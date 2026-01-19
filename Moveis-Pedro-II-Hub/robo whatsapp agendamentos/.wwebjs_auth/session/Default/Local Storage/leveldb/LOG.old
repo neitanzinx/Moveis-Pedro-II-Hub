@@ -1,0 +1,24 @@
+2025/12/16-07:18:22.654 33b8 Reusing MANIFEST C:\Users\Usuario\Documents\robo whatsapp agendamentos\.wwebjs_auth\session\Default\Local Storage\leveldb/MANIFEST-000001
+2025/12/16-07:18:22.658 33b8 Recovering log #40
+2025/12/16-07:18:22.659 33b8 Reusing old log C:\Users\Usuario\Documents\robo whatsapp agendamentos\.wwebjs_auth\session\Default\Local Storage\leveldb/000040.log 
+2025/12/16-07:19:30.609 5d80 Level-0 table #44: started
+2025/12/16-07:19:30.614 5d80 Level-0 table #44: 13929 bytes OK
+2025/12/16-07:19:30.617 5d80 Delete type=0 #40
+2025/12/16-10:18:46.143 2f30 Level-0 table #46: started
+2025/12/16-10:18:46.148 2f30 Level-0 table #46: 13898 bytes OK
+2025/12/16-10:18:46.152 2f30 Delete type=0 #43
+2025/12/16-12:58:15.753 5244 Level-0 table #48: started
+2025/12/16-12:58:15.762 5244 Level-0 table #48: 13716 bytes OK
+2025/12/16-12:58:15.765 5244 Delete type=0 #45
+2025/12/16-12:58:15.766 5244 Compacting 4@0 + 1@1 files
+2025/12/16-12:58:15.773 5244 Generated table #49@0: 48 keys, 4889 bytes
+2025/12/16-12:58:15.773 5244 Compacted 4@0 + 1@1 files => 4889 bytes
+2025/12/16-12:58:15.776 5244 compacted to: files[ 0 1 1 0 0 0 0 ]
+2025/12/16-12:58:15.776 5244 Delete type=2 #38
+2025/12/16-12:58:15.776 5244 Delete type=2 #41
+2025/12/16-12:58:15.776 5244 Delete type=2 #44
+2025/12/16-12:58:15.776 5244 Delete type=2 #46
+2025/12/16-12:58:15.776 5244 Delete type=2 #48
+2025/12/16-16:39:04.777 3a90 Level-0 table #51: started
+2025/12/16-16:39:04.793 3a90 Level-0 table #51: 13731 bytes OK
+2025/12/16-16:39:04.802 3a90 Delete type=0 #47

@@ -1,0 +1,4 @@
+2026/01/19-11:21:22.187 2ec8 Reusing MANIFEST C:\Users\Usuario\Documents\moveispedroii - launch\Moveis-Pedro-II-Hub\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/01/19-11:21:22.204 2ec8 Recovering log #401
+2026/01/19-11:21:22.247 2ec8 Reusing old log C:\Users\Usuario\Documents\moveispedroii - launch\Moveis-Pedro-II-Hub\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000401.log 
+2026/01/19-11:21:28.143 4978 Manual compaction at level-0 from '\x00d\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00e\x00\x00\x00' @ 0 : 0; will stop at (end)

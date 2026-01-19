@@ -1,0 +1,31 @@
+FROM node:18-slim
+
+# 1. Instalar dependências do Chrome/Puppeteer no Linux
+# Isso é o que faz o "Chrome por trás" funcionar no servidor
+RUN apt-get update \
+    && apt-get install -y wget gnupg \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
+      --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Configurar diretório de trabalho
+WORKDIR /usr/src/app
+
+# 3. Copiar arquivos do projeto
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+
+# 4. Variáveis de Ambiente para o Puppeteer encontrar o Chrome instalado
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+
+# 5. Expor a porta
+EXPOSE 3001
+
+# 6. Rodar o robô
+CMD [ "node", "server.js" ]
