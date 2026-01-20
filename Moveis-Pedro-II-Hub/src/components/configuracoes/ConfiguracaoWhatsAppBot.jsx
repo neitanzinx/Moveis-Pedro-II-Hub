@@ -638,7 +638,7 @@ export default function ConfiguracaoWhatsAppBot() {
                                     <h3 className="text-lg font-semibold mb-2">Status do Dispositivo</h3>
                                     <p className="text-gray-500 text-sm mb-6">Escaneie o QR Code para conectar seu WhatsApp Business e começar a enviar mensagens automáticas.</p>
 
-                                    {connectionStatus === 'connected' && connectionInfo ? (
+                                    {connectionStatus === 'connected' ? (
                                         <div className="bg-green-50 border border-green-100 rounded-xl p-6 mb-6">
                                             <div className="flex items-center gap-4">
                                                 <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm text-green-600 border border-green-200">
@@ -646,8 +646,8 @@ export default function ConfiguracaoWhatsAppBot() {
                                                 </div>
                                                 <div>
                                                     <p className="text-sm font-medium text-green-600 uppercase tracking-wider">Dispositivo Conectado</p>
-                                                    <p className="text-xl font-bold text-gray-900">{connectionInfo.pushname || 'WhatsApp'}</p>
-                                                    <p className="text-sm text-gray-600 font-mono">+{connectionInfo.wid?.split('@')[0]}</p>
+                                                    <p className="text-xl font-bold text-gray-900">{connectionInfo?.pushname || 'WhatsApp Bot'}</p>
+                                                    <p className="text-sm text-gray-600 font-mono">+{connectionInfo?.wid?.split('@')[0] || 'Conectado'}</p>
                                                 </div>
                                             </div>
                                             <div className="mt-6 flex gap-3">
