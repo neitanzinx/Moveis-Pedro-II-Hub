@@ -18,28 +18,22 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 const app = express();
-const allowedOrigins = [
-    'https://mpiihub.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'https://bot-whatsapp-connection.onrender.com'
-];
+const port = process.env.PORT || 3001;
 
-app.use(cors({
-    origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) === -1) {
-            // Opcional: Permitir temporariamente tudo para debug se necessário, mas melhor restringir
-            // return callback(null, true); 
-            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-            return callback(new Error(msg), false);
-        }
-        return callback(null, true);
-    },
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
+// 🛡️ Bulletproof CORS: Allow ALL origins.
+app.use(cors());
+
+// 🛡️ Global Crash Prevention
+process.on('uncaughtException', (err) => {
+    console.error('🔥 CRITICAL ERROR (Uncaught):', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🔥 CRITICAL ERROR (Unhandled Rejection):', reason);
+});
+
+// Aumentar limite de listeners
+require('events').EventEmitter.defaultMaxListeners = 20;
 // Aumentar limite do body para suportar PDF base64 (~200KB+)
 app.use(express.json({ limit: '10mb' }));
 
