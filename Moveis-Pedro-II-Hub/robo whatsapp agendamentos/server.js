@@ -50,8 +50,20 @@ const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--no-first-run', '--no-zygote', '--disable-gpu'],
-        timeout: 60000
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process', // Critical for Render/Docker to reduce memory
+            '--disable-gpu'
+        ],
+        timeout: 60000,
+        handleSIGINT: false, // Let Render handle signals
+        handleSIGTERM: false,
+        handleSIGHUP: false
     }
 });
 
