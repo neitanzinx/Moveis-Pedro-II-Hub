@@ -18,7 +18,28 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 const app = express();
-app.use(cors());
+const allowedOrigins = [
+    'https://mpiihub.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://bot-whatsapp-connection.onrender.com'
+];
+
+app.use(cors({
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) === -1) {
+            // Opcional: Permitir temporariamente tudo para debug se necessário, mas melhor restringir
+            // return callback(null, true); 
+            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    },
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 // Aumentar limite do body para suportar PDF base64 (~200KB+)
 app.use(express.json({ limit: '10mb' }));
 
@@ -84,6 +105,9 @@ client.on('auth_failure', (msg) => {
     connectionStatus = 'disconnected';
     console.log('⚠️ Falha na autenticação:', msg);
 });
+
+// --- ROTA DE HEALTH CHECK (RENDER) ---
+app.get('/', (req, res) => res.status(200).send('Bot is running! 🚀'));
 
 // --- ROTA DE STATUS GERAL ---
 app.get('/status', (req, res) => res.json({ status: 'online' }));
@@ -1024,4 +1048,10 @@ require('./cron-aniversarios');
 require('./cron-montagens');
 
 client.initialize();
+// --- GLOBAL ERROR HANDLER ---
+app.use((err, req, res, next) => {
+    console.error("🔥 Erro não tratado:", err);
+    res.status(500).json({ error: "Erro interno do servidor", details: err.message });
+});
+
 app.listen(PORT, () => console.log(`🛡️ Servidor rodando na porta ${PORT}`));
