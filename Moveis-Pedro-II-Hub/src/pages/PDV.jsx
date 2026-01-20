@@ -10,6 +10,7 @@ import SeletorCliente from "../components/pdv/SeletorCliente";
 import PainelPagamento from "../components/pdv/PainelPagamento";
 import { abrirNotaPedidoPDF, enviarWhatsApp, gerarNotaPedidoBase64, prepararNotaPedidoPDF, preencherEImprimirPDF } from "../components/vendas/NotaPedidoPDF";
 import { processarFidelidadeCompra } from "@/utils/fidelidadeEngine";
+import { ZAP_API_URL } from "@/utils/zapApiUrl";
 
 // Icons
 import {
@@ -283,7 +284,7 @@ export default function PDV() {
 
         // Tenta enviar mensagem do robô também na sincronização
         if (dadosVenda.cliente_telefone) {
-          fetch(`${import.meta.env.VITE_ZAP_API_URL}/mensagem-pos-venda`, {
+          fetch(`${ZAP_API_URL}/mensagem-pos-venda`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -650,7 +651,7 @@ export default function PDV() {
             console.error('Erro ao gerar PDF (continuando sem PDF):', pdfErr);
           }
 
-          fetch(`${import.meta.env.VITE_ZAP_API_URL}/mensagem-pos-venda`, {
+          fetch(`${ZAP_API_URL}/mensagem-pos-venda`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
