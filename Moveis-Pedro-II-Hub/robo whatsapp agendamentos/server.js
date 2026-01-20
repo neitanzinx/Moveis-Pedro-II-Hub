@@ -52,18 +52,25 @@ const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
-            '--no-zygote',
-            '--single-process', // Critical for Render/Docker to reduce memory
-            '--disable-gpu'
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-default-apps',
+            '--disable-sync',
+            '--metrics-recording-only',
+            '--mute-audio',
+            '--no-default-browser-check',
+            '--remote-debugging-port=0'
         ],
-        timeout: 60000,
-        handleSIGINT: false, // Let Render handle signals
+        timeout: 120000,
+        handleSIGINT: false,
         handleSIGTERM: false,
         handleSIGHUP: false
     }
