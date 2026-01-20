@@ -17,6 +17,9 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+// 🔐 Rotas de Autenticação de Funcionários
+const { setupEmployeeAuthRoutes } = require('./routes/authEmployee');
+
 const app = express();
 const port = process.env.PORT || 3001;
 
@@ -36,6 +39,9 @@ process.on('unhandledRejection', (reason, promise) => {
 require('events').EventEmitter.defaultMaxListeners = 20;
 // Aumentar limite do body para suportar PDF base64 (~200KB+)
 app.use(express.json({ limit: '10mb' }));
+
+// 🔐 Registrar rotas de autenticação de funcionários
+setupEmployeeAuthRoutes(app, supabase);
 
 // 🏗️ SERVE FRONTEND (Monolith Mode)
 // Serves static files from the React build folder

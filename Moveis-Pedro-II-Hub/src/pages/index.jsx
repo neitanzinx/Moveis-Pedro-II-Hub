@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import Layout from "./Layout.jsx";
-import Login from "./Login.jsx";
+import LoginFuncionario from "./LoginFuncionario.jsx";
 
 // ============================================================================
 // LAZY LOADING - Páginas Admin (carregadas sob demanda para melhor performance)
@@ -154,7 +154,7 @@ function PagesContent() {
         if (user && user.cargo && user.cargo !== 'Cliente') {
             return <Navigate to="/admin/Dashboard" replace />;
         }
-        return <Login />;
+        return <LoginFuncionario />;
     }
 
     // ===== ROTAS ADMIN (Requerem autenticação do sistema interno) =====

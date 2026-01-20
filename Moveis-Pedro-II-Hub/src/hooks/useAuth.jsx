@@ -2,24 +2,23 @@ import { useState, useEffect } from "react";
 import { base44, supabase } from "@/api/base44Client";
 import { ROLE_RULES, SCOPES } from "@/config/permissions";
 
+// API URL para autenticação de funcionários
+const API_URL = import.meta.env.VITE_ZAP_API_URL || '';
 
 export function useAuth() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [cargoPermissoes, setCargoPermissoes] = useState(null);
+  const [authType, setAuthType] = useState(null); // 'employee' | 'supabase' | null
 
   useEffect(() => {
     let mounted = true;
 
-    // Função auxiliar para carregar o perfil completo
-    const loadProfile = async (sessionUser) => {
+    // Função auxiliar para carregar o perfil completo (Supabase)
+    const loadSupabaseProfile = async (sessionUser) => {
       try {
         if (!sessionUser) {
-          if (mounted) {
-            setUser(null);
-            setLoading(false);
-          }
-          return;
+          return null;
         }
 
         const { data: u, error: profileError } = await supabase
@@ -32,47 +31,128 @@ export function useAuth() {
           console.error('Erro ao buscar perfil:', profileError);
         }
 
-        if (mounted) {
-          // Mescla dados da sessão com dados do perfil
-          const fullUser = u ? { ...sessionUser, ...u } : sessionUser;
-          const cargo = fullUser.cargo || 'Administrador';
+        // Mescla dados da sessão com dados do perfil
+        const fullUser = u ? { ...sessionUser, ...u } : sessionUser;
+        const cargo = fullUser.cargo || null;
 
-          setUser({
-            ...fullUser,
-            cargo: cargo,
-            full_name: fullUser.full_name || fullUser.email,
-          });
-
-          // Buscar permissões do cargo no banco
-          try {
-            const cargos = await base44.entities.Cargo.list();
-            const cargoEncontrado = cargos.find(c => c.nome === cargo);
-            if (cargoEncontrado?.permissoes) {
-              setCargoPermissoes(cargoEncontrado.permissoes);
-            }
-          } catch (e) {
-            console.log("Usando permissões hardcoded (fallback)");
-          }
-
-          setLoading(false);
-        }
+        return {
+          ...fullUser,
+          cargo: cargo,
+          full_name: fullUser.full_name || fullUser.email,
+        };
       } catch (error) {
-        console.error("Erro ao carregar perfil:", error);
-        if (mounted) setLoading(false);
+        console.error("Erro ao carregar perfil Supabase:", error);
+        return null;
       }
     };
 
-    // 1. Carrega estado inicial
-    base44.auth.me().then(loadProfile);
+    // Função para verificar autenticação de funcionário (JWT)
+    const checkEmployeeAuth = async () => {
+      const token = localStorage.getItem('employee_token');
+      const storedUser = localStorage.getItem('employee_user');
 
-    // 2. Inscreve para mudanças (Login/Logout)
+      if (!token || !storedUser) {
+        return null;
+      }
+
+      try {
+        // Verificar se token ainda é válido
+        const response = await fetch(`${API_URL}/api/auth/employee/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!response.ok) {
+          // Token inválido - limpar
+          localStorage.removeItem('employee_token');
+          localStorage.removeItem('employee_user');
+          return null;
+        }
+
+        const data = await response.json();
+        if (data.success && data.user) {
+          return {
+            ...data.user,
+            full_name: data.user.full_name || data.user.matricula
+          };
+        }
+      } catch (e) {
+        console.error("Erro ao verificar auth de funcionário:", e);
+      }
+
+      return null;
+    };
+
+    // Carrega estado inicial
+    const initAuth = async () => {
+      // 1. Primeiro verifica autenticação de funcionário (JWT)
+      const employeeUser = await checkEmployeeAuth();
+
+      if (employeeUser && mounted) {
+        setAuthType('employee');
+        setUser(employeeUser);
+
+        // Buscar permissões do cargo
+        try {
+          const cargos = await base44.entities.Cargo.list();
+          const cargoEncontrado = cargos.find(c => c.nome === employeeUser.cargo);
+          if (cargoEncontrado?.permissoes) {
+            setCargoPermissoes(cargoEncontrado.permissoes);
+          }
+        } catch (e) {
+          console.log("Usando permissões hardcoded (fallback)");
+        }
+
+        setLoading(false);
+        return;
+      }
+
+      // 2. Se não tem funcionário logado, verifica Supabase Auth
+      const supabaseUser = await base44.auth.me();
+
+      if (supabaseUser && mounted) {
+        const fullProfile = await loadSupabaseProfile(supabaseUser);
+
+        if (fullProfile) {
+          setAuthType('supabase');
+          setUser(fullProfile);
+
+          // Buscar permissões do cargo se existir
+          if (fullProfile.cargo) {
+            try {
+              const cargos = await base44.entities.Cargo.list();
+              const cargoEncontrado = cargos.find(c => c.nome === fullProfile.cargo);
+              if (cargoEncontrado?.permissoes) {
+                setCargoPermissoes(cargoEncontrado.permissoes);
+              }
+            } catch (e) {
+              console.log("Usando permissões hardcoded (fallback)");
+            }
+          }
+        }
+      }
+
+      if (mounted) {
+        setLoading(false);
+      }
+    };
+
+    initAuth();
+
+    // Inscreve para mudanças no Supabase Auth
     const { data: { subscription } } = base44.auth.onAuthStateChange?.((event, session) => {
-      if (event === 'SIGNED_OUT') {
+      if (event === 'SIGNED_OUT' && authType === 'supabase') {
         setUser(null);
         setCargoPermissoes(null);
+        setAuthType(null);
         setLoading(false);
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        loadProfile(session?.user);
+      } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && !localStorage.getItem('employee_token')) {
+        // Só atualiza se não estiver logado como funcionário
+        loadSupabaseProfile(session?.user).then(profile => {
+          if (mounted && profile) {
+            setAuthType('supabase');
+            setUser(profile);
+          }
+        });
       }
     }) || { data: { subscription: null } };
 
@@ -81,6 +161,20 @@ export function useAuth() {
       subscription?.unsubscribe();
     };
   }, []);
+
+  // Função de logout que funciona para ambos os tipos
+  const logout = async () => {
+    if (authType === 'employee') {
+      localStorage.removeItem('employee_token');
+      localStorage.removeItem('employee_user');
+    }
+    // Sempre tenta deslogar do Supabase também
+    await base44.auth.logout();
+    setUser(null);
+    setAuthType(null);
+    setCargoPermissoes(null);
+    window.location.href = '/login';
+  };
 
   // Verifica permissão - primeiro tenta banco, depois fallback hardcoded
   const can = (permission) => {
@@ -189,6 +283,8 @@ export function useAuth() {
   return {
     user,
     loading,
+    logout,
+    authType,
     can,
     getScope,
     filterData,
