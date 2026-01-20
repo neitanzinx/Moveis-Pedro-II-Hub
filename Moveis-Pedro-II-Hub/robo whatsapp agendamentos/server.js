@@ -38,8 +38,12 @@ require('events').EventEmitter.defaultMaxListeners = 20;
 app.use(express.json({ limit: '10mb' }));
 
 // 🏗️ SERVE FRONTEND (Monolith Mode)
-// Serves static files from the React build folder (../dist)
-app.use(express.static(path.join(__dirname, '../dist')));
+// Serves static files from the React build folder
+// Works both locally (../dist) and in Docker (/app/dist)
+const distPath = process.env.NODE_ENV === 'production'
+    ? path.join(__dirname, 'dist')  // Docker: /app/dist
+    : path.join(__dirname, '../dist'); // Local: robo.../dist -> root/dist
+app.use(express.static(distPath));
 
 // const genAI = new GoogleGenerativeAI(GEMINI_KEY); // Movido para dentro da rota
 // const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
@@ -1065,7 +1069,7 @@ app.use((req, res, next) => {
     if (req.path.startsWith('/whatsapp') || req.path.startsWith('/nfe-xml') || req.path.startsWith('/buscar') || req.path.startsWith('/enviar')) {
         return next();
     }
-    const indexPath = path.join(__dirname, '../dist/index.html');
+    const indexPath = path.join(distPath, 'index.html');
     const fs = require('fs');
     if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
