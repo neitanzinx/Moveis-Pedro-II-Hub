@@ -1058,16 +1058,14 @@ require('./cron-aniversarios');
 require('./cron-montagens');
 
 client.initialize();
-// 🏗️ CATCH-ALL ROUTE (React Router)
+// 🏗️ CATCH-ALL MIDDLEWARE (React Router)
 // Return index.html for any unknown route so React handles routing
-app.get('*', (req, res, next) => {
-    // If request marks itself as API (starts with /whatsapp or /nfe-xml), skip to error handler 
-    // (though express usually handles this by matching specific routes first)
-    if (req.path.startsWith('/whatsapp') || req.path.startsWith('/nfe-xml')) {
+app.use((req, res, next) => {
+    // Skip API routes - let them fall through to 404 handler
+    if (req.path.startsWith('/whatsapp') || req.path.startsWith('/nfe-xml') || req.path.startsWith('/buscar') || req.path.startsWith('/enviar')) {
         return next();
     }
     const indexPath = path.join(__dirname, '../dist/index.html');
-    // Check if file exists before sending to avoid crashing if build is missing
     const fs = require('fs');
     if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
