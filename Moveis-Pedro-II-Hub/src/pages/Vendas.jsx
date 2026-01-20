@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, MessageCircle, CreditCard, Link2 } from "lucide-react";
+import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { abrirNotaPedidoPDF } from "../components/vendas/NotaPedidoPDF";
 import { useAuth } from "@/hooks/useAuth";
@@ -43,6 +43,20 @@ export default function Vendas() {
     const { data: lancamentos = [] } = useQuery({
         queryKey: ['lancamentos-financeiros'],
         queryFn: () => base44.entities.LancamentoFinanceiro.list()
+    });
+
+    // Query para buscar entregas (para mostrar status operacional)
+    const { data: entregas = [] } = useQuery({
+        queryKey: ['entregas'],
+        queryFn: () => base44.entities.Entrega.list('-created_date'),
+        refetchInterval: 10000
+    });
+
+    // Query para buscar montagens
+    const { data: montagens = [] } = useQuery({
+        queryKey: ['montagens'],
+        queryFn: () => base44.entities.MontagemItem.list(),
+        refetchInterval: 10000
     });
 
     // Mutation para cancelar venda
@@ -194,22 +208,23 @@ export default function Vendas() {
                                     <TableHead>Data</TableHead>
                                     <TableHead>Loja</TableHead>
                                     <TableHead>Total</TableHead>
-                                    <TableHead>Status</TableHead>
+                                    <TableHead>Situação</TableHead>
                                     <TableHead>Pagamento</TableHead>
+                                    <TableHead>Andamento</TableHead>
                                     <TableHead className="text-right">Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {isLoading ? (
                                     <TableRow>
-                                        <TableCell colSpan={8} className="text-center py-8 text-gray-500">
+                                        <TableCell colSpan={10} className="text-center py-8 text-gray-500">
                                             <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
                                             Carregando vendas...
                                         </TableCell>
                                     </TableRow>
                                 ) : filtered.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={8} className="text-center py-8 text-gray-500">
+                                        <TableCell colSpan={10} className="text-center py-8 text-gray-500">
                                             Nenhuma venda encontrada.
                                         </TableCell>
                                     </TableRow>
@@ -256,6 +271,13 @@ export default function Vendas() {
                                                     cliente={{ nome: venda.cliente_nome, telefone: venda.cliente_telefone }}
                                                     numeroPedido={venda.numero_pedido}
                                                     valorTotal={venda.valor_total}
+                                                />
+                                            </TableCell>
+                                            <TableCell>
+                                                <OrderStatusBadge
+                                                    venda={venda}
+                                                    entregas={entregas}
+                                                    montagens={montagens}
                                                 />
                                             </TableCell>
                                             <TableCell className="text-right">
@@ -396,5 +418,161 @@ function PaymentStatusBadge({ status, linkPagamento, cliente, numeroPedido, valo
                 </Button>
             )}
         </div>
+    );
+}
+
+// Componente para status operacional do pedido
+function OrderStatusBadge({ venda, entregas, montagens }) {
+    // Se a venda foi cancelada, mostrar isso
+    if (venda.status === 'Cancelado') {
+        return (
+            <Badge className="bg-red-100 text-red-700 border border-red-200 gap-1">
+                <XCircle className="w-3 h-3" />
+                Cancelado
+            </Badge>
+        );
+    }
+
+    // Buscar entrega(s) relacionada(s) a essa venda
+    const entregasVenda = entregas.filter(e => e.numero_pedido === venda.numero_pedido);
+
+    // Se não tem entregas, verificar se é retirada no carrinho
+    if (entregasVenda.length === 0) {
+        // Verificar se todos os itens são do tipo 'retira' (Cliente Retira)
+        const todosRetira = venda.itens?.every(item => item.tipo_montagem === 'retira');
+        if (todosRetira && venda.itens?.length > 0) {
+            return (
+                <Badge className="bg-purple-100 text-purple-700 border border-purple-200 gap-1">
+                    <UserCheck className="w-3 h-3" />
+                    Cliente Retira
+                </Badge>
+            );
+        }
+
+        // Pagamento ainda não está pago - aguardando pagamento
+        if (venda.status === 'Pagamento Pendente') {
+            return (
+                <Badge className="bg-gray-100 text-gray-600 border border-gray-200 gap-1">
+                    <Clock className="w-3 h-3" />
+                    Aguardando Pgto
+                </Badge>
+            );
+        }
+
+        // Pago mas sem entrega criada ainda
+        return (
+            <Badge className="bg-yellow-100 text-yellow-700 border border-yellow-200 gap-1">
+                <Package className="w-3 h-3" />
+                Processando
+            </Badge>
+        );
+    }
+
+    // Analisar status das entregas
+    const entrega = entregasVenda[0]; // Pegar a primeira entrega
+
+    // Se é retirada e já foi concluída
+    if (entrega.tipo_entrega === 'Retirada' && entrega.status === 'Entregue') {
+        return (
+            <Badge className="bg-green-100 text-green-700 border border-green-200 gap-1">
+                <CheckCircle className="w-3 h-3" />
+                Retirado
+            </Badge>
+        );
+    }
+
+    // Se todas as entregas estão concluídas
+    const todasEntregues = entregasVenda.every(e => e.status === 'Entregue');
+    if (todasEntregues) {
+        return (
+            <Badge className="bg-green-100 text-green-700 border border-green-200 gap-1">
+                <CheckCircle className="w-3 h-3" />
+                Entregue
+            </Badge>
+        );
+    }
+
+    // Buscar montagens relacionadas
+    const montagensVenda = montagens.filter(m => m.numero_pedido === venda.numero_pedido);
+    const temMontagem = montagensVenda.length > 0;
+
+    if (temMontagem) {
+        const todasConcluidas = montagensVenda.every(m => m.status === 'concluida');
+        const algumaPendente = montagensVenda.some(m => m.status !== 'concluida');
+
+        if (algumaPendente) {
+            return (
+                <Badge className="bg-orange-100 text-orange-700 border border-orange-200 gap-1">
+                    <Wrench className="w-3 h-3" />
+                    Em Montagem
+                </Badge>
+            );
+        }
+
+        if (todasConcluidas && entrega.status === 'Pendente') {
+            // Montagem concluída, pronto para entrega
+            if (entrega.data_agendada && entrega.status_confirmacao === 'Confirmada') {
+                return (
+                    <Badge className="bg-blue-100 text-blue-700 border border-blue-200 gap-1">
+                        <MapPin className="w-3 h-3" />
+                        Rota Prevista
+                    </Badge>
+                );
+            }
+            return (
+                <Badge className="bg-teal-100 text-teal-700 border border-teal-200 gap-1">
+                    <Package className="w-3 h-3" />
+                    Pronto p/ Envio
+                </Badge>
+            );
+        }
+    }
+
+    // Verificar status de agendamento
+    if (entrega.status === 'Pendente') {
+        if (!entrega.data_agendada) {
+            return (
+                <Badge className="bg-yellow-100 text-yellow-700 border border-yellow-200 gap-1">
+                    <Clock className="w-3 h-3" />
+                    A Agendar
+                </Badge>
+            );
+        }
+
+        if (entrega.data_agendada && entrega.status_confirmacao !== 'Confirmada') {
+            return (
+                <Badge className="bg-amber-100 text-amber-700 border border-amber-200 gap-1">
+                    <Clock className="w-3 h-3" />
+                    A Confirmar
+                </Badge>
+            );
+        }
+
+        if (entrega.data_agendada && entrega.status_confirmacao === 'Confirmada') {
+            return (
+                <Badge className="bg-blue-100 text-blue-700 border border-blue-200 gap-1">
+                    <Truck className="w-3 h-3" />
+                    Rota Prevista
+                </Badge>
+            );
+        }
+    }
+
+    // Em trânsito / saiu para entrega
+    if (entrega.status === 'Em Rota') {
+        return (
+            <Badge className="bg-indigo-100 text-indigo-700 border border-indigo-200 gap-1 animate-pulse">
+                <Truck className="w-3 h-3" />
+                Em Entrega
+            </Badge>
+        );
+    }
+
+    // Fallback
+    return (
+        <Badge className="bg-gray-100 text-gray-600 border border-gray-200 gap-1">
+            <Package className="w-3 h-3" />
+            Em Andamento
+        </Badge>
     );
 }
