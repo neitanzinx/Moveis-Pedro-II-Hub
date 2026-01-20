@@ -37,6 +37,10 @@ require('events').EventEmitter.defaultMaxListeners = 20;
 // Aumentar limite do body para suportar PDF base64 (~200KB+)
 app.use(express.json({ limit: '10mb' }));
 
+// 🏗️ SERVE FRONTEND (Monolith Mode)
+// Serves static files from the React build folder (../dist)
+app.use(express.static(path.join(__dirname, '../dist')));
+
 // const genAI = new GoogleGenerativeAI(GEMINI_KEY); // Movido para dentro da rota
 // const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
@@ -1054,6 +1058,24 @@ require('./cron-aniversarios');
 require('./cron-montagens');
 
 client.initialize();
+// 🏗️ CATCH-ALL ROUTE (React Router)
+// Return index.html for any unknown route so React handles routing
+app.get('*', (req, res, next) => {
+    // If request marks itself as API (starts with /whatsapp or /nfe-xml), skip to error handler 
+    // (though express usually handles this by matching specific routes first)
+    if (req.path.startsWith('/whatsapp') || req.path.startsWith('/nfe-xml')) {
+        return next();
+    }
+    const indexPath = path.join(__dirname, '../dist/index.html');
+    // Check if file exists before sending to avoid crashing if build is missing
+    const fs = require('fs');
+    if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+    } else {
+        next(); // Fallback to error handler or 404
+    }
+});
+
 // --- GLOBAL ERROR HANDLER ---
 app.use((err, req, res, next) => {
     console.error("🔥 Erro não tratado:", err);
