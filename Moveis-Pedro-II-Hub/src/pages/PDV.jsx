@@ -283,7 +283,7 @@ export default function PDV() {
 
         // Tenta enviar mensagem do robô também na sincronização
         if (dadosVenda.cliente_telefone) {
-          fetch('http://localhost:3001/mensagem-pos-venda', {
+          fetch(`${import.meta.env.VITE_ZAP_API_URL}/mensagem-pos-venda`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -650,7 +650,7 @@ export default function PDV() {
             console.error('Erro ao gerar PDF (continuando sem PDF):', pdfErr);
           }
 
-          fetch('http://localhost:3001/mensagem-pos-venda', {
+          fetch(`${import.meta.env.VITE_ZAP_API_URL}/mensagem-pos-venda`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

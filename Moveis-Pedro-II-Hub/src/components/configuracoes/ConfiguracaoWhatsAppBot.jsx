@@ -21,7 +21,8 @@ import {
 import { toast } from "sonner";
 import QRCode from "qrcode";
 
-const WHATSAPP_BOT_URL = "http://localhost:3001";
+const API_URL = import.meta.env.VITE_ZAP_API_URL;
+
 
 // Definição de todos os templates de mensagens
 const MESSAGE_TEMPLATES = {

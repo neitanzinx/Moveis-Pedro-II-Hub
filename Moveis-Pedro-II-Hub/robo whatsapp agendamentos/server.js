@@ -7,7 +7,7 @@ const qrcode = require('qrcode-terminal');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // --- CONFIGURAÇÕES (via variáveis de ambiente) ---
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
 // 🚨 SUPABASE (Banco de Dados)

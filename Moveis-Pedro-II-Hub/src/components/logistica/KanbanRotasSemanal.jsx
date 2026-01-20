@@ -290,7 +290,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
   const verificarServidor = async () => {
     setStatusServidor("verificando");
     try {
-      await fetch('http://localhost:3001/status', { method: 'GET' });
+      await fetch(`${import.meta.env.VITE_ZAP_API_URL}/status`, { method: 'GET' });
       setStatusServidor("online");
     } catch (e) { setStatusServidor("offline"); }
   };
@@ -356,7 +356,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
       const payloadCompleto = [...payloadEntregas, ...payloadAssistencias];
 
-      const response = await fetch('http://localhost:3001/disparar-confirmacoes', {
+      const response = await fetch(`${import.meta.env.VITE_ZAP_API_URL}/disparar-confirmacoes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entregas: payloadCompleto })

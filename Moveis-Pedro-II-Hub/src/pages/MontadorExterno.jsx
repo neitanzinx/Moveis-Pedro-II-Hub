@@ -157,7 +157,7 @@ export default function MontadorExterno() {
             });
 
             try {
-                await fetch('http://localhost:3001/aviso-montagem-agendada', {
+                await fetch(`${import.meta.env.VITE_ZAP_API_URL}/aviso-montagem-agendada`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -247,7 +247,7 @@ export default function MontadorExterno() {
 
             // Notificar cliente via bot
             try {
-                await fetch('http://localhost:3001/aviso-montagem-cancelada', {
+                await fetch(`${import.meta.env.VITE_ZAP_API_URL}/aviso-montagem-cancelada`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -316,7 +316,7 @@ export default function MontadorExterno() {
 
             // Notificar cliente via bot
             try {
-                await fetch('http://localhost:3001/aviso-montagem-reagendada', {
+                await fetch(`${import.meta.env.VITE_ZAP_API_URL}/aviso-montagem-reagendada`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

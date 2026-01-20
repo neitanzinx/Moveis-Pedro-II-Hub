@@ -209,7 +209,7 @@ export default function Entregador() {
                 }
             }
 
-            await fetch('http://localhost:3001/aviso-inicio-rota', {
+            await fetch(`${import.meta.env.VITE_ZAP_API_URL}/aviso-inicio-rota`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ entregas: entregasRota })
@@ -250,7 +250,7 @@ export default function Entregador() {
             const linkMaps = `https://www.google.com/maps?q=${latitude},${longitude}`;
 
             try {
-                await fetch('http://localhost:3001/aviso-proxima-parada', {
+                await fetch(`${import.meta.env.VITE_ZAP_API_URL}/aviso-proxima-parada`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -393,7 +393,7 @@ export default function Entregador() {
             });
 
             // 2. Notificar cliente via bot
-            await fetch('http://localhost:3001/entrega-nao-realizada', {
+            await fetch(`${import.meta.env.VITE_ZAP_API_URL}/entrega-nao-realizada`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

@@ -17,16 +17,16 @@ export default function BotaoConfirmacaoWhatsApp({ entregas, vendas }) {
   const dataAmanhaFormatada = format(amanha, "dd/MM", { locale: ptBR });
 
   // Filtra entregas de amanhã
-  const entregasAmanha = entregas.filter(e => 
-    e.data_agendada === dataAmanhaStr && 
-    e.status !== 'Entregue' && 
+  const entregasAmanha = entregas.filter(e =>
+    e.data_agendada === dataAmanhaStr &&
+    e.status !== 'Entregue' &&
     e.status !== 'Cancelada'
   );
 
   const verificarServidor = async () => {
     setStatusServidor("verificando");
     try {
-      await fetch('http://localhost:3001/status', { method: 'GET' });
+      await fetch(`${import.meta.env.VITE_ZAP_API_URL}/status`, { method: 'GET' });
       setStatusServidor("online");
     } catch (e) {
       setStatusServidor("offline");
@@ -44,7 +44,7 @@ export default function BotaoConfirmacaoWhatsApp({ entregas, vendas }) {
       // Prepara os dados
       const payload = entregasAmanha.map(entrega => {
         const venda = vendas.find(v => v.id === entrega.venda_id);
-        const listaProdutos = venda?.itens?.map(item => 
+        const listaProdutos = venda?.itens?.map(item =>
           `• ${item.quantidade}x ${item.produto_nome}`
         ).join('\n') || "Itens não informados";
 
@@ -59,7 +59,7 @@ export default function BotaoConfirmacaoWhatsApp({ entregas, vendas }) {
       });
 
       // Manda para o seu PC
-      const response = await fetch('http://localhost:3001/disparar-confirmacoes', {
+      const response = await fetch(`${import.meta.env.VITE_ZAP_API_URL}/disparar-confirmacoes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entregas: payload })
@@ -68,10 +68,10 @@ export default function BotaoConfirmacaoWhatsApp({ entregas, vendas }) {
       if (response.ok) {
         // Marca como aguardando no sistema
         for (const entrega of entregasAmanha) {
-           await base44.entities.Entrega.update(entrega.id, {
-             status_confirmacao: 'Aguardando Resposta',
-             whatsapp_enviado: true
-           });
+          await base44.entities.Entrega.update(entrega.id, {
+            status_confirmacao: 'Aguardando Resposta',
+            whatsapp_enviado: true
+          });
         }
         alert(`✅ Robô Iniciado! Mensagens sendo enviadas para ${payload.length} clientes.`);
         setModalOpen(false);
@@ -98,15 +98,15 @@ export default function BotaoConfirmacaoWhatsApp({ entregas, vendas }) {
             <DialogTitle>Robô de Confirmação</DialogTitle>
             <DialogDescription>Entregas para amanhã: <strong>{dataAmanhaFormatada}</strong></DialogDescription>
           </DialogHeader>
-          
+
           <div className="py-4">
             {statusServidor === 'online' ? (
               <div className="p-3 rounded bg-green-100 text-green-800 flex items-center gap-2">
-                <Server className="w-5 h-5"/> <span>Robô Conectado e Pronto!</span>
+                <Server className="w-5 h-5" /> <span>Robô Conectado e Pronto!</span>
               </div>
             ) : (
               <div className="p-3 rounded bg-red-100 text-red-800 flex items-center gap-2">
-                <WifiOff className="w-5 h-5"/> <span>Robô Offline. Rode "node server.js" no terminal.</span>
+                <WifiOff className="w-5 h-5" /> <span>Robô Offline. Rode "node server.js" no terminal.</span>
               </div>
             )}
           </div>

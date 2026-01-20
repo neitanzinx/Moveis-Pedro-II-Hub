@@ -270,11 +270,11 @@ export default function Marketing() {
 
     // Funções de envio de mensagem marketing
     const enviarMensagemMarketing = async (tipo, dados) => {
-        const key = `${tipo} -${dados.telefone} `;
+        const key = `${tipo}-${dados.telefone}`;
         setEnviandoMsg(prev => ({ ...prev, [key]: true }));
 
         try {
-            const response = await fetch('http://localhost:3001/enviar-mensagem-marketing', {
+            const response = await fetch(`${import.meta.env.VITE_ZAP_API_URL}/enviar-mensagem-marketing`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -286,13 +286,13 @@ export default function Marketing() {
             });
 
             if (response.ok) {
-                toast.success(`Mensagem enviada para ${dados.nome} !`);
+                toast.success(`Mensagem enviada para ${dados.nome}!`);
             } else {
                 throw new Error("Falha no envio");
             }
         } catch (error) {
             console.error("Erro ao enviar:", error);
-            toast.error(`Erro ao enviar mensagem.Verifique se o robô está online.`);
+            toast.error(`Erro ao enviar mensagem. Verifique se o robô está online.`);
         } finally {
             setEnviandoMsg(prev => ({ ...prev, [key]: false }));
         }
@@ -337,7 +337,7 @@ export default function Marketing() {
             const lojas = await base44.entities.Loja.list();
             const lojasAtivas = lojas.filter(l => l.ativa);
 
-            const response = await fetch('http://localhost:3001/enviar-mensagem-aniversario', {
+            const response = await fetch(`${import.meta.env.VITE_ZAP_API_URL}/enviar-mensagem-aniversario`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
