@@ -10,12 +10,28 @@ const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'moveis-pedro-ii-jwt-secret-2026';
 const JWT_EXPIRES_IN = '24h';
 
+// Validação de complexidade de senha para funcionários
+// Mínimo 6 caracteres, 1 maiúscula, 1 número
+function validarSenhaComplexidade(senha) {
+    if (senha.length < 6) {
+        return { valido: false, erro: 'A senha deve ter pelo menos 6 caracteres' };
+    }
+    if (!/[A-Z]/.test(senha)) {
+        return { valido: false, erro: 'A senha deve conter pelo menos uma letra maiúscula' };
+    }
+    if (!/[0-9]/.test(senha)) {
+        return { valido: false, erro: 'A senha deve conter pelo menos um número' };
+    }
+    return { valido: true };
+}
+
 /**
  * Configura as rotas de autenticação de funcionários
  * @param {Express.Application} app - Instância do Express
  * @param {SupabaseClient} supabase - Cliente Supabase
+ * @param {WhatsAppClient} whatsappClient - Cliente WhatsApp para notificações (opcional)
  */
-function setupEmployeeAuthRoutes(app, supabase) {
+function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
 
     // ========================================
     // POST /api/auth/employee/login
@@ -141,10 +157,19 @@ function setupEmployeeAuthRoutes(app, supabase) {
             const { token_temp, senha_atual, nova_senha } = req.body;
             const authHeader = req.headers.authorization;
 
-            if (!nova_senha || nova_senha.length < 6) {
+            if (!nova_senha) {
                 return res.status(400).json({
                     success: false,
-                    error: 'A nova senha deve ter pelo menos 6 caracteres'
+                    error: 'A nova senha é obrigatória'
+                });
+            }
+
+            // Validar complexidade da senha
+            const validacao = validarSenhaComplexidade(nova_senha);
+            if (!validacao.valido) {
+                return res.status(400).json({
+                    success: false,
+                    error: validacao.erro
                 });
             }
 
@@ -288,11 +313,45 @@ function setupEmployeeAuthRoutes(app, supabase) {
 
             console.log(`[Auth] Senha resetada para ${matricula} por ${adminUser.matricula}`);
 
+            // Buscar telefone do funcionário para notificar via WhatsApp
+            const { data: funcionarioCompleto } = await supabase
+                .from('public_users')
+                .select('telefone')
+                .eq('matricula', matricula.toUpperCase())
+                .single();
+
+            // Notificar funcionário via WhatsApp se tiver telefone
+            let whatsappEnviado = false;
+            if (funcionarioCompleto?.telefone && whatsappClient) {
+                try {
+                    const telefone = funcionarioCompleto.telefone.replace(/\D/g, '');
+                    const telefoneFormatado = telefone.startsWith('55') ? telefone : `55${telefone}`;
+                    const chatId = `${telefoneFormatado}@c.us`;
+
+                    // Mensagem de notificação
+                    const mensagem = `🔐 *Senha Resetada*\n\n` +
+                        `Olá ${updatedUser.full_name.split(' ')[0]}!\n\n` +
+                        `Sua senha de acesso ao sistema foi resetada.\n\n` +
+                        `📋 *Matrícula:* ${updatedUser.matricula}\n` +
+                        `🔑 *Senha temporária:* ${senhaTemp}\n\n` +
+                        `⚠️ Por segurança, você será solicitado a alterar esta senha no primeiro acesso.\n\n` +
+                        `_Móveis Pedro II - Sistema de Gestão_`;
+
+                    // Enviar via WhatsApp
+                    await whatsappClient.sendMessage(chatId, mensagem);
+                    console.log(`[Auth] WhatsApp enviado para ${telefoneFormatado}`);
+                    whatsappEnviado = true;
+                } catch (e) {
+                    console.error('[Auth] Erro ao enviar WhatsApp:', e);
+                }
+            }
+
             res.json({
                 success: true,
                 funcionario: updatedUser.full_name,
                 matricula: updatedUser.matricula,
                 senha_temporaria: senhaTemp,
+                whatsapp_enviado: whatsappEnviado,
                 message: `Senha resetada! Comunique ao funcionário: ${senhaTemp}`
             });
 

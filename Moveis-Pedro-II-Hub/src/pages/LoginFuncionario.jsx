@@ -101,8 +101,17 @@ export default function LoginFuncionario() {
             return;
         }
 
+        // Validar complexidade da senha
         if (novaSenha.length < 6) {
             setError("A senha deve ter pelo menos 6 caracteres");
+            return;
+        }
+        if (!/[A-Z]/.test(novaSenha)) {
+            setError("A senha deve conter pelo menos uma letra maiúscula");
+            return;
+        }
+        if (!/[0-9]/.test(novaSenha)) {
+            setError("A senha deve conter pelo menos um número");
             return;
         }
 
@@ -179,7 +188,7 @@ export default function LoginFuncionario() {
                                     <Input
                                         id="novaSenha"
                                         type={showPassword ? "text" : "password"}
-                                        placeholder="Mínimo 6 caracteres"
+                                        placeholder="Mín 6 chars, 1 maiúscula, 1 número"
                                         value={novaSenha}
                                         onChange={(e) => setNovaSenha(e.target.value)}
                                         className="pl-10 pr-10"

@@ -40,8 +40,7 @@ require('events').EventEmitter.defaultMaxListeners = 20;
 // Aumentar limite do body para suportar PDF base64 (~200KB+)
 app.use(express.json({ limit: '10mb' }));
 
-// 🔐 Registrar rotas de autenticação de funcionários
-setupEmployeeAuthRoutes(app, supabase);
+// 🔐 As rotas de autenticação de funcionários são registradas após a inicialização do client WhatsApp
 
 // 🏗️ SERVE FRONTEND (Monolith Mode)
 // Serves static files from the React build folder
@@ -84,6 +83,9 @@ const client = new Client({
 
 let filaEspera = {};
 let mapaEntregas = {};
+
+// 🔐 Registrar rotas de autenticação de funcionários (com cliente WhatsApp)
+setupEmployeeAuthRoutes(app, supabase, client);
 
 // --- ESTADO DA CONEXÃO WHATSAPP ---
 let currentQR = null;
