@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import QRCode from "qrcode";
 
 const API_URL = import.meta.env.VITE_ZAP_API_URL;
+const WHATSAPP_BOT_URL = API_URL || "https://bot-whatsapp-connection.onrender.com";
 
 
 // Definição de todos os templates de mensagens

@@ -8,7 +8,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // --- CONFIGURAÇÕES (via variáveis de ambiente) ---
 const PORT = process.env.PORT || 3001;
-const GEMINI_KEY = process.env.GEMINI_API_KEY;
+// const GEMINI_KEY = process.env.GEMINI_API_KEY; // Removido para busca dinâmica
 
 // 🚨 SUPABASE (Banco de Dados)
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -22,8 +22,8 @@ app.use(cors());
 // Aumentar limite do body para suportar PDF base64 (~200KB+)
 app.use(express.json({ limit: '10mb' }));
 
-const genAI = new GoogleGenerativeAI(GEMINI_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+// const genAI = new GoogleGenerativeAI(GEMINI_KEY); // Movido para dentro da rota
+// const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -561,6 +561,29 @@ Um grande abraço! 🧡💚`;
     }
 });
 
+// Função auxiliar para obter a chave (Env ou Banco)
+async function getGeminiApiKey() {
+    // 1. Tentar Environment (Prioridade para Dev/Override)
+    if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
+
+    try {
+        const { data, error } = await supabase
+            .from("configuracao_sistema")
+            .select("dados")
+            .eq("tipo", "integracoes")
+            .single();
+
+        if (error || !data?.dados?.gemini_api_key) {
+            console.warn("Chave Gemini não encontrada no banco de dados");
+            return null;
+        }
+        return data.dados.gemini_api_key;
+    } catch (e) {
+        console.error("Erro ao buscar chave Gemini no banco:", e);
+        return null;
+    }
+}
+
 // --- ROTA 7: BUSCA DE PRODUTO COM IA (PARA CADASTRO RÁPIDO) ---
 app.post('/buscar-produto-ia', async (req, res) => {
     const { busca } = req.body;
@@ -570,6 +593,14 @@ app.post('/buscar-produto-ia', async (req, res) => {
     }
 
     try {
+        const apiKey = await getGeminiApiKey();
+        if (!apiKey) {
+            return res.status(500).json({ error: "Chave da API Gemini não configurada (Verifique Configurações > Integrações)" });
+        }
+
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
         const prompt = `Busque informações EXATAS sobre este produto de móveis:
 "${busca}"
 
@@ -620,7 +651,9 @@ EXEMPLO RUIM (não encontrou ou incerto):
         const responseText = result.response.text();
 
         try {
-            const jsonData = JSON.parse(responseText);
+            // Limpeza básica de markdown se houver
+            const cleanJson = responseText.replace(/```json\n?|\n?```/g, "").trim();
+            const jsonData = JSON.parse(cleanJson);
             res.json(jsonData);
         } catch (parseError) {
             console.error("Erro ao parsear resposta da IA:", parseError);
@@ -629,7 +662,7 @@ EXEMPLO RUIM (não encontrou ou incerto):
 
     } catch (error) {
         console.error("Erro ao buscar produto com IA:", error);
-        res.status(500).json({ error: "Erro ao processar solicitação" });
+        res.status(500).json({ error: "Erro ao processar solicitação: " + error.message });
     }
 });
 
