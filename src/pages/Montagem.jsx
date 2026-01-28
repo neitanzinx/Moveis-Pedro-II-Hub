@@ -12,8 +12,9 @@ export default function Montagem() {
   const isEstoque = user.cargo === 'Estoque';
   const isLogistica = user.cargo === 'Logística';
   const isAgendamento = user.cargo === 'Agendamento';
+  const isMontador = user.cargo === 'Montador';
 
-  if (!isAdmin && !isEstoque && !isLogistica && !isAgendamento) {
+  if (!isAdmin && !isEstoque && !isLogistica && !isAgendamento && !isMontador) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
         <div className="text-center text-gray-500">

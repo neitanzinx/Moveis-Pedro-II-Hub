@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   CheckCircle, Clock, Package, User, Calendar,
   ChevronLeft, ChevronRight, Truck, PartyPopper, ArrowDown, Sofa, AlertTriangle,
@@ -24,6 +25,12 @@ export default function MontagemInterna() {
   const [montagemSelecionada, setMontagemSelecionada] = React.useState(null);
   const [modalAtribuirOpen, setModalAtribuirOpen] = React.useState(false);
   const [montadorSelecionado, setMontadorSelecionado] = React.useState('');
+
+  // Estados para PIN
+  const [pinDialogOpen, setPinDialogOpen] = React.useState(false);
+  const [pinMontadorId, setPinMontadorId] = React.useState(null);
+  const [pinCallback, setPinCallback] = React.useState(null);
+  const [pinInput, setPinInput] = React.useState('');
 
   // Calcular início e fim da semana
   const getWeekRange = (offset = 0) => {
@@ -55,8 +62,8 @@ export default function MontagemInterna() {
   const { data: montadoresInternos = [] } = useQuery({
     queryKey: ['montadores-internos'],
     queryFn: async () => {
-      const todos = await base44.entities.Montador.list();
-      return todos.filter(m => m.tipo === 'interno' && m.ativo !== false);
+      const todos = await base44.entities.Colaborador.list();
+      return todos.filter(m => m.cargo === 'Montador' && m.ativo !== false);
     }
   });
 
@@ -146,6 +153,36 @@ export default function MontagemInterna() {
     return porDia;
   }, [montagensInternas, entregas, inicio]);
 
+  // Função para solicitar PIN
+  const solicitarPin = (montadorId, callback) => {
+    const montador = montadoresInternos.find(m => m.id.toString() === montadorId.toString());
+
+    // Se o montador tem PIN configurado, pedir
+    if (montador && montador.pin_montagem) {
+      setPinMontadorId(montadorId);
+      setPinCallback(() => callback);
+      setPinInput('');
+      setPinDialogOpen(true);
+    } else {
+      // Se não tem PIN, executar direto
+      callback();
+    }
+  };
+
+  const confirmarPin = () => {
+    const montador = montadoresInternos.find(m => m.id.toString() === pinMontadorId.toString());
+    if (montador && montador.pin_montagem === pinInput) {
+      setPinDialogOpen(false);
+      if (pinCallback) pinCallback();
+      // Limpar estados sensíveis
+      setPinInput('');
+      setPinCallback(null);
+    } else {
+      toast.error("PIN incorreto");
+      setPinInput('');
+    }
+  };
+
   // Abrir modal de atribuição
   const abrirModalAtribuir = (montagem, event) => {
     event.stopPropagation();
@@ -158,76 +195,93 @@ export default function MontagemInterna() {
   const atribuirMontador = async () => {
     if (!montagemSelecionada) return;
 
-    const montador = montadoresInternos.find(m => m.id.toString() === montadorSelecionado);
+    const executarAtribuicao = async () => {
+      const montador = montadoresInternos.find(m => m.id.toString() === montadorSelecionado);
 
-    await updateMutation.mutateAsync({
-      id: montagemSelecionada.id,
-      data: {
-        montador_id: montador?.id?.toString() || null,
-        montador_nome: montador?.nome || null
+      await updateMutation.mutateAsync({
+        id: montagemSelecionada.id,
+        data: {
+          montador_id: montador?.id?.toString() || null,
+          montador_nome: montador?.nome || null
+        }
+      });
+
+      if (montador) {
+        toast.success(`Montagem atribuída a ${montador.nome}!`);
+      } else {
+        toast.info('Atribuição removida');
       }
-    });
 
-    if (montador) {
-      toast.success(`Montagem atribuída a ${montador.nome}!`);
+      setModalAtribuirOpen(false);
+      setMontagemSelecionada(null);
+      setMontadorSelecionado('');
+    };
+
+    if (montadorSelecionado) {
+      solicitarPin(montadorSelecionado, executarAtribuicao);
     } else {
-      toast.info('Atribuição removida');
+      executarAtribuicao();
     }
-
-    setModalAtribuirOpen(false);
-    setMontagemSelecionada(null);
-    setMontadorSelecionado('');
   };
 
   const toggleMontado = async (montagem) => {
     const novoStatus = montagem.status === 'concluida' ? 'pendente' : 'concluida';
 
-    // Se está marcando como concluído, ativar animação
-    if (novoStatus === 'concluida') {
-      setItemRecemConcluido(montagem.id);
-      toast.success('✅ Montagem concluída!', {
-        icon: <PartyPopper className="w-5 h-5 text-yellow-500" />
+    const executarToggle = async () => {
+      // Se está marcando como concluído, ativar animação
+      if (novoStatus === 'concluida') {
+        setItemRecemConcluido(montagem.id);
+        toast.success('✅ Montagem concluída!', {
+          icon: <PartyPopper className="w-5 h-5 text-yellow-500" />
+        });
+
+        // Limpar animação após 2s
+        setTimeout(() => setItemRecemConcluido(null), 2000);
+      }
+
+      await updateMutation.mutateAsync({
+        id: montagem.id,
+        data: {
+          status: novoStatus,
+          // Se concluindo, registrar data de conclusão
+          ...(novoStatus === 'concluida' && { updated_at: new Date().toISOString() })
+        }
       });
 
-      // Limpar animação após 2s
-      setTimeout(() => setItemRecemConcluido(null), 2000);
-    }
+      // Verificar se TODAS as montagens internas dessa entrega foram concluídas
+      if (novoStatus === 'concluida' && montagem.entrega_id) {
+        const montagensDaEntrega = todasMontagens.filter(
+          m => m.entrega_id === montagem.entrega_id && m.tipo_montagem === 'interna'
+        );
 
-    await updateMutation.mutateAsync({
-      id: montagem.id,
-      data: {
-        status: novoStatus,
-        // Se concluindo, registrar data de conclusão
-        ...(novoStatus === 'concluida' && { updated_at: new Date().toISOString() })
-      }
-    });
+        // Contar quantas já estão concluídas (incluindo a atual que acabamos de marcar)
+        const jaConcluidasCount = montagensDaEntrega.filter(
+          m => m.status === 'concluida' || m.id === montagem.id
+        ).length;
 
-    // Verificar se TODAS as montagens internas dessa entrega foram concluídas
-    if (novoStatus === 'concluida' && montagem.entrega_id) {
-      const montagensDaEntrega = todasMontagens.filter(
-        m => m.entrega_id === montagem.entrega_id && m.tipo_montagem === 'interna'
-      );
-
-      // Contar quantas já estão concluídas (incluindo a atual que acabamos de marcar)
-      const jaConcluidasCount = montagensDaEntrega.filter(
-        m => m.status === 'concluida' || m.id === montagem.id
-      ).length;
-
-      // Se todas estão concluídas, atualizar status da entrega
-      if (jaConcluidasCount === montagensDaEntrega.length) {
-        try {
-          await base44.entities.Entrega.update(montagem.entrega_id, {
-            montagem_status: 'Concluída',
-            montagem_concluida_em: new Date().toISOString()
-          });
-          toast.success('🚚 Todas as montagens concluídas! Pedido pronto para enviar.', {
-            duration: 4000
-          });
-          queryClient.invalidateQueries({ queryKey: ['entregas'] });
-        } catch (err) {
-          console.error('Erro ao atualizar status da entrega:', err);
+        // Se todas estão concluídas, atualizar status da entrega
+        if (jaConcluidasCount === montagensDaEntrega.length) {
+          try {
+            await base44.entities.Entrega.update(montagem.entrega_id, {
+              montagem_status: 'Concluída',
+              montagem_concluida_em: new Date().toISOString()
+            });
+            toast.success('🚚 Todas as montagens concluídas! Pedido pronto para enviar.', {
+              duration: 4000
+            });
+            queryClient.invalidateQueries({ queryKey: ['entregas'] });
+          } catch (err) {
+            console.error('Erro ao atualizar status da entrega:', err);
+          }
         }
       }
+    };
+
+    // Verifica PIN se tiver montador atribuído
+    if (montagem.montador_id) {
+      solicitarPin(montagem.montador_id, executarToggle);
+    } else {
+      executarToggle();
     }
   };
 
@@ -243,21 +297,25 @@ export default function MontagemInterna() {
       return;
     }
 
-    toast.promise(
-      Promise.all(
-        montagensDoMontador.map(m =>
-          updateMutation.mutateAsync({
-            id: m.id,
-            data: { status: 'concluida', updated_at: new Date().toISOString() }
-          })
-        )
-      ),
-      {
-        loading: `Concluindo ${montagensDoMontador.length} montagens...`,
-        success: `${montagensDoMontador.length} montagens concluídas!`,
-        error: 'Erro ao concluir montagens'
-      }
-    );
+    const executarLote = () => {
+      toast.promise(
+        Promise.all(
+          montagensDoMontador.map(m =>
+            updateMutation.mutateAsync({
+              id: m.id,
+              data: { status: 'concluida', updated_at: new Date().toISOString() }
+            })
+          )
+        ),
+        {
+          loading: `Concluindo ${montagensDoMontador.length} montagens...`,
+          success: `${montagensDoMontador.length} montagens concluídas!`,
+          error: 'Erro ao concluir montagens'
+        }
+      );
+    };
+
+    solicitarPin(montadorId, executarLote);
   };
 
   // Resumo por montador
@@ -309,6 +367,7 @@ export default function MontagemInterna() {
 
     return (
       <div
+        onClick={(e) => abrirModalAtribuir(montagem, e)}
         className={`p-2 rounded-lg border cursor-pointer transition-all duration-300 ${itemRecemConcluido === montagem.id
           ? 'animate-pulse bg-green-200 border-green-400 scale-95 opacity-50'
           : montagem.status === 'concluida'
@@ -716,7 +775,7 @@ export default function MontagemInterna() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserCheck className="w-5 h-5 text-blue-600" />
-              Atribuir Montador
+              Quem é você?
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -757,7 +816,7 @@ export default function MontagemInterna() {
 
               {montadoresInternos.length === 0 && (
                 <p className="text-sm text-orange-600 mt-2">
-                  ⚠️ Nenhum montador interno cadastrado. Cadastre montadores do tipo "interno" para usar esta função.
+                  ⚠️ Nenhum montador interno encontrado. Verifique se há colaboradores com o cargo "Montador".
                 </p>
               )}
             </div>
@@ -779,6 +838,34 @@ export default function MontagemInterna() {
               ) : (
                 <><UserCheck className="w-4 h-4 mr-2" /> Confirmar</>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog PIN */}
+      <Dialog open={pinDialogOpen} onOpenChange={setPinDialogOpen}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-center">Confirmar Identidade</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="text-center text-sm text-gray-500">
+              Digite seu PIN de 4 dígitos para confirmar esta ação.
+            </div>
+            <Input
+              type="password"
+              className="text-center text-2xl tracking-widest"
+              maxLength={4}
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              placeholder="0000"
+              autoFocus
+            />
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:gap-0">
+            <Button className="w-full" onClick={confirmarPin}>
+              Confirmar
             </Button>
           </DialogFooter>
         </DialogContent>

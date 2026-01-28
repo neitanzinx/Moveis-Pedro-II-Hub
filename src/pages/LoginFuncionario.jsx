@@ -27,7 +27,7 @@ export default function LoginFuncionario() {
     const [novaSenha, setNovaSenha] = useState("");
     const [confirmarSenha, setConfirmarSenha] = useState("");
 
-    const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo'];
+    const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo', 'Montador'];
 
     const redirectByRole = (cargo) => {
         if (!cargo || !VALID_CARGOS.includes(cargo)) {
@@ -44,6 +44,8 @@ export default function LoginFuncionario() {
             window.location.href = '/admin/MontadorExterno';
         } else if (cargo === 'Entregador') {
             window.location.href = '/admin/Entregador';
+        } else if (cargo === 'Montador') {
+            window.location.href = '/admin/Montagem';
         } else {
             window.location.href = '/admin';
         }

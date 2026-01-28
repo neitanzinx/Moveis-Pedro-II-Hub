@@ -153,7 +153,7 @@ function PagesContent() {
 
     // ===== LOGIN DE FUNCIONÁRIOS =====
     if (location.pathname === '/login') {
-        const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo'];
+        const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo', 'Montador'];
 
         // Se já está logado como funcionário E tem cargo válido, redireciona
         if (user && user.cargo && VALID_CARGOS.includes(user.cargo)) {
@@ -177,7 +177,7 @@ function PagesContent() {
         }
 
         // Bloquear clientes (usuários sem cargo ou com cargo inválido)
-        const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo'];
+        const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo', 'Montador'];
         if (!user.cargo || !VALID_CARGOS.includes(user.cargo)) {
             console.warn('[Router] Usuário sem cargo válido tentando acessar /admin:', user.email, '- Cargo:', user.cargo);
             // Redirecionar para login de funcionário (não área cliente)
@@ -205,6 +205,18 @@ function PagesContent() {
             return (
                 <Suspense fallback={<PageLoadingFallback />}>
                     <Entregador />
+                </Suspense>
+            );
+        }
+
+        // Montador Interno só pode acessar /admin/Montagem
+        if (user.cargo === 'Montador') {
+            if (!location.pathname.toLowerCase().includes('montagem')) {
+                return <Navigate to="/admin/Montagem" replace />;
+            }
+            return (
+                <Suspense fallback={<PageLoadingFallback />}>
+                    <Montagem />
                 </Suspense>
             );
         }
