@@ -42,12 +42,12 @@ RUN apt-get update \
 WORKDIR /app
 
 # Copy Backend Dependencies
-COPY ["robo whatsapp agendamentos/package.json", "./"]
+COPY ["robo-whatsapp-agendamentos/package.json", "./"]
 RUN npm install --production
 
 # Copy Backend Source Code
 # We copy line by line or folder to avoid clutter, or just copy the whole folder
-COPY ["robo whatsapp agendamentos/", "./"]
+COPY ["robo-whatsapp-agendamentos/", "./"]
 
 # Copy Built Frontend from Stage 1 to 'dist' folder in backend
 COPY --from=builder /app/dist ./dist
