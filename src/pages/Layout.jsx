@@ -104,7 +104,7 @@ export default function Layout({ children, currentPageName }) {
               )}
               <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
                 <h2 className="font-bold text-sm text-gray-900 dark:text-white truncate">{brandName}</h2>
-                <h2 className="font-bold text-sm text-gray-900 dark:text-white truncate">{brandName}</h2>
+
                 <div className="flex flex-col">
                   <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                     {user?.loja ? `Loja ${user.loja}` : (selectedStore ? `Loja ${selectedStore}` : 'Sistema')}
