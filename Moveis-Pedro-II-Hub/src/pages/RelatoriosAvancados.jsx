@@ -22,7 +22,7 @@ import {
   Trophy, MapPin, LayoutDashboard, FileText, Meh, Award
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import KPICard from "@/components/dashboard/KPICard";
+
 import ProdutoModal from "@/components/produtos/ProdutoModal";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
