@@ -263,13 +263,51 @@ app.get('/', (req, res) => res.status(200).send('Bot is running! 🚀'));
 // --- ROTA DE STATUS GERAL ---
 app.get('/status', (req, res) => res.json({ status: 'online' }));
 
+// --- LOG CAPTURE SYSTEM (IN-MEMORY) ---
+const MAX_LOGS = 100;
+const memoryLogs = [];
+
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+
+function captureLog(type, args) {
+    const message = args.map(arg => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' ');
+    const timestamp = new Date().toISOString().split('T')[1].slice(0, 8); // HH:mm:ss
+    memoryLogs.unshift(`[${timestamp}] [${type.toUpperCase()}] ${message}`);
+    if (memoryLogs.length > MAX_LOGS) memoryLogs.pop();
+}
+
+console.log = (...args) => { changeLog: captureLog('info', args); originalConsoleLog.apply(console, args); };
+console.error = (...args) => { changeLog: captureLog('error', args); originalConsoleError.apply(console, args); };
+console.warn = (...args) => { changeLog: captureLog('warn', args); originalConsoleWarn.apply(console, args); };
+
 // --- ROTA DE STATUS DO WHATSAPP (PARA A INTERFACE) ---
-app.get('/whatsapp/status', (req, res) => {
+app.get('/whatsapp/status', async (req, res) => {
+    // Tentar recuperar info se estiver conectado mas sem dados
+    if (connectionStatus === 'connected' && (!connectionInfo || connectionInfo.wid === 'N/A')) {
+        try {
+            const info = await client.info;
+            if (info) {
+                connectionInfo = {
+                    wid: info.wid?.user || 'N/A',
+                    pushname: info.pushname || 'WhatsApp Bot',
+                    platform: info.platform || 'unknown'
+                };
+            }
+        } catch (e) { /* ignore */ }
+    }
+
     res.json({
         status: connectionStatus,
         qr: currentQR,
         info: connectionInfo
     });
+});
+
+// --- ROTA DE LOGS (DEBUG) ---
+app.get('/logs', (req, res) => {
+    res.json(memoryLogs);
 });
 
 // --- ROTA PARA CARREGAR CONFIGURAÇÕES DO AGENTE IA ---

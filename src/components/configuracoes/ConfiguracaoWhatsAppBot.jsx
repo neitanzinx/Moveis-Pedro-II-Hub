@@ -696,8 +696,30 @@ export default function ConfiguracaoWhatsAppBot() {
                                         </div>
                                     ) : (
                                         <div className="text-center text-gray-400">
-                                            <Loader2 className="w-10 h-10 mx-auto mb-3 animate-spin opacity-50" />
-                                            <p>Aguardando servidor...</p>
+                                            {connectionStatus === 'initializing' || connectionStatus === 'authenticating' ? (
+                                                <>
+                                                    <Loader2 className="w-10 h-10 mx-auto mb-3 animate-spin text-blue-500" />
+                                                    <p className="text-blue-600 font-medium">Iniciando WhatsApp...</p>
+                                                    <p className="text-xs mt-1">Isso pode levar alguns segundos.</p>
+                                                </>
+                                            ) : connectionStatus === 'disconnected' ? (
+                                                <>
+                                                    <WifiOff className="w-10 h-10 mx-auto mb-3 text-red-400" />
+                                                    <p className="text-red-600 font-medium">Desconectado</p>
+                                                    <p className="text-xs mt-1">Tentando reconectar automaticamente...</p>
+                                                </>
+                                            ) : connectionStatus === 'offline' ? (
+                                                <>
+                                                    <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-orange-400" />
+                                                    <p className="text-orange-600 font-medium">Servidor Offline</p>
+                                                    <p className="text-xs mt-1">Verifique se o container está rodando.</p>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Loader2 className="w-10 h-10 mx-auto mb-3 animate-spin opacity-50" />
+                                                    <p>Aguardando resposta do servidor...</p>
+                                                </>
+                                            )}
                                         </div>
                                     )}
                                 </div>
