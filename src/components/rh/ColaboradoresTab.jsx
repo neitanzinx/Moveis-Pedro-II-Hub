@@ -79,6 +79,14 @@ export default function ColaboradoresTab() {
     const [colaboradorSelecionado, setColaboradorSelecionado] = useState(null);
     const [novoColaborador, setNovoColaborador] = useState(null);
     const [confirmDelete, setConfirmDelete] = useState(null);
+    const [initialTab, setInitialTab] = useState("pessoal");
+
+    const handleGerarAcesso = () => {
+        setModalResumo(false);
+        setColaboradorSelecionado(novoColaborador);
+        setInitialTab("sistema");
+        setModalAberto(true);
+    };
 
     const { data: colaboradores = [], isLoading } = useQuery({
         queryKey: ['colaboradores'],
@@ -118,6 +126,7 @@ export default function ColaboradoresTab() {
 
     const abrirModal = (colaborador = null) => {
         setColaboradorSelecionado(colaborador);
+        setInitialTab("pessoal");
         setModalAberto(true);
     };
 
@@ -418,6 +427,7 @@ export default function ColaboradoresTab() {
                 <ColaboradorModal
                     colaborador={colaboradorSelecionado}
                     usuarios={usuarios}
+                    initialTab={initialTab}
                     onClose={() => {
                         setModalAberto(false);
                         setColaboradorSelecionado(null);
@@ -444,6 +454,7 @@ export default function ColaboradoresTab() {
             {modalResumo && novoColaborador && (
                 <ContratacaoResumoModal
                     colaborador={novoColaborador}
+                    onGenerateAccess={handleGerarAcesso}
                     onClose={() => {
                         setModalResumo(false);
                         setNovoColaborador(null);

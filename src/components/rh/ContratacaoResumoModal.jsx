@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
     User, Briefcase, DollarSign, Gift, Calendar, CreditCard,
-    Phone, Mail, MapPin, CheckCircle2, Printer, X
+    Phone, Mail, MapPin, CheckCircle2, Printer, X, KeyRound
 } from "lucide-react";
 
 // Utility function to format currency
@@ -54,7 +54,7 @@ function BenefitBadge({ label, value, active = true }) {
     );
 }
 
-export default function ContratacaoResumoModal({ colaborador, onClose }) {
+export default function ContratacaoResumoModal({ colaborador, onClose, onGenerateAccess }) {
     if (!colaborador) return null;
 
     // Calculate totals
@@ -233,12 +233,23 @@ export default function ContratacaoResumoModal({ colaborador, onClose }) {
                         <Printer className="w-4 h-4" />
                         Imprimir
                     </Button>
-                    <Button
-                        onClick={onClose}
-                        style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
-                    >
-                        Concluir
-                    </Button>
+                    <div className="flex gap-2">
+                        {onGenerateAccess && (
+                            <Button
+                                onClick={onGenerateAccess}
+                                className="bg-amber-600 hover:bg-amber-700 text-white gap-2"
+                            >
+                                <KeyRound className="w-4 h-4" />
+                                Gerar Acesso ao Sistema
+                            </Button>
+                        )}
+                        <Button
+                            onClick={onClose}
+                            style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
+                        >
+                            Concluir
+                        </Button>
+                    </div>
                 </div>
             </DialogContent>
         </Dialog>

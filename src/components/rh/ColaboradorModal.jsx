@@ -57,7 +57,7 @@ const formatCurrency = (value) => {
     return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
-export default function ColaboradorModal({ colaborador, usuarios = [], onClose, onSuccess }) {
+export default function ColaboradorModal({ colaborador, usuarios = [], onClose, onSuccess, initialTab = "pessoal" }) {
     const queryClient = useQueryClient();
     const isEditing = !!colaborador;
 
@@ -377,7 +377,7 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                     </DialogTitle>
                 </DialogHeader>
 
-                <Tabs defaultValue="pessoal" className="mt-4">
+                <Tabs defaultValue={initialTab} className="mt-4">
                     <TabsList className="grid w-full grid-cols-6">
                         <TabsTrigger value="pessoal" className="text-xs">
                             <User className="w-3 h-3 mr-1" />
