@@ -153,10 +153,19 @@ function PagesContent() {
 
     // ===== LOGIN DE FUNCIONÁRIOS =====
     if (location.pathname === '/login') {
-        // Se já está logado como funcionário, redireciona para admin
-        if (user && user.cargo && user.cargo !== 'Cliente') {
+        const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo'];
+
+        // Se já está logado como funcionário E tem cargo válido, redireciona
+        if (user && user.cargo && VALID_CARGOS.includes(user.cargo)) {
             return <Navigate to="/admin/Dashboard" replace />;
         }
+
+        // Se está logado mas sem permissão, força logout ou mostra erro (aqui deixamos ficar no login para evitar loop)
+        if (user) {
+            console.warn('Usuário logado sem permissão de acesso ao admin. Permanecendo no login.');
+            // Opcional: chamar logout() aqui se quiser forçar limpeza
+        }
+
         return <LoginFuncionario />;
     }
 
