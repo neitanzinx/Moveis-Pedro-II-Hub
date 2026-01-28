@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 
 .env
+.wwebjs_auth
+.wwebjs_cache
+robo whatsapp agendamentos/.wwebjs_auth
+robo whatsapp agendamentos/.wwebjs_cache
