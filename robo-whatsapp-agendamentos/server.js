@@ -1213,7 +1213,7 @@ client.initialize();
 // Return index.html for any unknown route so React handles routing
 app.use((req, res, next) => {
     // Skip API routes - let them fall through to 404 handler
-    if (req.path.startsWith('/whatsapp') || req.path.startsWith('/nfe-xml') || req.path.startsWith('/buscar') || req.path.startsWith('/enviar')) {
+    if (req.path.startsWith('/whatsapp') || req.path.startsWith('/nfe-xml') || req.path.startsWith('/buscar') || req.path.startsWith('/enviar') || req.path.startsWith('/api')) {
         return next();
     }
     const indexPath = path.join(distPath, 'index.html');
