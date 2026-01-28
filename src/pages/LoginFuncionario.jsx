@@ -32,6 +32,7 @@ export default function LoginFuncionario() {
     const redirectByRole = (cargo) => {
         if (!cargo || !VALID_CARGOS.includes(cargo)) {
             console.error('Cargo inválido ou pendente:', cargo);
+            alert('Seu usuário está com cargo pendente ou inválido. Contate o administrador.');
             setError('Seu usuário está com cargo pendente. Contate o administrador.');
             // Limpar dados para permitir novo login
             localStorage.removeItem('employee_token');
@@ -40,9 +41,9 @@ export default function LoginFuncionario() {
         }
 
         if (cargo === 'Montador Externo') {
-            window.location.href = '/montador-externo';
+            window.location.href = '/admin/MontadorExterno';
         } else if (cargo === 'Entregador') {
-            window.location.href = '/entregador';
+            window.location.href = '/admin/Entregador';
         } else {
             window.location.href = '/admin';
         }
@@ -162,6 +163,8 @@ export default function LoginFuncionario() {
             // Garantir que não existe sessão do Supabase ativa
             await supabase.auth.signOut();
 
+            // Tentar login automático
+            // Nota: Usamos a senha nova que o usuário acabou de digitar
             const loginResponse = await fetch(`${API_URL}/api/auth/employee/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -180,6 +183,7 @@ export default function LoginFuncionario() {
                 redirectByRole(loginData.user.cargo);
             } else {
                 // Se login automático falhar, volta pro fluxo normal
+                console.warn("Login automático falhou, solicitando login manual.");
                 setPrimeiroAcesso(false);
                 setSenha("");
                 setNovaSenha("");
@@ -190,6 +194,7 @@ export default function LoginFuncionario() {
 
         } catch (err) {
             console.error("Erro ao trocar senha:", err);
+            alert(`Erro ao trocar senha: ${err.message || "Erro desconhecido"}`);
             setError(err.message || "Erro ao trocar senha");
         } finally {
             setLoading(false);
