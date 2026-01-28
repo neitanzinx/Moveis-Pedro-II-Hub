@@ -8,192 +8,252 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Truck } from "lucide-react";
+import { Truck, User, Mail, Phone, Building2, Briefcase, KeyRound, RotateCcw } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { getZapApiUrl } from "@/utils/zapApiUrl";
+import { toast } from "sonner";
+
+// Cargos que NÃO precisam de loja (trabalham para todas)
+const CARGOS_SEM_LOJA = ['Administrador', 'Gerente Geral', 'Financeiro', 'RH', 'Estoque', 'Logística', 'Agendamento', 'Entregador', 'Montador Externo'];
+
+// Lista de cargos disponíveis
+const CARGOS_DISPONIVEIS = [
+  { value: 'Administrador', label: 'Administrador' },
+  { value: 'Gerente Geral', label: 'Gerente Geral' },
+  { value: 'Gerente', label: 'Gerente de Loja' },
+  { value: 'Vendedor', label: 'Vendedor' },
+  { value: 'Estoque', label: 'Estoque' },
+  { value: 'Financeiro', label: 'Financeiro' },
+  { value: 'Logística', label: 'Logística' },
+  { value: 'Entregador', label: 'Entregador' },
+  { value: 'Montador Externo', label: 'Montador Externo' },
+  { value: 'RH', label: 'RH' },
+  { value: 'Agendamento', label: 'Agendamento' },
+];
 
 export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
   const [dados, setDados] = useState({
     full_name: usuario?.full_name || "",
     email: usuario?.email || "",
     telefone: usuario?.telefone || "",
+    cargo: usuario?.cargo || "Vendedor",
     loja: usuario?.loja || "",
-    cargos: usuario?.cargos || [],
     caminhao_master_id: usuario?.caminhao_master_id || "",
     ativo: usuario?.ativo ?? true
   });
+  const [resetandoSenha, setResetandoSenha] = useState(false);
 
   const queryClient = useQueryClient();
 
   const { data: lojas = [] } = useQuery({
     queryKey: ['lojas'],
     queryFn: () => base44.entities.Loja.list('nome'),
-    select: (data) => data.filter(l => l.ativa),
+    select: (data) => data.filter(l => l.is_active !== false),
   });
+
+  const precisaLoja = !CARGOS_SEM_LOJA.includes(dados.cargo);
 
   const salvarMutation = useMutation({
     mutationFn: async (data) => {
-      const cargosSelecionados = cargos.filter(c => data.cargos.includes(c.id));
       const dadosUsuario = {
-        ...data,
-        cargos_nomes: cargosSelecionados.map(c => c.nome),
-        cargo: cargosSelecionados[0]?.nome || data.cargo,
-        caminhao_master_nome: caminhoes.find(c => c.id === data.caminhao_master_id)?.nome || null
+        full_name: data.full_name,
+        telefone: data.telefone,
+        cargo: data.cargo,
+        loja: precisaLoja ? data.loja : null,
+        ativo: data.ativo,
+        is_vendedor: data.cargo === 'Vendedor',
+        caminhao_master_id: data.caminhao_master_id || null
       };
 
-      if (usuario) {
-        return base44.asServiceRole.entities.User.update(usuario.id, dadosUsuario);
-      } else {
-        return base44.asServiceRole.entities.User.create(dadosUsuario);
-      }
+      return base44.entities.User.update(usuario.id, dadosUsuario);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['usuarios'] });
-      alert(usuario ? 'Usuário atualizado!' : 'Usuário criado!');
+      toast.success('Usuário atualizado com sucesso!');
       onClose();
     },
     onError: (error) => {
       console.error('Erro ao salvar usuário:', error);
-      alert('Erro ao salvar usuário: ' + (error.message || 'Erro desconhecido'));
+      toast.error('Erro ao salvar: ' + (error.message || 'Erro desconhecido'));
     }
   });
 
-  const toggleCargo = (cargoId) => {
-    const novos = dados.cargos.includes(cargoId)
-      ? dados.cargos.filter(id => id !== cargoId)
-      : [...dados.cargos, cargoId];
-    setDados({ ...dados, cargos: novos });
-  };
+  const resetarSenhaMutation = useMutation({
+    mutationFn: async () => {
+      const apiUrl = getZapApiUrl();
+      const response = await fetch(`${apiUrl}/api/auth/employee/reset-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('employee_token')}`
+        },
+        body: JSON.stringify({ user_id: usuario.id })
+      });
 
-  const cargosPorCategoria = {
-    'Principal': cargos.filter(c => c.categoria === 'Principal'),
-    'Vendas': cargos.filter(c => c.categoria === 'Vendas'),
-    'Operacional': cargos.filter(c => c.categoria === 'Operacional'),
-    'Gestão': cargos.filter(c => c.categoria === 'Gestão'),
-    'Admin': cargos.filter(c => c.categoria === 'Admin')
-  };
+      if (!response.ok) {
+        throw new Error('Falha ao resetar senha');
+      }
 
-  const caminhoesMaster = caminhoes.filter(c =>
-    dados.cargos.some(cargoId => {
-      const cargo = cargos.find(cg => cg.id === cargoId);
-      return cargo?.e_master_caminhao;
-    })
-  );
+      return response.json();
+    },
+    onSuccess: (data) => {
+      setResetandoSenha(false);
+      toast.success(
+        <div>
+          <p>Senha resetada com sucesso!</p>
+          <p className="font-mono text-sm mt-1">
+            Nova senha: <strong>{data.senha_temporaria}</strong>
+          </p>
+          {data.whatsapp_enviado && <p className="text-xs mt-1">Enviada via WhatsApp</p>}
+        </div>,
+        { duration: 10000 }
+      );
+    },
+    onError: (error) => {
+      toast.error('Erro ao resetar senha: ' + error.message);
+    }
+  });
+
+  // Verificar se este cargo pode ter caminhão master
+  const podeTerCaminhao = ['Entregador', 'Logística'].includes(dados.cargo);
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>
-            {usuario ? 'Editar Usuário' : 'Adicionar Usuário'}
+          <DialogTitle className="flex items-center gap-2">
+            <User className="w-5 h-5" />
+            Editar Usuário
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
+          {/* Matrícula (somente leitura) */}
+          {usuario?.matricula && (
+            <div className="bg-gray-50 dark:bg-neutral-800 rounded-lg p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-gray-500" />
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Matrícula:</span>
+                  <span className="font-mono font-bold text-green-600">{usuario.matricula}</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => resetarSenhaMutation.mutate()}
+                  disabled={resetarSenhaMutation.isPending}
+                  className="text-orange-600 hover:text-orange-700"
+                >
+                  <RotateCcw className={`w-4 h-4 mr-1 ${resetarSenhaMutation.isPending ? 'animate-spin' : ''}`} />
+                  Resetar Senha
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label>Nome Completo *</Label>
+              <Label className="flex items-center gap-2">
+                <User className="w-4 h-4" />
+                Nome Completo *
+              </Label>
               <Input
                 value={dados.full_name}
                 onChange={(e) => setDados({ ...dados, full_name: e.target.value })}
                 placeholder="João Silva"
+                className="mt-1"
               />
             </div>
             <div>
-              <Label>Email *</Label>
+              <Label className="flex items-center gap-2">
+                <Mail className="w-4 h-4" />
+                Email
+              </Label>
               <Input
                 type="email"
                 value={dados.email}
-                onChange={(e) => setDados({ ...dados, email: e.target.value })}
-                placeholder="joao@exemplo.com"
-                disabled={!!usuario}
+                disabled
+                className="mt-1 bg-gray-50 dark:bg-neutral-800"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label>Telefone</Label>
+              <Label className="flex items-center gap-2">
+                <Phone className="w-4 h-4" />
+                Telefone
+              </Label>
               <Input
                 value={dados.telefone}
                 onChange={(e) => setDados({ ...dados, telefone: e.target.value })}
                 placeholder="(27) 99999-9999"
+                className="mt-1"
               />
             </div>
             <div>
-              <Label>Loja</Label>
-              <Select value={dados.loja} onValueChange={(val) => setDados({ ...dados, loja: val })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
+              <Label className="flex items-center gap-2">
+                <Briefcase className="w-4 h-4" />
+                Cargo *
+              </Label>
+              <Select value={dados.cargo} onValueChange={(val) => setDados({ ...dados, cargo: val })}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {lojas.length === 0 ? (
-                    <SelectItem value="Centro" disabled>Carregando...</SelectItem>
-                  ) : (
-                    lojas.map((loja) => (
-                      <SelectItem key={loja.id} value={loja.nome}>
-                        {loja.nome}
-                      </SelectItem>
-                    ))
-                  )}
+                  {CARGOS_DISPONIVEIS.map((cargo) => (
+                    <SelectItem key={cargo.value} value={cargo.value}>
+                      {cargo.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          <div>
-            <Label className="mb-3 block">Cargos (selecione múltiplos)</Label>
-            <div className="space-y-4">
-              {Object.entries(cargosPorCategoria).map(([categoria, cargosCat]) => (
-                cargosCat.length > 0 && (
-                  <div key={categoria} className="border rounded-lg p-3">
-                    <h4 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-2">
-                      {categoria}
-                    </h4>
-                    <div className="space-y-2">
-                      {cargosCat.map(cargo => (
-                        <label
-                          key={cargo.id}
-                          className="flex items-center gap-3 p-2 rounded hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"
-                        >
-                          <Checkbox
-                            checked={dados.cargos.includes(cargo.id)}
-                            onCheckedChange={() => toggleCargo(cargo.id)}
-                          />
-                          <div
-                            className="w-3 h-3 rounded"
-                            style={{ backgroundColor: cargo.cor }}
-                          />
-                          <span className="flex-1">{cargo.nome}</span>
-                          {cargo.e_vendedor && (
-                            <Badge variant="outline" className="text-xs">Comissões</Badge>
-                          )}
-                          {cargo.e_master_caminhao && (
-                            <Badge variant="outline" className="text-xs">Master</Badge>
-                          )}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )
-              ))}
-            </div>
-          </div>
-
-          {caminhoesMaster.length > 0 && (
+          {precisaLoja && (
             <div>
-              <Label className="flex items-center gap-2 mb-2">
+              <Label className="flex items-center gap-2">
+                <Building2 className="w-4 h-4" />
+                Loja *
+              </Label>
+              <Select value={dados.loja} onValueChange={(val) => setDados({ ...dados, loja: val })}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Selecione a loja" />
+                </SelectTrigger>
+                <SelectContent>
+                  {lojas.map((loja) => (
+                    <SelectItem key={loja.id} value={loja.nome}>
+                      {loja.nome}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500 mt-1">
+                {dados.cargo === 'Gerente'
+                  ? 'O gerente só verá dados desta loja'
+                  : 'Loja do funcionário'
+                }
+              </p>
+            </div>
+          )}
+
+          {podeTerCaminhao && caminhoes?.length > 0 && (
+            <div>
+              <Label className="flex items-center gap-2">
                 <Truck className="w-4 h-4" />
                 Caminhão Master (opcional)
               </Label>
               <Select
-                value={dados.caminhao_master_id}
-                onValueChange={(val) => setDados({ ...dados, caminhao_master_id: val })}
+                value={dados.caminhao_master_id || "none"}
+                onValueChange={(val) => setDados({ ...dados, caminhao_master_id: val === "none" ? "" : val })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="mt-1">
                   <SelectValue placeholder="Selecione um caminhão" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={null}>Nenhum</SelectItem>
-                  {caminhoesMaster.map(c => (
+                  <SelectItem value="none">Nenhum</SelectItem>
+                  {caminhoes.map(c => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.nome} - {c.placa || 'Sem placa'}
                     </SelectItem>
@@ -206,13 +266,16 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
             </div>
           )}
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 pt-2">
             <Checkbox
               checked={dados.ativo}
               onCheckedChange={(checked) => setDados({ ...dados, ativo: checked })}
               id="ativo"
             />
             <Label htmlFor="ativo">Usuário ativo</Label>
+            {!dados.ativo && (
+              <Badge variant="destructive" className="ml-2">Desativado</Badge>
+            )}
           </div>
         </div>
 
@@ -222,10 +285,10 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
           </Button>
           <Button
             onClick={() => salvarMutation.mutate(dados)}
-            disabled={!dados.full_name || !dados.email || dados.cargos.length === 0 || salvarMutation.isPending}
+            disabled={!dados.full_name || (precisaLoja && !dados.loja) || salvarMutation.isPending}
             className="bg-green-600 hover:bg-green-700"
           >
-            {salvarMutation.isPending ? 'Salvando...' : (usuario ? 'Salvar' : 'Criar')}
+            {salvarMutation.isPending ? 'Salvando...' : 'Salvar'}
           </Button>
         </div>
       </DialogContent>

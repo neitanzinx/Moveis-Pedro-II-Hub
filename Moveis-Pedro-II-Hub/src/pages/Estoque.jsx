@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -19,12 +20,8 @@ import InventarioTab from "../components/estoque/InventarioTab";
 import ImportarProdutos from "../components/estoque/ImportarProdutos";
 
 export default function Estoque() {
-  const [user, setUser] = useState(null);
+  const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState("estoque");
-
-  useEffect(() => {
-    base44.auth.me().then(setUser).catch(console.error);
-  }, []);
 
   const { data: produtos = [] } = useQuery({
     queryKey: ['produtos'],
@@ -44,7 +41,7 @@ export default function Estoque() {
   const alertasAtivos = alertas.filter(a => a.status === 'Ativo').length;
   const transferenciasPendentes = transferencias.filter(t => t.status === 'Pendente').length;
 
-  if (!user) {
+  if (loading || !user) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="flex flex-col items-center gap-3">

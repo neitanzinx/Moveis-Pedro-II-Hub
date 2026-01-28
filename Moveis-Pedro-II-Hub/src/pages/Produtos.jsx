@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
+import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -52,18 +53,10 @@ export default function Produtos() {
   const [editingProduto, setEditingProduto] = useState(null);
   const [selectedProdutoPai, setSelectedProdutoPai] = useState(null);
   const [savingProduto, setSavingProduto] = useState(false);
-  const [user, setUser] = useState(null);
+  const { user, loading } = useAuth();
 
   const queryClient = useQueryClient();
   const confirm = useConfirm();
-
-  useEffect(() => {
-    const loadUser = async () => {
-      const currentUser = await base44.auth.me();
-      setUser(currentUser);
-    };
-    loadUser();
-  }, []);
 
   const { data: produtos, isLoading } = useQuery({
     queryKey: ['produtos'],

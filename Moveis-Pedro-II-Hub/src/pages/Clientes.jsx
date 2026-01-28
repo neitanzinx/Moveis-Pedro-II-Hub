@@ -358,16 +358,37 @@ export default function Clientes() {
                     </TableCell>
                     <TableCell>
                       {cliente.endereco ? (
-                        <div className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400 max-w-[300px]">
-                          <MapPin className="w-3 h-3 mt-0.5 shrink-0" />
-                          <span>
-                            {cliente.endereco}, {cliente.numero} -{" "}
-                            {cliente.bairro}
-                            <br />
-                            <span className="text-xs text-gray-400">
-                              {cliente.cidade}/{cliente.estado}
-                            </span>
-                          </span>
+                        <div className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400 max-w-[350px]">
+                          <MapPin className="w-3 h-3 mt-0.5 shrink-0 text-green-600" />
+                          <div className="space-y-1">
+                            <div>
+                              <span className="font-medium text-xs text-gray-500">Cliente:</span>
+                              <span className="ml-1">
+                                {cliente.endereco}, {cliente.numero || 's/n'}
+                                {cliente.complemento && ` - ${cliente.complemento}`}
+                                {cliente.bairro && ` - ${cliente.bairro}`}
+                              </span>
+                              <span className="text-xs text-gray-400 block">
+                                {cliente.cidade}/{cliente.estado}
+                                {cliente.ponto_referencia && (
+                                  <span className="text-orange-500 ml-1">(Ref: {cliente.ponto_referencia})</span>
+                                )}
+                              </span>
+                            </div>
+                            {!cliente.usar_mesmo_endereco && cliente.endereco_entrega_rua && (
+                              <div className="border-t pt-1 mt-1">
+                                <span className="font-medium text-xs text-blue-500">Entrega:</span>
+                                <span className="ml-1 text-xs">
+                                  {cliente.endereco_entrega_rua}, {cliente.endereco_entrega_numero || 's/n'}
+                                  {cliente.endereco_entrega_complemento && ` - ${cliente.endereco_entrega_complemento}`}
+                                  {cliente.endereco_entrega_bairro && ` - ${cliente.endereco_entrega_bairro}`}
+                                </span>
+                                {cliente.endereco_entrega_ponto_referencia && (
+                                  <span className="text-orange-500 text-xs block">(Ref: {cliente.endereco_entrega_ponto_referencia})</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ) : (
                         <span className="text-gray-400 text-sm italic">

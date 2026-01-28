@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -124,16 +125,8 @@ function MetricCard({ icon: Icon, value, label, trend, trendValue, color, onClic
 }
 
 export default function RecursosHumanos() {
-  const [user, setUser] = useState(null);
+  const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState("colaboradores");
-
-  useEffect(() => {
-    const loadUser = async () => {
-      const currentUser = await base44.auth.me();
-      setUser(currentUser);
-    };
-    loadUser();
-  }, []);
 
   // Fetch all HR data
   const { data: colaboradores = [], refetch: refetchColaboradores } = useQuery({
@@ -268,7 +261,7 @@ export default function RecursosHumanos() {
     refetchFerias();
   };
 
-  if (!user) {
+  if (loading || !user) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: '#07593f' }} />

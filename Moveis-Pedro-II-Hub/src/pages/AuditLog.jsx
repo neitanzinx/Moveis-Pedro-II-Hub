@@ -5,9 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { 
-  ShieldCheck, Search, User, Calendar, Edit, Trash2, 
-  CheckCircle, XCircle, UserPlus, LogIn, LogOut 
+import {
+  ShieldCheck, Search, User, Calendar, Edit, Trash2,
+  CheckCircle, XCircle, UserPlus, LogIn, LogOut
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -38,18 +38,33 @@ export default function AuditLogPage() {
   const [filterAction, setFilterAction] = useState("all");
   const [filterEntity, setFilterEntity] = useState("all");
 
-  const { data: logs = [], isLoading } = useQuery({
+  const { data: rawLogs = [], isLoading, isError } = useQuery({
     queryKey: ['audit-logs'],
-    queryFn: () => base44.entities.AuditLog.list('-timestamp', 200),
-    refetchInterval: 10000
+    queryFn: () => base44.entities.AuditLog.list('-created_at', 200),
+    refetchInterval: 10000,
+    retry: 1 // Limit retries to avoid spamming on error
   });
 
+  // Map database columns to expected format
+  const logs = rawLogs.map(log => ({
+    ...log,
+    action: log.acao || log.action || 'UPDATE',
+    user_name: log.usuario || log.user_name || 'Unknown',
+    user_email: log.user_email || '',
+    user_cargo: log.user_cargo || '',
+    entity_type: log.tabela || log.entity_type || '',
+    entity_description: log.detalhes?.description || '',
+    changes: log.detalhes?.changes || log.changes || {},
+    timestamp: log.created_at || log.timestamp,
+    ip_address: log.ip_address || ''
+  }));
+
   const filteredLogs = logs.filter(log => {
-    const matchesSearch = 
+    const matchesSearch =
       log.user_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       log.user_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       log.entity_description?.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     const matchesAction = filterAction === "all" || log.action === filterAction;
     const matchesEntity = filterEntity === "all" || log.entity_type === filterEntity;
 
@@ -85,7 +100,7 @@ export default function AuditLogPage() {
                 className="pl-10"
               />
             </div>
-            
+
             <Select value={filterAction} onValueChange={setFilterAction}>
               <SelectTrigger>
                 <SelectValue placeholder="Tipo de Ação" />
@@ -122,6 +137,14 @@ export default function AuditLogPage() {
         <div className="flex justify-center items-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600" />
         </div>
+      ) : isError ? (
+        <Card className="border-0 shadow-lg">
+          <CardContent className="py-12 text-center">
+            <ShieldCheck className="w-16 h-16 mx-auto mb-4 opacity-20 text-red-400" />
+            <p className="text-gray-500">Não foi possível carregar os logs de auditoria.</p>
+            <p className="text-sm text-gray-400 mt-1">A tabela pode não estar configurada ainda.</p>
+          </CardContent>
+        </Card>
       ) : (
         <Card className="border-0 shadow-lg">
           <CardContent className="p-0">
@@ -134,14 +157,14 @@ export default function AuditLogPage() {
               ) : (
                 filteredLogs.map(log => {
                   const ActionIcon = actionIcons[log.action] || Edit;
-                  
+
                   return (
                     <div key={log.id} className="p-4 hover:bg-gray-50 dark:hover:bg-neutral-800 transition-colors">
                       <div className="flex items-start gap-4">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${actionColors[log.action] || 'bg-gray-100'}`}>
                           <ActionIcon className="w-5 h-5" />
                         </div>
-                        
+
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
                             <span className="font-semibold text-gray-900 dark:text-white">
@@ -154,7 +177,7 @@ export default function AuditLogPage() {
                               {log.action}
                             </Badge>
                           </div>
-                          
+
                           <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
                             {log.entity_type && (
                               <span className="font-medium">{log.entity_type}</span>

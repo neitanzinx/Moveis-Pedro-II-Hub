@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -46,13 +47,8 @@ export default function AssistenciaTecnica() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingAssistencia, setEditingAssistencia] = useState(null);
     const [saving, setSaving] = useState(false);
-    const [user, setUser] = useState(null);
+    const { user } = useAuth();
     const queryClient = useQueryClient();
-
-    // Get current user
-    useEffect(() => {
-        base44.auth.me().then(setUser).catch(console.error);
-    }, []);
 
     // Queries
     const { data: assistencias = [], isLoading } = useQuery({

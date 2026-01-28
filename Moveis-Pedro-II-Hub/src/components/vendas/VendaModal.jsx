@@ -75,6 +75,14 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
     select: (data) => data.filter(l => l.ativa),
   });
 
+  // Fetch users for resolving seller names
+  const { data: users = [] } = useQuery({
+    queryKey: ['users-modal'],
+    queryFn: () => base44.entities.User.list(),
+    refetchOnMount: 'always',
+    staleTime: 0
+  });
+
   const criarClienteMutation = useMutation({
     mutationFn: (data) => base44.entities.Cliente.create(data),
     onSuccess: (novoClienteCriado) => {
@@ -424,7 +432,13 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
           ${vendaData.responsavel_nome ? `
           <div class="info-row">
             <span class="info-label">Vendedor:</span>
-            <span class="info-value">${vendaData.responsavel_nome}</span>
+            <span class="info-value">${(() => {
+          if (vendaData.responsavel_id) {
+            const u = users.find(user => user.id === vendaData.responsavel_id);
+            if (u && u.full_name) return u.full_name;
+          }
+          return vendaData.responsavel_nome;
+        })()}</span>
           </div>` : ''}
         </div>
 
@@ -537,7 +551,13 @@ Sua compra foi confirmada com sucesso! 🎉
 
 *Pedido:* #${vendaData.numero_pedido}
 *Loja:* ${vendaData.loja}
-*Vendedor:* ${vendaData.responsavel_nome || 'Não Informado'}
+*Vendedor:* ${(() => {
+        if (vendaData.responsavel_id) {
+          const u = users.find(user => user.id === vendaData.responsavel_id);
+          if (u && u.full_name) return u.full_name;
+        }
+        return vendaData.responsavel_nome || 'Não Informado';
+      })()}
 *Valor Total:* R$ ${vendaData.valor_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
 
 ${infoPagamento}
@@ -663,7 +683,13 @@ _Móveis Pedro II - ${vendaData.loja}_`;
               <Label htmlFor="responsavel_nome">Vendedor</Label>
               <Input
                 id="responsavel_nome"
-                value={formData.responsavel_nome}
+                value={(() => {
+                  if (formData.responsavel_id) {
+                    const u = users.find(user => user.id === formData.responsavel_id);
+                    if (u && u.full_name) return u.full_name;
+                  }
+                  return formData.responsavel_nome;
+                })()}
                 disabled
               />
             </div>

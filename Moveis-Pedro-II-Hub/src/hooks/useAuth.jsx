@@ -1,15 +1,31 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, createContext, useContext } from "react";
 import { base44, supabase } from "@/api/base44Client";
 import { ROLE_RULES, SCOPES } from "@/config/permissions";
 
 // API URL para autenticação de funcionários
 const API_URL = import.meta.env.VITE_ZAP_API_URL || '';
 
-export function useAuth() {
+const AuthContext = createContext(null);
+
+export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [cargoPermissoes, setCargoPermissoes] = useState(null);
   const [authType, setAuthType] = useState(null); // 'employee' | 'supabase' | null
+
+  // Admin Store Selection State
+  const [selectedStore, setSelectedStoreState] = useState(() => {
+    return localStorage.getItem('admin_selected_store') || null;
+  });
+
+  const setSelectedStore = (store) => {
+    setSelectedStoreState(store);
+    if (store) {
+      localStorage.setItem('admin_selected_store', store);
+    } else {
+      localStorage.removeItem('admin_selected_store');
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -35,41 +51,42 @@ export function useAuth() {
         const fullUser = u ? { ...sessionUser, ...u } : sessionUser;
         const cargo = fullUser.cargo || null;
 
-        return {
-          ...fullUser,
-          cargo: cargo,
-          full_name: fullUser.full_name || fullUser.email,
-        };
-      } catch (error) {
-        console.error("Erro ao carregar perfil Supabase:", error);
-        return null;
+        return { ...fullUser, cargo };
+      } catch (err) {
+        console.error('Erro ao carregar perfil Supabase:', err);
+        return sessionUser;
       }
     };
 
-    // Função para verificar autenticação de funcionário (JWT)
+    // Função para verificar autenticação de funcionário
     const checkEmployeeAuth = async () => {
       const token = localStorage.getItem('employee_token');
-      const storedUser = localStorage.getItem('employee_user');
-
-      if (!token || !storedUser) {
-        return null;
-      }
+      if (!token) return null;
 
       try {
-        // Verificar se token ainda é válido
-        const response = await fetch(`${API_URL}/api/auth/employee/me`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+        const response = await fetch(`${API_URL}/api/employee/me`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
         });
 
         if (!response.ok) {
-          // Token inválido - limpar
-          localStorage.removeItem('employee_token');
-          localStorage.removeItem('employee_user');
-          return null;
+          if (response.status === 401 || response.status === 403) {
+            localStorage.removeItem('employee_token');
+            localStorage.removeItem('employee_user');
+            return null;
+          }
+          throw new Error('Falha na validação do token');
         }
 
         const data = await response.json();
+        // Verificar se o usuário ainda está ativo no banco de dados
+        // (Isso é importante caso o funcionário tenha sido desativado/removido)
+
         if (data.success && data.user) {
+          // Opcional: Validar contra a tabela role_permissions ou tabela de usuarios do banco se necessário
+          // Por enquanto confiamos no token JWT validado pelo backend
+
           return {
             ...data.user,
             full_name: data.user.full_name || data.user.matricula
@@ -77,6 +94,8 @@ export function useAuth() {
         }
       } catch (e) {
         console.error("Erro ao verificar auth de funcionário:", e);
+        // Se der erro de conexão, talvez não devamos deslogar imediatamente?
+        // Mas por segurança, se não validar, null.
       }
 
       return null;
@@ -84,48 +103,72 @@ export function useAuth() {
 
     // Carrega estado inicial
     const initAuth = async () => {
+      console.log('[Auth] Iniciando verificação de autenticação...');
+
       // 1. Primeiro verifica autenticação de funcionário (JWT)
-      const employeeUser = await checkEmployeeAuth();
+      const hasEmployeeToken = localStorage.getItem('employee_token');
 
-      if (employeeUser && mounted) {
-        setAuthType('employee');
-        setUser(employeeUser);
+      if (hasEmployeeToken) {
+        console.log('[Auth] Token de funcionário encontrado, verificando...');
+        const employeeUser = await checkEmployeeAuth();
 
-        // Buscar permissões do cargo
-        try {
-          const cargos = await base44.entities.Cargo.list();
-          const cargoEncontrado = cargos.find(c => c.nome === employeeUser.cargo);
-          if (cargoEncontrado?.permissoes) {
-            setCargoPermissoes(cargoEncontrado.permissoes);
+        if (employeeUser && mounted) {
+          console.log('[Auth] ✅ Funcionário autenticado:', employeeUser.full_name, '- Cargo:', employeeUser.cargo);
+          setAuthType('employee');
+          setUser(employeeUser);
+
+          // Buscar permissões do cargo
+          try {
+            const rolePermissions = await base44.entities.RolePermission.list();
+            const cargoEncontrado = rolePermissions.find(c => c.cargo === employeeUser.cargo);
+            if (cargoEncontrado?.permissions) {
+              setCargoPermissoes({
+                can: cargoEncontrado.permissions,
+                scope: ROLE_RULES[employeeUser.cargo]?.scope || 'own'
+              });
+            }
+          } catch (e) {
+            console.log("[Auth] Usando permissões hardcoded (fallback)", e);
           }
-        } catch (e) {
-          console.log("Usando permissões hardcoded (fallback)");
-        }
 
-        setLoading(false);
-        return;
+          setLoading(false);
+          return;
+        } else {
+          // Token inválido - já foi limpo pelo checkEmployeeAuth se response.status 401/403
+          // Se foi erro de rede, talvez não tenha limpado. Limpeza garantida abaixo?
+          // checkEmployeeAuth limpa se 401/403.
+          console.log('[Auth] ⚠️ Token de funcionário inválido ou expirado');
+          if (!hasEmployeeToken) { // Se checkEmployeeAuth removeu
+            // ok
+          }
+        }
       }
 
-      // 2. Se não tem funcionário logado, verifica Supabase Auth
+      // 2. Se não tem funcionário logado, verifica Supabase Auth (para clientes)
+      console.log('[Auth] Verificando autenticação Supabase...');
       const supabaseUser = await base44.auth.me();
 
       if (supabaseUser && mounted) {
         const fullProfile = await loadSupabaseProfile(supabaseUser);
 
         if (fullProfile) {
+          console.log('[Auth] Supabase user encontrado:', fullProfile.email, '- Cargo:', fullProfile.cargo || 'Nenhum');
           setAuthType('supabase');
           setUser(fullProfile);
 
           // Buscar permissões do cargo se existir
           if (fullProfile.cargo) {
             try {
-              const cargos = await base44.entities.Cargo.list();
-              const cargoEncontrado = cargos.find(c => c.nome === fullProfile.cargo);
-              if (cargoEncontrado?.permissoes) {
-                setCargoPermissoes(cargoEncontrado.permissoes);
+              const rolePermissions = await base44.entities.RolePermission.list();
+              const cargoEncontrado = rolePermissions.find(c => c.cargo === fullProfile.cargo);
+              if (cargoEncontrado?.permissions) {
+                setCargoPermissoes({
+                  can: cargoEncontrado.permissions,
+                  scope: ROLE_RULES[fullProfile.cargo]?.scope || 'own'
+                });
               }
             } catch (e) {
-              console.log("Usando permissões hardcoded (fallback)");
+              console.log("Usando permissões hardcoded (fallback)", e);
             }
           }
         }
@@ -145,6 +188,7 @@ export function useAuth() {
         setCargoPermissoes(null);
         setAuthType(null);
         setLoading(false);
+        localStorage.removeItem('admin_selected_store'); // Limpa seleção ao sair
       } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && !localStorage.getItem('employee_token')) {
         // Só atualiza se não estiver logado como funcionário
         loadSupabaseProfile(session?.user).then(profile => {
@@ -160,7 +204,17 @@ export function useAuth() {
       mounted = false;
       subscription?.unsubscribe();
     };
-  }, []);
+  }, []); // Esvaziado para rodar apenas no mount do Provider
+
+  // Sync effect: If user has fixed store, force selectedStore to match
+  useEffect(() => {
+    if (user?.loja) {
+      if (selectedStore !== user.loja) {
+        setSelectedStoreState(user.loja);
+        localStorage.setItem('admin_selected_store', user.loja);
+      }
+    }
+  }, [user?.loja]);
 
   // Função de logout que funciona para ambos os tipos
   const logout = async () => {
@@ -173,6 +227,7 @@ export function useAuth() {
     setUser(null);
     setAuthType(null);
     setCargoPermissoes(null);
+    setSelectedStore(null); // Limpa seleção
     window.location.href = '/login';
   };
 
@@ -216,9 +271,9 @@ export function useAuth() {
     return user?.cargo === 'Gerente';
   };
 
-  // Pega a loja do usuario
+  // Pega a loja do usuario (Prioridade: Loja fixa do user -> Loja selecionada pelo Admin)
   const getUserLoja = () => {
-    return user?.loja || null;
+    return user?.loja || selectedStore || null;
   };
 
   // Verifica se deve filtrar por loja (Gerente)
@@ -228,8 +283,6 @@ export function useAuth() {
   };
 
   // Filtra dados automaticamente por escopo
-  // options.lojaField permite especificar qual campo usar para loja
-  // options.userField permite especificar qual campo usar para usuario
   const filterData = (data, options = {}) => {
     if (!data || !user) return [];
     if (!Array.isArray(data)) return [];
@@ -241,7 +294,7 @@ export function useAuth() {
 
     // Gerente ve apenas da sua loja
     if (scope === SCOPES.STORE || scope === 'store') {
-      const userLoja = user.loja;
+      const userLoja = getUserLoja();
       if (!userLoja) {
         console.warn('[useAuth] Gerente sem loja definida, filtrando tudo');
         return [];
@@ -280,7 +333,7 @@ export function useAuth() {
     return [];
   };
 
-  return {
+  const value = {
     user,
     loading,
     logout,
@@ -291,6 +344,22 @@ export function useAuth() {
     isGerente,
     getUserLoja,
     shouldFilterByStore,
-    SCOPES
+    SCOPES,
+    selectedStore,
+    setSelectedStore
   };
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 }

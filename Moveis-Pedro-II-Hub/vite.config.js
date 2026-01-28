@@ -8,6 +8,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     allowedHosts: true,
+    watch: {
+      // Ignorar pastas do WhatsApp Bot para evitar reloads desnecessários
+      ignored: ['**/.wwebjs_auth/**', '**/.wwebjs_cache/**', '**/robo whatsapp agendamentos/**']
+    },
     proxy: {
       '/api/nuvemfiscal': {
         target: 'https://api.nuvemfiscal.com.br',

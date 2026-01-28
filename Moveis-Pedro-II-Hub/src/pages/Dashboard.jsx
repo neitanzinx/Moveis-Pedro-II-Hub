@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ShoppingCart, DollarSign, Package, Users, TrendingUp, ArrowUpRight, ArrowDownRight, Activity, Calendar, Loader2 } from "lucide-react";
@@ -18,12 +19,8 @@ const fetchSafe = async (fn) => {
 };
 
 export default function Dashboard() {
-  const [user, setUser] = useState(null);
+  const { user, loading } = useAuth();
   const [periodo, setPeriodo] = useState("30");
-
-  useEffect(() => {
-    base44.auth.me().then(setUser).catch(console.error);
-  }, []);
 
   // Queries com fallback para array vazio []
   // Nota: Idealmente a API já filtraria por usuário, mas mantemos o client-side filtering por enquanto
@@ -147,7 +144,7 @@ export default function Dashboard() {
     return result;
   }, [vendas, clientes, user, periodo]);
 
-  if (!user) {
+  if (loading || !user) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="animate-spin rounded-full h-8 w-8 text-green-600" />

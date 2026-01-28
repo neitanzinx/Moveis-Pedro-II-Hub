@@ -30,7 +30,7 @@ export default function ConfiguracaoPagSeguro() {
             const configs = await base44.entities.ConfiguracaoSistema.list();
             const configMap = {};
             configs.forEach(c => {
-                if (c.chave.startsWith('pagseguro_')) {
+                if (c?.chave?.startsWith('pagseguro_')) {
                     configMap[c.chave] = c.valor || "";
                 }
             });

@@ -32,6 +32,14 @@ export default function ArquivoTab() {
         staleTime: 0
     });
 
+    // Buscar usuários para resolver nomes
+    const { data: users = [] } = useQuery({
+        queryKey: ['users-arquivo'],
+        queryFn: () => base44.entities.User.list(),
+        refetchOnMount: 'always',
+        staleTime: 0
+    });
+
     // Filtrar entregas finalizadas (Entregue ou Retirada)
     const entregasFinalizadas = entregas.filter(e =>
         e.status === 'Entregue' || e.tipo_entrega === 'Retirada'
@@ -197,7 +205,15 @@ export default function ArquivoTab() {
                                     </h4>
                                     <div className="text-sm text-blue-700 space-y-1">
                                         <p><strong>Data/Hora:</strong> {formatarData(detalhes.venda.data_venda)}</p>
-                                        <p><strong>Vendedor:</strong> {detalhes.venda.responsavel_nome || "Não informado"}</p>
+                                        <p><strong>Vendedor:</strong> {(() => {
+                                            const id = detalhes.venda.responsavel_id;
+                                            const nomeLegacy = detalhes.venda.responsavel_nome;
+                                            if (id) {
+                                                const u = users.find(user => user.id === id);
+                                                if (u && u.full_name) return u.full_name;
+                                            }
+                                            return nomeLegacy || "Não informado";
+                                        })()}</p>
                                         <p><strong>Loja:</strong> {detalhes.venda.loja || "Não informada"}</p>
                                         <p><strong>Valor Total:</strong> R$ {detalhes.venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || "0,00"}</p>
                                         {detalhes.venda.desconto > 0 && (

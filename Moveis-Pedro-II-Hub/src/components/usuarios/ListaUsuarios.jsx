@@ -35,7 +35,7 @@ export default function ListaUsuarios({ usuarios, cargos, caminhoes, onEditar })
       {usuarios.map(usuario => {
         const cargosUsuario = usuario.cargos?.map(getCargo).filter(Boolean) || [];
         const caminhaoMaster = caminhoes.find(c => c.id === usuario.caminhao_master_id);
-        
+
         return (
           <Card key={usuario.id} className="p-4 hover:shadow-lg transition-shadow">
             <div className="flex items-center gap-4">
@@ -61,7 +61,7 @@ export default function ListaUsuarios({ usuarios, cargos, caminhoes, onEditar })
                     </Badge>
                   )}
                 </div>
-                
+
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
                   {usuario.email}
                 </p>
@@ -80,6 +80,11 @@ export default function ListaUsuarios({ usuarios, cargos, caminhoes, onEditar })
                       {cargo.nome}
                     </Badge>
                   ))}
+                  {usuario.matricula && (
+                    <Badge variant="secondary" className="font-mono">
+                      🆔 {usuario.matricula}
+                    </Badge>
+                  )}
                   {usuario.loja && (
                     <Badge variant="outline">
                       🏪 {usuario.loja}

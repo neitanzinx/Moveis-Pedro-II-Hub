@@ -70,7 +70,7 @@ export const CARGOS = [
         bgColor: '#ecfdf5',
         description: 'Controla produtos e inventário',
         permissions: ['Gerenciar produtos', 'Movimentação de estoque', 'Gerenciar entregas'],
-        requiresStore: true,
+        requiresStore: false,
         canRegister: true,
         mobileAppOnly: false
     },

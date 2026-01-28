@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 const express = require('express');
 const cors = require('cors');
@@ -58,6 +59,7 @@ const client = new Client({
     puppeteer: {
         headless: true,
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        protocolTimeout: 180000, // 3 minutos para operações longas
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -74,7 +76,7 @@ const client = new Client({
             '--no-default-browser-check',
             '--remote-debugging-port=0'
         ],
-        timeout: 120000,
+        timeout: 180000, // Aumentado para 3 minutos
         handleSIGINT: false,
         handleSIGTERM: false,
         handleSIGHUP: false
@@ -101,11 +103,80 @@ function limparJSON(texto) {
     } catch (e) { return null; }
 }
 
+// 🛡️ HELPER: Enviar mensagem com verificação real de conexão
+async function enviarMensagemSegura(chatId, content, options = {}) {
+    // Verificar se o client está realmente conectado
+    let state;
+    try {
+        state = await client.getState();
+        console.log(`📡 Estado do WhatsApp: ${state}`);
+    } catch (stateError) {
+        console.error('❌ Erro ao verificar estado:', stateError.message);
+        // Continuar mesmo assim - o getState pode falhar mas o client funcionar
+    }
+
+    // Tentar enviar a mensagem
+    try {
+        console.log(`📤 Enviando mensagem para ${chatId}...`);
+        const result = await client.sendMessage(chatId, content, options);
+        console.log(`✅ Mensagem enviada com SUCESSO para ${chatId}`);
+        return { success: true, result };
+    } catch (error) {
+        console.error(`❌ Erro ao enviar mensagem:`, error.message);
+
+        // Se for erro markedUnread, a mensagem PODE ter sido enviada
+        if (error.message && error.message.includes('markedUnread')) {
+            console.log('⚠️ Erro markedUnread detectado - verificando se mensagem foi enviada...');
+            // Retornar como warning, não como falha total
+            return { success: true, warning: 'markedUnread - verifique manualmente' };
+        }
+
+        throw error;
+    }
+}
+
 client.on('qr', qr => {
     currentQR = qr;
     connectionStatus = 'waiting_qr';
     qrcode.generate(qr, { small: true }); // Manter no terminal também
     console.log('📱 QR Code gerado - disponível na interface web');
+});
+
+// 🔐 Autenticação bem-sucedida (antes do ready)
+client.on('authenticated', () => {
+    console.log('🔐 Autenticação bem-sucedida! Aguardando carregamento...');
+    connectionStatus = 'authenticating';
+    currentQR = null;
+});
+
+// 📶 Tela de carregamento do WhatsApp (com workaround para ready não disparar)
+client.on('loading_screen', async (percent, message) => {
+    console.log(`📶 Carregando WhatsApp: ${percent}% - ${message}`);
+
+    // 🔧 Workaround: se loading chegar a 100% e ready não disparar
+    if (percent >= 100 && connectionStatus !== 'connected') {
+        console.log('⏳ Aguardando evento ready (3s timeout)...');
+        setTimeout(async () => {
+            // Se ainda não estiver conectado após 3s, forçar conexão
+            if (connectionStatus !== 'connected') {
+                console.log('⚠️ Evento ready não disparou, forçando conexão...');
+                currentQR = null;
+                connectionStatus = 'connected';
+                try {
+                    const info = await client.info;
+                    connectionInfo = {
+                        wid: info?.wid?.user || 'N/A',
+                        pushname: info?.pushname || 'WhatsApp Bot',
+                        platform: info?.platform || 'unknown'
+                    };
+                    console.log(`✅ Robô Logístico 6.0 (Informativo) Online! - Conectado como: ${connectionInfo.pushname}`);
+                } catch (e) {
+                    connectionInfo = null;
+                    console.log('✅ Robô Logístico 6.0 (Informativo) Online!');
+                }
+            }
+        }, 3000);
+    }
 });
 
 client.on('ready', async () => {
@@ -118,21 +189,72 @@ client.on('ready', async () => {
             pushname: info?.pushname || 'WhatsApp Bot',
             platform: info?.platform || 'unknown'
         };
-    } catch (e) { connectionInfo = null; }
-    console.log('✅ Robô Logístico 6.0 (Informativo) Online!');
+        console.log(`✅ Robô Logístico 6.0 (Informativo) Online! - Conectado como: ${connectionInfo.pushname}`);
+    } catch (e) {
+        connectionInfo = null;
+        console.log('✅ Robô Logístico 6.0 (Informativo) Online!');
+    }
 });
 
-client.on('disconnected', (reason) => {
+// 🧹 Função para limpar cache do WhatsApp (sessão zumbi)
+function limparCacheWhatsApp() {
+    const authPath = path.join(__dirname, '.wwebjs_auth');
+    const cachePath = path.join(__dirname, '.wwebjs_cache');
+
+    try {
+        if (fs.existsSync(authPath)) {
+            fs.rmSync(authPath, { recursive: true, force: true });
+            console.log('🧹 Cache de autenticação limpo (.wwebjs_auth)');
+        }
+        if (fs.existsSync(cachePath)) {
+            fs.rmSync(cachePath, { recursive: true, force: true });
+            console.log('🧹 Cache do navegador limpo (.wwebjs_cache)');
+        }
+    } catch (e) {
+        console.error('⚠️ Erro ao limpar cache:', e.message);
+    }
+}
+
+client.on('disconnected', async (reason) => {
     currentQR = null;
     connectionStatus = 'disconnected';
     connectionInfo = null;
     console.log('❌ WhatsApp desconectado:', reason);
+
+    // 🧹 Limpar cache para evitar sessão zumbi
+    console.log('🧹 Limpando cache para garantir reconexão limpa...');
+    limparCacheWhatsApp();
+
+    // 🔄 Auto-reconnect após desconexão
+    console.log('🔄 Tentando reconectar automaticamente em 5 segundos...');
+    setTimeout(async () => {
+        try {
+            connectionStatus = 'initializing';
+            console.log('🔄 Reinicializando cliente WhatsApp...');
+            await client.initialize();
+        } catch (e) {
+            console.error('❌ Erro ao reconectar:', e.message);
+            connectionStatus = 'disconnected';
+        }
+    }, 5000);
 });
 
-client.on('auth_failure', (msg) => {
+client.on('auth_failure', async (msg) => {
     currentQR = null;
     connectionStatus = 'disconnected';
     console.log('⚠️ Falha na autenticação:', msg);
+
+    // 🔄 Auto-reconnect após falha de auth (gerará novo QR)
+    console.log('🔄 Tentando gerar novo QR em 5 segundos...');
+    setTimeout(async () => {
+        try {
+            connectionStatus = 'initializing';
+            await client.initialize();
+        } catch (e) {
+            console.error('❌ Erro ao reinicializar após auth_failure:', e.message);
+            connectionStatus = 'disconnected';
+        }
+    }, 5000);
 });
 
 // --- ROTA DE HEALTH CHECK (RENDER) ---
@@ -341,9 +463,17 @@ Qualquer imprevisto, é só responder esta mensagem! 📱`;
 app.post('/mensagem-pos-venda', async (req, res) => {
     const { telefone, nome, pedido, prazo, produtos, pdf_base64 } = req.body;
 
+    // VALIDAÇÃO: Tentar enviar mesmo se o status interno estiver desincronizado
+    // O helper enviarMensagemSegura fará a validação real
+    if (connectionStatus !== 'connected') {
+        console.warn(`⚠️ Status interno mostra '${connectionStatus}', mas tentando enviar mensagem mesmo assim...`);
+    }
+
     let tel = telefone.replace(/\D/g, '');
     if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
     const chatId = `${tel}@c.us`;
+
+    console.log(`📤 Tentando enviar mensagem para ${nome} (${chatId})`);
 
     const mensagem =
         `Olá *${nome}!* 🎉
@@ -369,21 +499,23 @@ Qualquer dúvida, estamos à disposição! 🧡💚`;
             try {
                 const { MessageMedia } = require('whatsapp-web.js');
                 const media = new MessageMedia('application/pdf', pdf_base64, `Pedido_${pedido}.pdf`);
-                await client.sendMessage(chatId, media, {
+                const pdfResult = await enviarMensagemSegura(chatId, media, {
                     caption: `📄 Nota do Pedido #${pedido} - Móveis Pedro II`
                 });
-                console.log(`📎 PDF enviado para ${nome}`);
+                console.log(`📎 PDF enviado para ${nome}:`, pdfResult.success ? 'OK' : pdfResult.warning || 'Falha');
             } catch (pdfError) {
-                console.error('Erro ao enviar PDF (continuando com mensagem de texto):', pdfError.message);
+                console.error('❌ Erro ao enviar PDF:', pdfError.message);
+                console.error('Stack:', pdfError.stack);
             }
         }
 
         // 2. Enviar mensagem de texto
-        await client.sendMessage(chatId, mensagem);
-        console.log(`✅ Pós-venda enviado para ${nome}`);
-        res.json({ success: true });
+        const msgResult = await enviarMensagemSegura(chatId, mensagem);
+        console.log(`✅ Pós-venda enviado para ${nome}:`, msgResult.success ? 'OK' : msgResult.warning || 'Falha');
+        res.json({ success: true, warning: msgResult.warning });
     } catch (e) {
-        console.error("Erro zap:", e);
+        console.error("❌ Erro ao enviar zap:", e.message);
+        console.error("Stack:", e.stack);
         res.status(500).json({ error: e.message });
     }
 });

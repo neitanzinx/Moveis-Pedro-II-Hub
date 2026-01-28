@@ -27,7 +27,7 @@ export default function GestaoCargos() {
             // Tentar atualizar primeiro
             const existing = rolePermissions.find(r => r.cargo === cargo);
             if (existing) {
-                await base44.entities.RolePermission.update(cargo, {
+                await base44.entities.RolePermission.update(existing.id, {
                     permissions,
                     updated_at: new Date().toISOString()
                 });

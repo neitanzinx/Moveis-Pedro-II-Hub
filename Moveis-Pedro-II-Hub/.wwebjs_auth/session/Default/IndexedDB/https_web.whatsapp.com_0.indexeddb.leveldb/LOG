@@ -1,0 +1,12 @@
+2026/01/28-00:36:28.554 3d64 Reusing MANIFEST C:\Users\Usuario\Documents\moveispedroii - launch\Moveis-Pedro-II-Hub\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/01/28-00:36:28.555 3d64 Recovering log #457
+2026/01/28-00:36:28.605 3d64 Reusing old log C:\Users\Usuario\Documents\moveispedroii - launch\Moveis-Pedro-II-Hub\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000457.log 
+2026/01/28-00:44:17.757 21a4 Level-0 table #462: started
+2026/01/28-00:44:17.814 21a4 Level-0 table #462: 1121826 bytes OK
+2026/01/28-00:44:17.819 21a4 Delete type=0 #457
+2026/01/28-00:44:17.862 4718 Compacting 1@1 + 1@2 files
+2026/01/28-00:44:17.939 4718 Generated table #463@1: 34916 keys, 1165608 bytes
+2026/01/28-00:44:17.939 4718 Compacted 1@1 + 1@2 files => 1165608 bytes
+2026/01/28-00:44:17.943 4718 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/01/28-00:44:17.943 4718 Delete type=2 #459
+2026/01/28-00:44:17.943 4718 Delete type=2 #462

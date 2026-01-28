@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSidebar } from "@/components/ui/sidebar";
+import { useAuth } from "@/hooks/useAuth";
 
 // Componentes
 import BuscaProdutoAvancada from "../components/vendas/BuscaProdutoAvancada";
@@ -52,6 +53,43 @@ const getOfflineSales = () => {
 const removeOfflineSale = (offlineId) => {
   const pending = getOfflineSales().filter(s => s.offlineId !== offlineId);
   localStorage.setItem(OFFLINE_SALES_KEY, JSON.stringify(pending));
+};
+
+// --- FUNÇÃO PARA CONSTRUIR ENDEREÇO COMPLETO DE ENTREGA ---
+const construirEnderecoEntrega = (cliente) => {
+  if (!cliente) return "Endereço a definir";
+
+  // Determinar qual endereço usar
+  const usarMesmo = cliente.usar_mesmo_endereco !== false;
+
+  const end = usarMesmo ? {
+    rua: cliente.endereco,
+    numero: cliente.numero,
+    complemento: cliente.complemento,
+    ponto_referencia: cliente.ponto_referencia,
+    bairro: cliente.bairro,
+    cidade: cliente.cidade,
+    estado: cliente.estado
+  } : {
+    rua: cliente.endereco_entrega_rua,
+    numero: cliente.endereco_entrega_numero,
+    complemento: cliente.endereco_entrega_complemento,
+    ponto_referencia: cliente.endereco_entrega_ponto_referencia,
+    bairro: cliente.endereco_entrega_bairro,
+    cidade: cliente.endereco_entrega_cidade,
+    estado: cliente.endereco_entrega_estado
+  };
+
+  if (!end.rua) return "Endereço a definir";
+
+  let endereco = `${end.rua}, ${end.numero || 's/n'}`;
+  if (end.complemento) endereco += ` - ${end.complemento}`;
+  if (end.bairro) endereco += ` - ${end.bairro}`;
+  if (end.cidade) endereco += `, ${end.cidade}`;
+  if (end.estado) endereco += `/${end.estado}`;
+  if (end.ponto_referencia) endereco += ` (Ref: ${end.ponto_referencia})`;
+
+  return endereco;
 };
 
 // --- FUNÇÃO PARA CRIAR LANÇAMENTOS FINANCEIROS AUTOMÁTICOS ---
@@ -136,7 +174,7 @@ const criarLancamentosVenda = async (vendaData, taxas, vendaId) => {
 };
 
 export default function PDV() {
-  const [user, setUser] = useState(null);
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { state: sidebarState, isMobile } = useSidebar();
@@ -224,13 +262,10 @@ export default function PDV() {
   }, [etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega]);
 
   useEffect(() => {
-    base44.auth.me().then(u => {
-      setUser(u);
-      if (!initialState && u) {
-        setConfigVenda(prev => ({ ...prev, loja: u.loja || "Centro" }));
-      }
-    }).catch(console.error);
-  }, []);
+    if (user && !initialState) {
+      setConfigVenda(prev => ({ ...prev, loja: user.loja || "Centro" }));
+    }
+  }, [user]);
 
   const { data: produtos = [] } = useQuery({
     queryKey: ['produtos'],
@@ -510,7 +545,7 @@ export default function PDV() {
         const dias = configVenda.prazo === "15 dias" ? 15 : 45;
         const limite = new Date();
         limite.setDate(limite.getDate() + dias);
-        const enderecoCompleto = clienteSelecionado.endereco ? `${clienteSelecionado.endereco}, ${clienteSelecionado.numero} - ${clienteSelecionado.bairro}` : "Endereço a definir";
+        const enderecoCompleto = construirEnderecoEntrega(clienteSelecionado);
 
         const entregaCriada = await base44.entities.Entrega.create({
           venda_id: vendaCriada.id,
@@ -520,7 +555,10 @@ export default function PDV() {
           endereco_entrega: enderecoCompleto,
           data_limite: limite.toISOString().split('T')[0],
           status: "Pendente",
-          item_mostruario: itens.some(i => i.origem === 'mostruario') // Flag if any item is showroom
+          item_mostruario: itens.some(i => i.origem === 'mostruario'), // Flag if any item is showroom
+          pagamento_na_entrega: pagamentoEntrega.ativo,
+          valor_a_receber: pagamentoEntrega.ativo ? pagamentoEntrega.valor : 0,
+          forma_pagamento_entrega: pagamentoEntrega.ativo ? pagamentoEntrega.forma : null
         });
 
         // Criar itens de montagem conforme o tipo selecionado
@@ -628,48 +666,6 @@ export default function PDV() {
         // Não impede a venda de continuar
       }
 
-      // --- GATILHO DO ROBÔ DE FIDELIZAÇÃO + ENVIO DE PDF ---
-      if (clienteSelecionado.telefone) {
-        try {
-          // Função para limpar nome do produto (remove prefixos internos)
-          const limparNomeProduto = (nome) => {
-            if (!nome) return '-';
-            return nome
-              .replace(/^\[SOLICITAÇÃO\]\s*/i, '')
-              .replace(/^\[PENDENTE CADASTRO\]\s*/i, '');
-          };
-
-          // Formata lista de produtos para a mensagem (com nomes limpos)
-          const listaProdutos = itens.map(item => `• ${item.quantidade}x ${limparNomeProduto(item.produto_nome)}`).join('\n');
-
-          // Gerar PDF base64 para enviar junto
-          let pdfBase64 = null;
-          try {
-            pdfBase64 = await gerarNotaPedidoBase64(vendaData, clienteSelecionado, user.full_name);
-            console.log('📄 PDF gerado para enviar ao cliente');
-          } catch (pdfErr) {
-            console.error('Erro ao gerar PDF (continuando sem PDF):', pdfErr);
-          }
-
-          fetch(`${ZAP_API_URL}/mensagem-pos-venda`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              telefone: clienteSelecionado.telefone,
-              nome: clienteSelecionado.nome_completo,
-              pedido: novoNumero,
-              prazo: configVenda.prazo,
-              produtos: listaProdutos,
-              pdf_base64: pdfBase64
-            })
-          });
-          console.log("Comando de mensagem enviado para o robô" + (pdfBase64 ? ' (com PDF)' : ''));
-        } catch (err) {
-          console.error("Erro ao chamar o robô:", err);
-        }
-      }
-      // ----------------------------------------------------------------
-
       // Invalidar queries após TODAS as operações serem concluídas
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['vendas'] }),
@@ -678,11 +674,88 @@ export default function PDV() {
         queryClient.invalidateQueries({ queryKey: ['clientes'] })
       ]);
 
-      // Usar a janela que já foi aberta no início para evitar bloqueio de popup
+      // 4. IMPRESSÃO IMEDIATA (UX Priorizada)
+      // Preenche e imprime a janela que já estava aberta. Não bloqueia a execução do React loop, 
+      // mas o window.print() do navegador pode pausar JS em algumas threads.
       preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, user.full_name);
 
       toast.success("Venda finalizada com sucesso!");
+
+      // Captura variáveis para o closure do timeout antes do resetForm
+      const zapTelefone = clienteSelecionado.telefone;
+      const zapNome = clienteSelecionado.nome_completo;
+      const zapPedido = novoNumero;
+      const zapPrazo = configVenda.prazo;
+      const zapItens = [...itens]; // Copia array
+
+      // Limpa o PDV para próxima venda
       resetForm();
+
+      // 5. ENVIO WHATSAPP EM "BACKGROUND" (Delay para não competir com renderização do print)
+      if (zapTelefone) {
+        toast.info("Processando envio do comprovante pelo WhatsApp...");
+
+        setTimeout(async () => {
+          try {
+            // Função para limpar nome do produto
+            const limparNomeProduto = (nome) => {
+              if (!nome) return '-';
+              return nome
+                .replace(/^\[SOLICITAÇÃO\]\s*/i, '')
+                .replace(/^\[PENDENTE CADASTRO\]\s*/i, '');
+            };
+
+            // Formata lista de produtos
+            const listaProdutos = zapItens.map(item => `• ${item.quantidade}x ${limparNomeProduto(item.produto_nome)}`).join('\n');
+
+            console.log("📄 Gerando PDF para WhatsApp em background...");
+            let pdfBase64 = null;
+            try {
+              // Nota: vendaData ainda está acessível no closure
+              pdfBase64 = await gerarNotaPedidoBase64(vendaData, { ...clienteSelecionado }, user.full_name);
+
+              if (pdfBase64) {
+                console.log(`📄 PDF gerado com sucesso (${pdfBase64.length} bytes)`);
+              } else {
+                console.warn('⚠️ Falha ao gerar PDF base64 (retornou null)');
+              }
+            } catch (pdfErr) {
+              console.error('Erro na geração do PDF background:', pdfErr);
+            }
+
+            // Envia para o Bot
+            console.log(`📤 Enviando para bot: ${ZAP_API_URL}`);
+            fetch(`${ZAP_API_URL}/mensagem-pos-venda`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                telefone: zapTelefone,
+                nome: zapNome,
+                pedido: zapPedido,
+                prazo: zapPrazo,
+                produtos: listaProdutos,
+                pdf_base64: pdfBase64
+              })
+            })
+              .then(async (response) => {
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                  console.error(`❌ Bot respondeu com erro:`, data);
+                  toast.error("Erro ao enviar WhatsApp.");
+                } else {
+                  console.log("✅ WhatsApp enviado:", data);
+                  toast.success("Comprovante enviado ao cliente!");
+                }
+              })
+              .catch(err => {
+                console.error("❌ Erro conexão bot:", err);
+              });
+
+          } catch (bgErr) {
+            console.error("Erro fatal no processo de background:", bgErr);
+          }
+        }, 1500); // 1.5s delay para garantir que o print dialog já abriu
+      }
 
     } catch (err) {
       // ❌ Se der erro, fecha a janela que abriu

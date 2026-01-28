@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
 import SolicitacoesCadastroWidget from "@/components/dashboard/SolicitacoesCadastroWidget";
 import ControleMontadoresWidget from "@/components/dashboard/ControleMontadoresWidget";
+import ProdutoModal from "@/components/produtos/ProdutoModal";
 import { toast } from "sonner";
 import {
     DollarSign,
@@ -81,22 +82,16 @@ export default function DashboardGerente() {
     const [novaMetaValor, setNovaMetaValor] = useState('');
     const [metaVendedorSelecionado, setMetaVendedorSelecionado] = useState(null);
 
-    // Estados para tokens gerenciais
+    // Estados para tokens gerenciais (v2 - simplificado)
     const [tokenModalOpen, setTokenModalOpen] = useState(false);
     const [novoToken, setNovoToken] = useState({
-        maxUsos: 1,
-        validadeHoras: 4,
-        descontoMaxPercent: 30,
-        permiteDesconto: true,
-        permiteSemEstoque: false,
-        permiteFreteGratis: false,
-        permitePrazoEstendido: false,
-        prazoMaxParcelas: 18,
-        permiteBrindes: false,
-        permitePrioridadeEntrega: false,
-        permitePrecoCusto: false,
-        permiteAlteracaoValor: false
+        tipoToken: 'SINGLE_USE', // 'SINGLE_USE' ou 'SUPERVISOR_MODE'
+        permissao: 'DESCONTO', // 'DESCONTO', 'CANCELAMENTO', 'ALTERACAO_PRECO', 'SUPER_CAIXA'
+        valorLimite: 20, // % ou R$
+        validadeMinutos: 15,
+        maxUsos: 1
     });
+    const [tokenGerado, setTokenGerado] = useState(null); // Código gerado para exibição
     const [copiado, setCopiado] = useState(null);
     const [tokenHistoricoOpen, setTokenHistoricoOpen] = useState(false);
 
@@ -117,6 +112,13 @@ export default function DashboardGerente() {
     const [produtoSelecionadoMostruario, setProdutoSelecionadoMostruario] = useState(null);
     const [quantidadeMostruario, setQuantidadeMostruario] = useState(1);
 
+    // Estados para detalhes do produto (Curva ABC)
+    const [produtoModalOpen, setProdutoModalOpen] = useState(false);
+    const [produtoDetalhe, setProdutoDetalhe] = useState(null);
+
+    // Estado para modal de pendências
+    const [pendenciasModalOpen, setPendenciasModalOpen] = useState(false);
+
     // Estados para Giro de Estoque
     const [giroFiltro, setGiroFiltro] = useState(60); // dias sem venda
 
@@ -124,6 +126,12 @@ export default function DashboardGerente() {
     const isGerenteGeral = user?.cargo === 'Gerente Geral' || user?.cargo === 'Administrador';
 
     // Queries
+    const { data: users = [] } = useQuery({
+        queryKey: ['users-gerente'],
+        queryFn: () => base44.entities.User.list(),
+        enabled: !!user
+    });
+
     const { data: vendas = [], isLoading: loadingVendas, refetch: refetchVendas } = useQuery({
         queryKey: ['vendas-gerente'],
         queryFn: () => base44.entities.Venda.list('-data_venda'),
@@ -188,6 +196,7 @@ export default function DashboardGerente() {
     });
 
     // Mutation para criar token
+    // Mutation para criar token (v2 - mantém para compatibilidade, mas usamos handleCriarToken direto)
     const criarToken = useMutation({
         mutationFn: async (token) => {
             return base44.entities.TokenGerencial.create(token);
@@ -196,17 +205,11 @@ export default function DashboardGerente() {
             queryClient.invalidateQueries(['tokens-gerenciais']);
             setTokenModalOpen(false);
             setNovoToken({
-                maxUsos: 1,
-                validadeHoras: 4,
-                descontoMaxPercent: 30,
-                permiteDesconto: true,
-                permiteSemEstoque: false,
-                permiteFreteGratis: false,
-                permitePrazoEstendido: false,
-                prazoMaxParcelas: 18,
-                permiteBrindes: false,
-                permitePrioridadeEntrega: false,
-                permitePrecoCusto: false
+                tipoToken: 'SINGLE_USE',
+                permissao: 'DESCONTO',
+                valorLimite: 20,
+                validadeMinutos: 15,
+                maxUsos: 1
             });
         }
     });
@@ -270,14 +273,9 @@ export default function DashboardGerente() {
         }
     });
 
-    // Gerar código do token
+    // Gerar código numérico de 6 dígitos (100000-999999)
     const gerarCodigoToken = () => {
-        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-        let codigo = 'G-';
-        for (let i = 0; i < 4; i++) {
-            codigo += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return codigo;
+        return String(Math.floor(100000 + Math.random() * 900000));
     };
 
     // Copiar código do token
@@ -302,31 +300,34 @@ export default function DashboardGerente() {
         return user?.loja || lojas[0] || '';
     }, [isGerenteGeral, lojaFiltro, user?.loja, lojas]);
 
-    // Criar novo token
-    const handleCriarToken = () => {
+    // Criar novo token (v2 - simplificado)
+    const handleCriarToken = async () => {
         const codigo = gerarCodigoToken();
-        const validade = novoToken.validadeHoras > 0
-            ? new Date(Date.now() + novoToken.validadeHoras * 60 * 60 * 1000).toISOString()
-            : null;
+        const lojaDestino = lojaAtiva === 'todas' ? (lojas[0] || 'Centro') : lojaAtiva;
+        const expiraEm = new Date(Date.now() + novoToken.validadeMinutos * 60 * 1000).toISOString();
 
-        criarToken.mutate({
-            codigo,
-            gerente_id: user.id,
-            gerente_nome: user.full_name,
-            loja: lojaAtiva === 'todas' ? (lojas[0] || 'Centro') : lojaAtiva,
-            max_usos: novoToken.maxUsos || null,
-            validade,
-            permite_desconto_gerencial: novoToken.permiteDesconto,
-            desconto_max_percent: novoToken.descontoMaxPercent,
-            permite_venda_sem_estoque: novoToken.permiteSemEstoque,
-            permite_prazo_estendido: novoToken.permitePrazoEstendido,
-            prazo_max_parcelas: novoToken.prazoMaxParcelas,
-            permite_brindes: novoToken.permiteBrindes,
-            permite_prioridade_entrega: novoToken.permitePrioridadeEntrega,
-            permite_preco_custo: novoToken.permitePrecoCusto,
-            permite_alteracao_valor: novoToken.permiteAlteracaoValor,
-            ativo: true
-        });
+        try {
+            const tokenCriado = await base44.entities.TokenGerencial.create({
+                codigo,
+                gerente_id: user.id,
+                gerente_nome: user.full_name,
+                loja: lojaDestino,
+                tipo_token: novoToken.tipoToken,
+                permissao: novoToken.permissao,
+                valor_limite: novoToken.tipoToken === 'SUPER_CAIXA' ? null : novoToken.valorLimite,
+                validade_minutos: novoToken.validadeMinutos,
+                max_usos: novoToken.maxUsos,
+                usos_realizados: 0,
+                ativo: true,
+                expira_em: expiraEm
+            });
+            setTokenGerado(tokenCriado);
+            refetchTokens();
+            toast.success('Token gerado com sucesso!');
+        } catch (error) {
+            console.error('Erro ao criar token:', error);
+            toast.error('Erro ao criar token');
+        }
     };
 
     // Tokens filtrados por loja
@@ -339,7 +340,7 @@ export default function DashboardGerente() {
 
     const tokensAtivos = tokensFiltrados.filter(t => {
         if (!t.ativo) return false;
-        if (t.validade && new Date(t.validade) < new Date()) return false;
+        if (t.expira_em && new Date(t.expira_em) < new Date()) return false;
         if (t.max_usos && t.usos_realizados >= t.max_usos) return false;
         return true;
     });
@@ -511,16 +512,25 @@ export default function DashboardGerente() {
         const agrupado = {};
 
         vendasMes.forEach(v => {
-            const vendedor = v.responsavel_nome || 'Não informado';
             const vendedorId = v.responsavel_id;
+            let vendedorNome = v.responsavel_nome || v.vendedor_nome || 'Não informado';
 
-            if (!agrupado[vendedor]) {
-                agrupado[vendedor] = { nome: vendedor, id: vendedorId, comissao: 0, vendas: 0, total: 0 };
+            // Tentar resolver nome pelo ID se possível
+            if (vendedorId) {
+                const userEncontrado = users.find(u => u.id === vendedorId);
+                if (userEncontrado && userEncontrado.full_name) {
+                    vendedorNome = userEncontrado.full_name;
+                }
             }
-            agrupado[vendedor].comissao += v.comissao_calculada || 0;
-            agrupado[vendedor].vendas += 1;
-            agrupado[vendedor].total += v.valor_total || 0;
+
+            if (!agrupado[vendedorNome]) {
+                agrupado[vendedorNome] = { nome: vendedorNome, id: vendedorId, comissao: 0, vendas: 0, total: 0 };
+            }
+            agrupado[vendedorNome].comissao += v.comissao_calculada || 0;
+            agrupado[vendedorNome].vendas += 1;
+            agrupado[vendedorNome].total += v.valor_total || 0;
         });
+
 
         return Object.values(agrupado)
             .filter(v => v.comissao > 0)
@@ -539,10 +549,10 @@ export default function DashboardGerente() {
                     const prodId = item.produto_id || item.id;
                     // Buscar nome do produto na lista de produtos quando item.nome está vazio
                     const produtoInfo = produtos.find(p => p.id === prodId);
-                    const nomeProduto = item.nome || produtoInfo?.nome || `Produto #${prodId}`;
+                    const nomeProduto = item.produto_nome || item.nome || produtoInfo?.nome || `Produto #${prodId}`;
 
                     if (!produtosVendidos[prodId]) {
-                        produtosVendidos[prodId] = { id: prodId, nome: nomeProduto, valor: 0, qtd: 0 };
+                        produtosVendidos[prodId] = { id: prodId, nome: nomeProduto, valor: 0, qtd: 0, produtoInfo };
                     }
                     produtosVendidos[prodId].valor += (item.preco_unitario || item.preco_venda || 0) * (item.quantidade || 1);
                     produtosVendidos[prodId].qtd += item.quantidade || 1;
@@ -766,18 +776,27 @@ export default function DashboardGerente() {
         const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
 
         vendasMes.forEach(v => {
-            const vendedor = v.responsavel_nome || v.vendedor_nome || 'Não informado';
             const vendedorId = v.responsavel_id;
-            if (!agrupado[vendedor]) {
-                agrupado[vendedor] = {
-                    nome: vendedor,
+            let vendedorNome = v.responsavel_nome || v.vendedor_nome || 'Não informado';
+
+            // Tentar resolver nome pelo ID se possível
+            if (vendedorId) {
+                const userEncontrado = users.find(u => u.id === vendedorId);
+                if (userEncontrado && userEncontrado.full_name) {
+                    vendedorNome = userEncontrado.full_name;
+                }
+            }
+
+            if (!agrupado[vendedorNome]) {
+                agrupado[vendedorNome] = {
+                    nome: vendedorNome,
                     id: vendedorId,
                     total: 0,
                     qtd: 0
                 };
             }
-            agrupado[vendedor].total += v.valor_total || 0;
-            agrupado[vendedor].qtd++;
+            agrupado[vendedorNome].total += v.valor_total || 0;
+            agrupado[vendedorNome].qtd++;
         });
 
         // Adicionar metas individuais
@@ -992,7 +1011,11 @@ export default function DashboardGerente() {
                 </Card>
 
                 {/* Pendências */}
-                <Card className={`relative overflow-hidden border-l-4 ${pendencias.total > 0 ? 'border-l-orange-500' : 'border-l-emerald-500'}`}>
+                {/* Pendências */}
+                <Card
+                    className={`relative overflow-hidden border-l-4 cursor-pointer transition-shadow hover:shadow-md ${pendencias.total > 0 ? 'border-l-orange-500' : 'border-l-emerald-500'}`}
+                    onClick={() => setPendenciasModalOpen(true)}
+                >
                     <CardContent className="p-6">
                         <div className="flex items-start justify-between">
                             <div>
@@ -1012,6 +1035,11 @@ export default function DashboardGerente() {
                                     {pendencias.pagamentos.length > 0 && (
                                         <Badge variant="outline" className="text-xs">
                                             <CreditCard className="w-3 h-3 mr-1" />{pendencias.pagamentos.length}
+                                        </Badge>
+                                    )}
+                                    {pendencias.triagem.length > 0 && (
+                                        <Badge variant="outline" className="text-xs">
+                                            <ClipboardList className="w-3 h-3 mr-1" />{pendencias.triagem.length}
                                         </Badge>
                                     )}
                                 </div>
@@ -1636,14 +1664,32 @@ export default function DashboardGerente() {
                             {curvaABC.produtos.length > 0 ? (
                                 <div className="space-y-2 max-h-[200px] overflow-y-auto">
                                     {curvaABC.produtos.map((p, i) => (
-                                        <div key={p.id} className="flex items-center justify-between p-2 rounded-lg bg-gray-50 dark:bg-neutral-800">
+                                        <div
+                                            key={p.id}
+                                            className="flex items-center justify-between p-2 rounded-lg bg-gray-50 dark:bg-neutral-800 hover:bg-gray-100 cursor-pointer transition-colors"
+                                            onClick={() => {
+                                                if (p.produtoInfo) {
+                                                    setProdutoDetalhe(p.produtoInfo);
+                                                    setProdutoModalOpen(true);
+                                                } else {
+                                                    // Fallback se não tiver info completa, tenta buscar de novo ou avisa
+                                                    const freshInfo = produtos.find(prod => prod.id === p.id);
+                                                    if (freshInfo) {
+                                                        setProdutoDetalhe(freshInfo);
+                                                        setProdutoModalOpen(true);
+                                                    } else {
+                                                        toast.info(`Detalhes não disponíveis para ${p.nome}`);
+                                                    }
+                                                }
+                                            }}
+                                        >
                                             <div className="flex items-center gap-2">
                                                 <Badge className={
                                                     p.classificacao === 'A' ? 'bg-green-100 text-green-700' :
                                                         p.classificacao === 'B' ? 'bg-yellow-100 text-yellow-700' :
                                                             'bg-red-100 text-red-700'
                                                 }>{p.classificacao}</Badge>
-                                                <span className="text-sm truncate max-w-[150px]">{p.nome}</span>
+                                                <span className="text-sm truncate max-w-[150px]" title="Clique para ver detalhes">{p.nome}</span>
                                             </div>
                                             <span className="text-sm font-medium">{formatarMoeda(p.valor)}</span>
                                         </div>
@@ -2021,163 +2067,189 @@ export default function DashboardGerente() {
                                 Criar Token
                             </Button>
                         </DialogTrigger>
-                        <DialogContent>
+                        <DialogContent className="sm:max-w-md">
                             <DialogHeader>
                                 <DialogTitle className="flex items-center gap-2">
                                     <Key className="w-5 h-5 text-amber-600" />
                                     Criar Token de Autorização
                                 </DialogTitle>
                             </DialogHeader>
-                            <div className="space-y-4 py-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <Label>Limite de Usos</Label>
-                                        <Select
-                                            value={String(novoToken.maxUsos)}
-                                            onValueChange={(v) => setNovoToken({ ...novoToken, maxUsos: Number(v) })}
-                                        >
-                                            <SelectTrigger className="mt-1">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="1">1 uso</SelectItem>
-                                                <SelectItem value="2">2 usos</SelectItem>
-                                                <SelectItem value="3">3 usos</SelectItem>
-                                                <SelectItem value="5">5 usos</SelectItem>
-                                                <SelectItem value="10">10 usos</SelectItem>
-                                                <SelectItem value="0">Ilimitado</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div>
-                                        <Label>Validade</Label>
-                                        <Select
-                                            value={String(novoToken.validadeHoras)}
-                                            onValueChange={(v) => setNovoToken({ ...novoToken, validadeHoras: Number(v) })}
-                                        >
-                                            <SelectTrigger className="mt-1">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="1">1 hora</SelectItem>
-                                                <SelectItem value="2">2 horas</SelectItem>
-                                                <SelectItem value="4">4 horas</SelectItem>
-                                                <SelectItem value="8">8 horas</SelectItem>
-                                                <SelectItem value="24">24 horas</SelectItem>
-                                                <SelectItem value="0">Sem expiração</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
 
-                                <div className="p-3 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
-                                    <Label className="text-amber-800 dark:text-amber-400 font-medium">Permissões do Token</Label>
-                                    <div className="space-y-3 mt-3">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={novoToken.permiteDesconto}
-                                                    onChange={(e) => setNovoToken({ ...novoToken, permiteDesconto: e.target.checked })}
-                                                    className="w-4 h-4 accent-amber-600"
-                                                />
-                                                <span className="text-sm">Desconto / Ajuste de Preço</span>
-                                            </div>
-                                            {novoToken.permiteDesconto && (
-                                                <div className="flex items-center gap-1">
-                                                    <span className="text-xs text-gray-500">Até</span>
-                                                    <Input
-                                                        type="number"
-                                                        value={novoToken.descontoMaxPercent}
-                                                        onChange={(e) => setNovoToken({ ...novoToken, descontoMaxPercent: Number(e.target.value) })}
-                                                        className="w-16 h-7 text-center text-sm"
-                                                        min={1}
-                                                        max={100}
-                                                    />
-                                                    <span className="text-xs text-gray-500">%</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={novoToken.permiteSemEstoque}
-                                                onChange={(e) => setNovoToken({ ...novoToken, permiteSemEstoque: e.target.checked })}
-                                                className="w-4 h-4 accent-amber-600"
-                                            />
-                                            <span className="text-sm">Vender sem Estoque</span>
-                                        </div>
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={novoToken.permitePrazoEstendido}
-                                                    onChange={(e) => setNovoToken({ ...novoToken, permitePrazoEstendido: e.target.checked })}
-                                                    className="w-4 h-4 accent-amber-600"
-                                                />
-                                                <span className="text-sm">💳 Prazo Estendido</span>
-                                            </div>
-                                            {novoToken.permitePrazoEstendido && (
-                                                <div className="flex items-center gap-1">
-                                                    <span className="text-xs text-gray-500">Até</span>
-                                                    <Input
-                                                        type="number"
-                                                        value={novoToken.prazoMaxParcelas}
-                                                        onChange={(e) => setNovoToken({ ...novoToken, prazoMaxParcelas: Number(e.target.value) })}
-                                                        className="w-16 h-7 text-center text-sm"
-                                                        min={13}
-                                                        max={36}
-                                                    />
-                                                    <span className="text-xs text-gray-500">x</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={novoToken.permiteBrindes}
-                                                onChange={(e) => setNovoToken({ ...novoToken, permiteBrindes: e.target.checked })}
-                                                className="w-4 h-4 accent-amber-600"
-                                            />
-                                            <span className="text-sm">🎁 Autorizar Brindes</span>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={novoToken.permitePrioridadeEntrega}
-                                                onChange={(e) => setNovoToken({ ...novoToken, permitePrioridadeEntrega: e.target.checked })}
-                                                className="w-4 h-4 accent-amber-600"
-                                            />
-                                            <span className="text-sm">⚡ Prioridade de Entrega</span>
-                                        </div>
-                                        <div className="flex items-center gap-2 border-t border-amber-200 pt-2 mt-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={novoToken.permiteAlteracaoValor}
-                                                onChange={(e) => setNovoToken({ ...novoToken, permiteAlteracaoValor: e.target.checked })}
-                                                className="w-4 h-4 accent-amber-600"
-                                            />
-                                            <span className="text-sm font-medium">✏️ Alteração Total de Valor (Override)</span>
-                                        </div>
-                                        <div className="flex items-center gap-2 border-t border-amber-200 pt-2 mt-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={novoToken.permitePrecoCusto}
-                                                onChange={(e) => setNovoToken({ ...novoToken, permitePrecoCusto: e.target.checked })}
-                                                className="w-4 h-4 accent-red-600"
-                                            />
-                                            <span className="text-sm text-red-700">⚠️ Preço de Custo (extremo)</span>
+                            {tokenGerado ? (
+                                // Mostrar código gerado
+                                <div className="py-6 space-y-6">
+                                    <div className="text-center">
+                                        <p className="text-sm text-gray-500 mb-2">Código do Token (6 dígitos)</p>
+                                        <div className="flex items-center justify-center gap-3">
+                                            <code className="font-mono font-bold text-5xl text-amber-600 tracking-wider">
+                                                {tokenGerado.codigo}
+                                            </code>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => copiarCodigo(tokenGerado.codigo)}
+                                                className="h-10 w-10"
+                                            >
+                                                {copiado === tokenGerado.codigo ? (
+                                                    <Check className="w-5 h-5 text-green-600" />
+                                                ) : (
+                                                    <Copy className="w-5 h-5" />
+                                                )}
+                                            </Button>
                                         </div>
                                     </div>
+
+                                    <div className="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg space-y-2">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-gray-600">Tipo:</span>
+                                            <Badge className={tokenGerado.tipo_token === 'SUPERVISOR_MODE' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}>
+                                                {tokenGerado.tipo_token === 'SUPERVISOR_MODE' ? '👑 Modo Supervisor' : '🎫 Uso Único'}
+                                            </Badge>
+                                        </div>
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-gray-600">Permissão:</span>
+                                            <span className="font-medium">{tokenGerado.permissao}</span>
+                                        </div>
+                                        {tokenGerado.valor_limite && (
+                                            <div className="flex items-center justify-between text-sm">
+                                                <span className="text-gray-600">Limite:</span>
+                                                <span className="font-medium">{tokenGerado.valor_limite}%</span>
+                                            </div>
+                                        )}
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-gray-600">Expira em:</span>
+                                            <span className="font-medium">{tokenGerado.validade_minutos} min</span>
+                                        </div>
+                                    </div>
+
+                                    <DialogFooter>
+                                        <Button
+                                            variant="outline"
+                                            onClick={() => {
+                                                setTokenGerado(null);
+                                                setTokenModalOpen(false);
+                                            }}
+                                            className="w-full"
+                                        >
+                                            Fechar
+                                        </Button>
+                                    </DialogFooter>
                                 </div>
-                            </div>
-                            <DialogFooter>
-                                <Button variant="outline" onClick={() => setTokenModalOpen(false)}>Cancelar</Button>
-                                <Button onClick={handleCriarToken} disabled={criarToken.isPending} className="bg-amber-600 hover:bg-amber-700">
-                                    {criarToken.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Key className="w-4 h-4 mr-2" />}
-                                    Gerar Token
-                                </Button>
-                            </DialogFooter>
+                            ) : (
+                                // Formulário de criação
+                                <div className="space-y-4 py-4">
+                                    {/* Seletor de Modo */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setNovoToken({ ...novoToken, tipoToken: 'SINGLE_USE', maxUsos: 1 })}
+                                            className={`p-4 rounded-lg border-2 transition-all ${novoToken.tipoToken === 'SINGLE_USE'
+                                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30'
+                                                : 'border-gray-200 hover:border-gray-300'
+                                                }`}
+                                        >
+                                            <div className="text-2xl mb-1">🎫</div>
+                                            <p className="font-medium text-sm">Uso Único</p>
+                                            <p className="text-xs text-gray-500">1 operação específica</p>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setNovoToken({ ...novoToken, tipoToken: 'SUPERVISOR_MODE', maxUsos: 10 })}
+                                            className={`p-4 rounded-lg border-2 transition-all ${novoToken.tipoToken === 'SUPERVISOR_MODE'
+                                                ? 'border-purple-500 bg-purple-50 dark:bg-purple-950/30'
+                                                : 'border-gray-200 hover:border-gray-300'
+                                                }`}
+                                        >
+                                            <div className="text-2xl mb-1">👑</div>
+                                            <p className="font-medium text-sm">Supervisor</p>
+                                            <p className="text-xs text-gray-500">Múltiplas operações</p>
+                                        </button>
+                                    </div>
+
+                                    {/* Configurações */}
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <Label>Permissão</Label>
+                                            <Select
+                                                value={novoToken.permissao}
+                                                onValueChange={(v) => setNovoToken({ ...novoToken, permissao: v })}
+                                            >
+                                                <SelectTrigger className="mt-1">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="DESCONTO">💰 Desconto</SelectItem>
+                                                    <SelectItem value="CANCELAMENTO">❌ Cancelamento</SelectItem>
+                                                    <SelectItem value="ALTERACAO_PRECO">✏️ Alt. Preço</SelectItem>
+                                                    <SelectItem value="SUPER_CAIXA">⭐ Super Caixa</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div>
+                                            <Label>Validade</Label>
+                                            <Select
+                                                value={String(novoToken.validadeMinutos)}
+                                                onValueChange={(v) => setNovoToken({ ...novoToken, validadeMinutos: Number(v) })}
+                                            >
+                                                <SelectTrigger className="mt-1">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="5">5 minutos</SelectItem>
+                                                    <SelectItem value="15">15 minutos</SelectItem>
+                                                    <SelectItem value="30">30 minutos</SelectItem>
+                                                    <SelectItem value="60">1 hora</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+
+                                    {novoToken.permissao !== 'SUPER_CAIXA' && (
+                                        <div>
+                                            <Label>Limite de Valor (%)</Label>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                <Input
+                                                    type="number"
+                                                    value={novoToken.valorLimite}
+                                                    onChange={(e) => setNovoToken({ ...novoToken, valorLimite: Number(e.target.value) })}
+                                                    className="w-24"
+                                                    min={1}
+                                                    max={100}
+                                                />
+                                                <span className="text-sm text-gray-500">% máximo</span>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {novoToken.tipoToken === 'SUPERVISOR_MODE' && (
+                                        <div>
+                                            <Label>Máximo de Usos</Label>
+                                            <Select
+                                                value={String(novoToken.maxUsos)}
+                                                onValueChange={(v) => setNovoToken({ ...novoToken, maxUsos: Number(v) })}
+                                            >
+                                                <SelectTrigger className="mt-1">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="5">5 usos</SelectItem>
+                                                    <SelectItem value="10">10 usos</SelectItem>
+                                                    <SelectItem value="20">20 usos</SelectItem>
+                                                    <SelectItem value="50">50 usos</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    )}
+
+                                    <DialogFooter className="pt-4">
+                                        <Button variant="outline" onClick={() => setTokenModalOpen(false)}>Cancelar</Button>
+                                        <Button onClick={handleCriarToken} className="bg-amber-600 hover:bg-amber-700">
+                                            <Key className="w-4 h-4 mr-2" />
+                                            Gerar Token
+                                        </Button>
+                                    </DialogFooter>
+                                </div>
+                            )}
                         </DialogContent>
                     </Dialog>
                 </CardHeader>
@@ -2194,7 +2266,7 @@ export default function DashboardGerente() {
                     {tokensFiltrados.length > 0 ? (
                         <div className="space-y-2 max-h-[300px] overflow-y-auto">
                             {tokensFiltrados.map(token => {
-                                const expirado = token.validade && new Date(token.validade) < new Date();
+                                const expirado = token.expira_em && new Date(token.expira_em) < new Date();
                                 const esgotado = token.max_usos && token.usos_realizados >= token.max_usos;
                                 const ativo = token.ativo && !expirado && !esgotado;
 
@@ -2207,8 +2279,12 @@ export default function DashboardGerente() {
                                             }`}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <div className={`p-2 rounded-lg ${ativo ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-gray-200 dark:bg-neutral-700'}`}>
-                                                <Key className={`w-4 h-4 ${ativo ? 'text-amber-600' : 'text-gray-400'}`} />
+                                            <div className={`p-2 rounded-lg ${token.tipo_token === 'SUPERVISOR_MODE' ? 'bg-purple-100 dark:bg-purple-900/40' : 'bg-blue-100 dark:bg-blue-900/40'}`}>
+                                                {token.tipo_token === 'SUPERVISOR_MODE' ? (
+                                                    <span className="text-lg">👑</span>
+                                                ) : (
+                                                    <span className="text-lg">🎫</span>
+                                                )}
                                             </div>
                                             <div>
                                                 <div className="flex items-center gap-2">
@@ -2227,19 +2303,18 @@ export default function DashboardGerente() {
                                                     </Button>
                                                 </div>
                                                 <div className="flex gap-2 mt-1">
-                                                    {token.permite_desconto_gerencial && (
-                                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                                                            Até {token.desconto_max_percent}% desc
-                                                        </Badge>
-                                                    )}
-                                                    {token.permite_venda_sem_estoque && (
-                                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                                                            <Package className="w-2.5 h-2.5 mr-0.5" /> Sem estoque
-                                                        </Badge>
-                                                    )}
-                                                    {token.permite_alteracao_valor && (
+                                                    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${token.tipo_token === 'SUPERVISOR_MODE' ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
+                                                        {token.tipo_token === 'SUPERVISOR_MODE' ? 'Supervisor' : 'Uso Único'}
+                                                    </Badge>
+                                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                                                        {token.permissao === 'DESCONTO' && '💰 Desc.'}
+                                                        {token.permissao === 'CANCELAMENTO' && '❌ Canc.'}
+                                                        {token.permissao === 'ALTERACAO_PRECO' && '✏️ Preço'}
+                                                        {token.permissao === 'SUPER_CAIXA' && '⭐ Super'}
+                                                    </Badge>
+                                                    {token.valor_limite && (
                                                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-50 text-amber-700 border-amber-200">
-                                                            <Edit2 className="w-2.5 h-2.5 mr-0.5" /> Valor Manual
+                                                            Até {token.valor_limite}%
                                                         </Badge>
                                                     )}
                                                 </div>
@@ -2251,10 +2326,10 @@ export default function DashboardGerente() {
                                                 <div className="flex items-center gap-1 text-gray-500">
                                                     <span>{token.usos_realizados}/{token.max_usos || '∞'} usos</span>
                                                 </div>
-                                                {token.validade && (
+                                                {token.expira_em && (
                                                     <div className={`flex items-center gap-1 ${expirado ? 'text-red-500' : 'text-gray-500'}`}>
                                                         <Clock className="w-3 h-3" />
-                                                        <span>{expirado ? 'Expirado' : new Date(token.validade).toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                                                        <span>{expirado ? 'Expirado' : new Date(token.expira_em).toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
                                                     </div>
                                                 )}
                                             </div>
@@ -2490,6 +2565,189 @@ export default function DashboardGerente() {
                                 <><Package className="w-4 h-4 mr-2" /> Solicitar Montagem</>
                             )}
                         </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+            {/* Modal de Detalhes do Produto */}
+            <ProdutoModal
+                isOpen={produtoModalOpen}
+                onClose={() => {
+                    setProdutoModalOpen(false);
+                    setProdutoDetalhe(null);
+                }}
+                onSave={async (dados) => {
+                    try {
+                        if (produtoDetalhe?.id) {
+                            await base44.entities.Produto.update(produtoDetalhe.id, dados);
+                            toast.success('Produto atualizado com sucesso!');
+                            queryClient.invalidateQueries(['produtos-gerente']);
+                            setProdutoModalOpen(false);
+                        }
+                    } catch (error) {
+                        console.error('Erro ao atualizar produto:', error);
+                        toast.error('Erro ao atualizar produto');
+                    }
+                }}
+                produto={produtoDetalhe}
+                isLoading={false}
+            />
+
+            {/* Modal Detalhes Pendências */}
+            <Dialog open={pendenciasModalOpen} onOpenChange={setPendenciasModalOpen}>
+                <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <AlertTriangle className="w-5 h-5 text-orange-600" />
+                            Detalhamento de Pendências
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    <Tabs defaultValue="entregas" className="flex-1 overflow-hidden flex flex-col">
+                        <TabsList className="mb-4">
+                            <TabsTrigger value="entregas" className="gap-2">
+                                <Truck className="w-4 h-4" />
+                                Entregas <Badge variant="secondary" className="ml-1">{pendencias.entregas.length}</Badge>
+                            </TabsTrigger>
+                            <TabsTrigger value="montagens" className="gap-2">
+                                <Wrench className="w-4 h-4" />
+                                Montagens <Badge variant="secondary" className="ml-1">{pendencias.montagens.length}</Badge>
+                            </TabsTrigger>
+                            <TabsTrigger value="pagamentos" className="gap-2">
+                                <CreditCard className="w-4 h-4" />
+                                Pagamentos <Badge variant="secondary" className="ml-1">{pendencias.pagamentos.length}</Badge>
+                            </TabsTrigger>
+                            <TabsTrigger value="triagem" className="gap-2">
+                                <ClipboardList className="w-4 h-4" />
+                                Triagem <Badge variant="secondary" className="ml-1">{pendencias.triagem.length}</Badge>
+                            </TabsTrigger>
+                        </TabsList>
+
+                        <TabsContent value="entregas" className="flex-1 overflow-auto">
+                            {pendencias.entregas.length === 0 ? (
+                                <div className="text-center py-12 text-gray-500">
+                                    <Check className="w-12 h-12 mx-auto mb-3 text-green-500" />
+                                    <p>Nenhuma entrega pendente!</p>
+                                </div>
+                            ) : (
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Data</TableHead>
+                                            <TableHead>Cliente</TableHead>
+                                            <TableHead>Endereço</TableHead>
+                                            <TableHead>Status</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {pendencias.entregas.map(e => (
+                                            <TableRow key={e.id}>
+                                                <TableCell>{e.data_agendada ? new Date(e.data_agendada).toLocaleDateString('pt-BR') : 'Sem data'}</TableCell>
+                                                <TableCell>{e.cliente_nome}</TableCell>
+                                                <TableCell className="max-w-xs truncate" title={e.endereco}>{e.endereco}</TableCell>
+                                                <TableCell>
+                                                    <Badge variant={e.status === 'Atrasada' ? 'destructive' : 'outline'}>{e.status}</Badge>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            )}
+                        </TabsContent>
+
+                        <TabsContent value="montagens" className="flex-1 overflow-auto">
+                            {pendencias.montagens.length === 0 ? (
+                                <div className="text-center py-12 text-gray-500">
+                                    <Check className="w-12 h-12 mx-auto mb-3 text-green-500" />
+                                    <p>Nenhuma montagem pendente!</p>
+                                </div>
+                            ) : (
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Data</TableHead>
+                                            <TableHead>Cliente</TableHead>
+                                            <TableHead>Montador</TableHead>
+                                            <TableHead>Status</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {pendencias.montagens.map(m => (
+                                            <TableRow key={m.id}>
+                                                <TableCell>{m.data_agendada ? new Date(m.data_agendada).toLocaleDateString('pt-BR') : 'Sem data'}</TableCell>
+                                                <TableCell>{m.cliente_nome}</TableCell>
+                                                <TableCell>{m.montador_nome || 'Não atribuído'}</TableCell>
+                                                <TableCell>
+                                                    <Badge variant={m.status === 'Atrasada' ? 'destructive' : 'outline'}>{m.status}</Badge>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            )}
+                        </TabsContent>
+
+                        <TabsContent value="pagamentos" className="flex-1 overflow-auto">
+                            {pendencias.pagamentos.length === 0 ? (
+                                <div className="text-center py-12 text-gray-500">
+                                    <Check className="w-12 h-12 mx-auto mb-3 text-green-500" />
+                                    <p>Nenhum pagamento pendente!</p>
+                                </div>
+                            ) : (
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Pedido</TableHead>
+                                            <TableHead>Cliente</TableHead>
+                                            <TableHead>Valor Total</TableHead>
+                                            <TableHead>Restante</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {pendencias.pagamentos.map(v => (
+                                            <TableRow key={v.id}>
+                                                <TableCell className="font-medium">#{v.numero_pedido || v.id}</TableCell>
+                                                <TableCell>{v.cliente_nome}</TableCell>
+                                                <TableCell>{formatarMoeda(v.valor_total)}</TableCell>
+                                                <TableCell className="text-red-600 font-bold">{formatarMoeda(v.valor_restante)}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            )}
+                        </TabsContent>
+
+                        <TabsContent value="triagem" className="flex-1 overflow-auto">
+                            {pendencias.triagem.length === 0 ? (
+                                <div className="text-center py-12 text-gray-500">
+                                    <Check className="w-12 h-12 mx-auto mb-3 text-green-500" />
+                                    <p>Nenhuma venda aguardando triagem!</p>
+                                </div>
+                            ) : (
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Pedido</TableHead>
+                                            <TableHead>Cliente</TableHead>
+                                            <TableHead>Data Venda</TableHead>
+                                            <TableHead>Loja</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {pendencias.triagem.map(v => (
+                                            <TableRow key={v.id}>
+                                                <TableCell className="font-medium">#{v.numero_pedido || v.id}</TableCell>
+                                                <TableCell>{v.cliente_nome}</TableCell>
+                                                <TableCell>{new Date(v.data_venda).toLocaleDateString('pt-BR')}</TableCell>
+                                                <TableCell>{v.loja}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            )}
+                        </TabsContent>
+                    </Tabs>
+                    <DialogFooter className="mt-4">
+                        <Button variant="outline" onClick={() => setPendenciasModalOpen(false)}>Fechar</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

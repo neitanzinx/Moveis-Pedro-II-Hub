@@ -18,9 +18,12 @@ import {
   Filter, BarChart3, PieChartIcon, ArrowUpRight, ArrowDownRight, Target,
   CreditCard, Wallet, ShoppingCart, Store, RefreshCw, Download, Printer,
   Star, Copy, Link, AlertTriangle, CheckCircle, ThumbsUp, ThumbsDown, Loader2,
-  Megaphone, Tag, UserPlus, Repeat, PercentIcon, Share2
+  Megaphone, Tag, UserPlus, Repeat, PercentIcon, Share2,
+  Trophy, MapPin, LayoutDashboard, FileText, Meh, Award
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import KPICard from "@/components/dashboard/KPICard";
+import ProdutoModal from "@/components/produtos/ProdutoModal";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
@@ -93,11 +96,15 @@ function KPICard({ title, value, subtitle, icon: Icon, trend, trendValue, color 
 
 // Componente de Mini Card para rankings
 function RankingCard({ position, name, value, percentage, color }) {
-  const medals = ['🥇', '🥈', '🥉'];
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-neutral-800/50 hover:bg-gray-100 dark:hover:bg-neutral-800 transition-colors">
-      <div className="w-8 h-8 rounded-full bg-white dark:bg-neutral-700 flex items-center justify-center font-bold text-sm shadow">
-        {position <= 3 ? medals[position - 1] : position}
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shadow
+        ${position === 1 ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
+          position === 2 ? 'bg-gray-100 text-gray-700 border border-gray-200' :
+            position === 3 ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+              'bg-white dark:bg-neutral-700 text-gray-700 dark:text-gray-300'
+        }`}>
+        {position <= 3 ? <Trophy className="w-4 h-4" /> : position}
       </div>
       <div className="flex-1 min-w-0">
         <p className="font-medium text-gray-900 dark:text-white truncate">{name}</p>
@@ -133,6 +140,11 @@ export default function RelatoriosAvancados() {
     queryFn: () => base44.entities.Venda.list('-data_venda'),
   });
 
+  const { data: users = [] } = useQuery({
+    queryKey: ['users-relatorios'],
+    queryFn: () => base44.entities.User.list(),
+  });
+
   const { data: clientes = [] } = useQuery({
     queryKey: ['clientes-relatorios'],
     queryFn: () => base44.entities.Cliente.list(),
@@ -149,7 +161,7 @@ export default function RelatoriosAvancados() {
   });
 
   // Queries de Marketing
-  const { data: campanhas = [] } = useQuery({
+  const { data: campanhas = [], refetch: refetchCampanhas } = useQuery({
     queryKey: ['campanhas-relatorios'],
     queryFn: () => base44.entities.Campanha.list('-data_inicio'),
   });
@@ -174,6 +186,10 @@ export default function RelatoriosAvancados() {
     queryFn: () => base44.entities.NPSLink.list('-created_at'),
   });
 
+  // Estados para detalhes do produto (Curva ABC)
+  const [produtoModalOpen, setProdutoModalOpen] = useState(false);
+  const [produtoDetalhe, setProdutoDetalhe] = useState(null);
+
   // Filtrar vendas (moved to useMemo to maintain hooks order)
   const vendasFiltradas = useMemo(() => {
     return vendas.filter(v => {
@@ -182,15 +198,21 @@ export default function RelatoriosAvancados() {
       const dataFim = new Date(filtros.dataFim);
       dataFim.setHours(23, 59, 59);
 
+      let vendedorNome = v.responsavel_nome || v.vendedor_nome || 'Não informado';
+      if (v.responsavel_id) {
+        const u = users.find(user => user.id === v.responsavel_id);
+        if (u && u.full_name) vendedorNome = u.full_name;
+      }
+
       return (
         dataVenda >= dataInicio &&
         dataVenda <= dataFim &&
         (filtros.loja === "todas" || v.loja === filtros.loja) &&
-        (filtros.vendedor === "todos" || v.responsavel_nome === filtros.vendedor) &&
+        (filtros.vendedor === "todos" || vendedorNome === filtros.vendedor) &&
         (filtros.status === "todos" || v.status === filtros.status)
       );
     });
-  }, [vendas, filtros]);
+  }, [vendas, filtros, users]);
 
   // Dados para gráficos (all useMemo hooks MUST be before any conditional returns)
   const vendasPorDia = useMemo(() => {
@@ -211,13 +233,18 @@ export default function RelatoriosAvancados() {
   const vendasPorVendedor = useMemo(() => {
     const map = {};
     vendasFiltradas.forEach(v => {
-      const vendedor = v.responsavel_nome || 'Não informado';
+      let vendedor = v.responsavel_nome || v.vendedor_nome || 'Não informado';
+      if (v.responsavel_id) {
+        const u = users.find(user => user.id === v.responsavel_id);
+        if (u && u.full_name) vendedor = u.full_name;
+      }
+
       if (!map[vendedor]) map[vendedor] = { vendedor, quantidade: 0, valor: 0 };
       map[vendedor].quantidade++;
       map[vendedor].valor += v.valor_total || 0;
     });
     return Object.values(map).sort((a, b) => b.valor - a.valor);
-  }, [vendasFiltradas]);
+  }, [vendasFiltradas, users]);
 
   const vendasPorLoja = useMemo(() => {
     const map = {};
@@ -477,23 +504,28 @@ export default function RelatoriosAvancados() {
     vendasFiltradas.forEach(v => {
       if (v.status !== 'Cancelada' && v.status !== 'Cancelado') {
         v.itens?.forEach(item => {
-          const id = item.produto_id || item.produto_nome;
-          if (!produtosVendidos[id]) {
+          const id = item.produto_id || item.id;
+          const produtoInfo = produtos.find(p => p.id === id);
+
+          if (id && !produtosVendidos[id]) {
             produtosVendidos[id] = {
               id,
-              nome: item.produto_nome || 'Produto',
+              nome: item.produto_nome || item.nome || produtoInfo?.nome || `Produto #${id}`,
               quantidade: 0,
               valorTotal: 0,
-              custo: 0
+              custo: 0,
+              produtoInfo // Salvar info completa para o modal
             };
           }
-          produtosVendidos[id].quantidade += item.quantidade || 1;
-          produtosVendidos[id].valorTotal += item.subtotal || 0;
 
-          // Find cost from products
-          const produto = produtos.find(p => p.id == id);
-          if (produto?.preco_custo) {
-            produtosVendidos[id].custo += (produto.preco_custo * (item.quantidade || 1));
+          if (id && produtosVendidos[id]) {
+            produtosVendidos[id].quantidade += item.quantidade || 1;
+            produtosVendidos[id].valorTotal += item.subtotal || 0;
+
+            // Find cost from products if not already set or accumulate
+            if (produtoInfo?.preco_custo) {
+              produtosVendidos[id].custo += (produtoInfo.preco_custo * (item.quantidade || 1));
+            }
           }
         });
       }
@@ -777,7 +809,18 @@ export default function RelatoriosAvancados() {
   const crescimentoVendas = valorAnterior > 0 ? ((valorTotal - valorAnterior) / valorAnterior) * 100 : 0;
 
   // Lista de vendedores únicos
-  const vendedoresUnicos = [...new Set(vendas.map(v => v.responsavel_nome).filter(Boolean))];
+  const vendedoresUnicos = useMemo(() => {
+    const names = new Set();
+    vendas.forEach(v => {
+      let name = v.responsavel_nome || v.vendedor_nome || 'Não informado';
+      if (v.responsavel_id) {
+        const u = users.find(user => user.id === v.responsavel_id);
+        if (u && u.full_name) name = u.full_name;
+      }
+      if (name) names.add(name);
+    });
+    return [...names].sort();
+  }, [vendas, users]);
 
   // Calcular valor máximo para percentuais nos rankings
   const maxValorVendedor = Math.max(...vendasPorVendedor.map(v => v.valor), 1);
@@ -787,16 +830,23 @@ export default function RelatoriosAvancados() {
   // Funções de exportação
   const exportarCSV = () => {
     const headers = ['Data', 'Pedido', 'Cliente', 'Vendedor', 'Loja', 'Valor Total', 'Valor Pago', 'Status'];
-    const rows = vendasFiltradas.map(v => [
-      new Date(v.data_venda).toLocaleDateString('pt-BR'),
-      v.numero_pedido || '',
-      v.cliente_nome || '',
-      v.responsavel_nome || '',
-      v.loja || '',
-      v.valor_total?.toFixed(2) || '0',
-      v.valor_pago?.toFixed(2) || '0',
-      v.status || ''
-    ]);
+    const rows = vendasFiltradas.map(v => {
+      let vendedorNome = v.responsavel_nome || v.vendedor_nome || '';
+      if (v.responsavel_id) {
+        const u = users.find(user => user.id === v.responsavel_id);
+        if (u && u.full_name) vendedorNome = u.full_name;
+      }
+      return [
+        new Date(v.data_venda).toLocaleDateString('pt-BR'),
+        v.numero_pedido || '',
+        v.cliente_nome || '',
+        vendedorNome,
+        v.loja || '',
+        `R$ ${(v.valor_total || 0).toFixed(2).replace('.', ',')}`,
+        `R$ ${(v.valor_pago || 0).toFixed(2).replace('.', ',')}`,
+        v.status || ''
+      ];
+    });
 
     const csv = [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -835,8 +885,9 @@ export default function RelatoriosAvancados() {
         </style>
       </head>
       <body>
+      <body>
         <div class="header">
-          <h1>📊 Relatório de Vendas</h1>
+          <h1>Relatório de Vendas</h1>
           <p><strong>Período:</strong> ${new Date(filtros.dataInicio).toLocaleDateString('pt-BR')} a ${new Date(filtros.dataFim).toLocaleDateString('pt-BR')}</p>
           ${filtros.loja !== 'todas' ? `<p><strong>Loja:</strong> ${filtros.loja}</p>` : ''}
           ${filtros.vendedor !== 'todos' ? `<p><strong>Vendedor:</strong> ${filtros.vendedor}</p>` : ''}
@@ -862,7 +913,7 @@ export default function RelatoriosAvancados() {
         </div>
 
         <div class="section">
-          <h2>🏆 Ranking de Vendedores</h2>
+          <h2>Ranking de Vendedores</h2>
           <table>
             <thead><tr><th>#</th><th>Vendedor</th><th>Vendas</th><th>Valor Total</th></tr></thead>
             <tbody>
@@ -879,7 +930,7 @@ export default function RelatoriosAvancados() {
         </div>
 
         <div class="section">
-          <h2>📦 Top 10 Produtos</h2>
+          <h2>Top 10 Produtos</h2>
           <table>
             <thead><tr><th>#</th><th>Produto</th><th>Qtd</th><th>Valor</th></tr></thead>
             <tbody>
@@ -896,7 +947,7 @@ export default function RelatoriosAvancados() {
         </div>
 
         <div class="section">
-          <h2>💳 Formas de Pagamento</h2>
+          <h2>Formas de Pagamento</h2>
           <table>
             <thead><tr><th>Forma</th><th>Transações</th><th>Valor</th><th>%</th></tr></thead>
             <tbody>
@@ -1077,36 +1128,46 @@ export default function RelatoriosAvancados() {
 
         {/* Tabs com Gráficos */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 p-1 h-auto flex-wrap">
-            <TabsTrigger value="visao-geral" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-              📊 Visão Geral
+          <TabsList className="bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 p-1 h-auto flex-wrap gap-1">
+            <TabsTrigger value="visao-geral" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+              <LayoutDashboard className="w-4 h-4" />
+              Visão Geral
             </TabsTrigger>
-            <TabsTrigger value="vendedores" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-              👥 Vendedores
+            <TabsTrigger value="vendedores" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+              <Users className="w-4 h-4" />
+              Vendedores
             </TabsTrigger>
-            <TabsTrigger value="produtos" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-              📦 Produtos
+            <TabsTrigger value="produtos" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+              <Package className="w-4 h-4" />
+              Produtos
             </TabsTrigger>
-            <TabsTrigger value="pagamentos" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-              💳 Pagamentos
+            <TabsTrigger value="pagamentos" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+              <CreditCard className="w-4 h-4" />
+              Pagamentos
             </TabsTrigger>
-            <TabsTrigger value="lojas" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-              🏪 Lojas
+            <TabsTrigger value="lojas" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+              <Store className="w-4 h-4" />
+              Lojas
             </TabsTrigger>
-            <TabsTrigger value="dre" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-              📈 D.R.E.
+            <TabsTrigger value="dre" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+              <FileText className="w-4 h-4" />
+              D.R.E.
             </TabsTrigger>
-            <TabsTrigger value="curva-abc" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-              📊 Curva ABC
+            <TabsTrigger value="curva-abc" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" />
+              Curva ABC
             </TabsTrigger>
-            <TabsTrigger value="fluxo-caixa" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-              💰 Fluxo de Caixa
+            <TabsTrigger value="fluxo-caixa" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+              <DollarSign className="w-4 h-4" />
+              Fluxo de Caixa
             </TabsTrigger>
-            <TabsTrigger value="nps" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-              ⭐ NPS
+            <TabsTrigger value="nps" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+              <Star className="w-4 h-4" />
+              NPS
             </TabsTrigger>
-            <TabsTrigger value="marketing" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white">
-              📈 Marketing
+            <TabsTrigger value="marketing" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+              <Megaphone className="w-4 h-4" />
+              Marketing
             </TabsTrigger>
           </TabsList>
 
@@ -1213,7 +1274,10 @@ export default function RelatoriosAvancados() {
 
               <Card className="border-0 shadow-lg">
                 <CardHeader>
-                  <CardTitle>🏆 Ranking de Vendedores</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    <Trophy className="w-5 h-5 text-yellow-500" />
+                    Ranking de Vendedores
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <ScrollArea className="h-[350px] pr-4">
@@ -1260,7 +1324,10 @@ export default function RelatoriosAvancados() {
 
               <Card className="border-0 shadow-lg">
                 <CardHeader>
-                  <CardTitle>📊 Ranking de Produtos</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-purple-600" />
+                    Ranking de Produtos
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <ScrollArea className="h-[400px] pr-4">
@@ -1317,7 +1384,10 @@ export default function RelatoriosAvancados() {
 
               <Card className="border-0 shadow-lg">
                 <CardHeader>
-                  <CardTitle>💰 Detalhamento</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-amber-600" />
+                    Detalhamento
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
@@ -1377,7 +1447,10 @@ export default function RelatoriosAvancados() {
 
               <Card className="border-0 shadow-lg">
                 <CardHeader>
-                  <CardTitle>📍 Distribuição por Loja</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    <MapPin className="w-5 h-5 text-pink-600" />
+                    Distribuição por Loja
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <ResponsiveContainer width="100%" height={350}>
@@ -1665,7 +1738,25 @@ export default function RelatoriosAvancados() {
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-neutral-800">
                       {curvaABCData.produtos.map((p) => (
-                        <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-neutral-800">
+                        <tr
+                          key={p.id}
+                          className="hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer transition-colors"
+                          onClick={() => {
+                            if (p.produtoInfo) {
+                              setProdutoDetalhe(p.produtoInfo);
+                              setProdutoModalOpen(true);
+                            } else {
+                              // Tentativa de fallback buscar de novo
+                              const freshInfo = produtos.find(prod => prod.id === p.id);
+                              if (freshInfo) {
+                                setProdutoDetalhe(freshInfo);
+                                setProdutoModalOpen(true);
+                              } else {
+                                toast.info(`Detalhes não disponíveis para ${p.nome}`);
+                              }
+                            }
+                          }}
+                        >
                           <td className="px-4 py-2 text-sm text-gray-500">{p.posicao}</td>
                           <td className="px-4 py-2 text-sm font-medium text-gray-900 dark:text-white truncate max-w-[200px]">{p.nome}</td>
                           <td className="text-right px-4 py-2 text-sm text-gray-600 dark:text-gray-400">{p.quantidade}</td>
@@ -1830,7 +1921,7 @@ export default function RelatoriosAvancados() {
                       <p className="text-sm text-gray-500">Promotores (9-10)</p>
                     </div>
                     <div className="text-center p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20">
-                      <span className="text-3xl block mb-2">😐</span>
+                      <Meh className="w-8 h-8 mx-auto mb-2 text-amber-600" />
                       <p className="text-3xl font-bold text-amber-600">{npsData.neutros}</p>
                       <p className="text-sm text-gray-500">Neutros (7-8)</p>
                     </div>
@@ -2235,6 +2326,30 @@ export default function RelatoriosAvancados() {
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* Modal de Detalhes do Produto */}
+        <ProdutoModal
+          isOpen={produtoModalOpen}
+          onClose={() => {
+            setProdutoModalOpen(false);
+            setProdutoDetalhe(null);
+          }}
+          onSave={async (dados) => {
+            try {
+              if (produtoDetalhe?.id) {
+                await base44.entities.Produto.update(produtoDetalhe.id, dados);
+                toast.success('Produto atualizado com sucesso!');
+                queryClient.invalidateQueries(['produtos-relatorios']);
+                setProdutoModalOpen(false);
+              }
+            } catch (error) {
+              console.error('Erro ao atualizar produto:', error);
+              toast.error('Erro ao atualizar produto');
+            }
+          }}
+          produto={produtoDetalhe}
+          isLoading={false}
+        />
       </div>
     </div>
   );

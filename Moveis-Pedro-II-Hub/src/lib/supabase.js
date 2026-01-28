@@ -3,7 +3,53 @@ import { createClient } from '@supabase/supabase-js';
 // Configuração do Supabase
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-export const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Criar cliente com configurações que garantem persistência de autenticação
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+        persistSession: true, // Persiste a sessão no localStorage
+        autoRefreshToken: true, // Atualiza automaticamente o token
+        detectSessionInUrl: true, // Detecta sessão na URL (útil para email confirmations)
+        storage: window.localStorage, // Usa localStorage explicitamente
+        storageKey: 'moveis-pedro-ii-auth-token', // Chave única para evitar conflitos
+    },
+    global: {
+        headers: {
+            'x-client-info': 'moveis-pedro-ii-web',
+        },
+    },
+});
+
+// Listener para refresh automático de sessão quando estiver prestes a expirar
+supabase.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'TOKEN_REFRESHED') {
+        console.log('✅ Token renovado automaticamente');
+    } else if (event === 'SIGNED_OUT') {
+        console.log('🔒 Usuário deslogado');
+    } else if (event === 'SIGNED_IN') {
+        console.log('✅ Usuário logado');
+    }
+});
+
+// Tentar recuperar sessão ao inicializar (força refresh se necessário)
+(async () => {
+    try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (session) {
+            // Se a sessão existe mas está prestes a expirar (menos de 5 min), força refresh
+            const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+            const now = Date.now();
+            const fiveMinutes = 5 * 60 * 1000;
+
+            if (expiresAt - now < fiveMinutes) {
+                console.log('⏰ Token expirando, renovando...');
+                await supabase.auth.refreshSession();
+            }
+        }
+    } catch (e) {
+        console.warn('Erro ao verificar sessão:', e);
+    }
+})();
 
 // Mapa Completo: Entidade (Código) -> Tabela (Supabase)
 const tableMap = {

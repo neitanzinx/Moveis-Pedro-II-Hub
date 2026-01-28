@@ -20,13 +20,14 @@ import {
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarHeader, SidebarFooter,
   SidebarProvider, SidebarTrigger,
 } from "@/components/ui/sidebar";
+import StoreSelectorModal from "@/components/common/StoreSelectorModal";
 import { MENU_ITEMS } from "@/config/permissions";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function Layout({ children, currentPageName }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, loading, can } = useAuth();
+  const { user, loading, can, logout, selectedStore, setSelectedStore } = useAuth();
   const { brandName, brandLogo, isModuleActive } = useTenant();
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const [buscaAberta, setBuscaAberta] = useState(false);
@@ -103,7 +104,20 @@ export default function Layout({ children, currentPageName }) {
               )}
               <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
                 <h2 className="font-bold text-sm text-gray-900 dark:text-white truncate">{brandName}</h2>
-                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user?.loja ? `Loja ${user.loja}` : 'Sistema'}</p>
+                <h2 className="font-bold text-sm text-gray-900 dark:text-white truncate">{brandName}</h2>
+                <div className="flex flex-col">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                    {user?.loja ? `Loja ${user.loja}` : (selectedStore ? `Loja ${selectedStore}` : 'Sistema')}
+                  </p>
+                  {!user?.loja && selectedStore && (
+                    <button
+                      onClick={() => setSelectedStore(null)}
+                      className="text-[10px] text-green-600 hover:underline text-left cursor-pointer"
+                    >
+                      Trocar Loja
+                    </button>
+                  )}
+                </div>
               </div>
               <SidebarTrigger className="hidden md:flex flex-shrink-0 group-data-[collapsible=icon]:hidden" />
             </div>
@@ -199,7 +213,7 @@ export default function Layout({ children, currentPageName }) {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => base44.auth.logout()}
+                onClick={logout}
                 className="flex-1 h-8 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:flex-none"
               >
                 <LogOut className="w-3 h-3 group-data-[collapsible=icon]:mr-0 mr-1" />
@@ -225,6 +239,8 @@ export default function Layout({ children, currentPageName }) {
         isOpen={novoUsuarioModalOpen}
         onClose={() => setNovoUsuarioModalOpen(false)}
       />
+
+      <StoreSelectorModal />
     </SidebarProvider>
   );
 }

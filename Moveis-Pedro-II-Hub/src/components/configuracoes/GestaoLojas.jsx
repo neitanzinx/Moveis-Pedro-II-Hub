@@ -7,14 +7,23 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Switch } from "@/components/ui/switch";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Store, Plus, Pencil, Trash2, MapPin, Loader2, Building2, Search } from "lucide-react";
+import { Store, Plus, Pencil, Trash2, MapPin, Loader2, Building2, Search, Phone, Mail, FileText } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+
+const INITIAL_FORM_DATA = {
+    nome: "",
+    endereco: "",
+    cidade: "",
+    estado: "",
+    cep: "",
+    telefone: ""
+};
 
 export default function GestaoLojas() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingLoja, setEditingLoja] = useState(null);
-    const [formData, setFormData] = useState({ nome: "", endereco: "" });
+    const [formData, setFormData] = useState(INITIAL_FORM_DATA);
     const [error, setError] = useState("");
     const [searchTerm, setSearchTerm] = useState("");
 
@@ -52,7 +61,18 @@ export default function GestaoLojas() {
 
     const handleOpenModal = (loja = null) => {
         setEditingLoja(loja);
-        setFormData(loja ? { nome: loja.nome, endereco: loja.endereco || "" } : { nome: "", endereco: "" });
+        if (loja) {
+            setFormData({
+                nome: loja.nome || "",
+                endereco: loja.endereco || "",
+                cidade: loja.cidade || "",
+                estado: loja.estado || "",
+                cep: loja.cep || "",
+                telefone: loja.telefone || ""
+            });
+        } else {
+            setFormData(INITIAL_FORM_DATA);
+        }
         setError("");
         setIsModalOpen(true);
     };
@@ -60,7 +80,7 @@ export default function GestaoLojas() {
     const handleCloseModal = () => {
         setIsModalOpen(false);
         setEditingLoja(null);
-        setFormData({ nome: "", endereco: "" });
+        setFormData(INITIAL_FORM_DATA);
         setError("");
     };
 
@@ -73,12 +93,12 @@ export default function GestaoLojas() {
         if (editingLoja) {
             updateMutation.mutate({ id: editingLoja.id, data: formData });
         } else {
-            createMutation.mutate({ ...formData, ativa: true });
+            createMutation.mutate({ ...formData, ativa: true, is_active: true });
         }
     };
 
     const handleToggleAtiva = (loja) => {
-        updateMutation.mutate({ id: loja.id, data: { ativa: !loja.ativa } });
+        updateMutation.mutate({ id: loja.id, data: { ativa: !loja.ativa, is_active: !loja.ativa } });
     };
 
     const handleDelete = (id) => {
@@ -87,9 +107,40 @@ export default function GestaoLojas() {
         }
     };
 
+    const handleChange = (field, value) => {
+        setFormData(prev => ({ ...prev, [field]: value }));
+    };
+
+    // Format CNPJ as user types
+    const formatCNPJ = (value) => {
+        const digits = value.replace(/\D/g, '').slice(0, 14);
+        if (digits.length <= 2) return digits;
+        if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+        if (digits.length <= 8) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
+        if (digits.length <= 12) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+        return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+    };
+
+    // Format phone as user types
+    const formatPhone = (value) => {
+        const digits = value.replace(/\D/g, '').slice(0, 11);
+        if (digits.length <= 2) return digits;
+        if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+        if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+        return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+    };
+
+    // Format CEP as user types
+    const formatCEP = (value) => {
+        const digits = value.replace(/\D/g, '').slice(0, 8);
+        if (digits.length <= 5) return digits;
+        return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+    };
+
     const filteredLojas = lojas.filter(l =>
         l.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (l.endereco && l.endereco.toLowerCase().includes(searchTerm.toLowerCase()))
+        (l.endereco && l.endereco.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (l.cidade && l.cidade.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
     if (isLoading) {
@@ -177,11 +228,13 @@ export default function GestaoLojas() {
                                             </div>
                                             <div>
                                                 <h3 className="font-semibold text-gray-900 leading-tight">{loja.nome}</h3>
-                                                <p className="text-xs text-gray-500 mt-0.5">ID: {loja.id.substring(0, 8)}</p>
+                                                {loja.cidade && loja.estado && (
+                                                    <p className="text-xs text-gray-500 mt-0.5">{loja.cidade} - {loja.estado}</p>
+                                                )}
                                             </div>
                                         </div>
 
-                                        <div className="space-y-2 mb-6 min-h-[40px]">
+                                        <div className="space-y-2 mb-6 min-h-[60px]">
                                             {loja.endereco ? (
                                                 <div className="flex items-start gap-2 text-sm text-gray-600">
                                                     <MapPin className="w-4 h-4 mt-0.5 text-gray-400 shrink-0" />
@@ -190,6 +243,18 @@ export default function GestaoLojas() {
                                             ) : (
                                                 <div className="flex items-center gap-2 text-sm text-gray-400 italic">
                                                     <MapPin className="w-4 h-4" /> Sem endereço
+                                                </div>
+                                            )}
+                                            {loja.telefone && (
+                                                <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                    <Phone className="w-4 h-4 text-gray-400 shrink-0" />
+                                                    <span>{loja.telefone}</span>
+                                                </div>
+                                            )}
+                                            {loja.cnpj && (
+                                                <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                    <FileText className="w-4 h-4 text-gray-400 shrink-0" />
+                                                    <span className="font-mono text-xs">{loja.cnpj}</span>
                                                 </div>
                                             )}
                                         </div>
@@ -234,7 +299,7 @@ export default function GestaoLojas() {
             </Card>
 
             <Dialog open={isModalOpen} onOpenChange={handleCloseModal}>
-                <DialogContent className="sm:max-w-[450px]">
+                <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="text-xl font-bold flex items-center gap-2 text-gray-900">
                             <Store className="w-5 h-5 text-green-600" />
@@ -252,28 +317,89 @@ export default function GestaoLojas() {
                             </Alert>
                         )}
 
-                        <div className="space-y-2">
-                            <Label htmlFor="nome">Nome da Loja *</Label>
-                            <Input
-                                id="nome"
-                                value={formData.nome}
-                                onChange={(e) => setFormData(prev => ({ ...prev, nome: e.target.value }))}
-                                placeholder="Ex: Matriz, Shopping Sul, Centro"
-                                className="bg-gray-50"
-                            />
-                        </div>
+                        {/* Dados Básicos */}
+                        <div className="space-y-4">
+                            <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                <Building2 className="w-4 h-4" />
+                                Dados Básicos
+                            </h4>
 
-                        <div className="space-y-2">
-                            <Label htmlFor="endereco">Endereço Completo</Label>
-                            <div className="relative">
-                                <MapPin className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
-                                <Input
-                                    id="endereco"
-                                    value={formData.endereco}
-                                    onChange={(e) => setFormData(prev => ({ ...prev, endereco: e.target.value }))}
-                                    placeholder="Rua, Número, Bairro, Cidade - UF"
-                                    className="pl-9 bg-gray-50"
-                                />
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="col-span-2">
+                                    <Label htmlFor="nome">Nome da Loja *</Label>
+                                    <Input
+                                        id="nome"
+                                        value={formData.nome}
+                                        onChange={(e) => handleChange("nome", e.target.value)}
+                                        placeholder="Ex: Matriz, Shopping Sul, Centro"
+                                        className="bg-gray-50 mt-1"
+                                    />
+                                </div>
+
+                                <div className="col-span-2">
+                                    <Label htmlFor="telefone">Telefone</Label>
+                                    <Input
+                                        id="telefone"
+                                        value={formData.telefone}
+                                        onChange={(e) => handleChange("telefone", formatPhone(e.target.value))}
+                                        placeholder="(00) 00000-0000"
+                                        className="bg-gray-50 mt-1"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                        {/* Endereço */}
+                        <div className="space-y-4 pt-4 border-t">
+                            <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                <MapPin className="w-4 h-4" />
+                                Endereço
+                            </h4>
+
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="col-span-3">
+                                    <Label htmlFor="endereco">Endereço Completo</Label>
+                                    <Input
+                                        id="endereco"
+                                        value={formData.endereco}
+                                        onChange={(e) => handleChange("endereco", e.target.value)}
+                                        placeholder="Rua, Número, Bairro"
+                                        className="bg-gray-50 mt-1"
+                                    />
+                                </div>
+
+                                <div className="col-span-2">
+                                    <Label htmlFor="cidade">Cidade</Label>
+                                    <Input
+                                        id="cidade"
+                                        value={formData.cidade}
+                                        onChange={(e) => handleChange("cidade", e.target.value)}
+                                        placeholder="Ex: São Paulo"
+                                        className="bg-gray-50 mt-1"
+                                    />
+                                </div>
+
+                                <div>
+                                    <Label htmlFor="estado">UF</Label>
+                                    <Input
+                                        id="estado"
+                                        value={formData.estado}
+                                        onChange={(e) => handleChange("estado", e.target.value.toUpperCase().slice(0, 2))}
+                                        placeholder="SP"
+                                        maxLength={2}
+                                        className="bg-gray-50 mt-1 uppercase"
+                                    />
+                                </div>
+
+                                <div className="col-span-3">
+                                    <Label htmlFor="cep">CEP</Label>
+                                    <Input
+                                        id="cep"
+                                        value={formData.cep}
+                                        onChange={(e) => handleChange("cep", formatCEP(e.target.value))}
+                                        placeholder="00000-000"
+                                        className="bg-gray-50 mt-1 w-40"
+                                    />
+                                </div>
                             </div>
                         </div>
 
@@ -292,9 +418,10 @@ export default function GestaoLojas() {
                                 {editingLoja ? 'Salvar Alterações' : 'Criar Loja'}
                             </Button>
                         </DialogFooter>
-                    </form>
-                </DialogContent>
-            </Dialog>
-        </div>
+                    </form >
+                </DialogContent >
+            </Dialog >
+        </div >
     );
 }
+

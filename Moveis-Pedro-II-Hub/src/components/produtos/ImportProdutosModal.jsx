@@ -5,6 +5,7 @@ import { useTenant, useLojas } from '@/contexts/TenantContext';
 import {
     Dialog,
     DialogContent,
+    DialogDescription,
     DialogHeader,
     DialogTitle,
     DialogFooter,
@@ -816,6 +817,12 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                         <FileSpreadsheet className="w-5 h-5" />
                         Importar Produtos via Planilha
                     </DialogTitle>
+                    <DialogDescription>
+                        {step === 1 && "Faça upload de um arquivo CSV para importar produtos em lote."}
+                        {step === 2 && "Revise os produtos antes de importar e opcionalmente enriqueça com NCMs sugeridos por IA."}
+                        {step === 3 && "Aguarde enquanto os produtos são importados para o sistema."}
+                        {step === 4 && "Enriquecendo produtos com códigos NCM usando inteligência artificial."}
+                    </DialogDescription>
                 </DialogHeader>
 
                 <div className="flex-1 overflow-y-auto py-4">

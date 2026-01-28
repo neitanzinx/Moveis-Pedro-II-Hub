@@ -1,3 +1,6 @@
-2026/01/20-19:13:30.915 153c Reusing MANIFEST C:\Users\Usuario\Documents\moveispedroii - launch\Moveis-Pedro-II-Hub\.wwebjs_auth\session\Default\Local Storage\leveldb/MANIFEST-000001
-2026/01/20-19:13:30.933 153c Recovering log #54
-2026/01/20-19:13:30.934 153c Reusing old log C:\Users\Usuario\Documents\moveispedroii - launch\Moveis-Pedro-II-Hub\.wwebjs_auth\session\Default\Local Storage\leveldb/000054.log 
+2026/01/28-00:36:27.418 54f8 Reusing MANIFEST C:\Users\Usuario\Documents\moveispedroii - launch\Moveis-Pedro-II-Hub\.wwebjs_auth\session\Default\Local Storage\leveldb/MANIFEST-000001
+2026/01/28-00:36:27.572 54f8 Recovering log #68
+2026/01/28-00:36:27.584 54f8 Reusing old log C:\Users\Usuario\Documents\moveispedroii - launch\Moveis-Pedro-II-Hub\.wwebjs_auth\session\Default\Local Storage\leveldb/000068.log 
+2026/01/28-00:44:21.862 e04 Level-0 table #73: started
+2026/01/28-00:44:21.873 e04 Level-0 table #73: 17955 bytes OK
+2026/01/28-00:44:21.878 e04 Delete type=0 #68

@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DollarSign, AlertCircle, Plus, Calendar, BarChart3, PieChart } from "lucide-react";
 import FinanceiroStats from "../components/financeiro/FinanceiroStats";
@@ -11,11 +12,9 @@ import CategoriasManager from "../components/financeiro/CategoriasManager";
 import RecorrentesManager from "../components/financeiro/RecorrentesManager";
 
 export default function Financeiro() {
-  const [user, setUser] = useState(null);
+  const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState("lancamentos");
   const [mesAno, setMesAno] = useState(new Date().toISOString().slice(0, 7));
-
-  useEffect(() => { base44.auth.me().then(setUser).catch(console.error); }, []);
 
   // 1. BLINDAGEM: queryFn assíncrona com fallback "|| []"
   const { data: lancamentos = [], isLoading } = useQuery({
@@ -33,7 +32,7 @@ export default function Financeiro() {
     queryFn: async () => await base44.entities.Venda.list('-data_venda') || []
   });
 
-  if (!user) return <div className="flex h-screen items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600" /></div>;
+  if (loading || !user) return <div className="flex h-screen items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600" /></div>;
 
   const isAdmin = user.cargo === 'Administrador';
   const isManager = user.cargo === 'Gerente';

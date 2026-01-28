@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  moveis-pedro-ii-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moveis-pedro-ii-app
+    restart: always
+    ports:
+      - "80:3001" # Mapeia a porta 80 (HTTP padrão) da VPS para a 3001 do App
+    env_file:
+      - .env
+    volumes:
+      - ./robo whatsapp agendamentos/.wwebjs_auth:/app/.wwebjs_auth # Persistir sessão do WhatsApp
+      - ./robo whatsapp agendamentos/.wwebjs_cache:/app/.wwebjs_cache # Persistir cache do Puppeteer
+    # Healthcheck para garantir que o sistema está de pé
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3001/status" ]
+      interval: 1m30s
+      timeout: 10s
+      retries: 3

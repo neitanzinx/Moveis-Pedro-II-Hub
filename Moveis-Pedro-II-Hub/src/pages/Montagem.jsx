@@ -1,16 +1,12 @@
-import React, { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import React from "react";
 import { AlertCircle } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 import MontagemInterna from "../components/logistica/MontagemInterna";
 
 export default function Montagem() {
-  const [user, setUser] = useState(null);
+  const { user, loading } = useAuth();
 
-  useEffect(() => {
-    base44.auth.me().then(setUser).catch(console.error);
-  }, []);
-
-  if (!user) return <div className="flex h-screen items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600" /></div>;
+  if (loading || !user) return <div className="flex h-screen items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600" /></div>;
 
   const isAdmin = user.cargo === 'Administrador';
   const isEstoque = user.cargo === 'Estoque';

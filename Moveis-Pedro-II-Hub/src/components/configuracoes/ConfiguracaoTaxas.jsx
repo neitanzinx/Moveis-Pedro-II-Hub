@@ -78,7 +78,9 @@ export default function ConfiguracaoTaxas() {
             [taxa.id]: {
                 tipo_taxa: taxa.tipo_taxa,
                 valor: taxa.valor,
-                ativa: taxa.ativa
+                ativa: taxa.ativa,
+                acrescimo: taxa.acrescimo || 0,
+                acrescimo_tipo: taxa.acrescimo_tipo || 'porcentagem'
             }
         });
     };
@@ -92,7 +94,9 @@ export default function ConfiguracaoTaxas() {
             data: {
                 tipo_taxa: dados.tipo_taxa,
                 valor: parseFloat(dados.valor),
-                ativa: dados.ativa
+                ativa: dados.ativa,
+                acrescimo: parseFloat(dados.acrescimo) || 0,
+                acrescimo_tipo: dados.acrescimo_tipo || 'porcentagem'
             }
         });
 
@@ -142,9 +146,19 @@ export default function ConfiguracaoTaxas() {
                     </CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <p className="text-gray-500 mb-6">
-                        Configure as taxas de cada forma de pagamento para o cálculo automático do financeiro.
+                    <p className="text-gray-500 mb-2">
+                        Configure as taxas de cada forma de pagamento.
                     </p>
+                    <div className="flex gap-4 mb-6 text-xs">
+                        <div className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100">
+                            <DollarSign className="w-3.5 h-3.5 text-red-600" />
+                            <span className="text-red-700"><strong>Taxa:</strong> Custo interno (descontado no financeiro)</span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100">
+                            <Percent className="w-3.5 h-3.5 text-blue-600" />
+                            <span className="text-blue-700"><strong>Acréscimo:</strong> Valor cobrado do cliente no PDV</span>
+                        </div>
+                    </div>
 
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                         {taxasOrdenadas.map(taxa => {
@@ -173,45 +187,77 @@ export default function ConfiguracaoTaxas() {
                                     <CardContent className="pt-0">
                                         {isEditing ? (
                                             <div className="space-y-3 pt-2">
-                                                <div className="flex gap-2">
-                                                    <div className="flex-1">
-                                                        <Label className="text-xs font-medium">Tipo</Label>
-                                                        <Select
-                                                            value={dados.tipo_taxa}
-                                                            onValueChange={(v) => handleChange(taxa.id, 'tipo_taxa', v)}
-                                                        >
-                                                            <SelectTrigger className="h-9 mt-1 bg-white">
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="porcentagem">Porcentagem (%)</SelectItem>
-                                                                <SelectItem value="fixo">Valor Fixo (R$)</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                    <div className="w-28">
-                                                        <Label className="text-xs font-medium">Valor</Label>
-                                                        <div className="relative mt-1">
-                                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-medium">
-                                                                {dados.tipo_taxa === 'porcentagem' ? '%' : 'R$'}
-                                                            </span>
+                                                {/* Taxa Interna */}
+                                                <div className="bg-red-50/50 p-2 rounded-lg border border-red-100">
+                                                    <Label className="text-[10px] font-bold uppercase text-red-600 flex items-center gap-1">
+                                                        <DollarSign className="w-3 h-3" /> Taxa Interna
+                                                    </Label>
+                                                    <div className="flex gap-2 mt-1">
+                                                        <div className="flex-1">
+                                                            <Select
+                                                                value={dados.tipo_taxa}
+                                                                onValueChange={(v) => handleChange(taxa.id, 'tipo_taxa', v)}
+                                                            >
+                                                                <SelectTrigger className="h-8 text-xs bg-white">
+                                                                    <SelectValue />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="porcentagem">%</SelectItem>
+                                                                    <SelectItem value="fixo">R$</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        <div className="w-20">
                                                             <Input
                                                                 type="number"
                                                                 step="0.01"
-                                                                className="h-9 pl-8 bg-white"
+                                                                className="h-8 text-xs bg-white"
                                                                 value={dados.valor}
                                                                 onChange={(e) => handleChange(taxa.id, 'valor', e.target.value)}
                                                             />
                                                         </div>
                                                     </div>
                                                 </div>
+
+                                                {/* Acréscimo ao Cliente */}
+                                                <div className="bg-blue-50/50 p-2 rounded-lg border border-blue-100">
+                                                    <Label className="text-[10px] font-bold uppercase text-blue-600 flex items-center gap-1">
+                                                        <Percent className="w-3 h-3" /> Acréscimo ao Cliente
+                                                    </Label>
+                                                    <div className="flex gap-2 mt-1">
+                                                        <div className="flex-1">
+                                                            <Select
+                                                                value={dados.acrescimo_tipo || 'porcentagem'}
+                                                                onValueChange={(v) => handleChange(taxa.id, 'acrescimo_tipo', v)}
+                                                            >
+                                                                <SelectTrigger className="h-8 text-xs bg-white">
+                                                                    <SelectValue />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="porcentagem">%</SelectItem>
+                                                                    <SelectItem value="fixo">R$</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        <div className="w-20">
+                                                            <Input
+                                                                type="number"
+                                                                step="0.01"
+                                                                className="h-8 text-xs bg-white"
+                                                                value={dados.acrescimo || 0}
+                                                                onChange={(e) => handleChange(taxa.id, 'acrescimo', e.target.value)}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+
                                                 <div className="flex items-center justify-between pt-1">
                                                     <div className="flex items-center gap-2">
                                                         <Switch
                                                             checked={dados.ativa}
                                                             onCheckedChange={(v) => handleChange(taxa.id, 'ativa', v)}
                                                         />
-                                                        <span className="text-xs font-medium">Taxa ativa</span>
+                                                        <span className="text-xs font-medium">Ativa</span>
                                                     </div>
                                                     <Button
                                                         size="sm"
@@ -225,18 +271,36 @@ export default function ConfiguracaoTaxas() {
                                                 </div>
                                             </div>
                                         ) : (
-                                            <div className="flex items-center justify-between pt-2">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-bold text-2xl" style={{ color: '#07593f' }}>
-                                                        {dados.tipo_taxa === 'porcentagem' ? `${dados.valor}%` : `R$ ${parseFloat(dados.valor).toFixed(2)}`}
-                                                    </span>
-                                                    {!dados.ativa && (
-                                                        <Badge variant="secondary" className="text-xs">Inativa</Badge>
-                                                    )}
+                                            <div className="pt-2 space-y-2">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-3">
+                                                        {/* Taxa */}
+                                                        <div className="text-center">
+                                                            <p className="text-[10px] uppercase text-red-500 font-medium">Taxa</p>
+                                                            <span className="font-bold text-lg text-red-600">
+                                                                {dados.tipo_taxa === 'porcentagem' ? `${dados.valor}%` : `R$ ${parseFloat(dados.valor).toFixed(2)}`}
+                                                            </span>
+                                                        </div>
+                                                        <div className="h-8 w-px bg-gray-200" />
+                                                        {/* Acréscimo */}
+                                                        <div className="text-center">
+                                                            <p className="text-[10px] uppercase text-blue-500 font-medium">Acréscimo</p>
+                                                            <span className="font-bold text-lg text-blue-600">
+                                                                {(dados.acrescimo_tipo || 'porcentagem') === 'porcentagem'
+                                                                    ? `+${dados.acrescimo || 0}%`
+                                                                    : `+R$ ${parseFloat(dados.acrescimo || 0).toFixed(2)}`}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        {!dados.ativa && (
+                                                            <Badge variant="secondary" className="text-xs">Inativa</Badge>
+                                                        )}
+                                                        <Button variant="outline" size="sm" className="h-8 bg-white" onClick={() => handleEdit(taxa)}>
+                                                            Editar
+                                                        </Button>
+                                                    </div>
                                                 </div>
-                                                <Button variant="outline" size="sm" className="h-8 bg-white" onClick={() => handleEdit(taxa)}>
-                                                    Editar
-                                                </Button>
                                             </div>
                                         )}
                                     </CardContent>

@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Eye, EyeOff, Lock, IdCard, Loader2 } from "lucide-react";
+import { supabase } from "@/api/base44Client";
 
 // API URL baseada no ambiente
 const API_URL = import.meta.env.VITE_ZAP_API_URL || '';
@@ -26,23 +27,18 @@ export default function LoginFuncionario() {
     const [novaSenha, setNovaSenha] = useState("");
     const [confirmarSenha, setConfirmarSenha] = useState("");
 
-    // Verificar se já está logado
-    useEffect(() => {
-        const token = localStorage.getItem('employee_token');
-        const user = localStorage.getItem('employee_user');
-
-        if (token && user) {
-            try {
-                const userData = JSON.parse(user);
-                redirectByRole(userData.cargo);
-            } catch (e) {
-                localStorage.removeItem('employee_token');
-                localStorage.removeItem('employee_user');
-            }
-        }
-    }, []);
+    const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo'];
 
     const redirectByRole = (cargo) => {
+        if (!cargo || !VALID_CARGOS.includes(cargo)) {
+            console.error('Cargo inválido ou pendente:', cargo);
+            setError('Seu usuário está com cargo pendente. Contate o administrador.');
+            // Limpar dados para permitir novo login
+            localStorage.removeItem('employee_token');
+            localStorage.removeItem('employee_user');
+            return;
+        }
+
         if (cargo === 'Montador Externo') {
             window.location.href = '/montador-externo';
         } else if (cargo === 'Entregador') {
@@ -52,10 +48,36 @@ export default function LoginFuncionario() {
         }
     };
 
+    // Verificar se já está logado
+    useEffect(() => {
+        const token = localStorage.getItem('employee_token');
+        const user = localStorage.getItem('employee_user');
+
+        if (token && user) {
+            try {
+                const userData = JSON.parse(user);
+                // Validar cargo antes de redirecionar para evitar loop
+                if (VALID_CARGOS.includes(userData.cargo)) {
+                    redirectByRole(userData.cargo);
+                } else {
+                    console.warn('Usuário logado com cargo inválido:', userData.cargo);
+                    localStorage.removeItem('employee_token');
+                    localStorage.removeItem('employee_user');
+                }
+            } catch (e) {
+                localStorage.removeItem('employee_token');
+                localStorage.removeItem('employee_user');
+            }
+        }
+    }, []);
+
     const handleLogin = async (e) => {
         e.preventDefault();
         setLoading(true);
         setError("");
+
+        // Garantir que não existe sessão do Supabase ativa para evitar conflitos
+        await supabase.auth.signOut();
 
         try {
             const response = await fetch(`${API_URL}/api/auth/employee/login`, {
@@ -134,16 +156,37 @@ export default function LoginFuncionario() {
                 throw new Error(data.error || 'Erro ao trocar senha');
             }
 
-            // Sucesso - fazer login novamente
-            setPrimeiroAcesso(false);
-            setSenha("");
-            setNovaSenha("");
-            setConfirmarSenha("");
-            setTokenTemp("");
-            setError("");
+            // Sucesso - fazer login automático com a nova senha
+            console.log('✅ Senha alterada, fazendo login automático...');
 
-            // Mostrar mensagem de sucesso e redirecionar para login
-            alert("Senha alterada com sucesso! Faça login com sua nova senha.");
+            // Garantir que não existe sessão do Supabase ativa
+            await supabase.auth.signOut();
+
+            const loginResponse = await fetch(`${API_URL}/api/auth/employee/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ matricula, senha: novaSenha })
+            });
+
+            const loginData = await loginResponse.json();
+
+            if (loginResponse.ok && loginData.token) {
+                // Salvar token e dados do usuário
+                localStorage.setItem('employee_token', loginData.token);
+                localStorage.setItem('employee_user', JSON.stringify(loginData.user));
+
+                // Redirecionar por cargo
+                alert("Senha alterada com sucesso! Você será redirecionado.");
+                redirectByRole(loginData.user.cargo);
+            } else {
+                // Se login automático falhar, volta pro fluxo normal
+                setPrimeiroAcesso(false);
+                setSenha("");
+                setNovaSenha("");
+                setConfirmarSenha("");
+                setTokenTemp("");
+                alert("Senha alterada com sucesso! Faça login com sua nova senha.");
+            }
 
         } catch (err) {
             console.error("Erro ao trocar senha:", err);

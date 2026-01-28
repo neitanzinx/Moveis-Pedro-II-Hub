@@ -180,13 +180,18 @@ export default function Entregador() {
         }
 
         // Verificar se tem pedidos a receber
+        // Verificar se tem pedidos a receber
         if (pedidosAReceber.length > 0) {
-            const formas = [...new Set(pedidosAReceber.map(p => p.forma_pagamento).filter(Boolean))];
+            const formas = [...new Set(pedidosAReceber.map(p => p.forma_pagamento_entrega || p.forma_pagamento).filter(Boolean))];
             const totalReceber = pedidosAReceber.reduce((sum, p) => sum + (p.valor_a_receber || 0), 0);
+
+            let avisoExtra = "";
+            if (formas.some(f => f.toLowerCase().includes('dinheiro'))) avisoExtra += "💵 Leve troco!\n";
+            if (formas.some(f => f.toLowerCase().includes('cartão') || f.toLowerCase().includes('debito') || f.toLowerCase().includes('crédito'))) avisoExtra += "💳 Leve a máquina!\n";
 
             const continuar = await confirm({
                 title: "⚠️ ATENÇÃO: Pedidos a Receber!",
-                message: `Você tem ${pedidosAReceber.length} pedido(s) para receber na entrega!\n\n💰 Total: R$ ${totalReceber.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n\n💳 Formas: ${formas.length > 0 ? formas.join(', ') : 'Não especificado'}\n\nPrepare a(s) máquina(s) de cartão!`,
+                message: `Você tem ${pedidosAReceber.length} pedido(s) para receber na entrega!\n\n💰 Total: R$ ${totalReceber.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n\n📝 Formas: ${formas.length > 0 ? formas.join(', ') : 'Não especificado'}\n\n${avisoExtra}`,
                 confirmText: "Entendi, Continuar",
                 variant: "default"
             });
@@ -743,9 +748,18 @@ export default function Entregador() {
                                         <p className="text-sm text-amber-700">
                                             Total: R$ {pedidosAReceber.reduce((s, p) => s + (p.valor_a_receber || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </p>
-                                        <p className="text-xs text-amber-600 mt-1">
-                                            💳 Prepare a máquina de cartão!
-                                        </p>
+                                        <div className="text-xs text-amber-800 mt-1 font-medium">
+                                            {(() => {
+                                                const formas = [...new Set(pedidosAReceber.map(p => p.forma_pagamento_entrega || p.forma_pagamento).filter(Boolean))];
+                                                return (
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span>📝 {formas.join(', ')}</span>
+                                                        {formas.some(f => f.toLowerCase().includes('dinheiro')) && <span>💵 Leve troco (confira os valores)</span>}
+                                                        {formas.some(f => f.toLowerCase().includes('cartão')) && <span>💳 Verifique a bateria da máquina</span>}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
                                     </div>
                                 </div>
                             </CardContent>
@@ -769,7 +783,10 @@ export default function Entregador() {
                                         <Badge variant="outline" className="text-xs">{i + 1}</Badge>
                                         <span className="font-medium truncate flex-1">{e.endereco_entrega?.split(',')[0]}</span>
                                         {(e.pagamento_na_entrega || e.valor_a_receber > 0) && (
-                                            <Badge className="bg-amber-500 text-white text-[10px]">💰 RECEBER</Badge>
+                                            <Badge className="bg-amber-500 text-white text-[10px] flex gap-1 items-center">
+                                                💰 R$ {(e.valor_a_receber || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                {e.forma_pagamento_entrega && <span className="opacity-75">({e.forma_pagamento_entrega})</span>}
+                                            </Badge>
                                         )}
                                     </div>
                                 ))}
@@ -846,7 +863,7 @@ export default function Entregador() {
                                 <div className="bg-amber-500 text-white text-[10px] font-bold px-3 py-1 text-center flex items-center justify-center gap-1">
                                     <DollarSign className="w-3 h-3" />
                                     RECEBER: R$ {(entrega.valor_a_receber || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    {entrega.forma_pagamento && ` (${entrega.forma_pagamento})`}
+                                    {entrega.forma_pagamento_entrega && ` (${entrega.forma_pagamento_entrega})`}
                                 </div>
                             )}
 

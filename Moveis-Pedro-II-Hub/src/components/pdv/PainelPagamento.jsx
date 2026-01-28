@@ -5,12 +5,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
-import { Receipt, CreditCard, Wallet, DollarSign, Plus, X, Loader2, Clock, Tag, Check, Percent, Truck, User, Package, Link2, QrCode, Copy, Download, MessageCircle, ExternalLink, Key, Ban } from "lucide-react";
+import { Receipt, CreditCard, Wallet, DollarSign, Plus, X, Loader2, Clock, Tag, Check, Percent, Truck, User, Package, Link2, QrCode, Copy, Download, MessageCircle, ExternalLink, Key, Ban, TrendingUp } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { base44, supabase } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-const formasPagamento = ["Dinheiro", "Crédito", "Débito", "Pix", "AFESP", "Multicrédito", "Link de Pagamento"];
+const formasPagamentoBase = ["Dinheiro", "Crédito", "Débito", "Pix", "AFESP", "Multicrédito", "Link de Pagamento"];
 
 export default function PainelPagamento({
   valores,
@@ -47,24 +48,58 @@ export default function PainelPagamento({
   const [erroToken, setErroToken] = useState("");
   const [descontoPercent, setDescontoPercent] = useState(0);
 
-  // Estado para Link de Pagamento
   const [linkPagamentoData, setLinkPagamentoData] = useState(null);
   const [gerandoLink, setGerandoLink] = useState(false);
   const [linkCopiado, setLinkCopiado] = useState(false);
   const [numeroAlternativo, setNumeroAlternativo] = useState("");
 
+  // Buscar configurações de taxa/acréscimo
+  const { data: configTaxas = [] } = useQuery({
+    queryKey: ['configuracao_taxas'],
+    queryFn: () => base44.entities.ConfiguracaoTaxa.list()
+  });
+
+  // Mapa de acréscimos por forma de pagamento
+  const getAcrescimo = (forma) => {
+    const taxa = configTaxas.find(t =>
+      t.forma_pagamento?.toLowerCase().includes(forma.toLowerCase()) ||
+      forma.toLowerCase().includes(t.forma_pagamento?.toLowerCase())
+    );
+    if (!taxa || !taxa.acrescimo || taxa.acrescimo === 0) return null;
+    return {
+      valor: taxa.acrescimo,
+      tipo: taxa.acrescimo_tipo || 'porcentagem'
+    };
+  };
+
+  // Calcular valor do acréscimo
+  const calcularAcrescimo = (forma, valorBase) => {
+    const acrescimo = getAcrescimo(forma);
+    if (!acrescimo) return 0;
+    if (acrescimo.tipo === 'porcentagem') {
+      return (valorBase * acrescimo.valor) / 100;
+    }
+    return acrescimo.valor;
+  };
+
   const handleAdd = async () => {
     if (!novoPagamento.valor) return;
 
+    const valorBase = parseFloat(novoPagamento.valor);
+    const valorAcrescimo = calcularAcrescimo(novoPagamento.forma, valorBase);
+    const valorTotal = valorBase + valorAcrescimo;
+
     // Se for Link de Pagamento, gerar o link primeiro
     if (novoPagamento.forma === "Link de Pagamento") {
-      await gerarLinkPagamento(parseFloat(novoPagamento.valor));
+      await gerarLinkPagamento(valorTotal);
       return;
     }
 
     onAddPagamento({
       forma_pagamento: novoPagamento.forma,
-      valor: parseFloat(novoPagamento.valor),
+      valor: valorTotal,
+      valor_base: valorBase,
+      acrescimo: valorAcrescimo,
       parcelas: novoPagamento.parcelas
     });
     setNovoPagamento({ forma: "Dinheiro", valor: "", parcelas: 1 });
@@ -275,7 +310,7 @@ export default function PainelPagamento({
         return;
       }
 
-      if (token.validade && new Date(token.validade) < new Date()) {
+      if (token.expira_em && new Date(token.expira_em) < new Date()) {
         setErroToken("Token expirado");
         setAplicandoToken(false);
         return;
@@ -317,6 +352,18 @@ export default function PainelPagamento({
       setDesconto(0);
     }
   }, [descontoPercent, valores.subtotal, tokenGerencial]);
+
+  // [CORREÇÃO] Atualizar valor do 'Receber na Entrega' sempre que o restante mudar
+  // E garantir que a forma de pagamento tenha um padrão se estiver vazio
+  useEffect(() => {
+    if (pagamentoEntrega.ativo) {
+      setPagamentoEntrega(prev => ({
+        ...prev,
+        valor: valores.restante,
+        forma: prev.forma || "Dinheiro" // Garante padrão caso venha vazio do storage
+      }));
+    }
+  }, [valores.restante, pagamentoEntrega.ativo]);
 
   return (
     <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-sm border border-gray-200 dark:border-neutral-800 p-4 h-full">
@@ -382,6 +429,14 @@ export default function PainelPagamento({
                 <div className="flex justify-between items-center text-sm text-purple-600 dark:text-purple-400">
                   <span className="flex items-center gap-1"><Tag className="w-3 h-3" /> Desconto {cupomAplicado && `(${cupomAplicado.codigo})`}</span>
                   <span className="font-bold">- R$ {desconto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                </div>
+              )}
+
+              {/* Linha de Acréscimos */}
+              {pagamentos.reduce((acc, p) => acc + (p.acrescimo || 0), 0) > 0 && (
+                <div className="flex justify-between items-center text-sm text-blue-600 dark:text-blue-400">
+                  <span className="flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Acréscimos</span>
+                  <span className="font-bold">+ R$ {pagamentos.reduce((acc, p) => acc + (p.acrescimo || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                 </div>
               )}
 
@@ -455,11 +510,16 @@ export default function PainelPagamento({
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="bg-amber-100 dark:bg-amber-800 p-1.5 rounded text-amber-600 dark:text-amber-300">
-                        <Key className="w-4 h-4" />
+                      <div className={`p-1.5 rounded ${tokenGerencial.tipo_token === 'SUPERVISOR_MODE' ? 'bg-purple-100 dark:bg-purple-900/40' : 'bg-blue-100 dark:bg-blue-900/40'}`}>
+                        <span className="text-lg">{tokenGerencial.tipo_token === 'SUPERVISOR_MODE' ? '👑' : '🎫'}</span>
                       </div>
                       <div>
-                        <p className="text-xs text-amber-500 dark:text-amber-400 font-medium">Token Gerencial</p>
+                        <p className="text-xs text-amber-500 dark:text-amber-400 font-medium flex items-center gap-1">
+                          {tokenGerencial.tipo_token === 'SUPERVISOR_MODE' ? 'Modo Supervisor' : 'Token Único'}
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200">
+                            {tokenGerencial.permissao}
+                          </span>
+                        </p>
                         <p className="text-sm font-bold font-mono text-amber-700 dark:text-amber-300">{tokenGerencial.codigo}</p>
                       </div>
                     </div>
@@ -472,29 +532,33 @@ export default function PainelPagamento({
                     </button>
                   </div>
 
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-amber-700 dark:text-amber-400">Desconto Gerencial</span>
-                      <span className="font-bold text-amber-800 dark:text-amber-300">
-                        {descontoPercent}% = R$ {((valores.subtotal * descontoPercent) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
+                  {/* Slider de desconto - só mostra se permissão é DESCONTO ou ALTERACAO_PRECO */}
+                  {(tokenGerencial.permissao === 'DESCONTO' || tokenGerencial.permissao === 'ALTERACAO_PRECO') && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-amber-700 dark:text-amber-400">Desconto Gerencial</span>
+                        <span className="font-bold text-amber-800 dark:text-amber-300">
+                          {descontoPercent}% = R$ {((valores.subtotal * descontoPercent) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <Slider
+                        value={[descontoPercent]}
+                        onValueChange={([v]) => setDescontoPercent(v)}
+                        max={tokenGerencial.valor_limite || 30}
+                        step={1}
+                        className="w-full"
+                      />
+                      <div className="flex justify-between text-[10px] text-amber-600">
+                        <span>0%</span>
+                        <span>Máx: {tokenGerencial.valor_limite || 30}%</span>
+                      </div>
                     </div>
-                    <Slider
-                      value={[descontoPercent]}
-                      onValueChange={([v]) => setDescontoPercent(v)}
-                      max={tokenGerencial.desconto_max_percent || 30}
-                      step={1}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-[10px] text-amber-600">
-                      <span>0%</span>
-                      <span>Máx: {tokenGerencial.desconto_max_percent || 30}%</span>
-                    </div>
-                  </div>
+                  )}
 
-                  {tokenGerencial.permite_venda_sem_estoque && (
-                    <p className="text-[10px] text-green-600 flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Venda sem estoque autorizada
+                  {/* Info adicional para SUPER_CAIXA */}
+                  {tokenGerencial.permissao === 'SUPER_CAIXA' && (
+                    <p className="text-[10px] text-purple-600 flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Modo Super Caixa - Todas permissões liberadas
                     </p>
                   )}
                 </div>
@@ -545,8 +609,26 @@ export default function PainelPagamento({
                 <div className="flex-1 w-full sm:w-auto">
                   <Label className="text-xs mb-1.5 block">Forma de Pagamento</Label>
                   <Select value={novoPagamento.forma} onValueChange={v => setNovoPagamento({ ...novoPagamento, forma: v })}>
-                    <SelectTrigger className="h-10 bg-white dark:bg-neutral-800"><SelectValue /></SelectTrigger>
-                    <SelectContent>{formasPagamento.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent>
+                    <SelectTrigger className="h-10 bg-white dark:bg-neutral-800">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {formasPagamentoBase.map(f => {
+                        const acr = getAcrescimo(f);
+                        return (
+                          <SelectItem key={f} value={f}>
+                            <span className="flex items-center gap-2">
+                              {f}
+                              {acr && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
+                                  +{acr.tipo === 'porcentagem' ? `${acr.valor}%` : `R$${acr.valor}`}
+                                </span>
+                              )}
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
                   </Select>
                 </div>
 
@@ -577,6 +659,13 @@ export default function PainelPagamento({
                       onKeyDown={e => e.key === 'Enter' && handleAdd()}
                     />
                   </div>
+                  {/* Preview do acréscimo */}
+                  {novoPagamento.valor && getAcrescimo(novoPagamento.forma) && (
+                    <p className="text-[10px] text-blue-600 mt-1 flex items-center gap-1">
+                      <TrendingUp className="w-3 h-3" />
+                      +R$ {calcularAcrescimo(novoPagamento.forma, parseFloat(novoPagamento.valor)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de acréscimo
+                    </p>
+                  )}
                 </div>
 
                 <Button
@@ -611,8 +700,14 @@ export default function PainelPagamento({
                           <BadgePagamento tipo={p.forma_pagamento} />
                           <div>
                             <p className="font-medium text-sm">{p.forma_pagamento}</p>
-                            {p.parcelas > 1 && <span className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded mr-2">{p.parcelas}x</span>}
-                            <span className="text-xs text-gray-400">Registrado agora</span>
+                            <div className="flex items-center gap-2">
+                              {p.parcelas > 1 && <span className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded">{p.parcelas}x</span>}
+                              {p.acrescimo > 0 && (
+                                <span className="text-[10px] text-blue-600">
+                                  R$ {(p.valor_base || p.valor - p.acrescimo).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} + R$ {p.acrescimo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} acréscimo
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
@@ -633,7 +728,22 @@ export default function PainelPagamento({
                           </div>
                           <div>
                             <p className="font-medium text-sm text-orange-800 dark:text-orange-400">Receber na Entrega</p>
-                            <span className="text-xs text-orange-600/70">{pagamentoEntrega.forma}</span>
+                            <div className="mt-1">
+                              <Select
+                                value={pagamentoEntrega.forma || "Dinheiro"}
+                                onValueChange={(val) => setPagamentoEntrega(prev => ({ ...prev, forma: val }))}
+                              >
+                                <SelectTrigger className="h-6 text-xs w-[130px] bg-white/50 border-orange-200 focus:ring-orange-500 text-orange-700">
+                                  <SelectValue placeholder="Selecione" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Dinheiro">Dinheiro</SelectItem>
+                                  <SelectItem value="Pix">Pix</SelectItem>
+                                  <SelectItem value="Cartão">Cartão</SelectItem>
+                                  <SelectItem value="A Combinar">A Combinar</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
@@ -643,9 +753,14 @@ export default function PainelPagamento({
                             <input
                               type="checkbox"
                               checked={pagamentoEntrega.ativo}
-                              onChange={e => setPagamentoEntrega({ ...pagamentoEntrega, ativo: e.target.checked, valor: e.target.checked ? valores.restante : 0 })}
+                              onChange={e => setPagamentoEntrega({
+                                ...pagamentoEntrega,
+                                ativo: e.target.checked,
+                                valor: e.target.checked ? valores.restante : 0,
+                                forma: pagamentoEntrega.forma || "Dinheiro" // Define padrão ao ativar
+                              })}
                               className="accent-orange-500 w-4 h-4 cursor-pointer"
-                              title="Remover pagamento na entrega"
+                              title={pagamentoEntrega.ativo ? "Remover pagamento na entrega" : "Adicionar pagamento na entrega"}
                             />
                           </div>
                         </div>

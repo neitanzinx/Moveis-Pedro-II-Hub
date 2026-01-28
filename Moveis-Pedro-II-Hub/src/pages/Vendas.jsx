@@ -7,7 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck } from "lucide-react";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck, ClipboardList, Info } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { abrirNotaPedidoPDF } from "../components/vendas/NotaPedidoPDF";
 import { useAuth } from "@/hooks/useAuth";
@@ -28,6 +29,7 @@ export default function Vendas() {
 
     // Hook de Autenticação e Controle de Acesso
     const { user, filterData, can } = useAuth();
+
 
     const { data: vendas = [], isLoading } = useQuery({
         queryKey: ['vendas'],
@@ -57,6 +59,12 @@ export default function Vendas() {
         queryKey: ['montagens'],
         queryFn: () => base44.entities.MontagemItem.list(),
         refetchInterval: 10000
+    });
+
+    // Query para buscar usuários (para exibir nome do vendedor)
+    const { data: users = [] } = useQuery({
+        queryKey: ['users_list'],
+        queryFn: () => base44.entities.User.list()
     });
 
     // Mutation para cancelar venda
@@ -207,24 +215,83 @@ export default function Vendas() {
                                     <TableHead>Produtos</TableHead>
                                     <TableHead>Data</TableHead>
                                     <TableHead>Loja</TableHead>
+                                    <TableHead>Vendedor</TableHead>
                                     <TableHead>Total</TableHead>
                                     <TableHead>Situação</TableHead>
                                     <TableHead>Pagamento</TableHead>
-                                    <TableHead>Andamento</TableHead>
+                                    <TableHead>
+                                        <div className="flex items-center gap-2">
+                                            Andamento
+                                            <HoverCard>
+                                                <HoverCardTrigger asChild>
+                                                    <Info className="h-4 w-4 text-gray-400 cursor-help" />
+                                                </HoverCardTrigger>
+                                                <HoverCardContent className="w-80">
+                                                    <div className="space-y-2">
+                                                        <h4 className="text-sm font-semibold">Legenda de Status</h4>
+                                                        <div className="space-y-1">
+                                                            <div className="flex items-center gap-2 text-xs">
+                                                                <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <Clock className="h-3 w-3" />
+                                                                </Badge>
+                                                                <span className="text-gray-600">A Agendar (Sem data definida)</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-xs">
+                                                                <Badge className="bg-orange-100 text-orange-700 border-orange-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <ClipboardList className="h-3 w-3" />
+                                                                </Badge>
+                                                                <span className="text-gray-600">Pendente Triagem (Sem data)</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-xs">
+                                                                <Badge className="bg-amber-100 text-amber-700 border-amber-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <Truck className="h-3 w-3" />
+                                                                </Badge>
+                                                                <span className="text-gray-600">Aguardando Entrega</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-xs">
+                                                                <Badge className="bg-amber-100 text-amber-700 border-amber-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <Wrench className="h-3 w-3" />
+                                                                </Badge>
+                                                                <span className="text-gray-600">Montagem Pendente</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-xs">
+                                                                <Badge className="bg-teal-100 text-teal-700 border-teal-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <Wrench className="h-3 w-3" />
+                                                                </Badge>
+                                                                <span className="text-gray-600">Entregue, aguardando montador</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-xs">
+                                                                <Badge className="bg-green-100 text-green-700 border-green-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <CheckCircle className="h-3 w-3" />
+                                                                </Badge>
+                                                                <span className="text-gray-600">Concluído / Pronto p/ Entrega</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-xs">
+                                                                <Badge className="bg-blue-100 text-blue-700 border-blue-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <Truck className="h-3 w-3" />
+                                                                </Badge>
+                                                                <span className="text-gray-600">Em Rota de Entrega</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </HoverCardContent>
+                                            </HoverCard>
+                                        </div>
+                                    </TableHead>
                                     <TableHead className="text-right">Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {isLoading ? (
                                     <TableRow>
-                                        <TableCell colSpan={10} className="text-center py-8 text-gray-500">
+                                        <TableCell colSpan={11} className="text-center py-8 text-gray-500">
                                             <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
                                             Carregando vendas...
                                         </TableCell>
                                     </TableRow>
                                 ) : filtered.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={10} className="text-center py-8 text-gray-500">
+                                        <TableCell colSpan={11} className="text-center py-8 text-gray-500">
                                             Nenhuma venda encontrada.
                                         </TableCell>
                                     </TableRow>
@@ -257,6 +324,28 @@ export default function Vendas() {
                                                 <Badge variant="outline" className="font-normal text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-neutral-800">
                                                     {venda.loja}
                                                 </Badge>
+                                            </TableCell>
+                                            <TableCell>
+                                                <span
+                                                    className="text-sm text-gray-600 dark:text-gray-400 cursor-help"
+                                                    title={`ID: ${venda.responsavel_id}`}
+                                                >
+                                                    {(() => {
+                                                        if (!venda.responsavel_id) return '-';
+
+                                                        // Debug para encontrar o erro
+                                                        // console.log('Procurando vendedor:', venda.responsavel_id);
+                                                        // console.log('Lista de usuários:', users);
+
+                                                        const responsavelId = String(venda.responsavel_id).toLowerCase();
+                                                        const user = users.find(u =>
+                                                            String(u.id).toLowerCase() === responsavelId ||
+                                                            String(u.email).toLowerCase() === responsavelId
+                                                        );
+
+                                                        return user?.full_name || user?.email || '-';
+                                                    })()}
+                                                </span>
                                             </TableCell>
                                             <TableCell className="font-bold text-gray-900 dark:text-white">
                                                 R$ {venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -303,7 +392,15 @@ export default function Vendas() {
 
                                                     <Button variant="ghost" size="icon" onClick={() => {
                                                         const clienteCompleto = clientes.find(c => c.id === venda.cliente_id) || { nome_completo: venda.cliente_nome, telefone: venda.cliente_telefone };
-                                                        abrirNotaPedidoPDF(venda, clienteCompleto, user?.full_name);
+
+                                                        // Resolver nome do vendedor
+                                                        let nomeVendedor = venda.responsavel_nome;
+                                                        if (venda.responsavel_id) {
+                                                            const u = users.find(user => user.id === venda.responsavel_id);
+                                                            if (u && u.full_name) nomeVendedor = u.full_name;
+                                                        }
+
+                                                        abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name);
                                                     }}>
                                                         <FileText className="w-4 h-4 text-blue-600" />
                                                     </Button>
@@ -494,35 +591,105 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
 
     // Buscar montagens relacionadas
     const montagensVenda = montagens.filter(m => m.numero_pedido === venda.numero_pedido);
-    const temMontagem = montagensVenda.length > 0;
 
-    if (temMontagem) {
-        const todasConcluidas = montagensVenda.every(m => m.status === 'concluida');
-        const algumaPendente = montagensVenda.some(m => m.status !== 'concluida');
+    // Verificar se é uma venda com Entrega Montada
+    const temEntregaMontada = venda.itens?.some(i => i.tipo_entrega === 'Montado');
 
-        if (algumaPendente) {
+    if (temEntregaMontada) {
+        // 1. Verificar Triagem
+        if (!venda.triagem_realizada) {
             return (
                 <Badge className="bg-orange-100 text-orange-700 border border-orange-200 gap-1">
-                    <Wrench className="w-3 h-3" />
-                    Em Montagem
+                    <ClipboardList className="w-3 h-3" />
+                    Pendente Triagem
                 </Badge>
             );
         }
 
-        if (todasConcluidas && entrega.status === 'Pendente') {
-            // Montagem concluída, pronto para entrega
-            if (entrega.data_agendada && entrega.status_confirmacao === 'Confirmada') {
+        // 2. Verificar Montagem
+        const todasConcluidas = montagensVenda.every(m => m.status === 'concluida');
+        const dataEntrega = entrega.data_agendada ? new Date(entrega.data_agendada).toLocaleDateString('pt-BR') : 'Data Indefinida';
+
+        if (!todasConcluidas) {
+            return (
+                <Badge className="bg-amber-100 text-amber-700 border border-amber-200 gap-1">
+                    <Wrench className="w-3 h-3" />
+                    Previsto: {dataEntrega} (Montagem Pendente)
+                </Badge>
+            );
+        } else {
+            // Montagem concluída -> Pronto para entrega ou Entregue
+            if (entrega.status === 'Entregue') {
                 return (
-                    <Badge className="bg-blue-100 text-blue-700 border border-blue-200 gap-1">
-                        <MapPin className="w-3 h-3" />
-                        Rota Prevista
+                    <Badge className="bg-green-100 text-green-700 border border-green-200 gap-1">
+                        <CheckCircle className="w-3 h-3" />
+                        Entregue
                     </Badge>
                 );
             }
+
+            return (
+                <Badge className="bg-green-100 text-green-700 border border-green-200 gap-1">
+                    <CheckCircle className="w-3 h-3" />
+                    Pronto p/ Entrega: {dataEntrega}
+                </Badge>
+            );
+        }
+    }
+
+    // Verificar se é uma venda com Montagem no Local (Montagem Externa)
+    const temMontagemNoLocal = venda.itens?.some(i => i.tipo_montagem === 'Montagem Externa' || i.tipo_montagem === 'Montagem no Local');
+
+    if (temMontagemNoLocal) {
+        // 1. Verificar Triagem
+        if (!venda.triagem_realizada) {
+            return (
+                <Badge className="bg-orange-100 text-orange-700 border border-orange-200 gap-1">
+                    <ClipboardList className="w-3 h-3" />
+                    Pendente Triagem
+                </Badge>
+            );
+        }
+
+        // 2. Verificar Status da Entrega (Pré-requisito para montagem externa)
+        if (entrega.status !== 'Entregue') {
+            return (
+                <Badge className="bg-amber-100 text-amber-700 border border-amber-200 gap-1">
+                    <Truck className="w-3 h-3" />
+                    Aguardando Entrega
+                </Badge>
+            );
+        }
+
+        // 3. Verificar Montagem (Só inicia após entrega)
+        const todasConcluidas = montagensVenda.every(m => m.status === 'concluida');
+
+        if (!todasConcluidas) {
             return (
                 <Badge className="bg-teal-100 text-teal-700 border border-teal-200 gap-1">
-                    <Package className="w-3 h-3" />
-                    Pronto p/ Envio
+                    <Wrench className="w-3 h-3" />
+                    Entregue e pronto p/ montagem
+                </Badge>
+            );
+        } else {
+            return (
+                <Badge className="bg-green-100 text-green-700 border border-green-200 gap-1">
+                    <CheckCircle className="w-3 h-3" />
+                    Montagem Concluída
+                </Badge>
+            );
+        }
+    }
+
+    // Lógica antiga para montagens avulsas (se houver) ou compatibilidade
+    const temMontagem = montagensVenda.length > 0;
+    if (temMontagem && !temEntregaMontada) {
+        const todasConcluidas = montagensVenda.every(m => m.status === 'concluida');
+        if (!todasConcluidas) {
+            return (
+                <Badge className="bg-orange-100 text-orange-700 border border-orange-200 gap-1">
+                    <Wrench className="w-3 h-3" />
+                    Em Montagem
                 </Badge>
             );
         }
@@ -561,18 +728,18 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
     // Em trânsito / saiu para entrega
     if (entrega.status === 'Em Rota') {
         return (
-            <Badge className="bg-indigo-100 text-indigo-700 border border-indigo-200 gap-1 animate-pulse">
+            <Badge className="bg-blue-600 text-white border border-blue-700 gap-1 animate-pulse">
                 <Truck className="w-3 h-3" />
-                Em Entrega
+                Em Rota
             </Badge>
         );
     }
 
-    // Fallback
+    // Default fallback
     return (
         <Badge className="bg-gray-100 text-gray-600 border border-gray-200 gap-1">
             <Package className="w-3 h-3" />
-            Em Andamento
+            {entrega.status}
         </Badge>
     );
 }

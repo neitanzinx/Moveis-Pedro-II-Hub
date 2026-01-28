@@ -42,6 +42,8 @@ const DashboardBI = lazy(() => import("./DashboardBI.jsx"));
 const DashboardGerente = lazy(() => import("./DashboardGerente.jsx"));
 const AvaliacaoNPS = lazy(() => import("./AvaliacaoNPS.jsx"));
 const Mostruario = lazy(() => import("./Mostruario.jsx"));
+const EntradaEstoque = lazy(() => import("./EntradaEstoque.jsx"));
+const SaneamentoEstoque = lazy(() => import("./SaneamentoEstoque.jsx"));
 
 // ============================================================================
 // CARREGAMENTO SÍNCRONO - Páginas Públicas (críticas para SEO e primeira impressão)
@@ -77,7 +79,8 @@ const PAGES = {
     RecursosHumanos, RelatoriosAvancados, TransferenciaEstoque, Inventario,
     AlertasRecompra, Estoque, ModoReuniao, PDV, CatalogoWhatsApp, NotasFiscais,
     LogisticaSemanal, Entregador, Marketing, MontadorExterno,
-    ExportacaoContabil, PedidosCompra, SetorCompras, DashboardBI, DashboardGerente, Mostruario
+    ExportacaoContabil, PedidosCompra, SetorCompras, DashboardBI, DashboardGerente, Mostruario,
+    EntradaEstoque, SaneamentoEstoque
 };
 
 function _getCurrentPage(url) {
@@ -167,7 +170,9 @@ function PagesContent() {
         // Bloquear clientes (usuários sem cargo ou com cargo inválido)
         const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo'];
         if (!user.cargo || !VALID_CARGOS.includes(user.cargo)) {
-            return <Navigate to="/area-cliente" replace />;
+            console.warn('[Router] Usuário sem cargo válido tentando acessar /admin:', user.email, '- Cargo:', user.cargo);
+            // Redirecionar para login de funcionário (não área cliente)
+            return <Navigate to="/login" replace />;
         }
 
         // ===== RESTRICAO POR CARGO =====
@@ -225,6 +230,8 @@ function PagesContent() {
                         <Route path="/admin/Mostruario" element={<Mostruario />} />
                         <Route path="/admin/Produtos" element={<Produtos />} />
                         <Route path="/admin/Fornecedores" element={<Fornecedores />} />
+                        <Route path="/admin/Entrada" element={<EntradaEstoque />} />
+                        <Route path="/admin/Saneamento" element={<SaneamentoEstoque />} />
 
                         {/* Gestão e Financeiro */}
                         <Route path="/admin/Financeiro" element={<Financeiro />} />

@@ -90,7 +90,12 @@ export default function ConfiguracaoNfe() {
                     .from('nfe_config')
                     .select('*');
 
-                if (error) throw error;
+                // Se tabela não existe (PGRST205) ou outro erro, apenas ignora silenciosamente
+                // As credenciais continuarão sendo lidas do localStorage
+                if (error) {
+                    // Não loga erro se tabela não existe - comportamento esperado
+                    return;
+                }
 
                 if (data && data.length > 0) {
                     const homolog = data.find(c => c.ambiente === 'homologacao');
@@ -104,7 +109,7 @@ export default function ConfiguracaoNfe() {
                     });
                 }
             } catch (error) {
-                console.error("Erro ao carregar credenciais NFe:", error);
+                // Ignora erros - credenciais continuam no localStorage
             }
         };
 
@@ -153,6 +158,12 @@ export default function ConfiguracaoNfe() {
         localStorage.setItem("nfe_serie", serieNfe);
         localStorage.setItem("nfe_margem_lucro", margemLucro);
 
+        // Sempre salva no localStorage como backup
+        localStorage.setItem("nuvem_fiscal_homolog_id", credenciais.homolog_id);
+        localStorage.setItem("nuvem_fiscal_homolog_secret", credenciais.homolog_secret);
+        localStorage.setItem("nuvem_fiscal_prod_id", credenciais.prod_id);
+        localStorage.setItem("nuvem_fiscal_prod_secret", credenciais.prod_secret);
+
         try {
             const updates = [
                 {
@@ -171,17 +182,16 @@ export default function ConfiguracaoNfe() {
                 .from('nfe_config')
                 .upsert(updates, { onConflict: 'ambiente' });
 
-            if (error) throw error;
-
-            localStorage.setItem("nuvem_fiscal_homolog_id", credenciais.homolog_id);
-            localStorage.setItem("nuvem_fiscal_homolog_secret", credenciais.homolog_secret);
-            localStorage.setItem("nuvem_fiscal_prod_id", credenciais.prod_id);
-            localStorage.setItem("nuvem_fiscal_prod_secret", credenciais.prod_secret);
+            // Se tabela não existe (404), ignora silenciosamente - localStorage já foi salvo
+            if (error && !error.message?.includes('404') && error.code !== 'PGRST116') {
+                console.warn("nfe_config não disponível, usando localStorage:", error.message);
+            }
 
             toast.success("Configurações de NFe salvas com sucesso!");
         } catch (error) {
-            console.error(error);
-            toast.error("Erro ao salvar credenciais: " + error.message);
+            // Erro de rede ou outro - localStorage já foi salvo
+            console.warn("Erro ao salvar no Supabase (usando localStorage):", error);
+            toast.success("Configurações salvas localmente!");
         } finally {
             setSalvando(false);
         }

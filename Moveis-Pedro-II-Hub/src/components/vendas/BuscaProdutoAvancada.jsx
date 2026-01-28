@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Package, Tag, Warehouse, Filter } from "lucide-react";
+import { Search, Package, Tag, Warehouse, Filter, Palette, Layers, Ruler } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
@@ -56,14 +56,19 @@ export default function BuscaProdutoAvancada(props) {
   const produtosFiltrados = produtos.filter(p => {
     if (!p.ativo) return false;
 
-    const matchesSearch =
-      p.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.codigo_barras?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.categoria?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.material?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.cor?.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchTokens = searchTerm.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+    if (searchTokens.length === 0) return false;
 
-    return matchesSearch;
+    // Verifica se TODOS os tokens de busca estão presentes em ALGUM campo do produto
+    return searchTokens.every(token =>
+      p.nome?.toLowerCase().includes(token) ||
+      p.codigo_barras?.toLowerCase().includes(token) ||
+      p.categoria?.toLowerCase().includes(token) ||
+      p.material?.toLowerCase().includes(token) ||
+      p.cor?.toLowerCase().includes(token) ||
+      p.fornecedor_nome?.toLowerCase().includes(token) ||
+      p.modelo_referencia?.toLowerCase().includes(token)
+    );
   });
 
   return (
@@ -128,21 +133,54 @@ export default function BuscaProdutoAvancada(props) {
                       key={produto.id}
                       type="button"
                       onClick={() => handleSelectProduto(produto)}
-                      className={`w-full text-left px-4 py-2.5 flex items-center gap-3 border-b border-gray-100 dark:border-neutral-800 transition-colors ${isSelected ? 'bg-green-50 dark:bg-green-900/30' : 'hover:bg-gray-50 dark:hover:bg-neutral-800'
+                      className={`w-full text-left px-4 py-2.5 flex flex-col gap-1 border-b border-gray-100 dark:border-neutral-800 transition-colors ${isSelected ? 'bg-green-50 dark:bg-green-900/30' : 'hover:bg-gray-50 dark:hover:bg-neutral-800'
                         }`}
                     >
-                      <span className="flex-1 text-sm font-medium text-gray-800 dark:text-white truncate">
-                        {produto.nome}
-                      </span>
-                      <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 dark:bg-neutral-700 text-gray-600 dark:text-gray-300">
-                        {produto.categoria || 'Outros'}
-                      </span>
-                      <span className={`text-xs font-medium ${qtd <= 0 ? 'text-red-500' : qtd <= 5 ? 'text-orange-500' : 'text-green-600'}`}>
-                        {qtd}un
-                      </span>
-                      <span className="text-sm font-bold text-green-700 dark:text-green-400">
-                        R$ {produto.preco_venda?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
+                      {/* Linha principal: Nome + Modelo + Preço */}
+                      <div className="flex items-center justify-between w-full">
+                        <span className="flex-1 text-sm font-medium text-gray-800 dark:text-white truncate">
+                          {produto.nome}{produto.modelo_referencia ? ` ${produto.modelo_referencia}` : ''}
+                        </span>
+                        <span className="text-sm font-bold text-green-700 dark:text-green-400 ml-2">
+                          R$ {produto.preco_venda?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+
+                      {/* Linha de detalhes: Variações + Categoria + Estoque */}
+                      <div className="flex items-center flex-wrap gap-1.5 w-full">
+                        {/* Cor */}
+                        {produto.cor && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium flex items-center">
+                            <Palette className="w-3 h-3 mr-1" /> {produto.cor}
+                          </span>
+                        )}
+                        {/* Material/Tecido */}
+                        {produto.material && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium flex items-center">
+                            <Layers className="w-3 h-3 mr-1" /> {produto.material}
+                          </span>
+                        )}
+                        {/* Dimensões - Montadas a partir dos campos separados */}
+                        {(produto.largura || produto.altura) && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium flex items-center">
+                            <Ruler className="w-3 h-3 mr-1" /> {produto.largura || '?'}×{produto.altura || '?'}{produto.profundidade ? `×${produto.profundidade}` : ''} cm
+                          </span>
+                        )}
+                        {/* Fornecedor */}
+                        {produto.fornecedor_nome && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-neutral-600">
+                            {produto.fornecedor_nome}
+                          </span>
+                        )}
+                        {/* Categoria */}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-700 text-gray-600 dark:text-gray-300">
+                          {produto.categoria || 'Outros'}
+                        </span>
+                        {/* Estoque */}
+                        <span className={`text-[10px] font-medium ml-auto ${qtd <= 0 ? 'text-red-500' : qtd <= 5 ? 'text-orange-500' : 'text-green-600'}`}>
+                          {qtd}un
+                        </span>
+                      </div>
                     </button>
                   );
                 })}

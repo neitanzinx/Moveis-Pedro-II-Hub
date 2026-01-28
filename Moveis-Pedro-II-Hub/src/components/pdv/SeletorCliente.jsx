@@ -3,9 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { User, UserPlus, Search, X, Check, MapPin, Loader2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { User, UserPlus, Search, X, Check, MapPin, Loader2, Truck, ChevronDown, ChevronUp, Edit } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { useAuth } from "@/hooks/useAuth";
+import ClienteModal from "../clientes/ClienteModal";
+import { toast } from "sonner";
 
 // Helper para exibir badge do tier baseado em coroas
 const getTierBadge = (cliente) => {
@@ -24,55 +28,167 @@ const getTierBadge = (cliente) => {
 
 export default function SeletorCliente({ clienteSelecionado, setClienteSelecionado, clientes = [] }) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
   const [busca, setBusca] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [novoCliente, setNovoCliente] = useState({
-    nome_completo: "", cpf: "", telefone: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", cidade: "", estado: "", data_nascimento: ""
+    nome_completo: "",
+    cpf: "",
+    telefone: "",
+    telefone_secundario: "",
+    telefone_fixo: "",
+    data_nascimento: "",
+    // Endereço do Cliente
+    cep: "",
+    endereco: "",
+    numero: "",
+    complemento: "",
+    ponto_referencia: "",
+    bairro: "",
+    cidade: "",
+    estado: "",
+    // Endereço de Entrega
+    usar_mesmo_endereco: true,
+    endereco_entrega_cep: "",
+    endereco_entrega_rua: "",
+    endereco_entrega_numero: "",
+    endereco_entrega_complemento: "",
+    endereco_entrega_ponto_referencia: "",
+    endereco_entrega_bairro: "",
+    endereco_entrega_cidade: "",
+    endereco_entrega_estado: ""
   });
   const [buscandoCep, setBuscandoCep] = useState(false);
+  const [buscandoCepEntrega, setBuscandoCepEntrega] = useState(false);
   const queryClient = useQueryClient();
+  const { getUserLoja } = useAuth();
 
   const criarClienteMutation = useMutation({
     mutationFn: (data) => {
       const cleanData = { ...data };
-      if (!cleanData.data_nascimento) delete cleanData.data_nascimento;
-      if (!cleanData.cpf) delete cleanData.cpf;
-      if (!cleanData.cep) delete cleanData.cep;
-      if (!cleanData.endereco) delete cleanData.endereco;
-      if (!cleanData.numero) delete cleanData.numero;
-      if (!cleanData.complemento) delete cleanData.complemento;
-      if (!cleanData.bairro) delete cleanData.bairro;
-      if (!cleanData.cidade) delete cleanData.cidade;
-      if (!cleanData.estado) delete cleanData.estado;
+      // Remove campos vazios
+      Object.keys(cleanData).forEach(key => {
+        if (cleanData[key] === "" || cleanData[key] === null || cleanData[key] === undefined) {
+          delete cleanData[key];
+        }
+      });
+      // Mantém usar_mesmo_endereco mesmo se true
+      cleanData.usar_mesmo_endereco = data.usar_mesmo_endereco;
+
+      const lojaOperacao = getUserLoja();
+      if (!lojaOperacao) {
+        throw new Error("Selecione uma loja de operação antes de criar um cliente.");
+      }
+      cleanData.loja = lojaOperacao;
+
       return base44.entities.Cliente.create(cleanData);
     },
     onSuccess: (novo) => {
       queryClient.invalidateQueries({ queryKey: ['clientes'] });
-      setClienteSelecionado(novo);
+      setClienteSelecionado({ ...novo, isNew: true });
       setModalOpen(false);
       setShowForm(false);
-      setNovoCliente({ nome_completo: "", cpf: "", telefone: "", cep: "", endereco: "", numero: "", complemento: "", bairro: "", cidade: "", estado: "", data_nascimento: "" });
+      resetNovoCliente();
+      // Remove o badge de novo após 10 segundos
+      setTimeout(() => {
+        setClienteSelecionado(prev => prev?.id === novo.id ? { ...prev, isNew: false } : prev);
+      }, 10000);
     }
   });
 
-  const buscarCep = async (cep) => {
+  const resetNovoCliente = () => {
+    setNovoCliente({
+      nome_completo: "",
+      cpf: "",
+      telefone: "",
+      data_nascimento: "",
+      cep: "",
+      endereco: "",
+      numero: "",
+      complemento: "",
+      ponto_referencia: "",
+      bairro: "",
+      cidade: "",
+      estado: "",
+      usar_mesmo_endereco: true,
+      endereco_entrega_cep: "",
+      endereco_entrega_rua: "",
+      endereco_entrega_numero: "",
+      endereco_entrega_complemento: "",
+      endereco_entrega_ponto_referencia: "",
+      endereco_entrega_bairro: "",
+      endereco_entrega_cidade: "",
+      endereco_entrega_estado: ""
+    });
+  };
+
+  const handleSaveEditedCliente = async (data) => {
+    try {
+      const cleanData = { ...data };
+      // Remove campos vazios e arrays vazios para evitar erro no supabase
+      if (!cleanData.contatos || cleanData.contatos.length === 0) delete cleanData.contatos;
+      if (!cleanData.enderecos || cleanData.enderecos.length === 0) delete cleanData.enderecos;
+      if (!cleanData.cpf) delete cleanData.cpf;
+      if (!cleanData.cnpj) delete cleanData.cnpj;
+      if (!cleanData.razao_social) delete cleanData.razao_social;
+      if (!cleanData.email) delete cleanData.email;
+      if (!cleanData.data_nascimento) delete cleanData.data_nascimento;
+
+      const updatedCliente = await base44.entities.Cliente.update(clienteSelecionado.id, cleanData);
+
+      queryClient.invalidateQueries({ queryKey: ['clientes'] });
+
+      // Atualiza o estado local para refletir a mudança imediatamente
+      setClienteSelecionado(prev => ({ ...prev, ...updatedCliente }));
+
+      setEditModalOpen(false);
+      toast.success("Cliente atualizado com sucesso!");
+    } catch (error) {
+      console.error("Erro ao atualizar cliente:", error);
+      toast.error("Erro ao atualizar cliente: " + (error.message || "Verifique os dados"));
+    }
+  };
+
+  const buscarCep = async (cep, isEntrega = false) => {
     const cepLimpo = cep.replace(/\D/g, '');
     if (cepLimpo.length !== 8) return;
-    setBuscandoCep(true);
+
+    if (isEntrega) {
+      setBuscandoCepEntrega(true);
+    } else {
+      setBuscandoCep(true);
+    }
+
     try {
       const res = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
       const data = await res.json();
       if (!data.erro) {
-        setNovoCliente(prev => ({
-          ...prev,
-          endereco: data.logradouro || "",
-          bairro: data.bairro || "",
-          cidade: data.localidade || "",
-          estado: data.uf || ""
-        }));
+        if (isEntrega) {
+          setNovoCliente(prev => ({
+            ...prev,
+            endereco_entrega_rua: data.logradouro || "",
+            endereco_entrega_bairro: data.bairro || "",
+            endereco_entrega_cidade: data.localidade || "",
+            endereco_entrega_estado: data.uf || ""
+          }));
+        } else {
+          setNovoCliente(prev => ({
+            ...prev,
+            endereco: data.logradouro || "",
+            bairro: data.bairro || "",
+            cidade: data.localidade || "",
+            estado: data.uf || ""
+          }));
+        }
       }
     } catch (err) { console.error(err); }
-    finally { setBuscandoCep(false); }
+    finally {
+      if (isEntrega) {
+        setBuscandoCepEntrega(false);
+      } else {
+        setBuscandoCep(false);
+      }
+    }
   };
 
   const filteredClientes = clientes.filter(c =>
@@ -86,6 +202,29 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
     return str
       .toLowerCase()
       .replace(/(?:^|\s)\S/g, (a) => a.toUpperCase());
+  };
+
+  // Construir endereço de entrega para exibição
+  const getEnderecoEntregaDisplay = (cliente) => {
+    // Se tiver endereço de entrega específico preenchido (mesmo que parcial), usa ele
+    if (cliente.endereco_entrega_rua) {
+      let end = `${cliente.endereco_entrega_rua}, ${cliente.endereco_entrega_numero || 's/n'}`;
+      if (cliente.endereco_entrega_complemento) end += ` - ${cliente.endereco_entrega_complemento}`;
+      if (cliente.endereco_entrega_bairro) end += ` - ${cliente.endereco_entrega_bairro}`;
+      if (cliente.endereco_entrega_cidade) end += ` - ${cliente.endereco_entrega_cidade}`;
+      if (cliente.endereco_entrega_estado) end += `/${cliente.endereco_entrega_estado}`;
+      return { texto: end, tipo: 'Entrega' };
+    }
+    // Se não, usa o endereço principal (fallback padrão do sistema)
+    if (cliente.endereco) {
+      let end = `${cliente.endereco}, ${cliente.numero || 's/n'}`;
+      if (cliente.complemento) end += ` - ${cliente.complemento}`;
+      if (cliente.bairro) end += ` - ${cliente.bairro}`;
+      if (cliente.cidade) end += ` - ${cliente.cidade}`;
+      if (cliente.estado) end += `/${cliente.estado}`;
+      return { texto: end, tipo: 'Principal' };
+    }
+    return null;
   };
 
   return (
@@ -111,8 +250,24 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
           >
             <X className="w-3 h-3" />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute top-1 right-8 h-6 w-6 text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={() => setEditModalOpen(true)}
+            title="Editar cliente"
+          >
+            <Edit className="w-3 h-3" />
+          </Button>
           <div className="flex items-center gap-2">
-            <p className="font-bold text-green-800 dark:text-green-400 truncate">{clienteSelecionado.nome_completo}</p>
+            <p className="font-bold text-green-800 dark:text-green-400 truncate flex items-center gap-2">
+              {clienteSelecionado.nome_completo}
+              {clienteSelecionado.isNew && (
+                <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse">
+                  NOVO
+                </span>
+              )}
+            </p>
             {(() => {
               const tier = getTierBadge(clienteSelecionado);
               return (
@@ -129,12 +284,24 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
           <p className="text-xs text-green-700 dark:text-green-500 truncate mt-0.5">
             {clienteSelecionado.cpf || 'CPF n/d'} • {clienteSelecionado.telefone} • {clienteSelecionado.coroas || clienteSelecionado.fidelidade_steps || 0} Coroas
           </p>
-          {clienteSelecionado.endereco && (
-            <p className="text-xs text-green-600 dark:text-green-500/70 truncate mt-1 flex items-center">
-              <MapPin className="w-3 h-3 mr-1 inline" />
-              {clienteSelecionado.endereco}, {clienteSelecionado.numero}
-            </p>
-          )}
+          {(() => {
+            const endereco = getEnderecoEntregaDisplay(clienteSelecionado);
+            if (!endereco) return null;
+            return (
+              <div className="mt-1">
+                <p className="text-xs text-green-600 dark:text-green-500/70 truncate flex items-center">
+                  <Truck className="w-3 h-3 mr-1 inline" />
+                  <span className="font-semibold mr-1">{endereco.tipo}:</span>
+                  {endereco.texto}
+                </p>
+                {(clienteSelecionado.ponto_referencia || clienteSelecionado.endereco_entrega_ponto_referencia) && (
+                  <p className="text-[10px] text-orange-600 ml-4 truncate">
+                    (Ref: {clienteSelecionado.endereco_entrega_ponto_referencia || clienteSelecionado.ponto_referencia})
+                  </p>
+                )}
+              </div>
+            );
+          })()}
         </div>
       ) : (
         <Button
@@ -147,7 +314,7 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
       )}
 
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{showForm ? "Novo Cliente" : "Selecionar Cliente"}</DialogTitle>
           </DialogHeader>
@@ -196,7 +363,6 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                     <Button
                       variant="link"
                       onClick={() => {
-                        // Pega o que está escrito na busca, formata e joga no formulário
                         setNovoCliente(prev => ({
                           ...prev,
                           nome_completo: formatarNome(busca)
@@ -212,9 +378,10 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
             </div>
           ) : (
             <div className="space-y-3">
+              {/* Dados Básicos */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
-                  <Label>Nome Completo</Label>
+                  <Label>Nome Completo *</Label>
                   <Input value={novoCliente.nome_completo} onChange={e => setNovoCliente({ ...novoCliente, nome_completo: e.target.value })} />
                 </div>
                 <div>
@@ -222,21 +389,32 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                   <Input value={novoCliente.cpf} onChange={e => setNovoCliente({ ...novoCliente, cpf: e.target.value })} placeholder="000.000.000-00" />
                 </div>
                 <div>
-                  <Label>Telefone</Label>
-                  <Input value={novoCliente.telefone} onChange={e => setNovoCliente({ ...novoCliente, telefone: e.target.value })} placeholder="(00) 00000-0000" />
-                </div>
-                <div>
-                  <Label>Data de Nascimento (Opcional)</Label>
+                  <Label>Data de Nascimento</Label>
                   <Input
                     type="date"
                     value={novoCliente.data_nascimento}
                     onChange={e => setNovoCliente({ ...novoCliente, data_nascimento: e.target.value })}
                   />
                 </div>
+                <div>
+                  <Label>Celular (WhatsApp) *</Label>
+                  <Input value={novoCliente.telefone} onChange={e => setNovoCliente({ ...novoCliente, telefone: e.target.value })} placeholder="(00) 00000-0000" />
+                </div>
+                <div>
+                  <Label>Celular Secundário</Label>
+                  <Input value={novoCliente.telefone_secundario} onChange={e => setNovoCliente({ ...novoCliente, telefone_secundario: e.target.value })} placeholder="(00) 00000-0000" />
+                </div>
+                <div>
+                  <Label>Telefone Fixo</Label>
+                  <Input value={novoCliente.telefone_fixo} onChange={e => setNovoCliente({ ...novoCliente, telefone_fixo: e.target.value })} placeholder="(00) 0000-0000" />
+                </div>
               </div>
 
+              {/* Endereço do Cliente */}
               <div className="border-t pt-3 mt-2">
-                <p className="text-xs font-semibold text-gray-500 mb-2">Endereço (Opcional)</p>
+                <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1">
+                  <MapPin className="w-3 h-3" /> Endereço do Cliente
+                </p>
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <Label className="text-xs">CEP</Label>
@@ -246,7 +424,7 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                         value={novoCliente.cep}
                         onChange={e => {
                           setNovoCliente({ ...novoCliente, cep: e.target.value });
-                          if (e.target.value.length >= 8) buscarCep(e.target.value);
+                          if (e.target.value.replace(/\D/g, '').length >= 8) buscarCep(e.target.value);
                         }}
                       />
                       {buscandoCep && <Loader2 className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 animate-spin" />}
@@ -261,8 +439,16 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                     <Input className="h-8 text-xs" value={novoCliente.numero} onChange={e => setNovoCliente({ ...novoCliente, numero: e.target.value })} />
                   </div>
                   <div>
+                    <Label className="text-xs">Complemento</Label>
+                    <Input className="h-8 text-xs" value={novoCliente.complemento} onChange={e => setNovoCliente({ ...novoCliente, complemento: e.target.value })} placeholder="Apt, Bloco..." />
+                  </div>
+                  <div>
                     <Label className="text-xs">Bairro</Label>
                     <Input className="h-8 text-xs" value={novoCliente.bairro} onChange={e => setNovoCliente({ ...novoCliente, bairro: e.target.value })} />
+                  </div>
+                  <div className="col-span-2">
+                    <Label className="text-xs">Ponto de Referência</Label>
+                    <Input className="h-8 text-xs" value={novoCliente.ponto_referencia} onChange={e => setNovoCliente({ ...novoCliente, ponto_referencia: e.target.value })} placeholder="Próximo ao mercado..." />
                   </div>
                   <div>
                     <Label className="text-xs">Cidade/UF</Label>
@@ -271,11 +457,105 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                 </div>
               </div>
 
+              {/* Endereço de Entrega */}
+              <div className="border-t pt-3 mt-2">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-gray-500 flex items-center gap-1">
+                    <Truck className="w-3 h-3" /> Endereço de Entrega
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 mb-2">
+                  <Checkbox
+                    id="usar_mesmo_pdv"
+                    checked={novoCliente.usar_mesmo_endereco}
+                    onCheckedChange={(checked) => {
+                      setNovoCliente(prev => ({
+                        ...prev,
+                        usar_mesmo_endereco: checked,
+                        ...(checked ? {
+                          endereco_entrega_cep: prev.cep,
+                          endereco_entrega_rua: prev.endereco,
+                          endereco_entrega_numero: prev.numero,
+                          endereco_entrega_complemento: prev.complemento,
+                          endereco_entrega_ponto_referencia: prev.ponto_referencia,
+                          endereco_entrega_bairro: prev.bairro,
+                          endereco_entrega_cidade: prev.cidade,
+                          endereco_entrega_estado: prev.estado,
+                        } : {})
+                      }));
+                    }}
+                  />
+                  <Label htmlFor="usar_mesmo_pdv" className="text-xs font-normal cursor-pointer">
+                    Usar mesmo endereço do cliente
+                  </Label>
+                </div>
+
+                {novoCliente.usar_mesmo_endereco ? (
+                  <div className="bg-gray-50 dark:bg-neutral-800 rounded p-2 text-xs text-gray-500">
+                    {novoCliente.endereco ? (
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-green-600" />
+                        {novoCliente.endereco}, {novoCliente.numero || 's/n'}
+                        {novoCliente.complemento && ` - ${novoCliente.complemento}`}
+                        {novoCliente.bairro && ` - ${novoCliente.bairro}`}
+                        {novoCliente.ponto_referencia && (
+                          <span className="text-orange-600 ml-1">(Ref: {novoCliente.ponto_referencia})</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="italic">Preencha o endereço do cliente acima</span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <Label className="text-xs">CEP</Label>
+                      <div className="relative">
+                        <Input
+                          className="h-8 text-xs"
+                          value={novoCliente.endereco_entrega_cep}
+                          onChange={e => {
+                            setNovoCliente({ ...novoCliente, endereco_entrega_cep: e.target.value });
+                            if (e.target.value.replace(/\D/g, '').length >= 8) buscarCep(e.target.value, true);
+                          }}
+                        />
+                        {buscandoCepEntrega && <Loader2 className="w-3 h-3 absolute right-2 top-1/2 -translate-y-1/2 animate-spin" />}
+                      </div>
+                    </div>
+                    <div className="col-span-2">
+                      <Label className="text-xs">Rua</Label>
+                      <Input className="h-8 text-xs" value={novoCliente.endereco_entrega_rua} onChange={e => setNovoCliente({ ...novoCliente, endereco_entrega_rua: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Número</Label>
+                      <Input className="h-8 text-xs" value={novoCliente.endereco_entrega_numero} onChange={e => setNovoCliente({ ...novoCliente, endereco_entrega_numero: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Complemento</Label>
+                      <Input className="h-8 text-xs" value={novoCliente.endereco_entrega_complemento} onChange={e => setNovoCliente({ ...novoCliente, endereco_entrega_complemento: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Bairro</Label>
+                      <Input className="h-8 text-xs" value={novoCliente.endereco_entrega_bairro} onChange={e => setNovoCliente({ ...novoCliente, endereco_entrega_bairro: e.target.value })} />
+                    </div>
+                    <div className="col-span-2">
+                      <Label className="text-xs">Ponto de Referência</Label>
+                      <Input className="h-8 text-xs" value={novoCliente.endereco_entrega_ponto_referencia} onChange={e => setNovoCliente({ ...novoCliente, endereco_entrega_ponto_referencia: e.target.value })} placeholder="Próximo ao mercado..." />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Cidade/UF</Label>
+                      <Input className="h-8 text-xs" value={novoCliente.endereco_entrega_cidade ? `${novoCliente.endereco_entrega_cidade}/${novoCliente.endereco_entrega_estado}` : ''} readOnly />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex gap-2 pt-2 justify-end">
-                <Button variant="ghost" onClick={() => setShowForm(false)}>Voltar</Button>
+                <Button variant="ghost" onClick={() => { setShowForm(false); resetNovoCliente(); }}>Voltar</Button>
                 <Button
                   onClick={() => criarClienteMutation.mutate(novoCliente)}
-                  disabled={!novoCliente.nome_completo || criarClienteMutation.isPending}
+                  disabled={!novoCliente.nome_completo || !novoCliente.telefone || criarClienteMutation.isPending}
                   className="bg-green-600 hover:bg-green-700 text-white"
                 >
                   {criarClienteMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
@@ -286,6 +566,14 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
           )}
         </DialogContent>
       </Dialog>
-    </div>
+
+      <ClienteModal
+        isOpen={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        onSave={handleSaveEditedCliente}
+        cliente={clienteSelecionado}
+        clientes={clientes}
+      />
+    </div >
   );
 }

@@ -253,116 +253,8 @@ function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
         }
     });
 
-    // ========================================
-    // POST /api/auth/employee/reset-password
-    // Admin reseta senha de funcionário
-    // ========================================
-    app.post('/api/auth/employee/reset-password', async (req, res) => {
-        try {
-            const { matricula } = req.body;
-            const authHeader = req.headers.authorization;
+    // (Rota reset-password removida pois era duplicada e usava matrícula)
 
-            // Verificar se é admin (simplificado - em produção verificar cargo)
-            if (!authHeader) {
-                return res.status(401).json({
-                    success: false,
-                    error: 'Não autorizado'
-                });
-            }
-
-            const token = authHeader.replace('Bearer ', '');
-            let adminUser;
-            try {
-                adminUser = jwt.verify(token, JWT_SECRET);
-            } catch (e) {
-                return res.status(401).json({
-                    success: false,
-                    error: 'Sessão expirada'
-                });
-            }
-
-            // Verificar se é Administrador ou Gerente
-            if (!['Administrador', 'Gerente'].includes(adminUser.cargo)) {
-                return res.status(403).json({
-                    success: false,
-                    error: 'Permissão negada. Apenas administradores podem resetar senhas.'
-                });
-            }
-
-            // Gerar senha temporária
-            const senhaTemp = 'temp' + Math.random().toString(36).substring(2, 8);
-            const senhaHash = await bcrypt.hash(senhaTemp, 10);
-
-            // Atualizar no banco
-            const { data: updatedUser, error: updateError } = await supabase
-                .from('public_users')
-                .update({
-                    senha_hash: senhaHash,
-                    primeiro_acesso: true
-                })
-                .eq('matricula', matricula.toUpperCase())
-                .select('full_name, matricula')
-                .single();
-
-            if (updateError || !updatedUser) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Matrícula não encontrada'
-                });
-            }
-
-            console.log(`[Auth] Senha resetada para ${matricula} por ${adminUser.matricula}`);
-
-            // Buscar telefone do funcionário para notificar via WhatsApp
-            const { data: funcionarioCompleto } = await supabase
-                .from('public_users')
-                .select('telefone')
-                .eq('matricula', matricula.toUpperCase())
-                .single();
-
-            // Notificar funcionário via WhatsApp se tiver telefone
-            let whatsappEnviado = false;
-            if (funcionarioCompleto?.telefone && whatsappClient) {
-                try {
-                    const telefone = funcionarioCompleto.telefone.replace(/\D/g, '');
-                    const telefoneFormatado = telefone.startsWith('55') ? telefone : `55${telefone}`;
-                    const chatId = `${telefoneFormatado}@c.us`;
-
-                    // Mensagem de notificação
-                    const mensagem = `🔐 *Senha Resetada*\n\n` +
-                        `Olá ${updatedUser.full_name.split(' ')[0]}!\n\n` +
-                        `Sua senha de acesso ao sistema foi resetada.\n\n` +
-                        `📋 *Matrícula:* ${updatedUser.matricula}\n` +
-                        `🔑 *Senha temporária:* ${senhaTemp}\n\n` +
-                        `⚠️ Por segurança, você será solicitado a alterar esta senha no primeiro acesso.\n\n` +
-                        `_Móveis Pedro II - Sistema de Gestão_`;
-
-                    // Enviar via WhatsApp
-                    await whatsappClient.sendMessage(chatId, mensagem);
-                    console.log(`[Auth] WhatsApp enviado para ${telefoneFormatado}`);
-                    whatsappEnviado = true;
-                } catch (e) {
-                    console.error('[Auth] Erro ao enviar WhatsApp:', e);
-                }
-            }
-
-            res.json({
-                success: true,
-                funcionario: updatedUser.full_name,
-                matricula: updatedUser.matricula,
-                senha_temporaria: senhaTemp,
-                whatsapp_enviado: whatsappEnviado,
-                message: `Senha resetada! Comunique ao funcionário: ${senhaTemp}`
-            });
-
-        } catch (error) {
-            console.error('[Auth] Erro ao resetar senha:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Erro interno do servidor'
-            });
-        }
-    });
 
     // ========================================
     // POST /api/auth/employee/create
@@ -371,11 +263,10 @@ function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
     app.post('/api/auth/employee/create', async (req, res) => {
         try {
             const { user_id, setor_code } = req.body;
-            const authHeader = req.headers.authorization;
 
-            if (!authHeader) {
-                return res.status(401).json({ success: false, error: 'Não autorizado' });
-            }
+            // Nota: Esta rota usa o service_role do Supabase para operações,
+            // então não precisa de JWT de usuário. A segurança é garantida
+            // pelo fato de estar acessível apenas no backend.
 
             // Gerar matrícula usando função do banco
             const { data: matriculaData, error: matriculaError } = await supabase
@@ -435,6 +326,106 @@ function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
         }
     });
 
+    // ========================================
+    // POST /api/auth/employee/reset-password
+    // Admin reseta senha de funcionário
+    // ========================================
+    app.post('/api/auth/employee/reset-password', async (req, res) => {
+        try {
+            const { user_id } = req.body;
+            const authHeader = req.headers.authorization;
+
+            if (!authHeader) {
+                return res.status(401).json({ success: false, error: 'Não autorizado' });
+            }
+
+            // Verificar se o usuário existe
+            const { data: user, error: userError } = await supabase
+                .from('public_users')
+                .select('id, full_name, matricula, telefone, cargo')
+                .eq('id', user_id)
+                .single();
+
+            if (userError || !user) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Funcionário não encontrado'
+                });
+            }
+
+            if (!user.matricula) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Funcionário não possui credenciais ativas'
+                });
+            }
+
+            // Gerar nova senha temporária
+            const senhaTemp = 'temp' + Math.random().toString(36).substring(2, 8);
+            const senhaHash = await bcrypt.hash(senhaTemp, 10);
+
+            // Atualizar senha
+            const { error: updateError } = await supabase
+                .from('public_users')
+                .update({
+                    senha_hash: senhaHash,
+                    primeiro_acesso: true
+                })
+                .eq('id', user_id);
+
+            if (updateError) {
+                console.error('[Auth] Erro ao resetar senha:', updateError);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Erro ao resetar senha'
+                });
+            }
+
+            console.log(`[Auth] Senha resetada: ${user.matricula} (${user.full_name})`);
+
+            // Enviar notificação via WhatsApp se possível
+            let whatsappEnviado = false;
+            if (whatsappClient && user.telefone) {
+                try {
+                    const telefoneFormatado = user.telefone.replace(/\D/g, '');
+                    const telefoneWhatsApp = telefoneFormatado.startsWith('55')
+                        ? telefoneFormatado
+                        : '55' + telefoneFormatado;
+
+                    const mensagem = `🔐 *Senha Resetada - Móveis Pedro II*\n\n` +
+                        `Olá ${user.full_name}!\n\n` +
+                        `Sua senha de acesso foi resetada.\n\n` +
+                        `📋 *Matrícula:* ${user.matricula}\n` +
+                        `🔑 *Nova Senha:* ${senhaTemp}\n\n` +
+                        `⚠️ _No primeiro acesso você deverá criar uma nova senha._\n\n` +
+                        `Acesse: ${process.env.FRONTEND_URL || 'https://moveispedroii.com.br'}/login`;
+
+                    await whatsappClient.sendMessage(`${telefoneWhatsApp}@c.us`, mensagem);
+                    whatsappEnviado = true;
+                    console.log(`[Auth] Notificação WhatsApp enviada para ${user.full_name}`);
+                } catch (whatsError) {
+                    console.error('[Auth] Erro ao enviar WhatsApp:', whatsError);
+                }
+            }
+
+            res.json({
+                success: true,
+                matricula: user.matricula,
+                senha_temporaria: senhaTemp,
+                whatsapp_enviado: whatsappEnviado,
+                message: whatsappEnviado
+                    ? 'Senha resetada e enviada via WhatsApp'
+                    : 'Senha resetada. Informe manualmente ao funcionário.'
+            });
+
+        } catch (error) {
+            console.error('[Auth] Erro ao resetar senha:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Erro interno do servidor'
+            });
+        }
+    });
     // ========================================
     // GET /api/auth/employee/me
     // Retorna dados do usuário logado

@@ -382,36 +382,63 @@ export async function gerarNotaPedidoBase64(venda, cliente, vendedor) {
 
     const htmlContent = gerarNotaPedidoHTML(venda, cliente, vendedor);
 
-    // Criar container temporário
+    // Criar container temporário 
     const container = document.createElement('div');
     container.innerHTML = htmlContent;
-    container.style.position = 'absolute';
-    container.style.left = '-9999px';
-    container.style.top = '-9999px';
-    document.body.appendChild(container);
 
-    // Configurações do PDF
+    // Estilos cruciais para o html2canvas capturar corretamente
+    // Posicionado no topo esquerdo mas invisível, para garantir que seja renderizado
+    container.style.position = 'absolute';
+    container.style.left = '0';
+    container.style.top = '0';
+    container.style.width = '210mm';
+    container.style.minHeight = '297mm';
+    container.style.backgroundColor = '#ffffff'; // Fundo branco explícito
+    container.style.color = '#000000'; // Texto preto explícito
+    container.style.zIndex = '-9999'; // Atrás de tudo
+    container.style.opacity = '0'; // Invisível
+    container.style.pointerEvents = 'none'; // Não interfere no clique
+
+    const appRoot = document.getElementById('root') || document.body;
+    appRoot.appendChild(container);
+
+    // Aguardar renderização e carregamento de imagens
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Configurações do PDF OTIMIZADAS
     const opt = {
-      margin: 10,
+      margin: [10, 10, 10, 10],
       filename: `Pedido_${venda.numero_pedido}.pdf`,
-      image: { type: 'jpeg', quality: 0.95 },
-      html2canvas: { scale: 2, useCORS: true, logging: false },
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        letterRendering: true,
+        scrollY: 0,
+        scrollX: 0,
+        windowWidth: 800,
+        backgroundColor: '#ffffff'
+      },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
 
     // Gerar PDF como blob
     const pdfBlob = await html2pdf().set(opt).from(container).outputPdf('blob');
 
-    // Remover container temporário
-    document.body.removeChild(container);
+    // Remover container
+    appRoot.removeChild(container);
 
     // Converter blob para base64
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
-        // Remove o prefixo "data:application/pdf;base64,"
-        const base64 = reader.result.split(',')[1];
-        resolve(base64);
+        // Verifica se o resultado é válido
+        if (reader.result) {
+          const base64 = reader.result.split(',')[1];
+          resolve(base64);
+        } else {
+          reject(new Error("Falha na conversão para Base64"));
+        }
       };
       reader.onerror = reject;
       reader.readAsDataURL(pdfBlob);

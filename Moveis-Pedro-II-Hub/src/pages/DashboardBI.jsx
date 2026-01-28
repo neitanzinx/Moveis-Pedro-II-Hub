@@ -56,6 +56,11 @@ export default function DashboardBI() {
         queryFn: () => base44.entities.Venda.list('-data_venda')
     });
 
+    const { data: users = [] } = useQuery({
+        queryKey: ['users-bi'],
+        queryFn: () => base44.entities.User.list()
+    });
+
     const { data: lancamentos = [] } = useQuery({
         queryKey: ['lancamentos-bi'],
         queryFn: () => base44.entities.LancamentoFinanceiro.list('-data_lancamento')
@@ -203,11 +208,20 @@ export default function DashboardBI() {
     const rankingVendedores = useMemo(() => {
         const agrupado = {};
         vendasFiltradas.forEach(v => {
-            // Usa responsavel_nome (PDV) ou vendedor_nome (legado)
-            const vendedor = v.responsavel_nome || v.vendedor_nome || 'Não informado';
-            if (!agrupado[vendedor]) agrupado[vendedor] = { nome: vendedor, total: 0, qtd: 0 };
-            agrupado[vendedor].total += v.valor_total || 0;
-            agrupado[vendedor].qtd++;
+            const vendedorId = v.responsavel_id;
+            let vendedorNome = v.responsavel_nome || v.vendedor_nome || 'Não informado';
+
+            // Tentar resolver nome pelo ID se possível
+            if (vendedorId) {
+                const userEncontrado = users.find(u => u.id === vendedorId);
+                if (userEncontrado && userEncontrado.full_name) {
+                    vendedorNome = userEncontrado.full_name;
+                }
+            }
+
+            if (!agrupado[vendedorNome]) agrupado[vendedorNome] = { nome: vendedorNome, total: 0, qtd: 0 };
+            agrupado[vendedorNome].total += v.valor_total || 0;
+            agrupado[vendedorNome].qtd++;
         });
         return Object.values(agrupado)
             .sort((a, b) => b.total - a.total)

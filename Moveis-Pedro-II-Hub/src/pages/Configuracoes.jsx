@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import React, { useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import { Building2, DollarSign, Truck, FileText, Users, Shield, AlertCircle, Image, Store, Percent, Calculator, Package, UserCheck, ClipboardList, ChevronRight, CreditCard, Sparkles, Bot, MessageCircle, Key } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import ConfiguracaoComissoes from "../components/configuracoes/ConfiguracaoComissoes";
@@ -11,13 +11,12 @@ import GestaoCargos from "../components/configuracoes/GestaoCargos";
 import ConfiguracaoNfe from "../components/configuracoes/ConfiguracaoNfe";
 import ConfiguracaoPrecificacao from "../components/configuracoes/ConfiguracaoPrecificacao";
 import ConfiguracaoMarkup from "../components/configuracoes/ConfiguracaoMarkup";
-import GerenciamentoUsuariosTab from "../components/users/UserManagementTab";
 import AuditLogPage from "./AuditLog";
 import ConfiguracaoPagSeguro from "../components/configuracoes/ConfiguracaoPagSeguro";
 import ConfiguracaoWhatsAppBot from "../components/configuracoes/ConfiguracaoWhatsAppBot";
 import ConfiguracaoStone from "../components/configuracoes/ConfiguracaoStone";
 import ConfiguracaoIntegracoes from "../components/configuracoes/ConfiguracaoIntegracoes";
-import { useQuery } from "@tanstack/react-query";
+import GestaoFuncionarios from "../components/configuracoes/GestaoFuncionarios";
 
 const MENU_CONFIG = {
   empresa: {
@@ -78,8 +77,8 @@ const MENU_CONFIG = {
     label: "Equipe",
     icon: Users,
     items: [
-      { id: "usuarios", label: "Usuarios", icon: Users },
-      { id: "cargos", label: "Cargos", icon: Shield },
+      { id: "funcionarios", label: "Funcionários", icon: Users },
+      { id: "cargos", label: "Perfis de Acesso", icon: Shield },
     ]
   },
   seguranca: {
@@ -92,29 +91,9 @@ const MENU_CONFIG = {
 };
 
 export default function Configuracoes() {
-  const [user, setUser] = useState(null);
+  const { user, loading } = useAuth();
   const [activeCategory, setActiveCategory] = useState("empresa");
   const [activeItem, setActiveItem] = useState("logo");
-
-  useEffect(() => {
-    let mounted = true;
-    const loadUser = async () => {
-      try {
-        const currentUser = await base44.auth.me();
-        if (mounted) setUser(currentUser);
-      } catch (error) {
-        console.error("Erro ao carregar usuário:", error);
-      }
-    };
-    loadUser();
-    return () => { mounted = false; };
-  }, []);
-
-  const { data: users, isLoading: isLoadingUsers } = useQuery({
-    queryKey: ['users'],
-    queryFn: () => base44.entities.User.list('-created_date'),
-    enabled: !!user && user.cargo === 'Administrador',
-  });
 
   // Ao mudar categoria, seleciona o primeiro item
   const handleCategoryChange = (category) => {
@@ -122,7 +101,7 @@ export default function Configuracoes() {
     setActiveItem(MENU_CONFIG[category].items[0].id);
   };
 
-  if (!user) {
+  if (loading || !user) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: '#07593f' }} />
@@ -163,13 +142,7 @@ export default function Configuracoes() {
       case "pagseguro": return <ConfiguracaoPagSeguro />;
       case "stone": return <ConfiguracaoStone />;
       case "apis": return <ConfiguracaoIntegracoes />;
-      case "usuarios": return (
-        <GerenciamentoUsuariosTab
-          users={users}
-          isLoading={isLoadingUsers}
-          currentUser={user}
-        />
-      );
+      case "funcionarios": return <GestaoFuncionarios currentUser={user} />;
       case "cargos": return <GestaoCargos />;
       case "auditoria": return <AuditLogPage />;
       default: return null;
