@@ -10,6 +10,7 @@ import { base44, supabase } from "@/api/base44Client";
 import { Check, X, Merge, Search, AlertCircle, Loader2, PackagePlus } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
 
 export default function SolicitacoesCadastroWidget() {
     const queryClient = useQueryClient();
@@ -18,6 +19,11 @@ export default function SolicitacoesCadastroWidget() {
     const [targetProductSearch, setTargetProductSearch] = useState("");
     const [targetProducts, setTargetProducts] = useState([]);
     const [selectedTargetProduct, setSelectedTargetProduct] = useState(null);
+
+    // Full Registration Modal State
+    const [fullRegistrationModalOpen, setFullRegistrationModalOpen] = useState(false);
+    const [selectedRequestForRegistration, setSelectedRequestForRegistration] = useState(null);
+    const [isSavingFullProduct, setIsSavingFullProduct] = useState(false);
 
     // Fetch pending requests
     const { data: solicitacoes = [], isLoading } = useQuery({
@@ -34,31 +40,13 @@ export default function SolicitacoesCadastroWidget() {
     });
 
     // Action: Create New Product from Request
-    const createProductMutation = useMutation({
-        mutationFn: async (request) => {
-            // 1. Create the product - only use columns that exist in the 'produtos' table
-            const descricaoCompleta = [
-                'Cadastrado via solicitação de cadastro.',
-                request.cor ? `Cor: ${request.cor}` : null,
-                request.tecido ? `Tecido: ${request.tecido}` : null,
-                request.medidas ? `Medidas: ${request.medidas}` : null,
-                request.observacoes ? `Obs: ${request.observacoes}` : null
-            ].filter(Boolean).join(' | ');
+    // Action: Create New Product (Full Registration)
+    const createFullProductMutation = useMutation({
+        mutationFn: async ({ productData, originalRequestId }) => {
+            // 1. Create the product using the standard entity method (consistent with Produtos.jsx)
+            const newProd = await base44.entities.Produto.create(productData);
 
-            const { data: newProd, error: createError } = await supabase
-                .from('produtos')
-                .insert({
-                    nome: request.nome_produto,
-                    descricao: descricaoCompleta,
-                    preco_venda: request.preco_sugerido || 0,
-                    categoria: 'Geral',
-                    quantidade_estoque: 0,
-                    ativo: true
-                })
-                .select()
-                .single();
-
-            if (createError) throw createError;
+            if (!newProd?.id) throw new Error("Falha ao receber ID do produto criado.");
 
             // 2. Update request status
             const { error: updateError } = await supabase
@@ -67,7 +55,7 @@ export default function SolicitacoesCadastroWidget() {
                     status: 'aprovado',
                     produto_gerado_id: newProd.id
                 })
-                .eq('id', request.id);
+                .eq('id', originalRequestId);
 
             if (updateError) throw updateError;
 
@@ -77,10 +65,75 @@ export default function SolicitacoesCadastroWidget() {
             toast.success("Produto cadastrado com sucesso!");
             queryClient.invalidateQueries({ queryKey: ['solicitacoes_cadastro'] });
             queryClient.invalidateQueries({ queryKey: ['produtos'] });
-            setSelectedRequest(null);
+            setFullRegistrationModalOpen(false);
+            setSelectedRequestForRegistration(null);
         },
         onError: (err) => toast.error("Erro ao cadastrar: " + err.message)
     });
+
+    const handleOpenRegistration = (req) => {
+        // Helper to extract value from "Key: Value" lines in observacoes
+        const extractVal = (key) => {
+            const regex = new RegExp(`${key}:\\s*(.+)`, 'i');
+            const match = req.observacoes?.match(regex);
+            return match ? match[1].trim() : null;
+        };
+
+        // Parse Dimensions from "A:100cm x L:200cm x P:50cm" or similar
+        // Or from the legacy 'medidas' field if available and matching pattern
+        let altura = '', largura = '', profundidade = '';
+        const medidasStr = extractVal('Dimensões') || req.medidas || '';
+
+        if (medidasStr) {
+            const altMatch = medidasStr.match(/A:(\d+(?:\.\d+)?)/i);
+            const largMatch = medidasStr.match(/L:(\d+(?:\.\d+)?)/i);
+            const profMatch = medidasStr.match(/P:(\d+(?:\.\d+)?)/i);
+            if (altMatch) altura = altMatch[1];
+            if (largMatch) largura = largMatch[1];
+            if (profMatch) profundidade = profMatch[1];
+        }
+
+        const productPreData = {
+            nome: req.nome_produto,
+            categoria: extractVal('Categoria') || '',
+            ambiente: extractVal('Ambiente') || '',
+            // Fornecedor logic might need ID vs Name check, but Product Modal handles text search or ID matching often if implemented well. 
+            // Looking at ProdutoCadastroCompleto, it takes fornecedor_id. 
+            // We only have the Name in the text usually, unless I saved ID. 
+            // In SolicitacaoCadastroModal I saved Name in text... wait, I extracted name from ID list.
+            // But I can try to pass 'fornecedor_nome' if the modal supported it, or just let user select.
+            // Actually, I can try to extract 'Fornecedor' name.
+            fornecedor_nome: extractVal('Fornecedor') || '',
+
+            material: extractVal('Material') || '',
+            altura,
+            largura,
+            profundidade,
+
+            descricao: [
+                req.observacoes || '', // The full text includes the technical details, which is fine to keep as history
+            ].filter(Boolean).join('\n'),
+
+            preco_venda: req.preco_sugerido || 0,
+            ativo: true
+        };
+        setSelectedRequestForRegistration({ ...req, preData: productPreData });
+        setFullRegistrationModalOpen(true);
+    };
+
+    const handleSaveFullProduct = (data) => {
+        if (!selectedRequestForRegistration) return;
+        setIsSavingFullProduct(true);
+        createFullProductMutation.mutate(
+            {
+                productData: data,
+                originalRequestId: selectedRequestForRegistration.id
+            },
+            {
+                onSettled: () => setIsSavingFullProduct(false)
+            }
+        );
+    };
 
     // Action: Merge with Existing Product
     const mergeProductMutation = useMutation({
@@ -208,8 +261,7 @@ export default function SolicitacoesCadastroWidget() {
                                     <Button
                                         size="sm"
                                         className="flex-1 bg-green-600 hover:bg-green-700 h-8 text-xs"
-                                        onClick={() => createProductMutation.mutate(req)}
-                                        disabled={createProductMutation.isPending}
+                                        onClick={() => handleOpenRegistration(req)}
                                     >
                                         <Check className="w-3 h-3 mr-1" /> Criar Produto
                                     </Button>
@@ -280,6 +332,17 @@ export default function SolicitacoesCadastroWidget() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Modal de Cadastro Completo */}
+            {fullRegistrationModalOpen && selectedRequestForRegistration && (
+                <ProdutoCadastroCompleto
+                    isOpen={fullRegistrationModalOpen}
+                    onClose={() => setFullRegistrationModalOpen(false)}
+                    onSave={handleSaveFullProduct}
+                    produto={selectedRequestForRegistration.preData}
+                    isLoading={isSavingFullProduct}
+                />
+            )}
         </Card>
     );
 }

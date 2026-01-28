@@ -533,24 +533,82 @@ export default function PainelPagamento({
                   </div>
 
                   {/* Slider de desconto - só mostra se permissão é DESCONTO ou ALTERACAO_PRECO */}
+                  {/* Slider de desconto - só mostra se permissão é DESCONTO ou ALTERACAO_PRECO */}
                   {(tokenGerencial.permissao === 'DESCONTO' || tokenGerencial.permissao === 'ALTERACAO_PRECO') && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-amber-700 dark:text-amber-400">Desconto Gerencial</span>
-                        <span className="font-bold text-amber-800 dark:text-amber-300">
-                          {descontoPercent}% = R$ {((valores.subtotal * descontoPercent) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        <span className="text-amber-700 dark:text-amber-400 font-medium">Desconto Autorizado</span>
+                        <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
+                          Máx: {tokenGerencial.valor_limite || 30}%
                         </span>
                       </div>
+
+                      <div className="flex gap-2 items-center">
+                        {/* Input Porcentagem */}
+                        <div className="relative flex-1">
+                          <Input
+                            type="number"
+                            value={descontoPercent}
+                            onChange={(e) => {
+                              let val = parseFloat(e.target.value);
+                              if (isNaN(val)) val = 0;
+                              const max = tokenGerencial.valor_limite || 30;
+                              if (val > max) val = max;
+                              if (val < 0) val = 0;
+                              setDescontoPercent(val);
+                            }}
+                            className="h-8 text-xs pr-6"
+                            placeholder="0"
+                          />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">%</span>
+                        </div>
+
+                        {/* Input Valor (R$) */}
+                        <div className="relative flex-[1.5]">
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">R$</span>
+                          <Input
+                            type="number"
+                            value={desconto > 0 ? desconto.toFixed(2) : ''}
+                            onChange={(e) => {
+                              let valR = parseFloat(e.target.value);
+                              if (isNaN(valR)) valR = 0;
+
+                              // Calcula a porcentagem equivalente
+                              let newPercent = (valR / valores.subtotal) * 100;
+                              const maxPercent = tokenGerencial.valor_limite || 30;
+
+                              if (newPercent > maxPercent) {
+                                // Se passar do limite, trava no limite
+                                newPercent = maxPercent;
+                                valR = (valores.subtotal * maxPercent) / 100;
+                                toast.error(`Limite de <span>${maxPercent}%</span> atingido.`);
+                              }
+
+                              setDescontoPercent(newPercent);
+                              // Nota: o useEffect [descontoPercent] vai atualizar o 'desconto' novamente, 
+                              // mas para digitação suave, talvez precisemos de um estado local ou controle melhor.
+                              // Porém, como o useEffect depende do descontoPercent, atualizar ele deve ser suficiente
+                              // se não houver arredondamentos conflituosos loopando.
+                              setDesconto(valR);
+                            }}
+                            className="h-8 text-xs pl-6"
+                            placeholder="0,00"
+                          />
+                        </div>
+                      </div>
+
                       <Slider
                         value={[descontoPercent]}
                         onValueChange={([v]) => setDescontoPercent(v)}
                         max={tokenGerencial.valor_limite || 30}
-                        step={1}
+                        step={0.1} // Permitir frações para ajustes finos de valor
                         className="w-full"
                       />
-                      <div className="flex justify-between text-[10px] text-amber-600">
-                        <span>0%</span>
-                        <span>Máx: {tokenGerencial.valor_limite || 30}%</span>
+
+                      <div className="text-center">
+                        <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                          Total Desconto: R$ {desconto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </p>
                       </div>
                     </div>
                   )}
