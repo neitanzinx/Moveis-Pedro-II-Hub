@@ -1138,21 +1138,8 @@ require('./cron-aniversarios');
 require('./cron-montagens');
 
 client.initialize();
-// 🏗️ CATCH-ALL MIDDLEWARE (React Router)
-// Return index.html for any unknown route so React handles routing
-app.use((req, res, next) => {
-    // Skip API routes - let them fall through to 404 handler
-    if (req.path.startsWith('/whatsapp') || req.path.startsWith('/nfe-xml') || req.path.startsWith('/buscar') || req.path.startsWith('/enviar') || req.path.startsWith('/api')) {
-        return next();
-    }
-    const indexPath = path.join(distPath, 'index.html');
-    const fs = require('fs');
-    if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
-    } else {
-        next(); // Fallback to error handler or 404
-    }
-});
+// 🏗️ CATCH-ALL MIDDLEWARE MOVED TO END
+
 
 // --- GLOBAL ERROR HANDLER ---
 app.use((err, req, res, next) => {
@@ -1233,6 +1220,23 @@ app.post('/concluir-entrega', async (req, res) => {
     } catch (e) {
         console.error("Erro ao concluir entrega:", e.message);
         res.status(500).json({ error: e.message });
+    }
+});
+
+// 🏗️ CATCH-ALL MIDDLEWARE (React Router)
+// Return index.html for any unknown route so React handles routing
+// MOVED TO END: Must be after all API routes to avoid intercepting them
+app.use((req, res, next) => {
+    // Skip API routes - let them fall through to 404 handler
+    if (req.path.startsWith('/whatsapp') || req.path.startsWith('/nfe-xml') || req.path.startsWith('/buscar') || req.path.startsWith('/enviar') || req.path.startsWith('/api')) {
+        return next();
+    }
+    const indexPath = path.join(distPath, 'index.html');
+    const fs = require('fs');
+    if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+    } else {
+        next(); // Fallback to error handler or 404
     }
 });
 
