@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
 import { useTenant, useLojas } from '@/contexts/TenantContext';
+import { useAuth } from '@/hooks/useAuth';
 import {
     Dialog,
     DialogContent,
@@ -71,6 +72,7 @@ const STEPS = [
 // Estado inicial do formulário
 const INITIAL_FORM_DATA = {
     nome: '',
+    modelo_referencia: '',
     categoria: '',
     ambiente: '',
     fornecedor_id: '',
@@ -88,7 +90,7 @@ const INITIAL_FORM_DATA = {
     altura_embalagem: '',
     largura_embalagem: '',
     profundidade_embalagem: '',
-    // Preços base (usados para item único ou como template para variações)
+    // Preços
     preco_custo: '',
     preco_custo_tabela: '', // Preço fixo do fornecedor (tabela)
     preco_custo_promocional: '', // Preço quando comprado em promoção
@@ -97,18 +99,22 @@ const INITIAL_FORM_DATA = {
     promocao_observacao: '', // Observação da promoção
     tem_promocao: false, // Toggle para ativar seção promocional
     preco_venda: '',
-    // Dimensões base (para item único)
+    // Dimensões do produto
     largura: '',
     altura: '',
     profundidade: '',
+    // Cor do produto (único, sem variações)
+    cor: '',
+    cor_hex: '',
+    // Estoque
     quantidade_estoque: '',
     estoque_minimo: '5',
-    variacoes: [],
+    estoque_ideal: '10',
     fotos: [],
     codigo_barras: '',
     ativo: true,
-    temVariacoes: false,
 };
+
 
 export default function ProdutoCadastroCompleto({
     isOpen,
@@ -129,6 +135,8 @@ export default function ProdutoCadastroCompleto({
     // Multi-Tenant: Carrega lojas dinâmicas e configurações
     const { lojas } = useLojas();
     const { settings, organization } = useTenant();
+    const { user } = useAuth();
+    const showFinancials = user?.cargo === 'Administrador';
 
     // Busca dados necessários
     const { data: fornecedores } = useQuery({
@@ -147,6 +155,7 @@ export default function ProdutoCadastroCompleto({
             setFormData({
                 ...INITIAL_FORM_DATA,
                 ...produto,
+                modelo_referencia: produto.modelo_referencia || '',
                 preco_custo: produto.preco_custo?.toString() || '',
                 preco_custo_tabela: produto.preco_custo_tabela?.toString() || produto.preco_custo?.toString() || '',
                 preco_custo_promocional: '', // Ignora valor do banco
@@ -277,58 +286,6 @@ export default function ProdutoCadastroCompleto({
         }));
     };
 
-    // Adiciona variação com dimensões - AGORA com estoque dinâmico por loja
-    const handleAddVariacao = () => {
-        // Cria objeto de estoque dinâmico baseado nas lojas cadastradas
-        const estoquePorLoja = {};
-        lojas.forEach(loja => {
-            estoquePorLoja[`estoque_${loja.codigo.toLowerCase().replace(/\s+/g, '_')}`] = '';
-        });
-
-        const novaVariacao = {
-            id: Date.now().toString(),
-            nome: '', // Nome descritivo da variação (ex: "Cinza 180cm")
-            cor: '',
-            cor_hex: '#CCCCCC',
-            tamanho: '',
-            // Dimensões por variação
-            largura: formData.largura || '',
-            altura: formData.altura || '',
-            profundidade: formData.profundidade || '',
-            // Preço
-            preco_custo: formData.preco_custo || '',
-            preco_venda: formData.preco_venda || '',
-            // Estoque dinâmico por loja (gerado automaticamente)
-            ...estoquePorLoja,
-            estoque_cd: '', // Centro de distribuição sempre presente
-            // Fotos da variação
-            fotos: [],
-        };
-        setFormData(prev => ({
-            ...prev,
-            variacoes: [...prev.variacoes, novaVariacao]
-        }));
-        setExpandedVariacao(novaVariacao.id);
-    };
-
-    // Atualiza variação
-    const handleUpdateVariacao = (index, field, value) => {
-        setFormData(prev => ({
-            ...prev,
-            variacoes: prev.variacoes.map((v, i) =>
-                i === index ? { ...v, [field]: value } : v
-            )
-        }));
-    };
-
-    // Remove variação
-    const handleRemoveVariacao = (index) => {
-        setFormData(prev => ({
-            ...prev,
-            variacoes: prev.variacoes.filter((_, i) => i !== index)
-        }));
-    };
-
     // Valida step atual
     const validateCurrentStep = () => {
         const newErrors = {};
@@ -343,32 +300,17 @@ export default function ProdutoCadastroCompleto({
         }
 
         if (currentStep === 2) {
-            if (formData.temVariacoes) {
-                if (formData.variacoes.length === 0) {
-                    newErrors.variacoes = 'Adicione pelo menos uma variação';
-                } else {
-                    const semIdentificacao = formData.variacoes.some(v =>
-                        (!v.cor || v.cor.trim() === '') && (!v.tamanho || v.tamanho.trim() === '')
-                    );
-                    if (semIdentificacao) {
-                        newErrors.variacoes = 'Cada variação precisa de cor ou tamanho';
-                    }
-                    const semPreco = formData.variacoes.some(v => !v.preco_venda || parseFloat(v.preco_venda) <= 0);
-                    if (semPreco) {
-                        newErrors.variacoes = 'Todas as variações precisam ter preço de venda';
-                    }
-                }
-            } else {
-                const precoVenda = parseFloat(formData.preco_venda);
-                if (!precoVenda || precoVenda <= 0) {
-                    newErrors.preco_venda = 'Preço de venda deve ser maior que zero';
-                }
+            // Validação para produto único
+            const precoVenda = parseFloat(formData.preco_venda);
+            if (!precoVenda || precoVenda <= 0) {
+                newErrors.preco_venda = 'Preço de venda deve ser maior que zero';
             }
         }
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
+
 
     // Navega entre steps
     const handleNext = () => {
@@ -400,24 +342,11 @@ export default function ProdutoCadastroCompleto({
         let altura = formData.altura ? parseFloat(formData.altura) : null;
         let profundidade = formData.profundidade ? parseFloat(formData.profundidade) : null;
 
-        if (formData.temVariacoes && formData.variacoes.length > 0) {
-            estoqueTotal = formData.variacoes.reduce((sum, v) => sum + (parseInt(v.estoque) || 0), 0);
-            // Pega o menor preço de venda das variações
-            const precos = formData.variacoes.map(v => parseFloat(v.preco_venda) || 0).filter(p => p > 0);
-            if (precos.length > 0) {
-                precoVenda = Math.min(...precos);
-            }
-            // Pega dimensões da primeira variação como referência
-            const primeiraVariacao = formData.variacoes[0];
-            if (primeiraVariacao) {
-                largura = primeiraVariacao.largura ? parseFloat(primeiraVariacao.largura) : null;
-                altura = primeiraVariacao.altura ? parseFloat(primeiraVariacao.altura) : null;
-                profundidade = primeiraVariacao.profundidade ? parseFloat(primeiraVariacao.profundidade) : null;
-            }
-        }
+
 
         const dataToSave = {
             nome: normalizeProductName(formData.nome),
+            modelo_referencia: formData.modelo_referencia || null,
             categoria: formData.categoria,
             ambiente: formData.ambiente || null,
             fornecedor_id: formData.fornecedor_id || null,
@@ -442,22 +371,16 @@ export default function ProdutoCadastroCompleto({
             preco_venda: precoVenda,
             quantidade_estoque: estoqueTotal,
             estoque_minimo: parseInt(formData.estoque_minimo) || 5,
-            variacoes: formData.temVariacoes ? formData.variacoes : [],
+            estoque_ideal: parseInt(formData.estoque_ideal) || 10,
+            cor: formData.cor || null,
+            cor_hex: formData.cor_hex || null,
+            variacoes: [], // Sempre vazio agora
             fotos: formData.fotos,
             codigo_barras: formData.codigo_barras || null,
             ativo: formData.ativo,
         };
 
         onSave(dataToSave);
-    };
-
-    // Gera nome da variação
-    const getVariacaoDisplayName = (v) => {
-        const parts = [];
-        if (v.cor) parts.push(v.cor);
-        if (v.tamanho) parts.push(v.tamanho);
-        if (v.largura && v.altura) parts.push(`${v.largura}x${v.altura}cm`);
-        return parts.join(' - ') || 'Nova variação';
     };
 
     return (
@@ -549,6 +472,17 @@ export default function ProdutoCadastroCompleto({
                                                 </AlertDescription>
                                             </Alert>
                                         )}
+                                    </div>
+
+                                    {/* Modelo / Referência */}
+                                    <div className="md:col-span-2">
+                                        <Label htmlFor="modelo_referencia">Modelo / Referência</Label>
+                                        <Input
+                                            id="modelo_referencia"
+                                            value={formData.modelo_referencia}
+                                            onChange={(e) => handleChange('modelo_referencia', e.target.value)}
+                                            placeholder="Ex: REF-1234, Premium, etc"
+                                        />
                                     </div>
 
                                     {/* Ambiente */}
@@ -778,513 +712,147 @@ export default function ProdutoCadastroCompleto({
                             </div>
                         )}
 
-                        {/* PASSO 2: Variações e Preço */}
+                        {/* PASSO 2: Detalhes do Produto */}
                         {currentStep === 2 && (
                             <div className="space-y-6">
                                 <div className="text-center mb-6">
-                                    <h3 className="text-lg font-semibold text-gray-900">Variações e Preço</h3>
-                                    <p className="text-sm text-gray-500">Configure as opções do produto</p>
+                                    <h3 className="text-lg font-semibold text-gray-900">Detalhes do Produto</h3>
+                                    <p className="text-sm text-gray-500">Cores, dimensões e valores</p>
                                 </div>
 
-                                {/* Pergunta: Tem variações? */}
-                                <Card className="border-2">
-                                    <CardContent className="p-6">
-                                        <div className="text-center mb-4">
-                                            <h4 className="font-medium text-gray-900">
-                                                Este produto possui variações de cor, tamanho ou acabamento?
-                                            </h4>
-                                            <p className="text-sm text-gray-500 mt-1">
-                                                Ex: Sofá disponível em Cinza e Bege, ou Mesa em 4 e 6 lugares
-                                            </p>
-                                        </div>
-                                        <div className="flex justify-center gap-4">
-                                            <Button
-                                                type="button"
-                                                variant={formData.temVariacoes ? "default" : "outline"}
-                                                onClick={() => handleChange('temVariacoes', true)}
-                                                className={cn(
-                                                    "w-40",
-                                                    formData.temVariacoes && "bg-green-600 hover:bg-green-700"
-                                                )}
-                                            >
-                                                <Check className="w-4 h-4 mr-2" />
-                                                Sim, tem variações
-                                            </Button>
-                                            <Button
-                                                type="button"
-                                                variant={!formData.temVariacoes ? "default" : "outline"}
-                                                onClick={() => handleChange('temVariacoes', false)}
-                                                className={cn(
-                                                    "w-40",
-                                                    !formData.temVariacoes && "bg-green-600 hover:bg-green-700"
-                                                )}
-                                            >
-                                                <X className="w-4 h-4 mr-2" />
-                                                Não, item único
-                                            </Button>
-                                        </div>
+                                {/* Cor e Acabamento */}
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle className="text-base flex items-center gap-2">
+                                            <Palette className="w-4 h-4" />
+                                            Cor e Acabamento
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <FurnitureColorPicker
+                                            value={formData.cor}
+                                            hexValue={formData.cor_hex}
+                                            onChange={(val) => handleChange('cor', val)}
+                                            onHexChange={(hex) => handleChange('cor_hex', hex)}
+                                            placeholder="Selecione ou digite a cor principal"
+                                        />
                                     </CardContent>
                                 </Card>
 
-                                {/* Se TEM variações */}
-                                {formData.temVariacoes && (
-                                    <div className="space-y-4">
-                                        {/* Preço Base */}
-                                        <Card className="bg-gray-50 border-dashed">
-                                            <CardContent className="p-4">
-                                                <Label className="text-sm text-gray-600 mb-2 block">
-                                                    Preço base (aplicado automaticamente às novas variações)
-                                                </Label>
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div>
-                                                        <Label className="text-xs text-gray-500">Custo Base</Label>
-                                                        <Input
-                                                            type="number"
-                                                            step="0.01"
-                                                            value={formData.preco_custo}
-                                                            onChange={(e) => handleChange('preco_custo', e.target.value)}
-                                                            placeholder="R$ 0,00"
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <Label className="text-xs text-gray-500">Venda Base</Label>
-                                                        <Input
-                                                            type="number"
-                                                            step="0.01"
-                                                            value={formData.preco_venda}
-                                                            onChange={(e) => handleChange('preco_venda', e.target.value)}
-                                                            placeholder="R$ 0,00"
-                                                        />
-                                                    </div>
+                                <div className="grid md:grid-cols-2 gap-6">
+                                    {/* Dimensões */}
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle className="text-base flex items-center gap-2">
+                                                <Ruler className="w-4 h-4" />
+                                                Dimensões
+                                            </CardTitle>
+                                        </CardHeader>
+                                        <CardContent className="space-y-4">
+                                            <div className="space-y-3">
+                                                <div>
+                                                    <Label>Largura (cm)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        value={formData.largura}
+                                                        onChange={(e) => handleChange('largura', e.target.value)}
+                                                        placeholder="Ex: 180"
+                                                    />
                                                 </div>
-                                                {formData.variacoes.length > 0 && (formData.preco_custo || formData.preco_venda) && (
+                                                <div>
+                                                    <Label>Altura (cm)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        value={formData.altura}
+                                                        onChange={(e) => handleChange('altura', e.target.value)}
+                                                        placeholder="Ex: 90"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <Label>Profundidade (cm)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        value={formData.profundidade}
+                                                        onChange={(e) => handleChange('profundidade', e.target.value)}
+                                                        placeholder="Ex: 85"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+
+                                    {/* Preços e Estoque */}
+                                    <Card className="border-green-200">
+                                        <CardHeader>
+                                            <CardTitle className="text-base flex items-center gap-2">
+                                                <DollarSign className="w-4 h-4 text-green-600" />
+                                                Preços e Estoque
+                                            </CardTitle>
+                                        </CardHeader>
+                                        <CardContent className="space-y-4">
+                                            {showFinancials && (
+                                                <div>
+                                                    <Label className="flex items-center gap-2">
+                                                        Preço de Custo
+                                                        <span className="text-xs text-gray-500 font-normal">(Tabela)</span>
+                                                    </Label>
+                                                    <Input
+                                                        type="number"
+                                                        step="0.01"
+                                                        value={formData.preco_custo_tabela}
+                                                        onChange={(e) => handleChange('preco_custo_tabela', e.target.value)}
+                                                        placeholder="R$ 0,00"
+                                                    />
+                                                </div>
+                                            )}
+
+                                            <div>
+                                                <Label>Preço de Venda *</Label>
+                                                <Input
+                                                    type="number"
+                                                    step="0.01"
+                                                    value={formData.preco_venda}
+                                                    onChange={(e) => handleChange('preco_venda', e.target.value)}
+                                                    placeholder="R$ 0,00"
+                                                    className={cn(errors.preco_venda && 'border-red-500')}
+                                                />
+                                                {errors.preco_venda && <p className="text-xs text-red-500 mt-1">{errors.preco_venda}</p>}
+                                                {suggestedPrice > 0 && showFinancials && (
                                                     <Button
                                                         type="button"
-                                                        variant="outline"
+                                                        variant="ghost"
                                                         size="sm"
-                                                        className="mt-3 w-full text-green-600 border-green-300 hover:bg-green-50"
-                                                        onClick={() => {
-                                                            setFormData(prev => ({
-                                                                ...prev,
-                                                                variacoes: prev.variacoes.map(v => ({
-                                                                    ...v,
-                                                                    preco_custo: prev.preco_custo || v.preco_custo,
-                                                                    preco_venda: prev.preco_venda || v.preco_venda
-                                                                }))
-                                                            }));
-                                                            toast.success('Preço base aplicado a todas as variações');
-                                                        }}
+                                                        onClick={applySuggestedMarkup}
+                                                        className="mt-1 h-auto py-1 text-green-600 hover:text-green-700 text-xs"
                                                     >
-                                                        Aplicar preço base a todas as variações
+                                                        Sugestão: R$ {suggestedPrice.toFixed(2)}
                                                     </Button>
                                                 )}
-                                            </CardContent>
-                                        </Card>
-
-                                        <div className="flex justify-between items-center">
-                                            <Label className="text-base font-semibold">Variações do Produto</Label>
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={handleAddVariacao}
-                                                className="gap-2"
-                                            >
-                                                <Plus className="w-4 h-4" />
-                                                Adicionar Variação
-                                            </Button>
-                                        </div>
-
-                                        {errors.variacoes && (
-                                            <Alert className="border-red-200 bg-red-50">
-                                                <AlertTriangle className="h-4 w-4 text-red-600" />
-                                                <AlertDescription className="text-red-800">
-                                                    {errors.variacoes}
-                                                </AlertDescription>
-                                            </Alert>
-                                        )}
-
-                                        {formData.variacoes.length === 0 ? (
-                                            <Card className="border-dashed">
-                                                <CardContent className="p-8 text-center text-gray-500">
-                                                    <Palette className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                                                    <p>Nenhuma variação adicionada</p>
-                                                    <p className="text-sm">Clique em "Adicionar Variação" para começar</p>
-                                                </CardContent>
-                                            </Card>
-                                        ) : (
-                                            <div className="space-y-3">
-                                                {formData.variacoes.map((variacao, index) => (
-                                                    <Card key={variacao.id} className="border">
-                                                        <CardContent className="p-0">
-                                                            {/* Header da variação - sempre visível */}
-                                                            <div
-                                                                className="p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-50"
-                                                                onClick={() => setExpandedVariacao(
-                                                                    expandedVariacao === variacao.id ? null : variacao.id
-                                                                )}
-                                                            >
-                                                                {/* Foto ou cor da variação */}
-                                                                {variacao.fotos && variacao.fotos.length > 0 ? (
-                                                                    <img
-                                                                        src={variacao.fotos[0]}
-                                                                        alt={variacao.cor || 'Variação'}
-                                                                        className="w-10 h-10 rounded object-cover border shadow-sm"
-                                                                        onClick={(e) => e.stopPropagation()}
-                                                                    />
-                                                                ) : (
-                                                                    <div
-                                                                        className="w-10 h-10 rounded border-2 shadow-sm flex items-center justify-center"
-                                                                        style={{ backgroundColor: variacao.cor_hex || getColorHex(variacao.cor) || '#CCCCCC' }}
-                                                                        onClick={(e) => e.stopPropagation()}
-                                                                    >
-                                                                        <ImageIcon className="w-4 h-4 text-white/50" />
-                                                                    </div>
-                                                                )}
-                                                                <span className="flex-1 font-medium">
-                                                                    {getVariacaoDisplayName(variacao)}
-                                                                </span>
-                                                                {variacao.fotos?.length > 0 && (
-                                                                    <Badge variant="secondary" className="text-xs">
-                                                                        {variacao.fotos.length} foto{variacao.fotos.length > 1 ? 's' : ''}
-                                                                    </Badge>
-                                                                )}
-                                                                <Badge variant="outline">
-                                                                    {(parseInt(variacao.estoque_cd) || 0) +
-                                                                        (parseInt(variacao.estoque_ponte_branca) || 0) +
-                                                                        (parseInt(variacao.estoque_carangola) || 0) +
-                                                                        (parseInt(variacao.estoque_centro) || 0)} un
-                                                                </Badge>
-                                                                <span className="font-semibold text-green-600">
-                                                                    R$ {parseFloat(variacao.preco_venda || 0).toFixed(2)}
-                                                                </span>
-                                                                <Button
-                                                                    type="button"
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        handleRemoveVariacao(index);
-                                                                    }}
-                                                                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                                >
-                                                                    <Trash2 className="w-4 h-4" />
-                                                                </Button>
-                                                                {expandedVariacao === variacao.id ? (
-                                                                    <ChevronUp className="w-5 h-5 text-gray-400" />
-                                                                ) : (
-                                                                    <ChevronDown className="w-5 h-5 text-gray-400" />
-                                                                )}
-                                                            </div>
-
-                                                            {/* Detalhes expandidos */}
-                                                            {expandedVariacao === variacao.id && (
-                                                                <div className="px-4 pb-4 pt-2 border-t bg-gray-50 space-y-4">
-                                                                    {/* Cor e Tamanho */}
-                                                                    <div className="grid grid-cols-2 gap-4">
-                                                                        <div>
-                                                                            <Label className="text-xs">Cor / Acabamento</Label>
-                                                                            <FurnitureColorPicker
-                                                                                value={variacao.cor}
-                                                                                hexValue={variacao.cor_hex}
-                                                                                onChange={(val) => handleUpdateVariacao(index, 'cor', val)}
-                                                                                onHexChange={(hex) => handleUpdateVariacao(index, 'cor_hex', hex)}
-                                                                                placeholder="Selecione ou digite"
-                                                                            />
-                                                                        </div>
-                                                                        <div>
-                                                                            <Label className="text-xs">Tamanho / Modelo</Label>
-                                                                            <Input
-                                                                                value={variacao.tamanho || ''}
-                                                                                onChange={(e) => handleUpdateVariacao(index, 'tamanho', e.target.value)}
-                                                                                placeholder="Ex: 6 Lugares, Grande"
-                                                                            />
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {/* Dimensões */}
-                                                                    <div>
-                                                                        <Label className="text-xs flex items-center gap-1">
-                                                                            <Ruler className="w-3 h-3" />
-                                                                            Dimensões desta variação (cm)
-                                                                        </Label>
-                                                                        <div className="grid grid-cols-3 gap-3 mt-1">
-                                                                            <Input
-                                                                                type="number"
-                                                                                value={variacao.largura || ''}
-                                                                                onChange={(e) => handleUpdateVariacao(index, 'largura', e.target.value)}
-                                                                                placeholder="Largura"
-                                                                            />
-                                                                            <Input
-                                                                                type="number"
-                                                                                value={variacao.altura || ''}
-                                                                                onChange={(e) => handleUpdateVariacao(index, 'altura', e.target.value)}
-                                                                                placeholder="Altura"
-                                                                            />
-                                                                            <Input
-                                                                                type="number"
-                                                                                value={variacao.profundidade || ''}
-                                                                                onChange={(e) => handleUpdateVariacao(index, 'profundidade', e.target.value)}
-                                                                                placeholder="Profund."
-                                                                            />
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {/* Preço */}
-                                                                    <div className="grid grid-cols-2 gap-4">
-                                                                        <div>
-                                                                            <Label className="text-xs">Preço Custo</Label>
-                                                                            <Input
-                                                                                type="number"
-                                                                                step="0.01"
-                                                                                value={variacao.preco_custo}
-                                                                                onChange={(e) => handleUpdateVariacao(index, 'preco_custo', e.target.value)}
-                                                                                placeholder="R$ 0,00"
-                                                                            />
-                                                                        </div>
-                                                                        <div>
-                                                                            <Label className="text-xs">Preço Venda *</Label>
-                                                                            <Input
-                                                                                type="number"
-                                                                                step="0.01"
-                                                                                value={variacao.preco_venda}
-                                                                                onChange={(e) => handleUpdateVariacao(index, 'preco_venda', e.target.value)}
-                                                                                placeholder="R$ 0,00"
-                                                                            />
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {/* Estoque por Localização */}
-                                                                    <div>
-                                                                        <Label className="text-xs flex items-center gap-1 mb-2">
-                                                                            <Package className="w-3 h-3" />
-                                                                            Estoque por Localização
-                                                                        </Label>
-                                                                        <div className="grid grid-cols-4 gap-2">
-                                                                            <div>
-                                                                                <Label className="text-[10px] text-gray-500">CD</Label>
-                                                                                <Input
-                                                                                    type="number"
-                                                                                    value={variacao.estoque_cd || ''}
-                                                                                    onChange={(e) => handleUpdateVariacao(index, 'estoque_cd', e.target.value)}
-                                                                                    placeholder="0"
-                                                                                    className="h-8"
-                                                                                />
-                                                                            </div>
-                                                                            <div>
-                                                                                <Label className="text-[10px] text-gray-500">Ponte Branca</Label>
-                                                                                <Input
-                                                                                    type="number"
-                                                                                    value={variacao.estoque_ponte_branca || ''}
-                                                                                    onChange={(e) => handleUpdateVariacao(index, 'estoque_ponte_branca', e.target.value)}
-                                                                                    placeholder="0"
-                                                                                    className="h-8"
-                                                                                />
-                                                                            </div>
-                                                                            <div>
-                                                                                <Label className="text-[10px] text-gray-500">Carangola</Label>
-                                                                                <Input
-                                                                                    type="number"
-                                                                                    value={variacao.estoque_carangola || ''}
-                                                                                    onChange={(e) => handleUpdateVariacao(index, 'estoque_carangola', e.target.value)}
-                                                                                    placeholder="0"
-                                                                                    className="h-8"
-                                                                                />
-                                                                            </div>
-                                                                            <div>
-                                                                                <Label className="text-[10px] text-gray-500">Centro</Label>
-                                                                                <Input
-                                                                                    type="number"
-                                                                                    value={variacao.estoque_centro || ''}
-                                                                                    onChange={(e) => handleUpdateVariacao(index, 'estoque_centro', e.target.value)}
-                                                                                    placeholder="0"
-                                                                                    className="h-8"
-                                                                                />
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {/* Fotos da Variação */}
-                                                                    <div>
-                                                                        <Label className="text-xs flex items-center gap-1 mb-2">
-                                                                            <ImageIcon className="w-3 h-3" />
-                                                                            Fotos desta variação
-                                                                        </Label>
-
-                                                                        {/* Upload de fotos */}
-                                                                        <label className="cursor-pointer">
-                                                                            <input
-                                                                                type="file"
-                                                                                multiple
-                                                                                accept="image/*"
-                                                                                onChange={async (e) => {
-                                                                                    const files = Array.from(e.target.files);
-                                                                                    if (files.length === 0) return;
-                                                                                    try {
-                                                                                        const urls = await Promise.all(
-                                                                                            files.map(file => base44.storage.uploadFile(file))
-                                                                                        );
-                                                                                        const currentPhotos = variacao.fotos || [];
-                                                                                        handleUpdateVariacao(index, 'fotos', [...currentPhotos, ...urls]);
-                                                                                        toast.success(`${files.length} foto(s) enviada(s)`);
-                                                                                    } catch (err) {
-                                                                                        toast.error('Erro ao enviar fotos');
-                                                                                    }
-                                                                                }}
-                                                                                className="hidden"
-                                                                            />
-                                                                            <div className="border-2 border-dashed rounded-lg p-4 text-center hover:bg-gray-100 transition-colors">
-                                                                                <Upload className="w-6 h-6 mx-auto mb-1 text-gray-400" />
-                                                                                <p className="text-sm text-gray-600">Clique para adicionar fotos</p>
-                                                                            </div>
-                                                                        </label>
-
-                                                                        {/* Grid de fotos da variação */}
-                                                                        {variacao.fotos && variacao.fotos.length > 0 && (
-                                                                            <div className="grid grid-cols-4 gap-2 mt-3">
-                                                                                {variacao.fotos.map((foto, fotoIndex) => (
-                                                                                    <div key={fotoIndex} className="relative group aspect-square">
-                                                                                        <img
-                                                                                            src={foto}
-                                                                                            alt={`Foto ${fotoIndex + 1}`}
-                                                                                            className="w-full h-full object-cover rounded"
-                                                                                        />
-                                                                                        {fotoIndex === 0 && (
-                                                                                            <Badge className="absolute top-1 left-1 bg-green-500 text-[10px] px-1">Principal</Badge>
-                                                                                        )}
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            onClick={() => {
-                                                                                                const newFotos = variacao.fotos.filter((_, i) => i !== fotoIndex);
-                                                                                                handleUpdateVariacao(index, 'fotos', newFotos);
-                                                                                            }}
-                                                                                            className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                                                        >
-                                                                                            <X className="w-3 h-3" />
-                                                                                        </button>
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </CardContent>
-                                                    </Card>
-                                                ))}
                                             </div>
-                                        )}
-                                    </div>
-                                )}
 
-                                {/* Se NÃO tem variações - Item único */}
-                                {!formData.temVariacoes && (
-                                    <div className="space-y-6">
-                                        <Card>
-                                            <CardHeader>
-                                                <CardTitle className="text-base flex items-center gap-2">
-                                                    <Ruler className="w-4 h-4" />
-                                                    Dimensões
-                                                </CardTitle>
-                                            </CardHeader>
-                                            <CardContent className="space-y-4">
-                                                <div className="grid grid-cols-3 gap-4">
-                                                    <div>
-                                                        <Label>Largura (cm)</Label>
-                                                        <Input
-                                                            type="number"
-                                                            value={formData.largura}
-                                                            onChange={(e) => handleChange('largura', e.target.value)}
-                                                            placeholder="Ex: 180"
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <Label>Altura (cm)</Label>
-                                                        <Input
-                                                            type="number"
-                                                            value={formData.altura}
-                                                            onChange={(e) => handleChange('altura', e.target.value)}
-                                                            placeholder="Ex: 90"
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <Label>Profundidade (cm)</Label>
-                                                        <Input
-                                                            type="number"
-                                                            value={formData.profundidade}
-                                                            onChange={(e) => handleChange('profundidade', e.target.value)}
-                                                            placeholder="Ex: 85"
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-
-                                        <Card className="border-green-200">
-                                            <CardHeader>
-                                                <CardTitle className="text-base flex items-center gap-2">
-                                                    <DollarSign className="w-4 h-4 text-green-600" />
-                                                    Preços e Custos
-                                                </CardTitle>
-                                            </CardHeader>
-                                            <CardContent className="space-y-4">
-                                                {/* Preços principais */}
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div>
-                                                        <Label className="flex items-center gap-2">
-                                                            Preço de Custo (Tabela)
-                                                            <span className="text-xs text-gray-500 font-normal">Preço fixo do fornecedor</span>
-                                                        </Label>
-                                                        <Input
-                                                            type="number"
-                                                            step="0.01"
-                                                            value={formData.preco_custo_tabela}
-                                                            onChange={(e) => handleChange('preco_custo_tabela', e.target.value)}
-                                                            placeholder="R$ 0,00"
-                                                            className="mt-1"
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <Label>Preço de Venda *</Label>
-                                                        <Input
-                                                            type="number"
-                                                            step="0.01"
-                                                            value={formData.preco_venda}
-                                                            onChange={(e) => handleChange('preco_venda', e.target.value)}
-                                                            placeholder="R$ 0,00"
-                                                            className={cn("mt-1", errors.preco_venda && 'border-red-500')}
-                                                        />
-                                                        {errors.preco_venda && <p className="text-xs text-red-500 mt-1">{errors.preco_venda}</p>}
-
-                                                        {suggestedPrice > 0 && (
-                                                            <Button
-                                                                type="button"
-                                                                variant="ghost"
-                                                                size="sm"
-                                                                onClick={applySuggestedMarkup}
-                                                                className="mt-1 text-green-600 hover:text-green-700"
-                                                            >
-                                                                Usar sugestão: R$ {suggestedPrice.toFixed(2)}
-                                                            </Button>
-                                                        )}
-                                                    </div>
-                                                </div>
-
-                                                {/* Estoque */}
-                                                <div className="pt-2 border-t">
-                                                    <Label>Quantidade em Estoque</Label>
+                                            <div className="pt-4 border-t grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <Label>Estoque Atual</Label>
                                                     <Input
                                                         type="number"
                                                         value={formData.quantidade_estoque}
                                                         onChange={(e) => handleChange('quantidade_estoque', e.target.value)}
                                                         placeholder="0"
-                                                        className="mt-1 w-40"
                                                     />
                                                 </div>
-                                            </CardContent>
-                                        </Card>
-                                    </div>
-                                )}
+                                                <div>
+                                                    <Label>Estoque Ideal</Label>
+                                                    <Input
+                                                        type="number"
+                                                        value={formData.estoque_ideal}
+                                                        onChange={(e) => handleChange('estoque_ideal', e.target.value)}
+                                                        placeholder="Opcional"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                </div>
                             </div>
                         )}
 
@@ -1294,9 +862,7 @@ export default function ProdutoCadastroCompleto({
                                 <div className="text-center mb-6">
                                     <h3 className="text-lg font-semibold text-gray-900">Fotos do Produto</h3>
                                     <p className="text-sm text-gray-500">
-                                        {formData.temVariacoes
-                                            ? 'Adicione fotos gerais do produto (fotos específicas podem ser adicionadas em cada variação)'
-                                            : 'Adicione imagens para o produto'}
+                                        Adicione imagens para o produto
                                     </p>
                                 </div>
 
@@ -1420,43 +986,37 @@ export default function ProdutoCadastroCompleto({
                                         </CardContent>
                                     </Card>
 
-                                    {/* Variações/Preço */}
+                                    {/* Detalhes do Produto */}
                                     <Card>
                                         <CardContent className="p-4">
                                             <h4 className="font-semibold mb-3 flex items-center gap-2">
                                                 <Palette className="w-4 h-4" />
-                                                {formData.temVariacoes ? `Variações (${formData.variacoes.length})` : 'Preço e Dimensões'}
+                                                Detalhes do Produto
                                             </h4>
-                                            {formData.temVariacoes ? (
+                                            <div className="space-y-4 text-sm">
+                                                {(formData.cor || formData.cor_hex) && (
+                                                    <div className="flex items-center gap-2 p-2 bg-gray-50 rounded">
+                                                        <div
+                                                            className="w-6 h-6 rounded-full border shadow-sm"
+                                                            style={{ backgroundColor: formData.cor_hex || '#ccc' }}
+                                                        />
+                                                        <span className="font-medium">{formData.cor}</span>
+                                                    </div>
+                                                )}
+
                                                 <div className="space-y-2">
-                                                    {formData.variacoes.map((v, i) => (
-                                                        <div key={i} className="flex items-center gap-2 text-sm p-2 bg-gray-50 rounded">
-                                                            <div
-                                                                className="w-4 h-4 rounded-full border"
-                                                                style={{ backgroundColor: v.cor_hex }}
-                                                            />
-                                                            <span className="flex-1">
-                                                                {getVariacaoDisplayName(v)}
-                                                            </span>
-                                                            <span className="text-gray-500">{v.estoque}un</span>
-                                                            <span className="font-medium text-green-600">
-                                                                R$ {parseFloat(v.preco_venda || 0).toFixed(2)}
-                                                            </span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-2 text-sm">
-                                                    <div className="flex justify-between">
-                                                        <span className="text-gray-500">Preço de Venda:</span>
-                                                        <span className="font-medium text-green-600">
+                                                    <div className="flex justify-between items-center text-lg">
+                                                        <span className="text-gray-500 text-sm">Preço de Venda:</span>
+                                                        <span className="font-bold text-green-600">
                                                             R$ {parseFloat(formData.preco_venda || 0).toFixed(2)}
                                                         </span>
                                                     </div>
-                                                    <div className="flex justify-between">
+
+                                                    <div className="flex justify-between border-t pt-2">
                                                         <span className="text-gray-500">Estoque:</span>
                                                         <span>{formData.quantidade_estoque || 0} unidades</span>
                                                     </div>
+
                                                     {(formData.largura || formData.altura || formData.profundidade) && (
                                                         <div className="flex justify-between">
                                                             <span className="text-gray-500">Dimensões:</span>
@@ -1466,7 +1026,7 @@ export default function ProdutoCadastroCompleto({
                                                         </div>
                                                     )}
                                                 </div>
-                                            )}
+                                            </div>
                                         </CardContent>
                                     </Card>
 

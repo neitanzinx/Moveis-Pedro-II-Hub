@@ -186,6 +186,29 @@ export default function EntradaEstoque() {
 
             if (stockError) throw stockError;
 
+            // --- SINCRONIZAÇÃO COM ESTOQUE GLOBAL (PDV) ---
+            // Além de registrar na unidade (estoque_loja), atualizamos o total no Produto Mestre/Variação
+            // para que o PDV reflita a disponibilidade imediata.
+            try {
+                const { data: mainProds, error: findError } = await supabase
+                    .from('produtos')
+                    .select('id, quantidade_estoque')
+                    .eq('codigo_barras', product.gtin);
+
+                if (!findError && mainProds && mainProds.length > 0) {
+                    for (const p of mainProds) {
+                        await supabase
+                            .from('produtos')
+                            .update({ quantidade_estoque: (p.quantidade_estoque || 0) + 1 })
+                            .eq('id', p.id);
+                    }
+                    console.log(`✅ Estoque global sincronizado para ${mainProds.length} variações.`);
+                }
+            } catch (syncErr) {
+                console.warn('⚠️ Falha ao sincronizar estoque global, mas entrada local foi salva.', syncErr);
+            }
+            // ----------------------------------------------
+
             playSound('success');
             setCurrentCard({
                 status: 'success',

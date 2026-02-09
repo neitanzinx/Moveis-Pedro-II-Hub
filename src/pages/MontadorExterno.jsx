@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -11,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
     Calendar, MapPin, Phone, User, Clock, Package,
     CheckCircle, AlertCircle, Navigation, MessageCircle,
-    Wrench, CalendarDays, ListTodo, ExternalLink, LogOut, XCircle
+    Wrench, CalendarDays, ListTodo, ExternalLink, LogOut, XCircle, Search
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -23,7 +24,11 @@ import {
 } from "@/components/ui/dialog";
 
 export default function MontadorExterno() {
-    const [user, setUser] = useState(null);
+    // Estado para busca na aba "Minhas"
+    const [searchTerm, setSearchTerm] = useState("");
+
+    // Filtro GLOBAL para montagens (se precisar)
+    const { user } = useAuth();
     const [montador, setMontador] = useState(null);
     const [activeTab, setActiveTab] = useState("disponiveis");
     const [selectedMontagem, setSelectedMontagem] = useState(null);
@@ -32,9 +37,7 @@ export default function MontadorExterno() {
 
     const queryClient = useQueryClient();
 
-    useEffect(() => {
-        base44.auth.me().then(setUser).catch(console.error);
-    }, []);
+
 
     // Buscar dados do montador baseado no usuário logado
     const { data: montadores = [] } = useQuery({
@@ -45,7 +48,11 @@ export default function MontadorExterno() {
 
     useEffect(() => {
         if (user && montadores.length > 0) {
-            const meuMontador = montadores.find(m => m.usuario_id === user.id);
+            // Tenta encontrar montador pelo ID do usuário ou pelo Nome (fallback para sistemas de auth diferentes)
+            const meuMontador = montadores.find(m =>
+                m.usuario_id === user.id ||
+                (m.nome && user.full_name && m.nome.trim().toLowerCase() === user.full_name.trim().toLowerCase())
+            );
             if (meuMontador?.status === 'ativo') {
                 setMontador(meuMontador);
             } else if (meuMontador?.status === 'pendente_aprovacao') {
@@ -65,7 +72,7 @@ export default function MontadorExterno() {
 
             // IDs de entregas que já foram concluídas
             const idsEntregasEntregues = entregas
-                .filter(e => e.status === 'Entregue')
+                .filter(e => ['Entregue', 'Retirado', 'Concluída'].includes(e.status))
                 .map(e => e.id);
 
             return todas.filter(m =>
@@ -389,7 +396,7 @@ export default function MontadorExterno() {
                     </p>
                     <Button
                         className="w-full bg-orange-500 hover:bg-orange-600"
-                        onClick={() => window.location.href = '/'}
+                        onClick={() => window.location.href = '/login?redirect=/admin/MontadorExterno'}
                     >
                         Ir para Login
                     </Button>
@@ -459,8 +466,8 @@ export default function MontadorExterno() {
         );
     }
 
-    // Admin vendo como teste mostra dados fake
-    const montadorDisplay = montador || { nome: 'Admin (Teste)', id: null };
+    // Admin vendo como teste mostra dados fake ou nome do usuário logado
+    const montadorDisplay = montador || { nome: user?.full_name || 'Admin (Teste)', id: null };
 
     const montagensHoje = minhasMontagens.filter(m => {
         const hoje = new Date().toISOString().split('T')[0];
@@ -593,108 +600,185 @@ export default function MontadorExterno() {
                         </TabsContent>
 
                         {/* Aba Minhas Montagens */}
-                        <TabsContent value="minhas" className="p-4 space-y-3">
-                            {minhasMontagens.filter(m => m.status !== 'concluida').length === 0 ? (
-                                <div className="text-center py-8">
-                                    <Package className="w-16 h-16 mx-auto text-gray-300 mb-3" />
-                                    <p className="text-gray-500">Nenhuma montagem pendente</p>
-                                </div>
-                            ) : (
-                                minhasMontagens.filter(m => m.status !== 'concluida').map(montagem => (
-                                    <div key={montagem.id} className="bg-gray-50 rounded-xl p-4 border-l-4 border-blue-500">
-                                        <div className="flex justify-between items-start mb-3">
-                                            <div>
-                                                <p className="font-bold text-gray-900">#{montagem.numero_pedido}</p>
-                                                <p className="text-sm text-gray-600">{montagem.produto_nome}</p>
-                                            </div>
-                                            <Badge className={getStatusBadge(montagem.status).className}>
-                                                {getStatusBadge(montagem.status).label}
-                                            </Badge>
-                                        </div>
+                        <TabsContent value="minhas" className="p-4 space-y-4">
+                            {/* Barra de Pesquisa */}
+                            <div className="relative">
+                                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                                <Input
+                                    placeholder="Buscar por cliente, pedido ou produto..."
+                                    className="pl-9 bg-white"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
 
-                                        <div className="bg-blue-50 rounded-lg p-3 mb-3">
-                                            <div className="flex items-center gap-2 text-blue-700 font-medium">
-                                                <Calendar className="w-4 h-4" />
-                                                <span>{formatarData(montagem.data_agendada)}</span>
-                                                <span>•</span>
-                                                <Clock className="w-4 h-4" />
-                                                <span>{montagem.horario_agendado}</span>
-                                            </div>
-                                        </div>
+                            {(() => {
+                                // Função de filtro usando o searchTerm
+                                const filtrar = (lista) => {
+                                    if (!searchTerm) return lista;
+                                    const termo = searchTerm.toLowerCase();
+                                    return lista.filter(m =>
+                                        m.cliente_nome?.toLowerCase().includes(termo) ||
+                                        m.numero_pedido?.toString().includes(termo) ||
+                                        m.produto_nome?.toLowerCase().includes(termo) ||
+                                        m.endereco?.toLowerCase().includes(termo)
+                                    );
+                                };
 
-                                        <div className="space-y-2 mb-4">
-                                            <button
-                                                onClick={() => ligarCliente(montagem.cliente_telefone)}
-                                                className="flex items-center gap-2 text-sm text-gray-600 active:bg-gray-100 rounded p-1 -ml-1 w-full"
-                                            >
-                                                <Phone className="w-4 h-4 text-green-600" />
-                                                <span>{montagem.cliente_nome}</span>
-                                            </button>
-                                            <button
-                                                onClick={() => abrirMapa(montagem.endereco)}
-                                                className="flex items-center gap-2 text-sm text-gray-600 active:bg-gray-100 rounded p-1 -ml-1 w-full"
-                                            >
-                                                <MapPin className="w-4 h-4 text-red-500 flex-shrink-0" />
-                                                <span className="text-left line-clamp-2">{montagem.endereco}</span>
-                                                <ExternalLink className="w-3 h-3 ml-auto text-gray-400" />
-                                            </button>
-                                        </div>
+                                const proximas = filtrar(minhasMontagens.filter(m => m.status !== 'concluida'));
+                                const concluidas = filtrar(minhasMontagens.filter(m => m.status === 'concluida'));
 
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {montagem.status === 'agendada' && (
-                                                <>
-                                                    <Button
-                                                        className="bg-green-500 hover:bg-green-600 h-12 rounded-xl"
-                                                        onClick={() => abrirWhatsAppACaminho(montagem)}
-                                                    >
-                                                        <Navigation className="w-4 h-4 mr-2" />
-                                                        A Caminho
-                                                    </Button>
-                                                    <Button
-                                                        variant="outline"
-                                                        className="h-12 rounded-xl border-orange-300 text-orange-600 hover:bg-orange-50"
-                                                        onClick={() => abrirReagendar(montagem)}
-                                                    >
-                                                        <Calendar className="w-4 h-4 mr-2" />
-                                                        Reagendar
-                                                    </Button>
-                                                </>
+                                return (
+                                    <>
+                                        {/* Seção Próximas */}
+                                        <div>
+                                            <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                                                <Calendar className="w-4 h-4 text-orange-500" />
+                                                Próximas
+                                                <span className="bg-orange-100 text-orange-700 text-[10px] px-2 py-0.5 rounded-full">{proximas.length}</span>
+                                            </h3>
+
+                                            {proximas.length === 0 ? (
+                                                <div className="text-center py-6 bg-white/50 rounded-lg border border-dashed border-gray-200">
+                                                    <p className="text-gray-400 text-sm">Nenhuma montagem pendente encontrada</p>
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-3">
+                                                    {proximas.map(montagem => (
+                                                        <div key={montagem.id} className="bg-gray-50 rounded-xl p-4 border-l-4 border-blue-500">
+                                                            <div className="flex justify-between items-start mb-3">
+                                                                <div>
+                                                                    <p className="font-bold text-gray-900">#{montagem.numero_pedido}</p>
+                                                                    <p className="text-sm text-gray-600">{montagem.produto_nome}</p>
+                                                                </div>
+                                                                <Badge className={getStatusBadge(montagem.status).className}>
+                                                                    {getStatusBadge(montagem.status).label}
+                                                                </Badge>
+                                                            </div>
+
+                                                            <div className="bg-blue-50 rounded-lg p-3 mb-3">
+                                                                <div className="flex items-center gap-2 text-blue-700 font-medium">
+                                                                    <Calendar className="w-4 h-4" />
+                                                                    <span>{formatarData(montagem.data_agendada)}</span>
+                                                                    <span>•</span>
+                                                                    <Clock className="w-4 h-4" />
+                                                                    <span>{montagem.horario_agendado}</span>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="space-y-2 mb-4">
+                                                                <button
+                                                                    onClick={() => ligarCliente(montagem.cliente_telefone)}
+                                                                    className="flex items-center gap-2 text-sm text-gray-600 active:bg-gray-100 rounded p-1 -ml-1 w-full"
+                                                                >
+                                                                    <Phone className="w-4 h-4 text-green-600" />
+                                                                    <span>{montagem.cliente_nome}</span>
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => abrirMapa(montagem.endereco)}
+                                                                    className="flex items-center gap-2 text-sm text-gray-600 active:bg-gray-100 rounded p-1 -ml-1 w-full"
+                                                                >
+                                                                    <MapPin className="w-4 h-4 text-red-500 flex-shrink-0" />
+                                                                    <span className="text-left line-clamp-2">{montagem.endereco}</span>
+                                                                    <ExternalLink className="w-3 h-3 ml-auto text-gray-400" />
+                                                                </button>
+                                                            </div>
+
+                                                            <div className="grid grid-cols-2 gap-2">
+                                                                {montagem.status === 'agendada' && (
+                                                                    <>
+                                                                        <Button
+                                                                            className="bg-green-500 hover:bg-green-600 h-10 rounded-xl text-sm"
+                                                                            onClick={() => abrirWhatsAppACaminho(montagem)}
+                                                                        >
+                                                                            <Navigation className="w-4 h-4 mr-2" />
+                                                                            Ir ao Local
+                                                                        </Button>
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            className="h-10 rounded-xl text-sm border-red-200 text-red-600 hover:bg-red-50"
+                                                                            onClick={() => abrirReagendar(montagem)}
+                                                                        >
+                                                                            <CalendarDays className="w-4 h-4 mr-2" />
+                                                                            Reagendar
+                                                                        </Button>
+                                                                    </>
+                                                                )}
+
+                                                                {montagem.status === 'em_andamento' && (
+                                                                    <Button
+                                                                        className="col-span-2 bg-blue-600 hover:bg-blue-700 h-10 rounded-xl text-sm"
+                                                                        onClick={() => {
+                                                                            // Na verdade precisamos de um modal de conclusão ou confirmar direto
+                                                                            if (confirm("Confirmar conclusão da montagem?")) finalizarMontagem(montagem);
+                                                                        }}
+                                                                    >
+                                                                        <CheckCircle className="w-4 h-4 mr-2" />
+                                                                        Finalizar Montagem
+                                                                    </Button>
+                                                                )}
+
+                                                                {montagem.status === 'pendente' && (
+                                                                    <Button
+                                                                        className="col-span-2 bg-orange-500 hover:bg-orange-600 h-10 rounded-xl text-sm"
+                                                                        onClick={() => pegarMontagem(montagem)}
+                                                                    >
+                                                                        <Clock className="w-4 h-4 mr-2" />
+                                                                        Agendar Agora
+                                                                    </Button>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Botão de Cancelar montagem */}
+                                                            {(montagem.status === 'agendada' || montagem.status === 'pendente') && (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    className="w-full mt-2 h-8 text-red-600 hover:bg-red-50 hover:text-red-700 rounded-lg text-xs"
+                                                                    onClick={() => cancelarMontagem(montagem)}
+                                                                >
+                                                                    <XCircle className="w-3 h-3 mr-2" />
+                                                                    Desistir desta Montagem
+                                                                </Button>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             )}
-                                            {montagem.status === 'em_andamento' && (
-                                                <Button
-                                                    className="bg-green-600 hover:bg-green-700 h-12 rounded-xl"
-                                                    onClick={() => finalizarMontagem(montagem)}
-                                                >
-                                                    <CheckCircle className="w-4 h-4 mr-2" />
-                                                    Concluir
-                                                </Button>
-                                            )}
-                                            <Button
-                                                variant="outline"
-                                                className="h-12 rounded-xl"
-                                                onClick={() => {
-                                                    const tel = montagem.cliente_telefone?.replace(/\D/g, '');
-                                                    window.open(`https://wa.me/55${tel}`, '_blank');
-                                                }}
-                                            >
-                                                <MessageCircle className="w-4 h-4 mr-2" />
-                                                WhatsApp
-                                            </Button>
                                         </div>
-                                        {/* Botão de Cancelar montagem */}
-                                        {(montagem.status === 'agendada' || montagem.status === 'pendente') && (
-                                            <Button
-                                                variant="ghost"
-                                                className="w-full mt-2 h-10 text-red-600 hover:bg-red-50 hover:text-red-700 rounded-xl"
-                                                onClick={() => cancelarMontagem(montagem)}
-                                            >
-                                                <XCircle className="w-4 h-4 mr-2" />
-                                                Desistir desta Montagem
-                                            </Button>
-                                        )}
-                                    </div>
-                                ))
-                            )}
+
+                                        {/* Seção Concluídas */}
+                                        <div className="pt-4 border-t border-gray-200">
+                                            <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                                                <CheckCircle className="w-4 h-4 text-green-500" />
+                                                Concluídas ({concluidas.length})
+                                            </h3>
+
+                                            {concluidas.length === 0 ? (
+                                                <p className="text-center text-xs text-gray-400 py-2">Nenhuma montagem concluída recente.</p>
+                                            ) : (
+                                                <div className="space-y-3 opacity-80">
+                                                    {concluidas.map(montagem => (
+                                                        <div key={montagem.id} className="bg-gray-100 rounded-xl p-4 border border-gray-200">
+                                                            <div className="flex justify-between items-start mb-2">
+                                                                <div>
+                                                                    <p className="font-bold text-gray-600 line-through">#{montagem.numero_pedido}</p>
+                                                                    <p className="text-xs text-gray-500">{montagem.produto_nome}</p>
+                                                                </div>
+                                                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                                                    Concluída
+                                                                </Badge>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                                                                <User className="w-3 h-3" /> {montagem.cliente_nome}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </>
+                                );
+                            })()}
                         </TabsContent>
 
                         {/* Aba Agenda */}
@@ -736,11 +820,11 @@ export default function MontadorExterno() {
                             )}
                         </TabsContent>
                     </Tabs>
-                </div>
-            </div>
+                </div >
+            </div >
 
             {/* Modal de Agendamento */}
-            <Dialog open={agendamentoModal} onOpenChange={setAgendamentoModal}>
+            < Dialog open={agendamentoModal} onOpenChange={setAgendamentoModal} >
                 <DialogContent className="mx-4 rounded-2xl">
                     <DialogHeader>
                         <DialogTitle className="text-center">Agendar Montagem</DialogTitle>
@@ -800,10 +884,10 @@ export default function MontadorExterno() {
                         </Button>
                     </DialogFooter>
                 </DialogContent>
-            </Dialog>
+            </Dialog >
 
             {/* Modal de Reagendamento */}
-            <Dialog open={reagendarModal} onOpenChange={setReagendarModal}>
+            < Dialog open={reagendarModal} onOpenChange={setReagendarModal} >
                 <DialogContent className="max-w-md mx-4">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
@@ -867,7 +951,7 @@ export default function MontadorExterno() {
                         </Button>
                     </DialogFooter>
                 </DialogContent>
-            </Dialog>
-        </div>
+            </Dialog >
+        </div >
     );
 }

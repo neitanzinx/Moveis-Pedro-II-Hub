@@ -360,6 +360,13 @@ export const TIPOS_ENTREGA = [
         descricao: "Vai na caixa, montador externo monta no endereço do cliente",
         icone: "Wrench"
     },
+    {
+        valor: "nao_requer_montagem",
+        label: "Não requer nenhuma montagem",
+        cor: "blue",
+        descricao: "Produto pronto, apenas entrega ou retirada",
+        icone: "Box"
+    },
 ];
 
 // Helper para obter tamanhos por categoria

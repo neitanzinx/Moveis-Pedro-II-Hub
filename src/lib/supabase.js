@@ -109,25 +109,55 @@ const tableMap = {
     LogUsoToken: 'log_uso_tokens',
     PedidoMostruario: 'pedidos_mostruario',
     SolicitacaoCadastro: 'solicitacoes_cadastro_produto',
-    PromocaoFornecedor: 'promocoes_fornecedor'
+    PromocaoFornecedor: 'promocoes_fornecedor',
+    HistoricoPrecos: 'historico_precos'
 };
 
 // O Adaptador Mágico (Handler)
 const createHandler = (tableName) => ({
     list: async (orderBy = null) => {
-        let query = supabase.from(tableName).select('*');
-        if (orderBy && typeof orderBy === 'string') {
-            const isDesc = orderBy.startsWith('-');
-            const field = isDesc ? orderBy.substring(1) : orderBy;
-            const dbField = field === 'created_date' ? 'created_at' : field;
-            query = query.order(dbField, { ascending: !isDesc });
+        let allData = [];
+        let from = 0;
+        const limit = 1000;
+        let fetchMore = true;
+
+        while (fetchMore) {
+            let query = supabase.from(tableName).select('*').range(from, from + limit - 1);
+
+            if (orderBy && typeof orderBy === 'string') {
+                const isDesc = orderBy.startsWith('-');
+                const field = isDesc ? orderBy.substring(1) : orderBy;
+                const dbField = field === 'created_date' ? 'created_at' : field;
+                query = query.order(dbField, { ascending: !isDesc });
+            } else {
+                // Ordenação padrão por ID para garantir consistência na paginação
+                query = query.order('id', { ascending: true });
+            }
+
+            const { data, error } = await query;
+
+            if (error) {
+                console.error(`Erro Supabase (Listar ${tableName}):`, error);
+                throw error;
+            }
+
+            if (data) {
+                allData = [...allData, ...data];
+                // Se retornou menos que o limite, acabou
+                if (data.length < limit) {
+                    fetchMore = false;
+                } else {
+                    from += limit;
+                }
+            } else {
+                fetchMore = false;
+            }
+
+            // Safety break para evitar loop infinito em edge cases (ex: > 20k produtos)
+            if (allData.length >= 20000) fetchMore = false;
         }
-        const { data, error } = await query;
-        if (error) {
-            console.error(`Erro Supabase (Listar ${tableName}):`, error);
-            throw error;
-        }
-        return data || [];
+
+        return allData;
     },
     create: async (data) => {
         const { data: created, error } = await supabase.from(tableName).insert(data).select().single();
@@ -154,31 +184,55 @@ const createHandler = (tableName) => ({
         return true;
     },
     filter: async (filters, orderBy = null) => {
-        let query = supabase.from(tableName).select('*');
+        let allData = [];
+        let from = 0;
+        const limit = 1000;
+        let fetchMore = true;
 
-        // Aplicar filtros
-        if (filters && typeof filters === 'object') {
-            Object.entries(filters).forEach(([key, value]) => {
-                if (value !== undefined && value !== null) {
-                    query = query.eq(key, value);
+        while (fetchMore) {
+            let query = supabase.from(tableName).select('*').range(from, from + limit - 1);
+
+            // Aplicar filtros
+            if (filters && typeof filters === 'object') {
+                Object.entries(filters).forEach(([key, value]) => {
+                    if (value !== undefined && value !== null) {
+                        query = query.eq(key, value);
+                    }
+                });
+            }
+
+            // Aplicar ordenação
+            if (orderBy && typeof orderBy === 'string') {
+                const isDesc = orderBy.startsWith('-');
+                const field = isDesc ? orderBy.substring(1) : orderBy;
+                const dbField = field === 'created_date' ? 'created_at' : field;
+                query = query.order(dbField, { ascending: !isDesc });
+            } else {
+                query = query.order('id', { ascending: true });
+            }
+
+            const { data, error } = await query;
+
+            if (error) {
+                console.error(`Erro Supabase (Filtrar ${tableName}):`, error);
+                throw error;
+            }
+
+            if (data) {
+                allData = [...allData, ...data];
+                if (data.length < limit) {
+                    fetchMore = false;
+                } else {
+                    from += limit;
                 }
-            });
+            } else {
+                fetchMore = false;
+            }
+            // Safety break
+            if (allData.length >= 20000) fetchMore = false;
         }
 
-        // Aplicar ordenação
-        if (orderBy && typeof orderBy === 'string') {
-            const isDesc = orderBy.startsWith('-');
-            const field = isDesc ? orderBy.substring(1) : orderBy;
-            const dbField = field === 'created_date' ? 'created_at' : field;
-            query = query.order(dbField, { ascending: !isDesc });
-        }
-
-        const { data, error } = await query;
-        if (error) {
-            console.error(`Erro Supabase (Filtrar ${tableName}):`, error);
-            throw error;
-        }
-        return data || [];
+        return allData;
     }
 });
 

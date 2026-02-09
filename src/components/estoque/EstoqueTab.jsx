@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import ProdutoCadastroCompleto from "../produtos/ProdutoCadastroCompleto";
+import ProductQualityBadge from "../produtos/ProductQualityBadge";
 import MovimentacaoModal from "./MovimentacaoModal";
 import { useConfirm } from "@/hooks/useConfirm";
 import { toast } from "sonner";
@@ -55,24 +56,19 @@ export default function EstoqueTab({ user }) {
   const isWarehouse = user?.cargo === 'Estoque';
   const canEdit = isAdmin || isManager || isWarehouse;
 
-  // Filtrar apenas produtos pai (não variações)
-  const produtosPai = (produtos || []).filter(p => !!p.is_parent);
+  // Filtrar para mostrar apenas produtos "finais" (filhos ou standalone), escondendo os containers (pais)
+  // Se o usuário quer "cada variação como um produto único", não devemos mostrar o Pai agrupador.
+  const produtosFinais = (produtos || []).filter(p => !p.is_parent);
 
-  // Get unique categories from parent products
-  const categorias = [...new Set(produtosPai.map(p => p.categoria).filter(Boolean))].sort();
+  // Get unique categories from visible products
+  const categorias = [...new Set(produtosFinais.map(p => p.categoria).filter(Boolean))].sort();
 
-  // Count parent products needing attention
-  const produtosComAtencao = produtosPai.filter(p => p.requer_atencao).length;
+  // Count products needing attention
+  const produtosComAtencao = produtosFinais.filter(p => p.requer_atencao).length;
 
-  // Mapa de contagem de variações por produto pai
-  const variationCountMap = {};
-  (produtos || []).forEach(p => {
-    if (p.parent_id) {
-      variationCountMap[p.parent_id] = (variationCountMap[p.parent_id] || 0) + 1;
-    }
-  });
+  // Mapa de contagem de variações removido (não agrupamos mais)
 
-  const filteredProdutos = produtosPai.filter(produto => {
+  const filteredProdutos = produtosFinais.filter(produto => {
     const matchesSearch =
       produto.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       produto.categoria?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -157,6 +153,7 @@ export default function EstoqueTab({ user }) {
           <TableHeader className="bg-gray-50 dark:bg-neutral-950">
             <TableRow>
               <TableHead className="w-[300px]">Produto</TableHead>
+              <TableHead className="text-center">Qualidade</TableHead>
               <TableHead>Categoria</TableHead>
               <TableHead className="text-center">Estoque</TableHead>
               <TableHead className="text-right">Preco</TableHead>
@@ -258,6 +255,9 @@ export default function EstoqueTab({ user }) {
                         </div>
                       </div>
                     </TableCell>
+                    <TableCell className="text-center">
+                      <ProductQualityBadge produto={produto} showMissing={true} />
+                    </TableCell>
                     <TableCell>
                       <Badge variant="secondary" className="font-normal bg-gray-100 dark:bg-neutral-800 text-gray-600 dark:text-gray-400">
                         {produto.categoria}
@@ -271,12 +271,7 @@ export default function EstoqueTab({ user }) {
                         {isLowStock && (
                           <Badge variant="destructive" className="h-4 px-1 text-[10px]">Baixo</Badge>
                         )}
-                        {variationCountMap[produto.id] > 0 && (
-                          <Badge variant="outline" className="h-4 px-1.5 text-[10px] gap-1 text-purple-600 border-purple-200 bg-purple-50">
-                            <Palette className="w-2.5 h-2.5" />
-                            {variationCountMap[produto.id]} var
-                          </Badge>
-                        )}
+                        {/* Badge de variação removido */}
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-medium text-gray-900 dark:text-white">

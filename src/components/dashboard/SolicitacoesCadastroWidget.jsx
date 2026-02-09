@@ -19,6 +19,7 @@ export default function SolicitacoesCadastroWidget() {
     const [targetProductSearch, setTargetProductSearch] = useState("");
     const [targetProducts, setTargetProducts] = useState([]);
     const [selectedTargetProduct, setSelectedTargetProduct] = useState(null);
+    const [selectedTargetVariation, setSelectedTargetVariation] = useState(null);
 
     // Full Registration Modal State
     const [fullRegistrationModalOpen, setFullRegistrationModalOpen] = useState(false);
@@ -71,6 +72,35 @@ export default function SolicitacoesCadastroWidget() {
         onError: (err) => toast.error("Erro ao cadastrar: " + err.message)
     });
 
+    // Action: Update Existing Product (Add Variation)
+    // Used when the request is to add a variation to an existing parent
+    const updateProductMutation = useMutation({
+        mutationFn: async ({ productId, productData, originalRequestId }) => {
+            // 1. Update the product
+            const updatedProd = await base44.entities.Produto.update(productId, productData);
+
+            // 2. Update request status
+            const { error: updateError } = await supabase
+                .from('solicitacoes_cadastro_produto')
+                .update({
+                    status: 'aprovado',
+                    produto_gerado_id: productId // Linked to same parent
+                })
+                .eq('id', originalRequestId);
+
+            if (updateError) throw updateError;
+            return updatedProd;
+        },
+        onSuccess: () => {
+            toast.success("Variação adicionada com sucesso!");
+            queryClient.invalidateQueries({ queryKey: ['solicitacoes_cadastro'] });
+            queryClient.invalidateQueries({ queryKey: ['produtos'] });
+            setFullRegistrationModalOpen(false);
+            setSelectedRequestForRegistration(null);
+        },
+        onError: (err) => toast.error("Erro ao atualizar: " + err.message)
+    });
+
     const handleOpenRegistration = (req) => {
         // Helper to extract value from "Key: Value" lines in observacoes
         const extractVal = (key) => {
@@ -93,51 +123,118 @@ export default function SolicitacoesCadastroWidget() {
             if (profMatch) profundidade = profMatch[1];
         }
 
+
         const productPreData = {
             nome: req.nome_produto,
             categoria: extractVal('Categoria') || '',
             ambiente: extractVal('Ambiente') || '',
-            // Fornecedor logic might need ID vs Name check, but Product Modal handles text search or ID matching often if implemented well. 
-            // Looking at ProdutoCadastroCompleto, it takes fornecedor_id. 
-            // We only have the Name in the text usually, unless I saved ID. 
-            // In SolicitacaoCadastroModal I saved Name in text... wait, I extracted name from ID list.
-            // But I can try to pass 'fornecedor_nome' if the modal supported it, or just let user select.
-            // Actually, I can try to extract 'Fornecedor' name.
             fornecedor_nome: extractVal('Fornecedor') || '',
-
             material: extractVal('Material') || '',
             altura,
             largura,
             profundidade,
-
             descricao: [
-                req.observacoes || '', // The full text includes the technical details, which is fine to keep as history
+                req.observacoes || '',
             ].filter(Boolean).join('\n'),
-
             preco_venda: req.preco_sugerido || 0,
-            ativo: true
+            ativo: true,
+            // [NOVO] Pre-fill variations
+            temVariacoes: !!extractVal('Cor') || !!extractVal('Tecido'),
+            variacoes: (extractVal('Cor') || extractVal('Tecido')) ? [{
+                id: Date.now().toString(),
+                nome: `${extractVal('Cor') || ''} ${extractVal('Tecido') || ''}`.trim(),
+                cor: extractVal('Cor') || '',
+                tamanho: medidasStr || extractVal('Tecido') || '',
+                largura,
+                altura,
+                profundidade,
+                preco_venda: req.preco_sugerido || 0,
+                estoque_cd: 0, // Starts at 0, manager confirms
+                fotos: []
+            }] : []
         };
-        setSelectedRequestForRegistration({ ...req, preData: productPreData });
+        setSelectedRequestForRegistration({ ...req, preData: productPreData, isUpdate: false });
+        setFullRegistrationModalOpen(true);
+    };
+
+    const handleOpenAddVariation = async (req) => {
+        if (!req.produto_pai_id) return;
+
+        // Fetch Parent
+        const { data: parent } = await supabase.from('produtos').select('*').eq('id', req.produto_pai_id).single();
+        if (!parent) return toast.error("Produto pai não encontrado.");
+
+        // Extract Variation Data
+        const extractVal = (key) => {
+            const regex = new RegExp(`${key}:\\s*(.+)`, 'i');
+            const match = req.observacoes?.match(regex);
+            return match ? match[1].trim() : null;
+        };
+        const medidasStr = extractVal('Dimensões') || req.medidas || '';
+        let altura = '', largura = '', profundidade = '';
+        if (medidasStr) {
+            const altMatch = medidasStr.match(/A:(\d+(?:\.\d+)?)/i);
+            const largMatch = medidasStr.match(/L:(\d+(?:\.\d+)?)/i);
+            const profMatch = medidasStr.match(/P:(\d+(?:\.\d+)?)/i);
+            if (altMatch) altura = altMatch[1];
+            if (largMatch) largura = largMatch[1];
+            if (profMatch) profundidade = profMatch[1];
+        }
+
+        const novaVariacao = {
+            id: Date.now().toString(),
+            nome: `${extractVal('Cor') || ''} ${extractVal('Tecido') || ''}`.trim() || 'Nova Variação',
+            cor: extractVal('Cor') || '',
+            tamanho: medidasStr || extractVal('Tecido') || '',
+            largura,
+            altura,
+            profundidade,
+            preco_venda: req.preco_sugerido || parent.preco_venda || 0,
+            estoque_cd: 0,
+            fotos: []
+        };
+
+        const productWithNewVariation = {
+            ...parent,
+            temVariacoes: true,
+            variacoes: [...(parent.variacoes || []), novaVariacao]
+        };
+
+        setSelectedRequestForRegistration({ ...req, preData: productWithNewVariation, isUpdate: true, parentId: parent.id });
         setFullRegistrationModalOpen(true);
     };
 
     const handleSaveFullProduct = (data) => {
         if (!selectedRequestForRegistration) return;
         setIsSavingFullProduct(true);
-        createFullProductMutation.mutate(
-            {
-                productData: data,
-                originalRequestId: selectedRequestForRegistration.id
-            },
-            {
-                onSettled: () => setIsSavingFullProduct(false)
-            }
-        );
+
+        if (selectedRequestForRegistration.isUpdate) {
+            updateProductMutation.mutate(
+                {
+                    productId: selectedRequestForRegistration.parentId,
+                    productData: data,
+                    originalRequestId: selectedRequestForRegistration.id
+                },
+                {
+                    onSettled: () => setIsSavingFullProduct(false)
+                }
+            );
+        } else {
+            createFullProductMutation.mutate(
+                {
+                    productData: data,
+                    originalRequestId: selectedRequestForRegistration.id
+                },
+                {
+                    onSettled: () => setIsSavingFullProduct(false)
+                }
+            );
+        }
     };
 
     // Action: Merge with Existing Product
     const mergeProductMutation = useMutation({
-        mutationFn: async ({ requestId, targetProductId }) => {
+        mutationFn: async ({ requestId, targetProductId, targetVariationId }) => {
             // 1. Calculate how many items were sold using this request
             // This is tricky because 'vendas' stores items in JSONB.
             // We need to fetch sales that might have this item.
@@ -167,14 +264,43 @@ export default function SolicitacoesCadastroWidget() {
                 // Fetch current stock
                 const { data: targetProd } = await supabase
                     .from('produtos')
-                    .select('quantidade_estoque')
+                    .select('*')
                     .eq('id', targetProductId)
                     .single();
 
                 if (targetProd) {
+                    let updateData = {};
+
+                    // Logic for Variations
+                    if (args.targetVariationId && targetProd.variacoes?.length > 0) {
+                        const updatedVariacoes = targetProd.variacoes.map(v => {
+                            if (v.id === args.targetVariationId) {
+                                // Defaulting to CD deduction for now as we don't track origin store of the request explicitly yet
+                                const currentStock = parseInt(v.estoque_cd) || 0;
+                                return { ...v, estoque_cd: Math.max(0, currentStock - quantitySold) };
+                            }
+                            return v;
+                        });
+
+                        // Recalculate Total Stock
+                        // Assuming simple sum of all stores for total, or just re-summing what we have
+                        // For safety, we just deduct from the total scalar as well to keep sync
+                        const currentTotal = parseInt(targetProd.quantidade_estoque) || 0;
+
+                        updateData = {
+                            variacoes: updatedVariacoes,
+                            quantidade_estoque: Math.max(0, currentTotal - quantitySold)
+                        };
+                    } else {
+                        // Simple Product
+                        updateData = {
+                            quantidade_estoque: Math.max(0, (targetProd.quantidade_estoque || 0) - quantitySold)
+                        };
+                    }
+
                     await supabase
                         .from('produtos')
-                        .update({ quantidade_estoque: targetProd.quantidade_estoque - quantitySold })
+                        .update(updateData)
                         .eq('id', targetProductId);
                 }
             }
@@ -242,7 +368,13 @@ export default function SolicitacoesCadastroWidget() {
                         {solicitacoes.map(req => (
                             <div key={req.id} className="bg-white p-3 rounded-lg border border-amber-100 shadow-sm text-sm">
                                 <div className="flex justify-between items-start mb-2">
-                                    <h4 className="font-bold text-gray-800">{req.nome_produto}</h4>
+                                    <h4 className="font-bold text-gray-800">
+                                        {req.produto_pai_id ? (
+                                            <span className="flex items-center gap-1 text-blue-700">
+                                                <AlertCircle className="w-3 h-3" /> Variação: {req.nome_produto}
+                                            </span>
+                                        ) : req.nome_produto}
+                                    </h4>
                                     <span className="text-xs text-gray-400">{format(new Date(req.created_at), 'dd/MM HH:mm')}</span>
                                 </div>
 
@@ -260,10 +392,14 @@ export default function SolicitacoesCadastroWidget() {
                                 <div className="flex gap-2">
                                     <Button
                                         size="sm"
-                                        className="flex-1 bg-green-600 hover:bg-green-700 h-8 text-xs"
-                                        onClick={() => handleOpenRegistration(req)}
+                                        className={`flex-1 h-8 text-xs ${req.produto_pai_id ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'}`}
+                                        onClick={() => req.produto_pai_id ? handleOpenAddVariation(req) : handleOpenRegistration(req)}
                                     >
-                                        <Check className="w-3 h-3 mr-1" /> Criar Produto
+                                        {req.produto_pai_id ? (
+                                            <><PackagePlus className="w-3 h-3 mr-1" /> Adicionar Variação</>
+                                        ) : (
+                                            <><Check className="w-3 h-3 mr-1" /> Criar Produto</>
+                                        )}
                                     </Button>
                                     <Button
                                         size="sm"
@@ -311,7 +447,10 @@ export default function SolicitacoesCadastroWidget() {
                             {targetProducts.map(p => (
                                 <div
                                     key={p.id}
-                                    onClick={() => setSelectedTargetProduct(p)}
+                                    onClick={() => {
+                                        setSelectedTargetProduct(p);
+                                        setSelectedTargetVariation(null); // Reset variation when product changes
+                                    }}
                                     className={`p-2 border rounded cursor-pointer text-sm flex justify-between ${selectedTargetProduct?.id === p.id ? 'border-green-500 bg-green-50' : 'hover:bg-gray-50'}`}
                                 >
                                     <span>{p.nome}</span>
@@ -320,11 +459,39 @@ export default function SolicitacoesCadastroWidget() {
                             ))}
                         </div>
                     </div>
-                    <DialogFooter>
+
+                    {/* Variações Selector (if applies) */}
+                    {selectedTargetProduct?.variacoes?.length > 0 && (
+                        <div className="space-y-2 border-t pt-4">
+                            <Label>Selecione a Variação vendida:</Label>
+                            <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto">
+                                {selectedTargetProduct.variacoes.map(v => (
+                                    <div
+                                        key={v.id}
+                                        onClick={() => setSelectedTargetVariation(v)}
+                                        className={`p-2 border rounded flex justify-between items-center cursor-pointer ${selectedTargetVariation?.id === v.id ? 'bg-amber-100 border-amber-500' : 'hover:bg-gray-50'}`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            {v.cor_hex && <div className="w-4 h-4 rounded-full border" style={{ backgroundColor: v.cor_hex }}></div>}
+                                            <span className="text-sm font-medium">{v.nome || v.cor || 'Variação sem nome'}</span>
+                                            <span className="text-xs text-gray-500">({v.tamanho || '-'})</span>
+                                        </div>
+                                        <Badge variant="outline">{v.estoque_cd || 0} un</Badge>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <DialogFooter className="mt-4">
                         <Button variant="ghost" onClick={() => setMergeModalOpen(false)}>Cancelar</Button>
                         <Button
-                            onClick={() => mergeProductMutation.mutate({ requestId: selectedRequest.id, targetProductId: selectedTargetProduct.id })}
-                            disabled={!selectedTargetProduct || mergeProductMutation.isPending}
+                            onClick={() => mergeProductMutation.mutate({
+                                requestId: selectedRequest.id,
+                                targetProductId: selectedTargetProduct.id,
+                                targetVariationId: selectedTargetVariation?.id
+                            })}
+                            disabled={!selectedTargetProduct || mergeProductMutation.isPending || (selectedTargetProduct.variacoes?.length > 0 && !selectedTargetVariation)}
                             className="bg-amber-600 hover:bg-amber-700 text-white"
                         >
                             Confirmar Vinculação

@@ -11,8 +11,28 @@ import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { CATEGORIAS, AMBIENTES, MATERIAIS } from "@/constants/productConstants";
 
-export default function SolicitacaoCadastroModal({ isOpen, onClose, onProdutoSolicitado, user }) {
+export default function SolicitacaoCadastroModal({ isOpen, onClose, onProdutoSolicitado, user, initialParentProduct = null }) {
     const [loading, setLoading] = useState(false);
+    const [parentProduct, setParentProduct] = useState(initialParentProduct);
+
+    // Effect to update internal state if prop changes
+    React.useEffect(() => {
+        if (initialParentProduct) {
+            setParentProduct(initialParentProduct);
+            setFormData(prev => ({
+                ...prev,
+                nome_produto: initialParentProduct.nome,
+                categoria: initialParentProduct.categoria,
+                ambiente: initialParentProduct.ambiente || '',
+                fornecedor_id: initialParentProduct.fornecedor_id ? String(initialParentProduct.fornecedor_id) : '',
+                material: initialParentProduct.material || '',
+                preco_sugerido: initialParentProduct.preco_venda ? String(initialParentProduct.preco_venda) : ''
+            }));
+        } else {
+            setParentProduct(null);
+        }
+    }, [initialParentProduct, isOpen]);
+
     const [formData, setFormData] = useState({
         nome_produto: '',
         categoria: '',
@@ -94,7 +114,8 @@ Dimensões: ${medidasFormatted}
                 medidas: medidasFormatted, // Store simple string representation in legacy column
                 preco_sugerido: preco,
                 observacoes: finalObservacoes,
-                status: 'pendente'
+                status: 'pendente',
+                produto_pai_id: parentProduct?.id || null
             });
 
             // 4. Construct "Fake" Product Object for Cart
@@ -118,7 +139,8 @@ Dimensões: ${medidasFormatted}
                     ambiente: formData.ambiente,
                     material: formData.material,
                     fornecedor_id: formData.fornecedor_id,
-                    nome_original: formData.nome_produto
+                    nome_original: formData.nome_produto,
+                    produto_pai_id: parentProduct?.id || null
                 }
             };
 
@@ -144,13 +166,27 @@ Dimensões: ${medidasFormatted}
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle>Solicitar Cadastro de Produto</DialogTitle>
+                    <DialogTitle>
+                        {parentProduct ? `Nova Variação: ${parentProduct.nome}` : 'Solicitar Cadastro de Produto'}
+                    </DialogTitle>
                     <DialogDescription>
-                        Preencha todos os dados técnicos para agilizar o cadastro.
+                        {parentProduct
+                            ? "Indique as características desta nova variação."
+                            : "Preencha todos os dados técnicos para agilizar o cadastro."}
                     </DialogDescription>
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
+                    {/* Parent Product Info Banner */}
+                    {parentProduct && (
+                        <div className="bg-blue-50 border border-blue-200 p-3 rounded-md flex items-start gap-2 text-sm text-blue-800">
+                            <AlertCircle className="w-4 h-4 mt-0.5" />
+                            <div>
+                                <p className="font-semibold">Vinculado a: {parentProduct.nome}</p>
+                                <p className="text-xs text-blue-600">Categoria: {parentProduct.categoria} | Fornecedor: {parentProduct.fornecedor_nome || '-'}</p>
+                            </div>
+                        </div>
+                    )}
                     {/* Linha 1: Nome e Categoria */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
@@ -161,11 +197,16 @@ Dimensões: ${medidasFormatted}
                                 onChange={handleChange}
                                 placeholder="Ex: Mesa Jantar 4 lugares"
                                 required
+                                disabled={!!parentProduct}
                             />
                         </div>
                         <div className="space-y-2">
                             <Label>Categoria *</Label>
-                            <Select onValueChange={(v) => handleSelectChange('categoria', v)} value={formData.categoria}>
+                            <Select
+                                onValueChange={(v) => handleSelectChange('categoria', v)}
+                                value={formData.categoria}
+                                disabled={!!parentProduct}
+                            >
                                 <SelectTrigger>
                                     <SelectValue placeholder="Selecione" />
                                 </SelectTrigger>

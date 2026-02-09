@@ -12,10 +12,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Loader2, Sparkles, Info, ChevronRight } from "lucide-react";
+import { Loader2, Sparkles, Info, ChevronRight, FileText } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { calculateSuggestedMarkup, calculateMarkupDetails } from "@/utils/markupCalculator";
+import { useAuth } from '@/hooks/useAuth';
 const categorias = [
   "Sofa",
   "Cama",
@@ -38,6 +39,8 @@ const categorias = [
 ];
 
 export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoading }) {
+  const { user } = useAuth();
+  const showFinancials = user?.cargo === 'Administrador';
   const [formData, setFormData] = useState({
     codigo_barras: "",
     nome: "",
@@ -142,6 +145,14 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
 
     if (!formData.tipo_entrega_padrao) {
       newErrors.tipo_entrega_padrao = "Selecione o tipo de entrega padrão";
+    }
+
+    if (!formData.ncm || formData.ncm.length < 8) {
+      newErrors.ncm = "NCM inválido (mínimo 8 dígitos)";
+    }
+
+    if (!formData.cfop || formData.cfop.length < 4) {
+      newErrors.cfop = "CFOP inválido (mínimo 4 dígitos)";
     }
 
     setErrors(newErrors);
@@ -267,22 +278,24 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
 
           {/* Precos */}
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="preco_custo">Preco de Custo (R$)</Label>
-              <Input
-                id="preco_custo"
-                type="number"
-                step="0.01"
-                min="0"
-                value={formData.preco_custo}
-                onChange={(e) => handleChange("preco_custo", e.target.value)}
-                placeholder="0,00"
-                className={errors.preco_custo ? "border-red-500" : ""}
-              />
-              {errors.preco_custo && (
-                <p className="text-xs text-red-500 mt-1">{errors.preco_custo}</p>
-              )}
-            </div>
+            {showFinancials && (
+              <div>
+                <Label htmlFor="preco_custo">Preco de Custo (R$)</Label>
+                <Input
+                  id="preco_custo"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.preco_custo}
+                  onChange={(e) => handleChange("preco_custo", e.target.value)}
+                  placeholder="0,00"
+                  className={errors.preco_custo ? "border-red-500" : ""}
+                />
+                {errors.preco_custo && (
+                  <p className="text-xs text-red-500 mt-1">{errors.preco_custo}</p>
+                )}
+              </div>
+            )}
             <div>
               <Label htmlFor="preco_venda">Preco de Venda (R$) *</Label>
               <Input
@@ -296,7 +309,7 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
                 className={errors.preco_venda ? "border-red-500" : ""}
               />
               {/* Suggested markup */}
-              {suggestedPrice > 0 && (
+              {suggestedPrice > 0 && showFinancials && (
                 <div className="flex items-center gap-2 mt-2">
                   <Popover>
                     <PopoverTrigger asChild>
@@ -424,6 +437,77 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
               checked={formData.ativo}
               onCheckedChange={(checked) => handleChange("ativo", checked)}
             />
+          </div>
+
+          <div className="space-y-4 pt-4 border-t border-gray-100">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-1 bg-green-100 rounded text-green-700">
+                <FileText className="w-4 h-4" />
+              </div>
+              <h4 className="font-semibold text-gray-800">Dados Fiscais (NFe)</h4>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="ncm">NCM *</Label>
+                <Input
+                  id="ncm"
+                  value={formData.ncm || ""}
+                  onChange={(e) => handleChange("ncm", e.target.value.replace(/\D/g, ''))}
+                  placeholder="Ex: 94036000"
+                  maxLength={8}
+                  className={`font-mono text-sm ${errors.ncm ? "border-red-500" : ""}`}
+                />
+                {errors.ncm && (
+                  <p className="text-xs text-red-500 mt-1">{errors.ncm}</p>
+                )}
+                <p className="text-[10px] text-gray-500 mt-1">Nomenclatura Comum do Mercosul</p>
+              </div>
+              <div>
+                <Label htmlFor="cest">CEST</Label>
+                <Input
+                  id="cest"
+                  value={formData.cest || ""}
+                  onChange={(e) => handleChange("cest", e.target.value.replace(/\D/g, ''))}
+                  placeholder="Ex: 2806100"
+                  maxLength={7}
+                  className="font-mono text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="origem">Origem</Label>
+                <Select
+                  value={formData.origem !== undefined ? String(formData.origem) : "0"}
+                  onValueChange={(v) => handleChange("origem", v)}
+                >
+                  <SelectTrigger className="font-mono text-xs h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">0 - Nacional</SelectItem>
+                    <SelectItem value="1">1 - Estrangeira (Importação direta)</SelectItem>
+                    <SelectItem value="2">2 - Estrangeira (Adq. no mercado int.)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="cfop">CFOP Padrão *</Label>
+                <Input
+                  id="cfop"
+                  value={formData.cfop || "5102"}
+                  onChange={(e) => handleChange("cfop", e.target.value.replace(/\D/g, ''))}
+                  placeholder="Ex: 5102"
+                  maxLength={4}
+                  className={`font-mono text-sm ${errors.cfop ? "border-red-500" : ""}`}
+                />
+                {errors.cfop && (
+                  <p className="text-xs text-red-500 mt-1">{errors.cfop}</p>
+                )}
+              </div>
+            </div>
           </div>
 
           <DialogFooter className="pt-4">

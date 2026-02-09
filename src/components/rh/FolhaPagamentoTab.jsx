@@ -14,6 +14,16 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
     Select,
     SelectContent,
     SelectItem,
@@ -41,6 +51,11 @@ export default function FolhaPagamentoTab() {
     const [modalDetalhes, setModalDetalhes] = useState(false);
     const [folhaSelecionada, setFolhaSelecionada] = useState(null);
     const [gerando, setGerando] = useState(false);
+
+    // States for payment confirmation
+    const [modalConfirmarPagamento, setModalConfirmarPagamento] = useState(false);
+    const [folhaParaPagar, setFolhaParaPagar] = useState(null);
+    const [gerarLancamentoFinanceiro, setGerarLancamentoFinanceiro] = useState(true);
 
     const { data: colaboradores = [] } = useQuery({
         queryKey: ['colaboradores'],
@@ -144,16 +159,41 @@ export default function FolhaPagamentoTab() {
         }
     };
 
-    const marcarComoPago = async (folha) => {
+    const marcarComoPago = (folha) => {
+        setFolhaParaPagar(folha);
+        setGerarLancamentoFinanceiro(true);
+        setModalConfirmarPagamento(true);
+    };
+
+    const confirmarPagamento = async () => {
+        if (!folhaParaPagar) return;
+
         try {
-            await base44.entities.FolhaPagamento.update(folha.id, {
+            // 1. Update Folha status
+            await base44.entities.FolhaPagamento.update(folhaParaPagar.id, {
                 status: 'Pago',
                 data_pagamento: new Date().toISOString().slice(0, 10),
             });
+
+            // 2. Create Financial Entry (Optional)
+            if (gerarLancamentoFinanceiro) {
+                await base44.entities.LancamentoFinanceiro.create({
+                    descricao: `Pagamento Folha - ${MESES[folhaParaPagar.mes_referencia - 1]}/${folhaParaPagar.ano_referencia} - ${folhaParaPagar.colaborador_nome}`,
+                    valor: -Number(folhaParaPagar.salario_liquido),
+                    tipo: 'despesa',
+                    categoria: 'Salários', // Assuming this category exists or is free-text
+                    data_lancamento: new Date().toISOString().slice(0, 10),
+                    forma_pagamento: 'Transferência', // Defaulting to Transfer
+                    status: 'Pago'
+                });
+            }
+
             queryClient.invalidateQueries(['folhas_pagamento']);
-            toast.success("Pagamento registrado!");
+            toast.success("Pagamento registrado com sucesso!");
+            setModalConfirmarPagamento(false);
+            setFolhaParaPagar(null);
         } catch (error) {
-            toast.error("Erro: " + error.message);
+            toast.error("Erro ao registrar pagamento: " + error.message);
         }
     };
 
@@ -481,6 +521,45 @@ export default function FolhaPagamentoTab() {
                     onClose={() => { setModalDetalhes(false); setFolhaSelecionada(null); }}
                 />
             )}
+            {/* Confirmation Modal for Payment */}
+            <AlertDialog open={modalConfirmarPagamento} onOpenChange={setModalConfirmarPagamento}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Confirmar Pagamento</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Deseja marcar a folha de <strong>{folhaParaPagar?.colaborador_nome}</strong> como paga?
+                            <br /><br />
+                            <div className="flex items-center space-x-2 bg-gray-50 p-3 rounded-md border border-gray-200">
+                                <input
+                                    type="checkbox"
+                                    id="gerarLancamento"
+                                    className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-600"
+                                    checked={gerarLancamentoFinanceiro}
+                                    onChange={(e) => setGerarLancamentoFinanceiro(e.target.checked)}
+                                />
+                                <label
+                                    htmlFor="gerarLancamento"
+                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-gray-700"
+                                >
+                                    Gerar despesa no Financeiro automaticamente
+                                </label>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">
+                                Valor: R$ {Number(folhaParaPagar?.salario_liquido).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </p>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={confirmarPagamento}
+                            className="bg-green-600 hover:bg-green-700"
+                        >
+                            Confirmar Pagamento
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

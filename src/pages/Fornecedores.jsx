@@ -6,19 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Plus, Search, Edit, Trash2, Package, AlertTriangle, Merge, Building2, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import BulkPriceUpdateModal from "@/components/compras/BulkPriceUpdateModal";
+import FornecedorModal from "@/components/cadastros/FornecedorModal";
 
 export default function Fornecedores() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -27,18 +18,6 @@ export default function Fornecedores() {
   const [editingFornecedor, setEditingFornecedor] = useState(null);
   const [showDuplicatas, setShowDuplicatas] = useState(false);
   const [duplicatas, setDuplicatas] = useState([]);
-  const [formData, setFormData] = useState({
-    nome_empresa: "",
-    cnpj: "",
-    outros_cnpjs: [],
-    telefone: "",
-    email: "",
-    endereco: "",
-    contato: "",
-    observacoes: "",
-    ativo: true
-  });
-  const [novoCnpj, setNovoCnpj] = useState("");
 
   const queryClient = useQueryClient();
   const confirm = useConfirm();
@@ -48,24 +27,6 @@ export default function Fornecedores() {
     queryFn: () => base44.entities.Fornecedor.list('nome_empresa'),
   });
 
-  const createMutation = useMutation({
-    mutationFn: (data) => base44.entities.Fornecedor.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fornecedores'] });
-      setIsModalOpen(false);
-      resetForm();
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.Fornecedor.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fornecedores'] });
-      setIsModalOpen(false);
-      resetForm();
-    },
-  });
-
   const deleteMutation = useMutation({
     mutationFn: (id) => base44.entities.Fornecedor.delete(id),
     onSuccess: () => {
@@ -73,53 +34,14 @@ export default function Fornecedores() {
     },
   });
 
-  const resetForm = () => {
-    setFormData({
-      nome_empresa: "",
-      cnpj: "",
-      outros_cnpjs: [],
-      telefone: "",
-      email: "",
-      endereco: "",
-      contato: "",
-      observacoes: "",
-      ativo: true
-    });
-    setNovoCnpj("");
-    setEditingFornecedor(null);
-  };
-
-  const handleAddCnpj = () => {
-    if (novoCnpj && !formData.outros_cnpjs.includes(novoCnpj)) {
-      setFormData({
-        ...formData,
-        outros_cnpjs: [...(formData.outros_cnpjs || []), novoCnpj]
-      });
-      setNovoCnpj("");
-    }
-  };
-
-  const handleRemoveCnpj = (cnpjToRemove) => {
-    setFormData({
-      ...formData,
-      outros_cnpjs: (formData.outros_cnpjs || []).filter(c => c !== cnpjToRemove)
-    });
-  };
-
   const handleEdit = (fornecedor) => {
     setEditingFornecedor(fornecedor);
-    setFormData(fornecedor);
     setIsModalOpen(true);
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-
-    if (editingFornecedor) {
-      updateMutation.mutate({ id: editingFornecedor.id, data: formData });
-    } else {
-      createMutation.mutate(formData);
-    }
+  const handleSuccess = () => {
+    setEditingFornecedor(null);
+    setIsModalOpen(false);
   };
 
   const handleDelete = async (id) => {
@@ -254,7 +176,7 @@ export default function Fornecedores() {
   };
   ;
 
-  const filteredFornecedores = fornecedores.filter(f =>
+  const filteredFornecedores = (fornecedores || []).filter(f =>
     f.nome_empresa?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     f.cnpj?.includes(searchTerm)
   );
@@ -267,7 +189,7 @@ export default function Fornecedores() {
             Fornecedores
           </h1>
           <p className="text-gray-500 dark:text-gray-400">
-            {fornecedores.length} fornecedor(es) cadastrado(s)
+            {fornecedores?.length || 0} fornecedor(es) cadastrado(s)
             {duplicatas.length > 0 && (
               <span className="ml-2 text-orange-600 font-medium">• {duplicatas.reduce((acc, grupo) => acc + grupo.duplicatas.length, 0)} duplicatas encontradas</span>
             )}
@@ -292,7 +214,7 @@ export default function Fornecedores() {
           </Button>
           <Button
             onClick={() => {
-              resetForm();
+              setEditingFornecedor(null);
               setIsModalOpen(true);
             }}
             className="shadow-lg bg-green-700 hover:bg-green-800 text-white"
@@ -451,163 +373,12 @@ export default function Fornecedores() {
         </div>
       )}
 
-      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {editingFornecedor ? 'Editar Fornecedor' : 'Novo Fornecedor'}
-            </DialogTitle>
-            <DialogDescription>
-              Preencha as informações do fornecedor
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleSubmit}>
-            <div className="space-y-4 py-4">
-              <div>
-                <Label htmlFor="nome_empresa">Nome da Empresa *</Label>
-                <Input
-                  id="nome_empresa"
-                  value={formData.nome_empresa}
-                  onChange={(e) => setFormData({ ...formData, nome_empresa: e.target.value })}
-                  placeholder="Nome do fornecedor"
-                  required
-                />
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="cnpj">CNPJ Principal</Label>
-                  <Input
-                    id="cnpj"
-                    value={formData.cnpj}
-                    onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
-                    placeholder="00.000.000/0000-00"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <Label>Outros CNPJs (Filiais)</Label>
-                  <div className="flex gap-2 mb-2">
-                    <Input
-                      value={novoCnpj}
-                      onChange={(e) => setNovoCnpj(e.target.value)}
-                      placeholder="Adicionar outro CNPJ"
-                    />
-                    <Button type="button" onClick={handleAddCnpj} variant="secondary">
-                      Adicionar
-                    </Button>
-                  </div>
-                  {(formData.outros_cnpjs && formData.outros_cnpjs.length > 0) && (
-                    <div className="flex flex-wrap gap-2 p-2 bg-gray-50 rounded border">
-                      {formData.outros_cnpjs.map((cnpj, idx) => (
-                        <Badge key={idx} variant="outline" className="flex items-center gap-1 bg-white">
-                          {cnpj}
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveCnpj(cnpj)}
-                            className="hover:text-red-500"
-                          >
-                            ×
-                          </button>
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-
-                <div>
-                  <Label htmlFor="telefone">Telefone</Label>
-                  <Input
-                    id="telefone"
-                    value={formData.telefone}
-                    onChange={(e) => setFormData({ ...formData, telefone: e.target.value })}
-                    placeholder="(00) 00000-0000"
-                  />
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="email">E-mail</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    placeholder="contato@fornecedor.com"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="contato">Responsável</Label>
-                  <Input
-                    id="contato"
-                    value={formData.contato}
-                    onChange={(e) => setFormData({ ...formData, contato: e.target.value })}
-                    placeholder="Nome do contato"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="endereco">Endereço</Label>
-                <Input
-                  id="endereco"
-                  value={formData.endereco}
-                  onChange={(e) => setFormData({ ...formData, endereco: e.target.value })}
-                  placeholder="Endereço completo"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="observacoes">Observações</Label>
-                <Textarea
-                  id="observacoes"
-                  value={formData.observacoes}
-                  onChange={(e) => setFormData({ ...formData, observacoes: e.target.value })}
-                  rows={3}
-                  placeholder="Informações adicionais..."
-                />
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="ativo"
-                  checked={formData.ativo}
-                  onChange={(e) => setFormData({ ...formData, ativo: e.target.checked })}
-                  className="rounded"
-                />
-                <Label htmlFor="ativo" className="cursor-pointer">
-                  Fornecedor Ativo
-                </Label>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setIsModalOpen(false);
-                  resetForm();
-                }}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="submit"
-                disabled={createMutation.isPending || updateMutation.isPending}
-                style={{ width: '100%' }}
-                className="bg-green-700 hover:bg-green-800 text-white"
-              >
-                {(createMutation.isPending || updateMutation.isPending) ? 'Salvando...' : 'Salvar'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <FornecedorModal
+        open={isModalOpen}
+        onOpenChange={setIsModalOpen}
+        fornecedor={editingFornecedor}
+        onSuccess={handleSuccess}
+      />
 
       {/* Modal de Reajuste em Massa */}
       {isBulkUpdateOpen && (

@@ -144,9 +144,9 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
     const [ncmProgress, setNcmProgress] = useState({ current: 0, total: 0, message: '' });
     const [ncmStats, setNcmStats] = useState(null); // { gemini: N, fallback: N }
 
-    // Verificar permissão gerencial
-    const { user, isGerente } = useAuth();
-    const isGerencial = isGerente?.() || user?.cargo === 'Gerente Geral' || user?.cargo === 'Administrador';
+    // Verificação de permissão estrita para dados financeiros
+    const { user } = useAuth();
+    const showFinancials = user?.cargo === 'Administrador';
 
     // Multi-Tenant: Carrega lojas dinâmicas
     const { lojas } = useLojas();
@@ -403,66 +403,18 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         return { data, errors: parseErrors };
     };
 
-    // Agrupa dados por produto (mesmo nome + modelo = variações)
-    const groupByProduct = (data) => {
-        const groups = {};
-
-        data.forEach(row => {
-            // Chave de agrupamento: nome + modelo/referência + dimensões
-            const nome = row.nome.toLowerCase().trim();
-            const modelo = (row.modelo_referencia || '').toLowerCase().trim();
-            const largura = row.largura || '';
-            const altura = row.altura || '';
-            const profundidade = row.profundidade || '';
-            const key = `${nome}|${modelo}|${largura}x${altura}x${profundidade}`;
-
-            if (!groups[key]) {
-                groups[key] = {
-                    nome: row.nome,
-                    categoria: row.categoria || '',
-                    ambiente: row.ambiente || '',
-                    fornecedor_nome: row.fornecedor_nome || '',
-                    modelo_referencia: row.modelo_referencia || '',
-                    material: row.material || '',
-                    impostos_percentual: row.impostos_percentual || 0,
-                    frete_custo: row.frete_custo || 0,
-                    ipi_percentual: row.ipi_percentual || 0,
-                    markup_aplicado: row.markup_aplicado,
-                    desconto_max_vendedor: row.desconto_max_vendedor || 5,
-                    desconto_max_gerencial: row.desconto_max_gerencial || 15,
-                    requer_montagem: row.requer_montagem || false,
-                    montagem_terceirizado: row.montagem_terceirizado || false,
-                    variacoes: []
-                };
-            }
-
-            // Extrair estoque dinâmico por loja para a variação
-            const estoqueVariacao = {};
-            lojas.forEach(loja => {
-                const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
-                const fieldName = `estoque_${codigoNorm}`;
-                estoqueVariacao[fieldName] = row[fieldName] || 0;
-            });
-
-            // Adiciona variação com estoque dinâmico
-            groups[key].variacoes.push({
-                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                cor: row.cor || '',
-                cor_hex: getColorHex(row.cor),
-                modelos_tecidos: row.modelos_tecidos || '',
-                tamanho: row.tamanho || '',
-                dimensao_extra: row.dimensao_extra || '',
-                largura: row.largura,
-                altura: row.altura,
-                profundidade: row.profundidade,
-                preco_custo: row.preco_custo,
-                preco_venda: row.preco_venda,
-                ...estoqueVariacao,
-                fotos: []
-            });
+    // NÃO AGRUPA MAIS - Retorna lista plana preparada
+    const prepareProducts = (data) => {
+        return data.map(row => {
+            // Garante que todo produto tenha um ID temporário para a UI de preview
+            return {
+                ...row,
+                id: row.id || Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                // Mantém estrutura "variacoes" vazia apenas se algum componente legado depender, 
+                // mas a lógica principal vai ignorar.
+                variacoes: []
+            };
         });
-
-        return Object.values(groups);
     };
 
     // Handle file upload
@@ -494,9 +446,9 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                 setErrors(parseErrors);
 
                 if (data.length > 0) {
-                    const grouped = groupByProduct(data);
-                    console.log('[Import] Produtos agrupados:', grouped.length);
-                    setGroupedProducts(grouped);
+                    const prepared = prepareProducts(data);
+                    console.log('[Import] Produtos preparados (sem agrupamento):', prepared.length);
+                    setGroupedProducts(prepared);
                     setStep(2);
                 } else {
                     console.log('[Import] Nenhum produto encontrado nos dados');
@@ -586,48 +538,60 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
             const product = groupedProducts[index];
             try {
-                // === CÁLCULO DE ESTOQUE DINÂMICO POR LOJA ===
-                const estoquePorLoja = {};
-                let totalEstoque = 0;
+                // Constroi nome único concatenando variações
+                let nomeUnico = product.nome;
+                const variaveisNome = [];
+                if (product.cor) variaveisNome.push(product.cor);
+                if (product.tamanho) variaveisNome.push(product.tamanho);
+                if (product.dimensao_extra) variaveisNome.push(product.dimensao_extra);
 
-                lojas.forEach(loja => {
-                    const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
-                    const fieldName = `estoque_${codigoNorm}`;
-                    const quantidade = product.variacoes.reduce((sum, v) => sum + (v[fieldName] || 0), 0);
-                    estoquePorLoja[loja.id] = quantidade;
-                    totalEstoque += quantidade;
-                });
-
-                const precoMinimo = Math.min(...product.variacoes.map(v => v.preco_venda).filter(p => p > 0)) || 0;
-
-                // Determina se tem variações ou item único
-                const temVariacoes = product.variacoes.length > 1 ||
-                    product.variacoes.some(v => v.cor || v.tamanho);
-
-                // Calcula preço de custo médio
-                const precoCustoMedio = product.variacoes.reduce((sum, v) => sum + (v.preco_custo || 0), 0) / product.variacoes.length || 0;
+                if (variaveisNome.length > 0) {
+                    nomeUnico = `${product.nome} - ${variaveisNome.join(' ')}`;
+                }
 
                 // Gera SKU único
-                const skuBase = generateSKU(product.fornecedor_nome, product.modelo_referencia, index);
+                // Se já tiver código de barras no CSV, usa ele. Se não, gera.
+                const sku = product.codigo_barras || generateSKU(product.fornecedor_nome, product.modelo_referencia, index, product.cor);
 
                 // Detecta categoria e ambiente automaticamente se não fornecidos
                 const detected = detectCategoryAndAmbiente(product.nome);
                 const categoria = product.categoria || detected.categoria;
                 const ambiente = product.ambiente || detected.ambiente;
 
+                // === CÁLCULO DE ESTOQUE TOTAL ===
+                // O product já tem os campos estoque_nomeloja vindos do parseCSV
+                let totalEstoque = 0;
+                lojas.forEach(loja => {
+                    const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
+                    const fieldName = `estoque_${codigoNorm}`;
+                    totalEstoque += (parseInt(product[fieldName]) || 0);
+                });
+
                 const produtoData = {
                     // Identificação
-                    codigo_barras: skuBase,
-                    nome: product.nome,
+                    codigo_barras: sku,
+                    nome: nomeUnico,
                     categoria: categoria,
                     ambiente: ambiente,
                     fornecedor_nome: product.fornecedor_nome || '',
                     modelo_referencia: product.modelo_referencia || '',
                     material: product.material || '',
+
+                    // Variações (agora atributos diretos do produto único)
+                    cor: product.cor || null,
+                    cor_hex: product.cor ? getColorHex(product.cor) : null,
+                    tamanho: product.tamanho || null,
+
                     tipo_entrega_padrao: 'desmontado',
 
-                    // Preço de Custo
-                    preco_custo: precoCustoMedio,
+                    // Dimensões
+                    largura: product.largura || null,
+                    altura: product.altura || null,
+                    profundidade: product.profundidade || null,
+
+                    // Preços
+                    preco_custo: product.preco_custo || 0,
+                    preco_venda: product.preco_venda || 0,
 
                     // Custeio
                     impostos_percentual: product.impostos_percentual || 0,
@@ -637,104 +601,61 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                     // Markup
                     markup_aplicado: product.markup_aplicado,
 
-                    // Preços
-                    preco_venda: precoMinimo,
-
                     // Descontos
                     desconto_max_vendedor: product.desconto_max_vendedor || 5,
                     desconto_max_gerencial: product.desconto_max_gerencial || 15,
 
-                    // Estoque total (soma de todas as lojas)
+                    // Estoque
                     quantidade_estoque: totalEstoque,
                     estoque_minimo: 5,
+
+                    // Campos dinâmicos de estoque por loja já estão no ...product se passarmos,
+                    // mas precisamos garantir que estao no formato certo para criar?
+                    // O base44.entities.Produto.create deve aceitar os campos extras se o backend suportar.
+                    // Assumindo que o create aceita campos extras ou que precisamos passá-los um a um?
+                    // O ideal é passar explicitamente o que sabemos que existe.
 
                     // Montagem
                     requer_montagem: product.requer_montagem || false,
                     montagem_terceirizado: product.montagem_terceirizado || false,
 
-                    // Variações e outros
-                    variacoes: temVariacoes ? product.variacoes : [],
+                    // NÃO É MAIS PARENT/CHILD
+                    variacoes: [],
                     fotos: [],
                     ativo: true,
-                    is_parent: true,
-                    parent_id: null,
+                    is_parent: false,
+                    parent_id: null, // NULO PARA SEMPRE
 
                     // Multi-tenant
                     organization_id: organization?.id || '00000000-0000-0000-0000-000000000001'
                 };
 
-                // Copiar dimensões e preço da primeira variação para o produto pai
-                if (product.variacoes.length > 0) {
-                    const v = product.variacoes[0];
-                    produtoData.largura = v.largura;
-                    produtoData.altura = v.altura;
-                    produtoData.profundidade = v.profundidade;
-                    produtoData.preco_custo = v.preco_custo;
-                    if (!temVariacoes) {
-                        produtoData.cor = v.cor;
-                        produtoData.modelos_tecidos = v.modelos_tecidos ?
-                            (typeof v.modelos_tecidos === 'string' ? v.modelos_tecidos.split(',').map(t => t.trim()) : v.modelos_tecidos) :
-                            null;
+                // Adiciona campos de estoque por loja explicitamente
+                lojas.forEach(loja => {
+                    const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
+                    const fieldName = `estoque_${codigoNorm}`;
+                    if (product[fieldName] !== undefined) {
+                        produtoData[fieldName] = product[fieldName];
                     }
-                }
+                });
 
-                const produtoPai = await base44.entities.Produto.create(produtoData);
+                const novoProduto = await base44.entities.Produto.create(produtoData);
 
-                // === REGISTRAR HISTÓRICO DE PREÇOS (importação em massa) ===
+                // === REGISTRAR HISTÓRICO DE PREÇOS ===
                 try {
-                    await base44.entities.HistoricoPrecos?.create?.({
-                        organization_id: organization?.id || '00000000-0000-0000-0000-000000000001',
-                        produto_id: produtoPai.id,
-                        preco_antigo: 0,
-                        preco_novo: precoMinimo,
-                        tipo: 'importacao',
-                        motivo: `Importação em massa via CSV - ${file?.name || 'arquivo'}`,
-                        usuario_nome: user?.nome || 'Sistema'
-                    });
+                    if (novoProduto && novoProduto.id) {
+                        await base44.entities.HistoricoPrecos?.create?.({
+                            organization_id: organization?.id || '00000000-0000-0000-0000-000000000001',
+                            produto_id: novoProduto.id,
+                            preco_antigo: 0,
+                            preco_novo: produtoData.preco_venda,
+                            tipo: 'custo',
+                            motivo: `Importação - ${file?.name || 'arquivo'}`,
+                            usuario_nome: user?.nome || 'Sistema'
+                        });
+                    }
                 } catch (histErr) {
                     console.warn('[Import] Não foi possível registrar histórico de preços:', histErr);
-                }
-
-                // Criar variações como produtos filhos
-                if (temVariacoes && product.variacoes.length > 0) {
-                    for (let vIndex = 0; vIndex < product.variacoes.length; vIndex++) {
-                        const variacao = product.variacoes[vIndex];
-                        const varSku = generateSKU(
-                            product.fornecedor_nome,
-                            product.modelo_referencia,
-                            index,
-                            variacao.cor,
-                            vIndex + 1
-                        );
-
-                        // Extrair estoque da variação
-                        const estoqueVar = {};
-                        lojas.forEach(loja => {
-                            const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
-                            estoqueVar[`estoque_${codigoNorm}`] = variacao[`estoque_${codigoNorm}`] || 0;
-                        });
-                        const totalEstoqueVar = Object.values(estoqueVar).reduce((a, b) => a + b, 0);
-
-                        await base44.entities.Produto.create({
-                            nome: produtoData.nome,
-                            categoria: produtoData.categoria,
-                            ambiente: produtoData.ambiente,
-                            fornecedor_nome: produtoData.fornecedor_nome,
-                            modelo_referencia: produtoData.modelo_referencia,
-                            cor: variacao.cor || null,
-                            largura: variacao.largura || null,
-                            altura: variacao.altura || null,
-                            profundidade: variacao.profundidade || null,
-                            preco_custo: variacao.preco_custo || null,
-                            preco_venda: variacao.preco_venda || null,
-                            quantidade_estoque: totalEstoqueVar,
-                            is_parent: false,
-                            parent_id: produtoPai.id,
-                            sku: varSku,
-                            ativo: true,
-                            organization_id: organization?.id || '00000000-0000-0000-0000-000000000001'
-                        });
-                    }
                 }
 
                 imported++;
@@ -952,7 +873,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                                             {product.categoria && (
                                                                 <span>📂 {product.categoria}</span>
                                                             )}
-                                                            {isGerencial && product.markup_aplicado && (
+                                                            {showFinancials && product.markup_aplicado && (
                                                                 <span>📊 Markup: {product.markup_aplicado}%</span>
                                                             )}
                                                             {product.ncm && (
@@ -991,7 +912,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                                             <tr>
                                                                 <th className="text-left px-3 py-2 font-medium">Cor</th>
                                                                 <th className="text-left px-3 py-2 font-medium">Dimensões</th>
-                                                                {isGerencial && <th className="text-right px-3 py-2 font-medium">Custo</th>}
+                                                                {showFinancials && <th className="text-right px-3 py-2 font-medium">Custo</th>}
                                                                 <th className="text-right px-3 py-2 font-medium">Venda</th>
                                                                 <th className="text-right px-3 py-2 font-medium">Est.</th>
                                                             </tr>
@@ -1022,7 +943,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                                                         <td className="px-3 py-2 text-gray-500">
                                                                             {dims ? `${dims} cm` : '-'}
                                                                         </td>
-                                                                        {isGerencial && (
+                                                                        {showFinancials && (
                                                                             <td className="px-3 py-2 text-right text-gray-500">
                                                                                 {v.preco_custo > 0 ? `R$ ${v.preco_custo.toFixed(2)}` : '-'}
                                                                             </td>

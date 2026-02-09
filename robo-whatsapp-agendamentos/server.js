@@ -55,11 +55,15 @@ app.use(express.static(distPath));
 // const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    // 🔐 AUTH PERSISTENTE: Salva a sessão para não precisar escanear QR code sempre
+    authStrategy: new LocalAuth({
+        clientId: "client-one",
+        dataPath: "./.wwebjs_auth"
+    }),
     puppeteer: {
         headless: true,
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-        protocolTimeout: 180000, // 3 minutos para operações longas
+        protocolTimeout: 180000,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -76,12 +80,28 @@ const client = new Client({
             '--no-default-browser-check',
             '--remote-debugging-port=0'
         ],
-        timeout: 180000, // Aumentado para 3 minutos
-        handleSIGINT: false,
+        timeout: 180000,
+        handleSIGINT: false, // Vamos tratar manualmente
         handleSIGTERM: false,
         handleSIGHUP: false
     }
 });
+
+// 🛑 GRACEFUL SHUTDOWN (Evita EBUSY e Zombis)
+const shutdown = async (signal) => {
+    console.log(`🛑 Recebido ${signal}. Encerrando cliente WhatsApp e liberando arquivos...`);
+    try {
+        await client.destroy();
+        console.log('✅ Cliente WhatsApp encerrado.');
+        process.exit(0);
+    } catch (err) {
+        console.error('❌ Erro ao encerrar cliente:', err);
+        process.exit(1);
+    }
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 let filaEspera = {};
 let mapaEntregas = {};
@@ -143,10 +163,29 @@ client.on('qr', qr => {
 });
 
 // 🔐 Autenticação bem-sucedida (antes do ready)
-client.on('authenticated', () => {
-    console.log('🔐 Autenticação bem-sucedida! Aguardando carregamento...');
-    connectionStatus = 'authenticating';
+// 🔐 Autenticação bem-sucedida (antes do ready)
+client.on('authenticated', async () => {
+    console.log('🔐 Autenticação bem-sucedida!');
+    console.log('🚀 FORÇANDO STATUS: CONECTADO (Workaround para loop infinito)');
+
+    // FORÇA BRUTA: Assume que está conectado assim que autentica
+    connectionStatus = 'connected';
     currentQR = null;
+
+    // Tenta pegar info do usuário, mas não bloqueia o status
+    try {
+        const info = await client.info;
+        if (info) {
+            connectionInfo = {
+                wid: info.wid?.user || 'N/A',
+                pushname: info.pushname || 'WhatsApp Bot',
+                platform: info.platform || 'unknown'
+            };
+        }
+    } catch (e) {
+        // Ignora erro, já estamos "conectados"
+        console.log('⚠️ Info do usuário indisponível no momento, mas status setado para connected.');
+    }
 });
 
 // 📶 Tela de carregamento do WhatsApp (com workaround para ready não disparar)
@@ -430,31 +469,26 @@ app.post('/disparar-confirmacoes', async (req, res) => {
             if (entrega.data_agendada) {
                 try {
                     // Parse da data corretamente (pode vir YYYY-MM-DD ou YYYY-MM-DDTHH:MM:SS)
-                    const dataStr = entrega.data_agendada.split('T')[0]; // Pega só a data
-                    const partes = dataStr.split('-');
+                    // Parse seguro da data agendada (YYYY-MM-DD)
+                    const dataStr = entrega.data_agendada.split('T')[0];
 
-                    if (partes.length === 3) {
-                        const [ano, mes, dia] = partes.map(Number);
-                        const dataEntrega = new Date(ano, mes - 1, dia);
+                    // Data de Hoje (Fuso BR)
+                    const now = new Date();
+                    const hojeStr = now.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }).split('/').reverse().join('-');
 
-                        const hoje = new Date();
-                        hoje.setHours(0, 0, 0, 0);
-                        const amanha = new Date(hoje);
-                        amanha.setDate(amanha.getDate() + 1);
+                    // Data de Amanhã (Fuso BR)
+                    const amanha = new Date(now);
+                    amanha.setDate(amanha.getDate() + 1);
+                    const amanhaStr = amanha.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }).split('/').reverse().join('-');
 
-                        dataEntrega.setHours(0, 0, 0, 0);
-
-                        if (dataEntrega.getTime() === hoje.getTime()) {
-                            dataTexto = "HOJE";
-                        } else if (dataEntrega.getTime() === amanha.getTime()) {
-                            dataTexto = "AMANHÃ";
-                        } else {
-                            const diasSemana = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
-                            const diaSemana = diasSemana[dataEntrega.getDay()] || 'Dia';
-                            const diaStr = dia.toString().padStart(2, '0');
-                            const mesStr = mes.toString().padStart(2, '0');
-                            dataTexto = `${diaSemana.toUpperCase()}, ${diaStr}/${mesStr}`;
-                        }
+                    if (dataStr === hojeStr) {
+                        dataTexto = "HOJE";
+                    } else if (dataStr === amanhaStr) {
+                        dataTexto = "AMANHÃ";
+                    } else {
+                        // Formato dd/mm
+                        const [ano, mes, dia] = dataStr.split('-');
+                        dataTexto = `${dia}/${mes}`;
                     }
                 } catch (e) {
                     console.log('Erro ao parsear data:', e.message);
@@ -513,41 +547,35 @@ app.post('/mensagem-pos-venda', async (req, res) => {
 
     console.log(`📤 Tentando enviar mensagem para ${nome} (${chatId})`);
 
-    const mensagem =
-        `Olá *${nome}!* 🎉
-Muito obrigado por comprar na *Móveis Pedro II*.
+    const isRetirada = prazo && (prazo.toLowerCase().includes('retirada') || prazo.toLowerCase().includes('retirado'));
 
-✅ *Seu Pedido #${pedido} foi confirmado!*
+    let mensagem;
 
-📦 *Itens do seu pedido:*
-${produtos || 'Consulte sua nota de pedido'}
-
-⚠️ *IMPORTANTE:*
-Por favor, **salve este número** na sua agenda. É por aqui que vamos te avisar sobre a entrega.
-
-📅 *Prazo:* ${prazo} úteis
-Não precisa se preocupar em ligar! Quando seu pedido já tiver uma rota pronta, entraremos em contato para te informar a data da entrega.
-
-Qualquer dúvida, estamos à disposição! 🧡💚`;
+    if (isRetirada) {
+        mensagem =
+            `Olá *${nome}!* 🎉\n` +
+            `Muito obrigado por comprar na *Móveis Pedro II*.\n\n` +
+            `✅ *Seu Pedido #${pedido} foi confirmado!* \n\n` +
+            `📦 *Itens do seu pedido:*\n` +
+            `${produtos || 'Consulte sua nota de pedido'}\n\n` +
+            `Esperamos que você aproveite muito sua compra! 😍\n\n` +
+            `Qualquer dúvida, estamos à disposição! 🧡💚`;
+    } else {
+        mensagem =
+            `Olá *${nome}!* 🎉\n` +
+            `Muito obrigado por comprar na *Móveis Pedro II*.\n\n` +
+            `✅ *Seu Pedido #${pedido} foi confirmado!* \n\n` +
+            `📦 *Itens do seu pedido:*\n` +
+            `${produtos || 'Consulte sua nota de pedido'}\n\n` +
+            `⚠️ *IMPORTANTE:*\n` +
+            `Por favor, **salve este número** na sua agenda. É por aqui que vamos te avisar sobre a entrega.\n\n` +
+            `📅 *Prazo:* ${prazo} úteis\n` +
+            `Não precisa se preocupar em ligar! Quando seu pedido já tiver uma rota pronta, entraremos em contato para te informar a data da entrega.\n\n` +
+            `Qualquer dúvida, estamos à disposição! 🧡💚`;
+    }
 
     try {
-        // 1. Se tiver PDF, enviar primeiro como documento
-        if (pdf_base64) {
-            console.log(`📦 Recebido PDF base64 para ${nome} (tamanho: ${pdf_base64.length} chars)`);
-            try {
-                const { MessageMedia } = require('whatsapp-web.js');
-                const media = new MessageMedia('application/pdf', pdf_base64, `Pedido_${pedido}.pdf`);
-                const pdfResult = await enviarMensagemSegura(chatId, media, {
-                    caption: `📄 Nota do Pedido #${pedido} - Móveis Pedro II`
-                });
-                console.log(`📎 PDF enviado para ${nome}:`, pdfResult.success ? 'OK' : pdfResult.warning || 'Falha');
-            } catch (pdfError) {
-                console.error('❌ Erro ao enviar PDF:', pdfError.message);
-                console.error('Stack:', pdfError.stack);
-            }
-        }
-
-        // 2. Enviar mensagem de texto
+        // Enviar mensagem de texto
         const msgResult = await enviarMensagemSegura(chatId, mensagem);
         console.log(`✅ Pós-venda enviado para ${nome}:`, msgResult.success ? 'OK' : msgResult.warning || 'Falha');
         res.json({ success: true, warning: msgResult.warning });
@@ -593,11 +621,19 @@ Até breve!`;
 
 // --- ROTA 4: PRÓXIMA PARADA (RASTREAMENTO) ---
 app.post('/aviso-proxima-parada', async (req, res) => {
-    const { telefone, nome, linkLocalizacao } = req.body;
+    const { id, telefone, nome } = req.body;
+
+    if (!id || !telefone) {
+        return res.status(400).json({ error: "id da entrega e telefone são obrigatórios" });
+    }
 
     let tel = telefone.replace(/\D/g, '');
     if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
     const chatId = `${tel}@c.us`;
+
+    // URL da Landing Page (ajuste se o domínio for diferente)
+    const baseUrl = process.env.PUBLIC_URL || "https://moveispedroii.com.br";
+    const linkRastreio = `${baseUrl}/rastreio/${id}`;
 
     const msg =
         `*Móveis Pedro II Informa:* 📍
@@ -606,13 +642,14 @@ Olá *${nome}*! O motorista finalizou a entrega anterior e **você é a próxima
 
 Prepare-se para receber seus móveis em breve.
 
-👇 *Localização atual do caminhão:*
-${linkLocalizacao || "O motorista está a caminho!"}`;
+👇 *Acompanhe a localização do caminhão ao vivo:*
+${linkRastreio}`;
 
     try {
-        await client.sendMessage(chatId, msg);
-        res.json({ success: true });
+        const result = await enviarMensagemSegura(chatId, msg);
+        res.json({ success: true, link: linkRastreio });
     } catch (e) {
+        console.error("Erro ao enviar aviso de próxima parada:", e.message);
         res.status(500).json({ error: e.message });
     }
 });
@@ -1048,159 +1085,13 @@ Por favor, aguarde no local indicado.
     }
 });
 
-// --- OUVINTE DE RESPOSTAS (IA) - NOVA LÓGICA ---
+/* 
+// --- OUVINTE DE RESPOSTAS (IA) - DESATIVADO (MODO APENAS INFORMATIVO) ---
 client.on('message', async msg => {
-    if (msg.from.includes('@g.us') || msg.isStatus) return;
-
-    let entrega = mapaEntregas[msg.from];
-    if (!entrega) {
-        const tel = msg.from.replace(/\D/g, '');
-        const raiz = tel.slice(-8);
-        const key = Object.keys(filaEspera).find(k => k.endsWith(raiz));
-        if (key) entrega = filaEspera[key];
-    }
-
-    if (!entrega) return;
-
-    console.log(`💡 ${entrega.nome} respondeu ao informativo de entrega...`);
-
-    try {
-        let parts = [];
-        if (msg.type === 'ptt' || msg.type === 'audio') {
-            console.log("🎙️ Baixando áudio...");
-            const media = await msg.downloadMedia();
-            parts.push({ inlineData: { mimeType: media.mimetype, data: media.data } });
-            parts.push({ text: `Analise este áudio.` });
-        } else if (msg.type === 'chat') {
-            parts.push({ text: `Cliente disse: "${msg.body}"` });
-        } else { return; }
-
-        // ✅ NOVA LÓGICA DE CLASSIFICAÇÃO
-        const prompt = `
-        Contexto: O cliente ${entrega.nome} recebeu um INFORMATIVO de entrega do pedido #${entrega.pedido} para AMANHÃ (${entrega.turno}).
-        A mensagem NÃO pediu confirmação, apenas informou. O cliente está respondendo agora.
-        
-        TAREFA: Classifique a resposta em UMA das 3 categorias. Retorne APENAS JSON válido.
-        
-        Formato: { "categoria": "CIENTE" | "PROBLEMA" | "DUVIDA", "resumo": "breve resumo", "resposta_zap": "mensagem para enviar" }
-        
-        REGRAS DE CLASSIFICAÇÃO:
-        
-        1. CIENTE: Cliente demonstrou que entendeu/aceitou a entrega.
-           - Exemplos: "Ok", "Tá bom", "Obrigado", "Certo", "Beleza", "Pode ser", "Estarei em casa".
-           - resposta_zap: "Perfeito! Agradecemos o retorno. Qualquer novidade, avisamos! 🚚✅"
-        
-        2. PROBLEMA: Cliente sinalizou que NÃO pode/vai receber.
-           - Exemplos: "Não vou estar", "Viajei", "Não posso", "Preciso trocar o dia", "Não tenho como receber".
-           - resposta_zap: "Entendido. Vou avisar a equipe de logística imediatamente para reagendarmos. Aguarde nosso contato! 📞"
-        
-        3. DUVIDA: Cliente fez perguntas sobre horário, montagem, pagamento, etc.
-           - Exemplos: "Que horas mais ou menos?", "Vocês montam?", "Posso pagar na entrega?".
-           - resposta_zap: "Boa pergunta! Um atendente humano vai te responder em breve. Por favor, aguarde. 🙂"
-        `;
-
-        parts.push({ text: prompt });
-
-        // Retry com backoff para rate limits
-        let result;
-        let tentativas = 0;
-        const maxTentativas = 3;
-
-        while (tentativas < maxTentativas) {
-            try {
-                result = await model.generateContent(parts);
-                break; // Sucesso, sair do loop
-            } catch (apiError) {
-                tentativas++;
-                if (apiError.status === 429 && tentativas < maxTentativas) {
-                    console.log(`⏳ Rate limit, aguardando ${tentativas * 2}s...`);
-                    await new Promise(r => setTimeout(r, tentativas * 2000));
-                } else if (apiError.status === 429) {
-                    // Quota excedida - usar fallback
-                    console.log(`⚠️ Quota Gemini excedida, usando resposta padrão...`);
-                    result = null;
-                    break;
-                } else {
-                    // Outro erro - usar fallback também
-                    console.log(`⚠️ Erro na IA: ${apiError.message}, usando resposta padrão...`);
-                    result = null;
-                    break;
-                }
-            }
-        }
-
-        if (!result) {
-            // Se não conseguiu após retries, responde com mensagem padrão gentil
-            await msg.reply(`Recebemos sua mensagem, ${dados.nome?.split(' ')[0] || 'cliente'}! 🙂\n\nUm atendente vai confirmar sua entrega em breve. Obrigado pela resposta!`);
-
-            // Atualizar no banco como "Requer Atenção" para alguém ver
-            try {
-                await supabase
-                    .from('entregas')
-                    .update({
-                        status_confirmacao: 'Requer Atenção',
-                        observacoes: 'Cliente respondeu - aguardando análise manual'
-                    })
-                    .eq('id', dados.id);
-            } catch (e) { console.log('Erro ao atualizar:', e.message); }
-            return;
-        }
-
-        const analise = limparJSON(result.response.text());
-
-        if (!analise) throw new Error("Falha JSON IA");
-
-        // Mapear categoria para status do sistema
-        let statusSistema = 'Confirmada';
-        let acaoExtra = null;
-
-        if (analise.categoria === "CIENTE") {
-            statusSistema = 'Confirmada';
-        } else if (analise.categoria === "PROBLEMA") {
-            statusSistema = 'Ressalva'; // ⚠️ NOVO STATUS - Alerta visual no sistema
-            acaoExtra = 'CLIENTE NÃO PODE RECEBER - REAGENDAR';
-        } else if (analise.categoria === "DUVIDA") {
-            statusSistema = 'Requer Atenção';
-        }
-
-        console.log(`🤖 IA: ${analise.categoria} -> Status: ${statusSistema}`);
-
-        // Atualizar Supabase diretamente
-        const updateData = {
-            status: statusSistema,
-            observacoes: acaoExtra || analise.resumo
-        };
-
-        const { error } = await supabase
-            .from('entregas')
-            .update(updateData)
-            .eq('id', entrega.id);
-
-        if (!error) {
-            console.log(`✅ Supabase atualizado: ${statusSistema}`);
-        } else {
-            console.error(`⚠️ Erro Supabase: ${error.message}`);
-        }
-
-        // Responder ao cliente
-        await msg.reply(analise.resposta_zap);
-
-        // Limpar da fila
-        delete mapaEntregas[msg.from];
-        const tel = msg.from.replace(/\D/g, '');
-        const key = Object.keys(filaEspera).find(k => k.endsWith(tel.slice(-8)));
-        if (key) delete filaEspera[key];
-
-    } catch (e) {
-        console.error("Erro Geral:", e);
-        // Resposta fallback em caso de erro persistente
-        try {
-            await msg.reply("Recebemos sua mensagem! Um atendente vai te responder em breve. 🙂");
-        } catch (replyError) {
-            console.error("Erro ao enviar fallback:", replyError);
-        }
-    }
+    // Lógica desativada a pedido do usuário. 
+    // O bot agora funciona apenas para disparos ativos.
 });
+*/
 
 // --- ROTA PROXY: DOWNLOAD DE XML NFE (EVITA CORS) ---
 app.get('/nfe-xml/:documentoId', async (req, res) => {
@@ -1269,4 +1160,84 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: "Erro interno do servidor", details: err.message });
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`🛡️ Servidor rodando na porta ${PORT}`));
+// --- ROTA 11: CONCLUIR ENTREGA E AVISAR PRÓXIMO (AUTOMÁTICO) ---
+app.post('/concluir-entrega', async (req, res) => {
+    const { id_concluida } = req.body;
+
+    if (!id_concluida) {
+        return res.status(400).json({ error: "ID da entrega concluída é obrigatório" });
+    }
+
+    try {
+        // 1. Marcar a atual como concluída no Supabase salvando os dados do front
+        const updatePayload = {
+            status: 'Concluída',
+            data_entrega: new Date().toISOString(),
+            ...(req.body.update_data || {}) // Inclui fotos, assinatura, geolocalização
+        };
+
+        const { data: entregaAtual, error: err1 } = await supabase
+            .from('entregas')
+            .update(updatePayload)
+            .eq('id', id_concluida)
+            .select('veiculo_id, ordem_rota')
+            .single();
+
+        if (err1) throw err1;
+
+        res.json({ success: true, message: "Entrega concluída. Próximo cliente será avisado em 5 min." });
+
+        // 2. Aguardar 5 minutos (Temporizador solicitado)
+        console.log(`⏳ Aguardando 5 minutos para avisar o próximo cliente após entrega ${id_concluida}...`);
+
+        setTimeout(async () => {
+            try {
+                // 3. Buscar a PRÓXIMA entrega da mesma rota/veículo
+                const { data: proximaEntrega, error: err2 } = await supabase
+                    .from('entregas')
+                    .select('*')
+                    .eq('veiculo_id', entregaAtual.veiculo_id)
+                    .eq('status', 'Em rota') // Ou o status que você usa para pendentes na carga
+                    .gt('ordem_rota', entregaAtual.ordem_rota)
+                    .order('ordem_rota', { ascending: true })
+                    .limit(1)
+                    .single();
+
+                if (err2 || !proximaEntrega) {
+                    console.log("🏁 Fim da rota ou nenhum próximo cliente encontrado.");
+                    return;
+                }
+
+                // 4. Atualizar status da próxima para "Próxima parada"
+                await supabase
+                    .from('entregas')
+                    .update({ status: 'Próxima parada' })
+                    .eq('id', proximaEntrega.id);
+
+                // 5. Disparar o aviso via Rota 4 (Internamente)
+                const baseUrl = process.env.PUBLIC_URL || "https://moveispedroii.com.br";
+                const linkRastreio = `${baseUrl}/rastreio/${proximaEntrega.id}`;
+                const tel = proximaEntrega.cliente_telefone.replace(/\D/g, '');
+                const chatId = (tel.length <= 11 ? '55' : '') + tel + '@c.us';
+
+                const msg = `*Móveis Pedro II Informa:* 📍\n\nOlá *${proximaEntrega.cliente_nome}*! O motorista finalizou a entrega anterior e **você é a próxima parada!**\n\nPrepare-se para receber seus móveis em breve.\n\n👇 *Acompanhe a localização do caminhão ao vivo:*\n${linkRastreio}`;
+
+                await enviarMensagemSegura(chatId, msg);
+                console.log(`✅ Próximo cliente avisado automaticamente: ${proximaEntrega.cliente_nome}`);
+
+            } catch (autoErr) {
+                console.error("❌ Erro no automatismo de próxima parada:", autoErr.message);
+            }
+        }, 300000); // 5 minutos
+
+    } catch (e) {
+        console.error("Erro ao concluir entrega:", e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- INICIALIZAÇÃO DO SERVIDOR ---
+app.listen(PORT, () => {
+    console.log(`🚀 Servidor rodando na porta ${PORT}`);
+    console.log(`🔗 Link local: http://localhost:${PORT}`);
+});

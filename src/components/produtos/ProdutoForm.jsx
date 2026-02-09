@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useAuth } from '@/hooks/useAuth';
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -14,9 +15,12 @@ const categorias = ["Sofá", "Cama", "Mesa", "Cadeira", "Armário", "Estante", "
 const ambientes = ["Quarto", "Sala", "Cozinha", "Escritório", "Banheiro", "Área Externa", "Hall", "Varanda"];
 
 export default function ProdutoForm({ produto = null, onSave, isLoading }) {
+  const { user } = useAuth();
+  const showFinancials = user?.cargo === 'Administrador';
   const [formData, setFormData] = useState({
     codigo_barras: "",
     nome: "",
+    modelo_referencia: "",
     fornecedor_id: "",
     categoria: "Outros",
     ambiente: "Sala",
@@ -163,6 +167,7 @@ export default function ProdutoForm({ produto = null, onSave, isLoading }) {
     // Limpa os dados antes de enviar: Transforma "" em null
     const dadosParaSalvar = {
       ...formData,
+      modelo_referencia: formData.modelo_referencia || null,
       // Se fornecedor_id for vazio, manda null (para não quebrar o banco)
       fornecedor_id: formData.fornecedor_id === "" ? null : formData.fornecedor_id,
       // Mesma coisa para código de barras
@@ -215,6 +220,15 @@ export default function ProdutoForm({ produto = null, onSave, isLoading }) {
             value={formData.nome}
             onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
             required
+          />
+        </div>
+        <div>
+          <Label htmlFor="modelo_referencia">Modelo / Referência</Label>
+          <Input
+            id="modelo_referencia"
+            value={formData.modelo_referencia}
+            onChange={(e) => setFormData({ ...formData, modelo_referencia: e.target.value })}
+            placeholder="Ex: REF-1234, Premium, etc"
           />
         </div>
         <div>
@@ -418,16 +432,18 @@ export default function ProdutoForm({ produto = null, onSave, isLoading }) {
 
       {/* Preços e Estoque */}
       <div className="grid md:grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="preco_custo">Preço de Custo (R$)</Label>
-          <Input
-            id="preco_custo"
-            type="number"
-            step="0.01"
-            value={formData.preco_custo}
-            onChange={(e) => setFormData({ ...formData, preco_custo: parseFloat(e.target.value) || 0 })}
-          />
-        </div>
+        {showFinancials && (
+          <div>
+            <Label htmlFor="preco_custo">Preço de Custo (R$)</Label>
+            <Input
+              id="preco_custo"
+              type="number"
+              step="0.01"
+              value={formData.preco_custo}
+              onChange={(e) => setFormData({ ...formData, preco_custo: parseFloat(e.target.value) || 0 })}
+            />
+          </div>
+        )}
         <div>
           <Label htmlFor="preco_venda">Preço de Venda (R$) *</Label>
           <Input

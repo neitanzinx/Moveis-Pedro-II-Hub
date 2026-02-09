@@ -2,9 +2,6 @@ import { useState, useEffect, createContext, useContext } from "react";
 import { base44, supabase } from "@/api/base44Client";
 import { ROLE_RULES, SCOPES } from "@/config/permissions";
 
-// API URL para autenticação de funcionários
-const API_URL = import.meta.env.VITE_ZAP_API_URL || '';
-
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
@@ -58,58 +55,74 @@ export function AuthProvider({ children }) {
       }
     };
 
-    // Função para verificar autenticação de funcionário
+    // Função para verificar autenticação de funcionário (agora via Supabase direto)
     const checkEmployeeAuth = async () => {
-      const token = localStorage.getItem('employee_token');
-      if (!token) return null;
+      // Verifica se há dados de usuário em localStorage (cache do login)
+      const cachedUser = localStorage.getItem('employee_user');
+      if (!cachedUser) return null;
 
       try {
-        const response = await fetch(`${API_URL}/api/auth/employee/me`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+        const parsedUser = JSON.parse(cachedUser);
 
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 403) {
-            localStorage.removeItem('employee_token');
-            localStorage.removeItem('employee_user');
-            return null;
-          }
-          throw new Error('Falha na validação do token');
+        // Verificar se ainda tem sessão Supabase ativa
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (!session) {
+          // Sessão expirada, limpar cache
+          localStorage.removeItem('employee_user');
+          return null;
         }
 
-        const data = await response.json();
-        // Verificar se o usuário ainda está ativo no banco de dados
-        // (Isso é importante caso o funcionário tenha sido desativado/removido)
+        // Buscar perfil atualizado do banco para garantir dados recentes
+        const { data: userProfile, error } = await supabase
+          .from('public_users')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
 
-        if (data.success && data.user) {
-          // Opcional: Validar contra a tabela role_permissions ou tabela de usuarios do banco se necessário
-          // Por enquanto confiamos no token JWT validado pelo backend
-
-          return {
-            ...data.user,
-            full_name: data.user.full_name || data.user.matricula
-          };
+        if (error || !userProfile) {
+          console.warn('[Auth] Perfil não encontrado no banco');
+          localStorage.removeItem('employee_user');
+          return null;
         }
+
+        if (!userProfile.ativo) {
+          console.warn('[Auth] Usuário inativo');
+          localStorage.removeItem('employee_user');
+          await supabase.auth.signOut();
+          return null;
+        }
+
+        // Atualizar cache com dados atualizados
+        localStorage.setItem('employee_user', JSON.stringify(userProfile));
+
+        return {
+          ...session.user,
+          ...userProfile,
+          full_name: userProfile.full_name || userProfile.matricula
+        };
       } catch (e) {
         console.error("Erro ao verificar auth de funcionário:", e);
-        // Se der erro de conexão, talvez não devamos deslogar imediatamente?
-        // Mas por segurança, se não validar, null.
+        localStorage.removeItem('employee_user');
+        return null;
       }
-
-      return null;
     };
 
     // Carrega estado inicial
     const initAuth = async () => {
       console.log('[Auth] Iniciando verificação de autenticação...');
 
-      // 1. Primeiro verifica autenticação de funcionário (JWT)
-      const hasEmployeeToken = localStorage.getItem('employee_token');
+      // Limpar token legado do backend (não mais utilizado)
+      if (localStorage.getItem('employee_token')) {
+        console.log('[Auth] Removendo token legado do backend...');
+        localStorage.removeItem('employee_token');
+      }
 
-      if (hasEmployeeToken) {
-        console.log('[Auth] Token de funcionário encontrado, verificando...');
+      // 1. Primeiro verifica se há cache de funcionário
+      const hasCachedUser = localStorage.getItem('employee_user');
+
+      if (hasCachedUser) {
+        console.log('[Auth] Cache de funcionário encontrado, verificando...');
         const employeeUser = await checkEmployeeAuth();
 
         if (employeeUser && mounted) {
@@ -134,13 +147,7 @@ export function AuthProvider({ children }) {
           setLoading(false);
           return;
         } else {
-          // Token inválido - já foi limpo pelo checkEmployeeAuth se response.status 401/403
-          // Se foi erro de rede, talvez não tenha limpado. Limpeza garantida abaixo?
-          // checkEmployeeAuth limpa se 401/403.
-          console.log('[Auth] ⚠️ Token de funcionário inválido ou expirado');
-          if (!hasEmployeeToken) { // Se checkEmployeeAuth removeu
-            // ok
-          }
+          console.log('[Auth] ⚠️ Cache inválido ou sessão expirada');
         }
       }
 
@@ -189,7 +196,7 @@ export function AuthProvider({ children }) {
         setAuthType(null);
         setLoading(false);
         localStorage.removeItem('admin_selected_store'); // Limpa seleção ao sair
-      } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && !localStorage.getItem('employee_token')) {
+      } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && !localStorage.getItem('employee_user')) {
         // Só atualiza se não estiver logado como funcionário
         loadSupabaseProfile(session?.user).then(profile => {
           if (mounted && profile) {
@@ -218,10 +225,8 @@ export function AuthProvider({ children }) {
 
   // Função de logout que funciona para ambos os tipos
   const logout = async () => {
-    if (authType === 'employee') {
-      localStorage.removeItem('employee_token');
-      localStorage.removeItem('employee_user');
-    }
+    // Limpar cache de funcionário
+    localStorage.removeItem('employee_user');
     // Sempre tenta deslogar do Supabase também
     await base44.auth.logout();
     setUser(null);

@@ -34,7 +34,6 @@ export default function ListaUsuarios({ usuarios, cargos, caminhoes, onEditar })
     <div className="grid gap-3">
       {usuarios.map(usuario => {
         const cargosUsuario = usuario.cargos?.map(getCargo).filter(Boolean) || [];
-        const caminhaoMaster = caminhoes.find(c => c.id === usuario.caminhao_master_id);
 
         return (
           <Card key={usuario.id} className="p-4 hover:shadow-lg transition-shadow">
@@ -53,12 +52,6 @@ export default function ListaUsuarios({ usuarios, cargos, caminhoes, onEditar })
                   </h3>
                   {usuario.role === 'admin' && (
                     <Crown className="w-4 h-4 text-yellow-500" />
-                  )}
-                  {caminhaoMaster && (
-                    <Badge variant="secondary" className="gap-1">
-                      <Truck className="w-3 h-3" />
-                      Master: {caminhaoMaster.nome}
-                    </Badge>
                   )}
                 </div>
 

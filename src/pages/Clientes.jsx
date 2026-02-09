@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -452,10 +453,125 @@ export default function Clientes() {
 
             if (editingCliente) {
               await base44.entities.Cliente.update(editingCliente.id, cleanData);
+
+              // --- SYNC MANUAL DE ENTREGAS PENDENTES ---
+              try {
+                // 1. Constrói o novo string de endereço
+                const construirEndereco = (c) => {
+                  const usarMesmo = c.usar_mesmo_endereco !== false;
+                  const end = usarMesmo ? {
+                    rua: c.endereco,
+                    numero: c.numero,
+                    complemento: c.complemento,
+                    ponto_referencia: c.ponto_referencia,
+                    bairro: c.bairro,
+                    cidade: c.cidade,
+                    estado: c.estado
+                  } : {
+                    rua: c.endereco_entrega_rua,
+                    numero: c.endereco_entrega_numero,
+                    complemento: c.endereco_entrega_complemento,
+                    ponto_referencia: c.endereco_entrega_ponto_referencia,
+                    bairro: c.endereco_entrega_bairro,
+                    cidade: c.endereco_entrega_cidade,
+                    estado: c.endereco_entrega_estado
+                  };
+
+                  if (!end.rua) return "Endereço a definir";
+
+                  let enderecoStr = `${end.rua}, ${end.numero || 's/n'}`;
+                  if (end.complemento) enderecoStr += ` - ${end.complemento}`;
+                  if (end.bairro) enderecoStr += ` - ${end.bairro}`;
+                  if (end.cidade) enderecoStr += `, ${end.cidade}`;
+                  if (end.estado) enderecoStr += `/${end.estado}`;
+                  if (end.ponto_referencia) enderecoStr += ` (Ref: ${end.ponto_referencia})`;
+
+                  return enderecoStr;
+                };
+
+                const novoEnderecoCompleto = construirEndereco(cleanData);
+                console.log("🔄 Sincronizando endereço nas entregas pendentes:", novoEnderecoCompleto);
+
+                // 2. Busca vendas do cliente
+                // 2. Busca IDs de entregas para atualizar (Estratégia Robusta: Venda ID + Nome Cliente)
+                let entregasParaAtualizar = [];
+
+                // A. Busca por Vendas (Link Relacional)
+                const { data: vendas } = await supabase
+                  .from('vendas')
+                  .select('id')
+                  .eq('cliente_id', editingCliente.id);
+
+                if (vendas && vendas.length > 0) {
+                  const vendaIds = vendas.map(v => v.id);
+
+                  const { data: entregasPorVenda } = await supabase
+                    .from('entregas')
+                    .select('id')
+                    .in('venda_id', vendaIds)
+                    .neq('status', 'Entregue')
+                    .neq('status', 'Cancelada')
+                    .neq('status', 'Retirado');
+
+                  if (entregasPorVenda) entregasParaAtualizar.push(...entregasPorVenda.map(e => e.id));
+                }
+
+                // B. Busca por Nome (Link Legacy/Nominal)
+                if (cleanData.nome_completo) {
+                  const { data: entregasPorNome } = await supabase
+                    .from('entregas')
+                    .select('id')
+                    .eq('cliente_nome', cleanData.nome_completo)
+                    .neq('status', 'Entregue')
+                    .neq('status', 'Cancelada')
+                    .neq('status', 'Retirado');
+
+                  if (entregasPorNome) entregasParaAtualizar.push(...entregasPorNome.map(e => e.id));
+                }
+
+                // Remove duplicatas
+                const idsUnicos = [...new Set(entregasParaAtualizar)];
+                console.log(`🔍 Sync: Encontradas ${idsUnicos.length} entregas (IDs: ${idsUnicos.join(', ')})`);
+
+                if (idsUnicos.length > 0) {
+                  // 3. Executa Update (Endereço + Preferências)
+
+                  // Monta objeto de preferências para a entrega
+                  // Garante array de números únicos para dias
+                  const diasUnicos = [...new Set((cleanData.dias_bloqueados_entrega || []).map(d => Number(d)))];
+                  const novasPreferencias = {
+                    dias: diasUnicos,
+                    turnos: cleanData.turno_bloqueado_entrega ? [cleanData.turno_bloqueado_entrega] : [],
+                    obs: cleanData.observacoes || ""
+                  };
+                  const { error: syncError, count } = await supabase
+                    .from('entregas')
+                    .update({
+                      endereco_entrega: novoEnderecoCompleto,
+                      preferencias_entrega: novasPreferencias // Sync das restrições!
+                    })
+                    .in('id', idsUnicos);
+
+                  if (syncError) {
+                    console.error("Erro ao sincronizar entregas:", syncError);
+                    toast.error("Erro ao sincronizar entregas");
+                  } else {
+                    console.log(`✅ ${count} entregas atualizadas (Obs e Restrições).`);
+                    toast.success(`${count} entregas atualizadas automaticamente (Endereço e Restrições)!`);
+                  }
+                } else {
+                  // toast.info("Nenhuma entrega pendente para atualizar.");
+                }
+              } catch (syncErr) {
+                console.error("Erro no sync manual:", syncErr);
+              }
+              // -----------------------------------------
+
             } else {
               await base44.entities.Cliente.create(cleanData);
             }
             queryClient.invalidateQueries({ queryKey: ['clientes'] });
+            queryClient.invalidateQueries({ queryKey: ['entregas'] }); // FORÇA UPDATE NO KANBAN
             setIsModalOpen(false);
             toast.success(editingCliente ? "Cliente atualizado!" : "Cliente cadastrado!");
           } catch (error) {

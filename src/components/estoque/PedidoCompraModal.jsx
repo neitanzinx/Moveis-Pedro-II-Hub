@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { base44 } from "@/api/base44Client";
+import { base44, supabase } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getColorHex } from "@/components/produtos/FurnitureColorPicker";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,7 @@ import { cn } from "@/lib/utils";
 import {
     Plus, Trash2, Search, Save, Send, Package, Building2, AlertTriangle,
     Sparkles, Tag, Calendar, TrendingDown, Check, DollarSign, Mail,
-    MessageCircle, FileText, Copy, CheckCircle, X
+    MessageCircle, FileText, Copy, CheckCircle, X, Ruler
 } from "lucide-react";
 import { toast } from "sonner";
 import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
@@ -81,19 +82,72 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
         }
     }, [pedido]);
 
-    // Buscar produtos
-    const { data: produtos = [] } = useQuery({
-        queryKey: ['produtos'],
-        queryFn: () => base44.entities.Produto.list()
+    // Buscar produtos (Server-Side Search para evitar limite de 1000 itens)
+    const { data: produtos = [], isLoading: carregandoProdutos } = useQuery({
+        queryKey: ['produtos', buscaProduto],
+        queryFn: async () => {
+            // Se não tiver busca, retorna vazio (ou poderia retornar os últimos, mas vamos focar na busca)
+            if (!buscaProduto || buscaProduto.length < 2) return [];
+
+            const { data, error } = await supabase
+                .from('produtos')
+                .select('*, parent:parent_id(fornecedor_id, fornecedor_nome)') // Busca dados do Pai para herdar fornecedor
+                .or((() => {
+                    const terms = buscaProduto.trim().split(/\s+/);
+                    // Match exato/parcial do código de barras (aceita input inteiro)
+                    const barcodeCondition = `codigo_barras.ilike.%${buscaProduto}%`;
+
+                    // Match de NOME ou MODELO: cada termo deve aparecer em (Nome OU Modelo)
+                    // Ex: "Aparador Cairo" -> (nome.ilike.Aparador OR modelo.ilike.Aparador) AND (nome.ilike.Cairo OR modelo.ilike.Cairo)
+                    const termConditions = terms.map(t => `or(nome.ilike.%${t}%,modelo_referencia.ilike.%${t}%)`).join(',');
+
+                    const textQuery = terms.length > 1 ? `and(${termConditions})` : termConditions;
+
+                    // Retorna: Ou bate código de barras, OU bate texto (nome/modelo)
+                    return `${barcodeCondition},${textQuery}`;
+                })())
+                .limit(50); // Limite seguro para performance
+
+            if (error) {
+                console.error("Erro ao buscar produtos Server-Side:", error);
+                return [];
+            }
+            return data;
+        },
+        enabled: buscaProduto.length >= 2, // Só busca se tiver 2+ caracteres
+        staleTime: 1000 * 60 * 5 // Cache por 5 min para a mesma busca
     });
 
-    // Produtos filtrados pela busca
-    const produtosFiltrados = produtos.filter(p =>
-        buscaProduto.length >= 2 && (
-            p.nome?.toLowerCase().includes(buscaProduto.toLowerCase()) ||
-            p.codigo_barras?.includes(buscaProduto)
-        )
-    ).slice(0, 5);
+    // Filtra resultado da busca pelo fornecedor (Client-Side Refinement)
+    const produtosFiltrados = useMemo(() => {
+        return produtos.filter(p => {
+            // Se houver fornecedor selecionado, tenta filtrar por ID ou Nome (flexível)
+            if (form.fornecedor_id) {
+                // Estratégia de herança: Se o produto não tem fornecedor, tenta pegar do Pai
+                const prodFornId = p.fornecedor_id || p.parent?.fornecedor_id;
+                const prodFornNome = p.fornecedor_nome || p.parent?.fornecedor_nome || '';
+
+                // SE O PRODUTO NÃO TIVER FORNECEDOR NENHUM, MOSTRA ELE! 
+                // (Permite adicionar produtos "orfãos" ao pedido)
+                if (!prodFornId && !prodFornNome) {
+                    return true;
+                }
+
+                const matchesId = prodFornId && String(prodFornId) === String(form.fornecedor_id);
+
+                // Normalização segura para comparação de nomes
+                const pNome = prodFornNome.toLowerCase().trim();
+                const fNome = (form.fornecedor_nome || '').toLowerCase().trim();
+
+                const matchesName = pNome && fNome && (pNome.includes(fNome) || fNome.includes(pNome));
+
+                if (!matchesId && !matchesName) {
+                    return false;
+                }
+            }
+            return true;
+        });
+    }, [produtos, form.fornecedor_id, form.fornecedor_nome]);
 
     // Mutation para salvar
     const salvarPedido = useMutation({
@@ -597,12 +651,81 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                                                         setPrecoUnitario(p.preco_custo || 0);
                                                         setPrecoTabela(p.preco_custo_tabela || p.preco_custo || 0);
                                                     }}
-                                                    className="w-full p-2 text-left hover:bg-gray-100 flex justify-between items-center"
+                                                    className="w-full text-left"
                                                 >
-                                                    <span>{p.nome}</span>
-                                                    <span className="text-xs text-gray-500">
-                                                        Estoque: {p.quantidade_estoque || 0}
-                                                    </span>
+                                                    <div className="flex gap-4 p-3 bg-white hover:bg-gray-50 border-b last:border-0 transition-all group relative">
+
+                                                        {/* Icone / Imagem */}
+                                                        <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center border border-gray-200 shrink-0 mt-1">
+                                                            <Package className="w-5 h-5 text-gray-400 group-hover:text-blue-500 transition-colors" />
+                                                        </div>
+
+                                                        {/* Conteúdo Central */}
+                                                        <div className="flex-1 min-w-0 flex flex-col justify-center gap-1.5">
+                                                            {/* Linha 1: Nome e Badge Pai */}
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-semibold text-sm text-gray-900 group-hover:text-blue-700 leading-tight">
+                                                                    {p.nome}
+                                                                </span>
+                                                                {p.is_parent && (
+                                                                    <Badge variant="outline" className="text-[10px] h-4 px-1 border-blue-200 text-blue-600 bg-blue-50">
+                                                                        PAI
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Linha 2: Atributos Visuais */}
+                                                            <div className="flex items-center flex-wrap gap-2 text-xs">
+
+                                                                {/* Categoria */}
+                                                                <span className="text-gray-500 font-medium uppercase tracking-wide text-[10px]">
+                                                                    {p.categoria || 'Geral'}
+                                                                </span>
+
+                                                                {p.modelo_referencia && (
+                                                                    <>
+                                                                        <span className="text-gray-300">|</span>
+                                                                        <span className="text-gray-600 font-medium" title={p.modelo_referencia}>
+                                                                            {p.modelo_referencia}
+                                                                        </span>
+                                                                    </>
+                                                                )}
+
+                                                                {(p.cor || p.tamanho) && <span className="text-gray-300">|</span>}
+
+                                                                {/* Cor */}
+                                                                {p.cor && (
+                                                                    <div className="flex items-center gap-1.5 bg-gray-50 px-2 py-0.5 rounded-full border border-gray-100">
+                                                                        <div
+                                                                            className="w-2.5 h-2.5 rounded-full border border-gray-200 shadow-sm"
+                                                                            style={{ backgroundColor: getColorHex(p.cor) }}
+                                                                        />
+                                                                        <span className="font-medium text-gray-700">{p.cor}</span>
+                                                                    </div>
+                                                                )}
+
+                                                                {/* Tamanho */}
+                                                                {p.tamanho && (
+                                                                    <div className="flex items-center gap-1 bg-gray-50 px-2 py-0.5 rounded-full border border-gray-100">
+                                                                        <Ruler className="w-3 h-3 text-gray-400" />
+                                                                        <span className="font-medium text-gray-700">{p.tamanho}</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Seção Direita: Estoque */}
+                                                        <div className="flex flex-col items-end justify-center shrink-0 gap-1">
+                                                            <span className={cn(
+                                                                "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                                                                (p.estoque_cd || 0) > 0
+                                                                    ? "bg-green-50 text-green-700 border-green-200"
+                                                                    : "bg-red-50 text-red-700 border-red-200"
+                                                            )}>
+                                                                {(p.estoque_cd || 0) > 0 ? `${p.estoque_cd} un` : 'Sem estoque'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
                                                 </button>
                                             ))}
                                         </div>
@@ -820,10 +943,11 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                         </div>
                     </div>
                 </DialogContent>
-            </Dialog>
+            </Dialog >
 
             {/* Modal de Opções de Envio */}
-            <Dialog open={modalEnvio} onOpenChange={() => fecharTudo()}>
+            < Dialog open={modalEnvio} onOpenChange={() => fecharTudo()
+            }>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2 text-green-600">
@@ -900,10 +1024,10 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                         </div>
                     </div>
                 </DialogContent>
-            </Dialog>
+            </Dialog >
 
             {/* Modal para cadastrar produtos novos */}
-            <ProdutoCadastroCompleto
+            < ProdutoCadastroCompleto
                 isOpen={produtoModalOpen}
                 onClose={() => {
                     setProdutoModalOpen(false);

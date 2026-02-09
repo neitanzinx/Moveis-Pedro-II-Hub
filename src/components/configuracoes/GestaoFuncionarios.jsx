@@ -23,6 +23,8 @@ import {
 import { toast } from "sonner";
 import { CARGOS, LOJAS, getCargoConfig } from "@/config/cargos";
 
+import { supabase } from "@/lib/supabase";
+
 const API_URL = import.meta.env.VITE_ZAP_API_URL || "http://localhost:3001";
 
 export default function GestaoFuncionarios({ currentUser }) {
@@ -46,7 +48,7 @@ export default function GestaoFuncionarios({ currentUser }) {
     const { data: users = [], isLoading } = useQuery({
         queryKey: ['funcionarios-gestao'],
         queryFn: async () => {
-            const allUsers = await base44.entities.User.list('-created_date');
+            const allUsers = await base44.entities.User.list('-ultimo_login'); // Ordenar por ultimo login se possivel
             // Filtrar apenas usuários que são funcionários (não clientes)
             return allUsers.filter(u =>
                 u.status_aprovacao === 'Aprovado' &&
@@ -56,23 +58,36 @@ export default function GestaoFuncionarios({ currentUser }) {
         }
     });
 
+    // [FEATURE] Real-time updates
+    React.useEffect(() => {
+        const channel = supabase
+            .channel('public_users_gestao')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'public_users' },
+                (payload) => {
+                    console.log('Realtime update:', payload);
+                    queryClient.invalidateQueries({ queryKey: ['funcionarios-gestao'] });
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [queryClient]);
+
     // Mutation para criar credenciais
     const createCredentialsMutation = useMutation({
         mutationFn: async (userId) => {
-            const token = localStorage.getItem('employee_token');
-            const response = await fetch(`${API_URL}/api/auth/employee/create`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': token ? `Bearer ${token}` : ''
-                },
-                body: JSON.stringify({ user_id: userId })
+            const { data, error } = await supabase.functions.invoke('admin-actions', {
+                body: { action: 'create_credentials', user_id: userId }
             });
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Erro ao criar credenciais');
-            }
-            return response.json();
+
+            if (error) throw error;
+            if (data.error) throw new Error(data.error);
+
+            return data;
         },
         onSuccess: (data) => {
             setGeneratedMatricula(data.matricula);
@@ -81,6 +96,7 @@ export default function GestaoFuncionarios({ currentUser }) {
             toast.success("Acesso ativado com sucesso!");
         },
         onError: (error) => {
+            console.error("Erro Criação Credenciais:", error); // DEBUG
             toast.error(error.message);
             handleCloseModal();
         }
@@ -89,26 +105,26 @@ export default function GestaoFuncionarios({ currentUser }) {
     // Mutation para resetar senha
     const resetPasswordMutation = useMutation({
         mutationFn: async (userId) => {
-            const response = await fetch(`${API_URL}/api/auth/employee/reset-password`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: userId })
+            const { data, error } = await supabase.functions.invoke('admin-actions', {
+                body: { action: 'reset_password', user_id: userId }
             });
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Erro ao resetar senha');
-            }
-            return response.json();
+
+            if (error) throw error;
+            if (data.error) throw new Error(data.error);
+
+            return data;
         },
         onSuccess: (data) => {
             setGeneratedPassword(data.senha_temporaria);
             setGeneratedMatricula(selectedUser?.matricula);
             queryClient.invalidateQueries({ queryKey: ['funcionarios-gestao'] });
+
             toast.success(data.whatsapp_enviado
                 ? "Senha resetada e enviada via WhatsApp!"
                 : "Senha resetada! (WhatsApp não disponível)");
         },
         onError: (error) => {
+            console.error("Erro Reset Senha:", error); // DEBUG
             toast.error(error.message);
             handleCloseModal();
         }
@@ -800,7 +816,11 @@ export default function GestaoFuncionarios({ currentUser }) {
                                 <Label>Cargo</Label>
                                 <Select
                                     value={editData.cargo}
-                                    onValueChange={(v) => setEditData({ ...editData, cargo: v })}
+                                    onValueChange={(v) => setEditData({
+                                        ...editData,
+                                        cargo: v,
+                                        is_vendedor: v === 'Vendedor' ? true : editData.is_vendedor
+                                    })}
                                 >
                                     <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                                     <SelectContent>

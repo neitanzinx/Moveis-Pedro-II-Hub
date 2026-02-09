@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import SolicitacaoCadastroModal from "./SolicitacaoCadastroModal";
+import { getColorHex } from "../produtos/FurnitureColorPicker";
 
 export default function BuscaProdutoAvancada(props) {
   const { produtos, onSelectProduto } = props;
@@ -14,6 +15,7 @@ export default function BuscaProdutoAvancada(props) {
   const [showResults, setShowResults] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [solicitationParentProduct, setSolicitationParentProduct] = useState(null);
   const searchRef = useRef(null);
 
   // Fechar resultados ao clicar fora
@@ -112,7 +114,10 @@ export default function BuscaProdutoAvancada(props) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setIsModalOpen(true)}
+                onClick={() => {
+                  setSolicitationParentProduct(null);
+                  setIsModalOpen(true);
+                }}
                 className="w-full border-green-200 text-green-700 hover:bg-green-50"
               >
                 <Plus className="w-4 h-4 mr-2" /> Solicitar Cadastro
@@ -149,11 +154,22 @@ export default function BuscaProdutoAvancada(props) {
                       {/* Linha de detalhes: Variações + Categoria + Estoque */}
                       <div className="flex items-center flex-wrap gap-1.5 w-full">
                         {/* Cor */}
-                        {produto.cor && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium flex items-center">
-                            <Palette className="w-3 h-3 mr-1" /> {produto.cor}
-                          </span>
-                        )}
+                        {produto.cor && (() => {
+                          const colors = produto.cor.split('/').map(c => c.trim());
+                          const isDual = colors.length > 1;
+                          const hex1 = getColorHex(colors[0]);
+                          const hex2 = isDual ? getColorHex(colors[1]) : null;
+
+                          return (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-50 border border-gray-200 text-gray-700 font-medium flex items-center gap-1.5">
+                              <div
+                                className="w-3 h-3 rounded-full border border-gray-300 shadow-sm"
+                                style={{ background: isDual ? `linear-gradient(135deg, ${hex1} 50%, ${hex2} 50%)` : hex1 }}
+                              />
+                              {produto.cor}
+                            </span>
+                          );
+                        })()}
                         {/* Material/Tecido */}
                         {produto.material && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium flex items-center">
@@ -180,6 +196,22 @@ export default function BuscaProdutoAvancada(props) {
                         <span className={`text-[10px] font-medium ml-auto ${qtd <= 0 ? 'text-red-500' : qtd <= 5 ? 'text-orange-500' : 'text-green-600'}`}>
                           {qtd}un
                         </span>
+
+                        {/* Botão de Solicitar Variação (Visible on Hover essentially, or always small) */}
+                        <div className="ml-2" onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 rounded-full hover:bg-green-100 text-green-600"
+                            title="Solicitar nova variação deste produto"
+                            onClick={() => {
+                              setSolicitationParentProduct(produto);
+                              setIsModalOpen(true);
+                            }}
+                          >
+                            <Plus className="w-3 h-3" />
+                          </Button>
+                        </div>
                       </div>
                     </button>
                   );
@@ -190,7 +222,10 @@ export default function BuscaProdutoAvancada(props) {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setIsModalOpen(true)}
+                  onClick={() => {
+                    setSolicitationParentProduct(null);
+                    setIsModalOpen(true);
+                  }}
                   className="w-full text-xs text-gray-500 hover:text-green-700 h-8 font-normal"
                 >
                   <Plus className="w-3 h-3 mr-2" /> Não encontrou? Solicitar Cadastro
@@ -206,6 +241,7 @@ export default function BuscaProdutoAvancada(props) {
         onClose={() => setIsModalOpen(false)}
         onProdutoSolicitado={handleSelectProduto}
         user={props.user}
+        initialParentProduct={solicitationParentProduct}
       />
     </div>
   );

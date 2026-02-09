@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { base44, supabase } from "@/lib/supabase";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -79,6 +79,20 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
                                 await base44.entities.Produto.update(item.produto_id, {
                                     quantidade_estoque: estoqueAtual + qtdRecebida
                                 });
+
+                                // --- SINCRONIZAÇÃO COM ESTOQUE POR UNIDADE (estoque_loja) ---
+                                // Ao receber pedido de compra, garantimos que a unidade CD (padrão) receba o saldo.
+                                try {
+                                    if (produto.codigo_barras) {
+                                        await supabase.from('estoque_loja').insert({
+                                            gtin: produto.codigo_barras,
+                                            tenant_id: 'CD',
+                                            quantidade: qtdRecebida
+                                        });
+                                    }
+                                } catch (syncErr) {
+                                    console.warn('Erro ao sincronizar estoque por unidade:', syncErr);
+                                }
                             }
                         } catch (e) {
                             console.error('Erro ao atualizar estoque:', e);

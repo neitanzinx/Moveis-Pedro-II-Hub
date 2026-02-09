@@ -8,13 +8,18 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck, ClipboardList, Info } from "lucide-react";
+import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck, ClipboardList, Info, CalendarX, Settings, ArrowRightLeft } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { useNavigate } from "react-router-dom";
 import { abrirNotaPedidoPDF } from "../components/vendas/NotaPedidoPDF";
 import { useAuth } from "@/hooks/useAuth";
 import { useConfirm } from "@/hooks/useConfirm";
 import ArquivoTab from "../components/vendas/ArquivoTab";
 import EmitirNFeModal from "../components/vendas/EmitirNFeModal";
+import TransferirMontagemModal from "../components/vendas/TransferirMontagemModal";
 
 export default function Vendas() {
     const [search, setSearch] = useState("");
@@ -23,6 +28,14 @@ export default function Vendas() {
     const [nfeModalOpen, setNfeModalOpen] = useState(false);
     const [vendaParaNfe, setVendaParaNfe] = useState(null);
     const [clienteParaNfe, setClienteParaNfe] = useState(null);
+    // Estados para reagendamento
+    const [modalReagendamento, setModalReagendamento] = useState(null); // { vendaId, entregaId, dataAgendada, turno }
+    const [motivoReagendamento, setMotivoReagendamento] = useState("");
+
+    // Estados para Preferências de Entrega
+    const [modalPreferencias, setModalPreferencias] = useState(null); // { entregaId, preferencias }
+    const [preferenciasTemp, setPreferenciasTemp] = useState({ dias: [], turnos: [], obs: "" });
+    const [modalTransferencia, setModalTransferencia] = useState(null); // { vendaId }
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     const confirm = useConfirm();
@@ -116,6 +129,72 @@ export default function Vendas() {
             toast.success("Venda cancelada e estoque retornado!");
         }
     });
+
+    // Mutation para solicitar reagendamento
+    const reagendarMutation = useMutation({
+        mutationFn: async ({ entregaId, motivo, dataOriginal, turnoOriginal }) => {
+            // 1. Buscar entrega atual para pegar histórico
+            const entregaAtual = entregas.find(e => e.id === entregaId);
+            const historicoAtual = entregaAtual?.historico_reagendamentos || [];
+
+            const novoEvento = {
+                data: dataOriginal,
+                turno: turnoOriginal,
+                motivo: motivo,
+                data_registro: new Date().toISOString(),
+                usuario: user?.email || 'vendedor'
+            };
+
+            return await base44.entities.Entrega.update(entregaId, {
+                status: 'Pendente',
+                data_agendada: null,
+                turno: null,
+                caminhao_id: null,
+                ordem_rota: null,
+                // Registrar a restrição
+                data_restricao: dataOriginal,
+                turno_restricao: turnoOriginal,
+                motivo_restricao: motivo,
+                historico_reagendamentos: [...historicoAtual, novoEvento]
+            });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['entregas'] });
+            queryClient.invalidateQueries({ queryKey: ['vendas'] }); // Atualizar badges
+            toast.success("Solicitação de reagendamento enviada para Logística!");
+            setModalReagendamento(null);
+            setMotivoReagendamento("");
+        },
+        onError: () => toast.error("Erro ao solicitar reagendamento")
+    });
+
+    // Mutation para salvar preferências
+    const salvarPreferenciasMutation = useMutation({
+        mutationFn: async ({ entregaId, preferencias }) => {
+            return await base44.entities.Entrega.update(entregaId, {
+                preferencias_entrega: preferencias
+            });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['entregas'] });
+            toast.success("Preferências de entrega atualizadas!");
+            setModalPreferencias(null);
+        },
+        onError: () => toast.error("Erro ao salvar preferências")
+    });
+
+    const confirmarReagendamento = () => {
+        if (!modalReagendamento || !motivoReagendamento.trim()) {
+            toast.error("Informe o motivo");
+            return;
+        }
+        reagendarMutation.mutate({
+            entregaId: modalReagendamento.entregaId,
+            motivo: motivoReagendamento,
+            dataOriginal: modalReagendamento.dataAgendada,
+            turnoOriginal: modalReagendamento.turno
+        });
+    };
 
     const handleCancelarVenda = async (venda) => {
         const confirmed = await confirm({
@@ -218,7 +297,7 @@ export default function Vendas() {
                                     <TableHead>Vendedor</TableHead>
                                     <TableHead>Total</TableHead>
                                     <TableHead>Situação</TableHead>
-                                    <TableHead>Pagamento</TableHead>
+
                                     <TableHead>
                                         <div className="flex items-center gap-2">
                                             Andamento
@@ -353,15 +432,7 @@ export default function Vendas() {
                                             <TableCell>
                                                 <StatusBadge status={venda.status} />
                                             </TableCell>
-                                            <TableCell>
-                                                <PaymentStatusBadge
-                                                    status={venda.status_pagamento}
-                                                    linkPagamento={venda.link_pagamento}
-                                                    cliente={{ nome: venda.cliente_nome, telefone: venda.cliente_telefone }}
-                                                    numeroPedido={venda.numero_pedido}
-                                                    valorTotal={venda.valor_total}
-                                                />
-                                            </TableCell>
+
                                             <TableCell>
                                                 <OrderStatusBadge
                                                     venda={venda}
@@ -405,7 +476,7 @@ export default function Vendas() {
                                                         <FileText className="w-4 h-4 text-blue-600" />
                                                     </Button>
 
-                                                    {/* Botão de cancelar - só mostra se não estiver cancelado */}
+                                                    {/* Botão de Cancelar */}
                                                     {venda.status !== 'Cancelado' && (
                                                         <Button
                                                             variant="ghost"
@@ -417,6 +488,80 @@ export default function Vendas() {
                                                             <XCircle className="w-4 h-4 text-orange-600" />
                                                         </Button>
                                                     )}
+
+                                                    {/* Botão de Reagendamento (Vendedor solicita) */}
+                                                    {(() => {
+                                                        const entregaAgendada = entregas.find(e => e.numero_pedido === venda.numero_pedido && e.data_agendada && e.status !== 'Entregue');
+                                                        if (entregaAgendada) {
+                                                            return (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={() => {
+                                                                        setModalReagendamento({
+                                                                            vendaId: venda.id,
+                                                                            entregaId: entregaAgendada.id,
+                                                                            dataAgendada: entregaAgendada.data_agendada,
+                                                                            turno: entregaAgendada.turno
+                                                                        });
+                                                                        setMotivoReagendamento("");
+                                                                    }}
+                                                                    title="Solicitar Reagendamento (Cliente não pode receber)"
+                                                                >
+                                                                    <CalendarX className="w-4 h-4 text-red-500" />
+                                                                </Button>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    })()}
+
+                                                    {/* Botão de Preferências de Entrega */}
+                                                    {(() => {
+                                                        const entrega = entregas.find(e => e.numero_pedido === venda.numero_pedido && e.status !== 'Entregue');
+                                                        if (entrega) {
+                                                            return (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={() => {
+                                                                        const prefs = entrega.preferencias_entrega || { dias: [], turnos: [], obs: "" };
+                                                                        setPreferenciasTemp(prefs);
+                                                                        setModalPreferencias({ entregaId: entrega.id });
+                                                                    }}
+                                                                    title="Preferências de Entrega / Restrições"
+                                                                >
+                                                                    <Settings className="w-4 h-4 text-gray-500" />
+                                                                </Button>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    })()}
+
+                                                    {/* Botão de Transferir Montagem (Wrench com seta) */}
+                                                    {(() => {
+                                                        // Verificar se tem itens de montagem INTERNA pendentes
+                                                        const itensInternosPendentes = montagens.some(m =>
+                                                            m.venda_id === venda.id &&
+                                                            m.tipo_montagem === 'interna' &&
+                                                            m.status !== 'concluida'
+                                                        );
+
+                                                        if (itensInternosPendentes) {
+                                                            return (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={() => setModalTransferencia(venda)}
+                                                                    title="Transferir Montagem para Externo"
+                                                                >
+                                                                    <div className="relative">
+                                                                        <ArrowRightLeft className="w-5 h-5 text-orange-600" />
+                                                                    </div>
+                                                                </Button>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    })()}
                                                 </div>
                                             </TableCell>
                                         </TableRow>
@@ -441,7 +586,132 @@ export default function Vendas() {
                 cliente={clienteParaNfe}
                 user={user}
             />
-        </div>
+
+            {/* Modal Solicitar Reagendamento */}
+            <Dialog open={!!modalReagendamento} onOpenChange={() => setModalReagendamento(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-red-600">
+                            <CalendarX className="w-5 h-5" />
+                            Solicitar Reagendamento
+                        </DialogTitle>
+                        <DialogDescription>
+                            Motivo pelo qual o cliente não pode receber na data agendada:
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <Textarea
+                            placeholder="Ex: Cliente estará viajando, pediu para entregar próxima semana..."
+                            value={motivoReagendamento}
+                            onChange={(e) => setMotivoReagendamento(e.target.value)}
+                            rows={3}
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setModalReagendamento(null)}>Cancelar</Button>
+                        <Button
+                            onClick={confirmarReagendamento}
+                            disabled={reagendarMutation.isPending}
+                            className="bg-red-600 hover:bg-red-700"
+                        >
+                            {reagendarMutation.isPending ? <Loader2 className="animate-spin" /> : "Confirmar Reagendamento"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+
+            {/* Modal de Preferências de Entrega */}
+            <Dialog open={!!modalPreferencias} onOpenChange={(open) => !open && setModalPreferencias(null)}>
+                <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                        <DialogTitle>Preferências de Entrega</DialogTitle>
+                        <DialogDescription>
+                            Defina restrições ou preferências de horário para esta entrega.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                        <div className="space-y-3">
+                            <Label>Dias da Semana Permitidos</Label>
+                            <div className="grid grid-cols-3 gap-2">
+                                {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((dia, idx) => (
+                                    <div key={idx} className="flex items-center space-x-2">
+                                        <Checkbox
+                                            id={`venda-dia-${idx}`}
+                                            checked={preferenciasTemp.dias?.includes(idx + 1)}
+                                            onCheckedChange={(checked) => {
+                                                setPreferenciasTemp(prev => ({
+                                                    ...prev,
+                                                    dias: checked
+                                                        ? [...(prev.dias || []), idx + 1]
+                                                        : (prev.dias || []).filter(d => d !== idx + 1)
+                                                }));
+                                            }}
+                                        />
+                                        <label htmlFor={`venda-dia-${idx}`} className="text-sm font-medium leading-none cursor-pointer">
+                                            {dia}
+                                        </label>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="space-y-3">
+                            <Label>Turnos Permitidos</Label>
+                            <div className="grid grid-cols-2 gap-2">
+                                {['Manhã', 'Tarde', 'Comercial'].map((turno) => (
+                                    <div key={turno} className="flex items-center space-x-2">
+                                        <Checkbox
+                                            id={`venda-turno-${turno}`}
+                                            checked={preferenciasTemp.turnos?.includes(turno)}
+                                            onCheckedChange={(checked) => {
+                                                setPreferenciasTemp(prev => ({
+                                                    ...prev,
+                                                    turnos: checked
+                                                        ? [...(prev.turnos || []), turno]
+                                                        : (prev.turnos || []).filter(t => t !== turno)
+                                                }));
+                                            }}
+                                        />
+                                        <label htmlFor={`venda-turno-${turno}`} className="text-sm font-medium leading-none cursor-pointer">
+                                            {turno}
+                                        </label>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Observação</Label>
+                            <Textarea
+                                placeholder="Ex: Ligar antes..."
+                                value={preferenciasTemp.obs || ""}
+                                onChange={(e) => setPreferenciasTemp(prev => ({ ...prev, obs: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setModalPreferencias(null)}>Cancelar</Button>
+                        <Button
+                            onClick={() => salvarPreferenciasMutation.mutate({
+                                entregaId: modalPreferencias.entregaId,
+                                preferencias: preferenciasTemp
+                            })}
+                            disabled={salvarPreferenciasMutation.isPending}
+                        >
+                            {salvarPreferenciasMutation.isPending ? <Loader2 className="animate-spin" /> : "Salvar Preferências"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+            {/* Modal de Transferência de Montagem */}
+            <TransferirMontagemModal
+                isOpen={!!modalTransferencia}
+                onClose={() => setModalTransferencia(null)}
+                venda={modalTransferencia}
+                user={user}
+            />
+        </div >
     );
 }
 
@@ -523,223 +793,131 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
     // Se a venda foi cancelada, mostrar isso
     if (venda.status === 'Cancelado') {
         return (
-            <Badge className="bg-red-100 text-red-700 border border-red-200 gap-1">
+            <Badge className="bg-red-100 text-red-700 border border-red-200 gap-1 w-fit">
                 <XCircle className="w-3 h-3" />
                 Cancelado
             </Badge>
         );
     }
 
-    // Buscar entrega(s) relacionada(s) a essa venda
+    const badges = [];
+
+    // 1. Verificação de Triagem
+    if (!venda.triagem_realizada) {
+        badges.push(
+            <Badge key="triagem" className="bg-orange-100 text-orange-700 border border-orange-200 gap-1 w-fit">
+                <ClipboardList className="w-3 h-3" />
+                Pendente Triagem
+            </Badge>
+        );
+    }
+
+    // 2. Verificação de Entrega
     const entregasVenda = entregas.filter(e => e.numero_pedido === venda.numero_pedido);
 
-    // Se não tem entregas, verificar se é retirada no carrinho
+    // Se não tem entregas criadas
     if (entregasVenda.length === 0) {
         // Verificar se todos os itens são do tipo 'retira' (Cliente Retira)
         const todosRetira = venda.itens?.every(item => item.tipo_montagem === 'retira');
+
         if (todosRetira && venda.itens?.length > 0) {
-            return (
-                <Badge className="bg-purple-100 text-purple-700 border border-purple-200 gap-1">
+            badges.push(
+                <Badge key="retira" className="bg-purple-100 text-purple-700 border border-purple-200 gap-1 w-fit">
                     <UserCheck className="w-3 h-3" />
                     Cliente Retira
                 </Badge>
             );
-        }
-
-        // Pagamento ainda não está pago - aguardando pagamento
-        if (venda.status === 'Pagamento Pendente') {
-            return (
-                <Badge className="bg-gray-100 text-gray-600 border border-gray-200 gap-1">
+        } else if (venda.status === 'Pagamento Pendente') {
+            badges.push(
+                <Badge key="pgto" className="bg-gray-100 text-gray-600 border border-gray-200 gap-1 w-fit">
                     <Clock className="w-3 h-3" />
                     Aguardando Pgto
                 </Badge>
             );
-        }
-
-        // Pago mas sem entrega criada ainda
-        return (
-            <Badge className="bg-yellow-100 text-yellow-700 border border-yellow-200 gap-1">
-                <Package className="w-3 h-3" />
-                Processando
-            </Badge>
-        );
-    }
-
-    // Analisar status das entregas
-    const entrega = entregasVenda[0]; // Pegar a primeira entrega
-
-    // Se é retirada e já foi concluída
-    if (entrega.tipo_entrega === 'Retirada' && entrega.status === 'Entregue') {
-        return (
-            <Badge className="bg-green-100 text-green-700 border border-green-200 gap-1">
-                <CheckCircle className="w-3 h-3" />
-                Retirado
-            </Badge>
-        );
-    }
-
-    // Se todas as entregas estão concluídas
-    const todasEntregues = entregasVenda.every(e => e.status === 'Entregue');
-    if (todasEntregues) {
-        return (
-            <Badge className="bg-green-100 text-green-700 border border-green-200 gap-1">
-                <CheckCircle className="w-3 h-3" />
-                Entregue
-            </Badge>
-        );
-    }
-
-    // Buscar montagens relacionadas
-    const montagensVenda = montagens.filter(m => m.numero_pedido === venda.numero_pedido);
-
-    // Verificar se é uma venda com Entrega Montada
-    const temEntregaMontada = venda.itens?.some(i => i.tipo_entrega === 'Montado');
-
-    if (temEntregaMontada) {
-        // 1. Verificar Triagem
-        if (!venda.triagem_realizada) {
-            return (
-                <Badge className="bg-orange-100 text-orange-700 border border-orange-200 gap-1">
-                    <ClipboardList className="w-3 h-3" />
-                    Pendente Triagem
-                </Badge>
-            );
-        }
-
-        // 2. Verificar Montagem
-        const todasConcluidas = montagensVenda.every(m => m.status === 'concluida');
-        const dataEntrega = entrega.data_agendada ? new Date(entrega.data_agendada).toLocaleDateString('pt-BR') : 'Data Indefinida';
-
-        if (!todasConcluidas) {
-            return (
-                <Badge className="bg-amber-100 text-amber-700 border border-amber-200 gap-1">
-                    <Wrench className="w-3 h-3" />
-                    Previsto: {dataEntrega} (Montagem Pendente)
-                </Badge>
-            );
         } else {
-            // Montagem concluída -> Pronto para entrega ou Entregue
-            if (entrega.status === 'Entregue') {
-                return (
-                    <Badge className="bg-green-100 text-green-700 border border-green-200 gap-1">
-                        <CheckCircle className="w-3 h-3" />
-                        Entregue
-                    </Badge>
-                );
-            }
-
-            return (
-                <Badge className="bg-green-100 text-green-700 border border-green-200 gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    Pronto p/ Entrega: {dataEntrega}
-                </Badge>
-            );
-        }
-    }
-
-    // Verificar se é uma venda com Montagem no Local (Montagem Externa)
-    const temMontagemNoLocal = venda.itens?.some(i => i.tipo_montagem === 'Montagem Externa' || i.tipo_montagem === 'Montagem no Local');
-
-    if (temMontagemNoLocal) {
-        // 1. Verificar Triagem
-        if (!venda.triagem_realizada) {
-            return (
-                <Badge className="bg-orange-100 text-orange-700 border border-orange-200 gap-1">
-                    <ClipboardList className="w-3 h-3" />
-                    Pendente Triagem
-                </Badge>
-            );
-        }
-
-        // 2. Verificar Status da Entrega (Pré-requisito para montagem externa)
-        if (entrega.status !== 'Entregue') {
-            return (
-                <Badge className="bg-amber-100 text-amber-700 border border-amber-200 gap-1">
-                    <Truck className="w-3 h-3" />
+            badges.push(
+                <Badge key="processando" className="bg-yellow-100 text-yellow-700 border border-yellow-200 gap-1 w-fit">
+                    <Package className="w-3 h-3" />
                     Aguardando Entrega
                 </Badge>
             );
         }
+    } else {
+        // Tem entregas
+        const entrega = entregasVenda[0]; // Pega a principal (simplificação)
+        const dataEntrega = entrega.data_agendada ? new Date(entrega.data_agendada).toLocaleDateString('pt-BR') : null;
 
-        // 3. Verificar Montagem (Só inicia após entrega)
-        const todasConcluidas = montagensVenda.every(m => m.status === 'concluida');
+        if (entrega.tipo_entrega === 'Retirada') {
+            if (entrega.status === 'Entregue') {
+                badges.push(
+                    <Badge key="retirado" className="bg-green-100 text-green-700 border border-green-200 gap-1 w-fit">
+                        <CheckCircle className="w-3 h-3" />
+                        Retirado
+                    </Badge>
+                );
+            } else {
+                badges.push(
+                    <Badge key="retirada_pendente" className="bg-purple-100 text-purple-700 border border-purple-200 gap-1 w-fit">
+                        <UserCheck className="w-3 h-3" />
+                        Aguardando Retirada
+                    </Badge>
+                );
+            }
+        } else {
+            // Entrega Comum
+            if (entrega.status === 'Entregue') {
+                badges.push(
+                    <Badge key="entregue" className="bg-green-100 text-green-700 border border-green-200 gap-1 w-fit">
+                        <CheckCircle className="w-3 h-3" />
+                        Entregue
+                    </Badge>
+                );
+            } else if (entrega.status === 'Em Rota') {
+                badges.push(
+                    <Badge key="em_rota" className="bg-blue-100 text-blue-700 border border-blue-200 gap-1 w-fit">
+                        <Truck className="w-3 h-3" />
+                        Em Rota
+                    </Badge>
+                );
+            } else {
+                badges.push(
+                    <Badge key="ent_pendente" className="bg-amber-100 text-amber-700 border border-amber-200 gap-1 w-fit">
+                        <Truck className="w-3 h-3" />
+                        Entrega: {dataEntrega || 'A Agendar'}
+                    </Badge>
+                );
+            }
+        }
+    }
 
-        if (!todasConcluidas) {
-            return (
-                <Badge className="bg-teal-100 text-teal-700 border border-teal-200 gap-1">
+    // 3. Verificação de Montagem
+    const temMontagem = venda.itens?.some(i => ['Montado', 'Montagem Externa', 'Montagem no Local', 'interna', 'terceirizada'].includes(i.tipo_entrega) || ['interna', 'terceirizada', 'Montagem Externa'].includes(i.tipo_montagem));
+
+    if (temMontagem) {
+        const montagensVenda = montagens.filter(m => m.numero_pedido === venda.numero_pedido);
+        const todasConcluidas = montagensVenda.length > 0 && montagensVenda.every(m => m.status === 'concluida');
+
+        if (todasConcluidas) {
+            badges.push(
+                <Badge key="montado" className="bg-green-100 text-green-700 border border-green-200 gap-1 w-fit">
                     <Wrench className="w-3 h-3" />
-                    Entregue e pronto p/ montagem
+                    Montado
                 </Badge>
             );
         } else {
-            return (
-                <Badge className="bg-green-100 text-green-700 border border-green-200 gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    Montagem Concluída
-                </Badge>
-            );
-        }
-    }
-
-    // Lógica antiga para montagens avulsas (se houver) ou compatibilidade
-    const temMontagem = montagensVenda.length > 0;
-    if (temMontagem && !temEntregaMontada) {
-        const todasConcluidas = montagensVenda.every(m => m.status === 'concluida');
-        if (!todasConcluidas) {
-            return (
-                <Badge className="bg-orange-100 text-orange-700 border border-orange-200 gap-1">
+            // Se tem itens de montagem criados ou se a venda requer montagem
+            badges.push(
+                <Badge key="mont_pendente" className="bg-amber-100 text-amber-700 border border-amber-200 gap-1 w-fit">
                     <Wrench className="w-3 h-3" />
-                    Em Montagem
+                    Montagem Pendente
                 </Badge>
             );
         }
     }
 
-    // Verificar status de agendamento
-    if (entrega.status === 'Pendente') {
-        if (!entrega.data_agendada) {
-            return (
-                <Badge className="bg-yellow-100 text-yellow-700 border border-yellow-200 gap-1">
-                    <Clock className="w-3 h-3" />
-                    A Agendar
-                </Badge>
-            );
-        }
-
-        if (entrega.data_agendada && entrega.status_confirmacao !== 'Confirmada') {
-            return (
-                <Badge className="bg-amber-100 text-amber-700 border border-amber-200 gap-1">
-                    <Clock className="w-3 h-3" />
-                    A Confirmar
-                </Badge>
-            );
-        }
-
-        if (entrega.data_agendada && entrega.status_confirmacao === 'Confirmada') {
-            return (
-                <Badge className="bg-blue-100 text-blue-700 border border-blue-200 gap-1">
-                    <Truck className="w-3 h-3" />
-                    Rota Prevista
-                </Badge>
-            );
-        }
-    }
-
-    // Em trânsito / saiu para entrega
-    if (entrega.status === 'Em Rota') {
-        return (
-            <Badge className="bg-blue-600 text-white border border-blue-700 gap-1 animate-pulse">
-                <Truck className="w-3 h-3" />
-                Em Rota
-            </Badge>
-        );
-    }
-
-    // Default fallback
     return (
-        <Badge className="bg-gray-100 text-gray-600 border border-gray-200 gap-1">
-            <Package className="w-3 h-3" />
-            {entrega.status}
-        </Badge>
+        <div className="flex flex-col gap-1 items-start">
+            {badges}
+        </div>
     );
 }

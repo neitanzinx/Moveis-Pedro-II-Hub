@@ -27,10 +27,18 @@ export default function LoginFuncionario() {
     const [novaSenha, setNovaSenha] = useState("");
     const [confirmarSenha, setConfirmarSenha] = useState("");
 
-    const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo', 'Montador'];
+
 
     const redirectByRole = (cargo) => {
-        if (!cargo || !VALID_CARGOS.includes(cargo)) {
+        // Verificar parametro de redirecionamento na URL
+        const params = new URLSearchParams(window.location.search);
+        const redirect = params.get('redirect');
+        if (redirect) {
+            window.location.href = redirect;
+            return;
+        }
+
+        if (!cargo) {
             console.error('Cargo inválido ou pendente:', cargo);
             alert('Seu usuário está com cargo pendente ou inválido. Contate o administrador.');
             setError('Seu usuário está com cargo pendente. Contate o administrador.');
@@ -51,27 +59,25 @@ export default function LoginFuncionario() {
         }
     };
 
-    // Verificar se já está logado
-    useEffect(() => {
-        const token = localStorage.getItem('employee_token');
-        const user = localStorage.getItem('employee_user');
+    // Verificação de sessão removida para evitar loop de redirecionamento.
+    // O controle de redirecionamento se já estiver logado é feito no App.jsx (PagesContent) usando o hook useAuth.
 
-        if (token && user) {
-            try {
-                const userData = JSON.parse(user);
-                // Validar cargo antes de redirecionar para evitar loop
-                if (VALID_CARGOS.includes(userData.cargo)) {
-                    redirectByRole(userData.cargo);
-                } else {
-                    console.warn('Usuário logado com cargo inválido:', userData.cargo);
-                    localStorage.removeItem('employee_token');
-                    localStorage.removeItem('employee_user');
+    // [FIX] Mas se o usuário JÁ estiver logado e cair aqui (porque o App.jsx permitiu por ser primeiro acesso),
+    // precisamos ativar o modo de troca de senha imediatamente.
+    useEffect(() => {
+        const checkSession = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+                // Verificar perfil
+                const { data: profile } = await supabase.from('public_users').select('*').eq('id', session.user.id).single();
+                if (profile?.primeiro_acesso) {
+                    console.log("Sessão ativa detectada com primeiro_acesso=true. Ativando wizard.");
+                    setPrimeiroAcesso(true);
+                    setTokenTemp(session.access_token);
                 }
-            } catch (e) {
-                localStorage.removeItem('employee_token');
-                localStorage.removeItem('employee_user');
             }
-        }
+        };
+        checkSession();
     }, []);
 
     const handleLogin = async (e) => {
@@ -79,36 +85,68 @@ export default function LoginFuncionario() {
         setLoading(true);
         setError("");
 
-        // Garantir que não existe sessão do Supabase ativa para evitar conflitos
-        await supabase.auth.signOut();
-
         try {
-            const response = await fetch(`${API_URL}/api/auth/employee/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ matricula, senha })
-            });
+            // Login via Supabase - busca por matrícula no banco
+            const { data: userProfile, error: profileError } = await supabase
+                .from('public_users')
+                .select('*')
+                .eq('matricula', matricula.toUpperCase())
+                .eq('ativo', true)
+                .single();
 
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Erro ao fazer login');
+            if (profileError || !userProfile) {
+                throw new Error("Matrícula não encontrada ou usuário inativo.");
             }
 
+            // Verificar senha (usando Supabase Auth com o email do usuário)
+            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+                email: userProfile.email,
+                password: senha
+            });
+
+            if (authError) {
+                throw new Error("Senha incorreta.");
+            }
+
+            // [FIX] Buscar perfil novamente, agora AUTENTICADO, para garantir que estamos vendo o status real de 'primeiro_acesso'
+            // A leitura anterior era anônima e poderia estar sofrendo cache ou restrição de RLS
+            const { data: freshProfile, error: freshError } = await supabase
+                .from('public_users')
+                .select('*')
+                .eq('id', authData.session.user.id)
+                .single();
+
+            if (freshProfile) {
+                // Perfil carregado com sucesso
+            }
+
+            const profileToUse = freshProfile || userProfile;
+
             // Verificar primeiro acesso
-            if (data.primeiro_acesso) {
+            if (profileToUse && profileToUse.primeiro_acesso) { // Check for existance too
                 setPrimeiroAcesso(true);
-                setTokenTemp(data.token_temp);
+                // Para troca de senha, precisamos do token da sessão
+                setTokenTemp(authData.session?.access_token || '');
                 setError("");
                 return;
             }
 
-            // Salvar token e dados do usuário
-            localStorage.setItem('employee_token', data.token);
-            localStorage.setItem('employee_user', JSON.stringify(data.user));
+
+            // [FEATURE] Atualizar último login
+            if (profileToUse && profileToUse.id) {
+                supabase.from('public_users')
+                    .update({ ultimo_login: new Date().toISOString() })
+                    .eq('id', profileToUse.id)
+                    .then(({ error }) => {
+                        if (error) console.error("Erro ao atualizar ultimo_login:", error);
+                    });
+            }
+
+            // Salvar dados do usuário no localStorage para compatibilidade
+            localStorage.setItem('employee_user', JSON.stringify(userProfile));
 
             // Redirecionar por cargo
-            redirectByRole(data.user.cargo);
+            redirectByRole(userProfile.cargo);
 
         } catch (err) {
             console.error("Erro no login:", err);
@@ -144,55 +182,37 @@ export default function LoginFuncionario() {
         setError("");
 
         try {
-            const response = await fetch(`${API_URL}/api/auth/employee/change-password`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    token_temp: tokenTemp,
-                    nova_senha: novaSenha
-                })
+            // Atualizar senha via Supabase Auth (usuário já está logado via tokenTemp/session)
+            const { error: updateError } = await supabase.auth.updateUser({
+                password: novaSenha
             });
 
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Erro ao trocar senha');
+            if (updateError) {
+                throw new Error(updateError.message);
             }
 
-            // Sucesso - fazer login automático com a nova senha
-            console.log('✅ Senha alterada, fazendo login automático...');
-
-            // Garantir que não existe sessão do Supabase ativa
-            await supabase.auth.signOut();
-
-            // Tentar login automático
-            // Nota: Usamos a senha nova que o usuário acabou de digitar
-            const loginResponse = await fetch(`${API_URL}/api/auth/employee/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ matricula, senha: novaSenha })
-            });
-
-            const loginData = await loginResponse.json();
-
-            if (loginResponse.ok && loginData.token) {
-                // Salvar token e dados do usuário
-                localStorage.setItem('employee_token', loginData.token);
-                localStorage.setItem('employee_user', JSON.stringify(loginData.user));
-
-                // Redirecionar por cargo
-                alert("Senha alterada com sucesso! Você será redirecionado.");
-                redirectByRole(loginData.user.cargo);
-            } else {
-                // Se login automático falhar, volta pro fluxo normal
-                console.warn("Login automático falhou, solicitando login manual.");
-                setPrimeiroAcesso(false);
-                setSenha("");
-                setNovaSenha("");
-                setConfirmarSenha("");
-                setTokenTemp("");
-                alert("Senha alterada com sucesso! Faça login com sua nova senha.");
+            // Marcar primeiro_acesso como false no banco
+            const { data: sessionData } = await supabase.auth.getSession();
+            if (sessionData?.session?.user?.id) {
+                await supabase
+                    .from('public_users')
+                    .update({ primeiro_acesso: false })
+                    .eq('id', sessionData.session.user.id);
             }
+
+            // Buscar perfil do usuário
+            const { data: userProfile } = await supabase
+                .from('public_users')
+                .select('*')
+                .eq('matricula', matricula.toUpperCase())
+                .single();
+
+            if (userProfile) {
+                localStorage.setItem('employee_user', JSON.stringify(userProfile));
+            }
+
+            alert("Senha alterada com sucesso! Você será redirecionado.");
+            redirectByRole(userProfile?.cargo);
 
         } catch (err) {
             console.error("Erro ao trocar senha:", err);

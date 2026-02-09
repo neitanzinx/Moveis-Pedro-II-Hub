@@ -564,9 +564,10 @@ ${infoPagamento}
 
 *Prazo de Entrega:* ${vendaData.prazo_entrega}
 
-Seus móveis serão entregues em até *${vendaData.prazo_entrega}*! 🛋️
-
-Em breve entraremos em contato para agendar a entrega.
+${vendaData.prazo_entrega === 'Retirado na loja'
+        ? `Esperamos que você aproveite muito sua compra! 😍\n\nQualquer dúvida, estamos à disposição!`
+        : `Seus móveis serão entregues em até *${vendaData.prazo_entrega}*! 🛋️\n\nEm breve entraremos em contato para agendar a entrega.`
+      }
 
 Obrigado pela preferência! 🧡💚
 _Móveis Pedro II - ${vendaData.loja}_`;

@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Truck, MapPin, Navigation, CheckCircle, Send, Radio, Sun, Sunset, Briefcase, ArrowLeft, Package, AlertTriangle, CreditCard, Camera, PenTool, X, DollarSign, LogOut, Wrench, Link2, MessageCircle, QrCode, Copy, Download, ExternalLink } from "lucide-react";
+import { Truck, MapPin, Navigation, CheckCircle, Send, Radio, Sun, Sunset, Briefcase, ArrowLeft, Package, AlertTriangle, CreditCard, Camera, PenTool, X, DollarSign, LogOut, Wrench, Link2, MessageCircle, QrCode, Copy, Download, ExternalLink, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import AssinaturaCanvas from "@/components/logistica/AssinaturaCanvas";
@@ -45,6 +45,19 @@ export default function Entregador() {
     const [gerandoLink, setGerandoLink] = useState(false);
     const [linkCopiado, setLinkCopiado] = useState(false);
     const [numeroAlternativo, setNumeroAlternativo] = useState("");
+
+    // Estado para rastrear clientes já notificados
+    const [clientesNotificados, setClientesNotificados] = useState(new Set());
+
+    // Estado para modal de confirmação de pagamento simplificado
+    const [modalConfirmaPagamento, setModalConfirmaPagamento] = useState(null);
+    const [pagamentoStatus, setPagamentoStatus] = useState('pago'); // 'pago' | 'pendente'
+    const [motivoPendente, setMotivoPendente] = useState("");
+
+    // Estado para checklist de carregamento
+    const [modalChecklist, setModalChecklist] = useState(false);
+    const [itensChecklist, setItensChecklist] = useState([]);
+    const [itensConferidos, setItensConferidos] = useState(new Set());
 
     const queryClient = useQueryClient();
     const confirm = useConfirm();
@@ -173,6 +186,59 @@ export default function Entregador() {
         }
     };
 
+    // Preparar checklist de carregamento
+    const prepararChecklist = async () => {
+        if (!caminhaoSelecionado || !turnoSelecionado) {
+            toast.error("Selecione caminhão e turno primeiro.");
+            return;
+        }
+        if (entregasRota.length === 0) {
+            toast.error("Nenhuma entrega para carregar.");
+            return;
+        }
+
+        // Buscar itens de cada venda para criar checklist
+        const itens = [];
+        for (const entrega of entregasRota) {
+            if (entrega.venda_id) {
+                try {
+                    const { data: venda } = await supabase
+                        .from('vendas')
+                        .select('itens, numero_pedido')
+                        .eq('id', entrega.venda_id)
+                        .single();
+
+                    if (venda?.itens) {
+                        const vendaItens = typeof venda.itens === 'string' ? JSON.parse(venda.itens) : venda.itens;
+                        vendaItens.forEach(item => {
+                            itens.push({
+                                id: `${entrega.id}-${item.produto_id || item.id}`,
+                                pedido: venda.numero_pedido || entrega.numero_pedido,
+                                entrega_id: entrega.id,
+                                cliente: entrega.cliente_nome,
+                                produto: item.nome || item.produto_nome,
+                                quantidade: item.quantidade || 1,
+                                cor: item.cor,
+                                codigo: item.codigo_barras || item.sku
+                            });
+                        });
+                    }
+                } catch (e) {
+                    console.error('Erro ao buscar itens:', e);
+                }
+            }
+        }
+
+        if (itens.length === 0) {
+            iniciarRota();
+            return;
+        }
+
+        setItensChecklist(itens);
+        setItensConferidos(new Set());
+        setModalChecklist(true);
+    };
+
     const iniciarRota = async () => {
         if (!caminhaoSelecionado || !turnoSelecionado) {
             toast.error("Selecione caminhão e turno primeiro.");
@@ -264,6 +330,8 @@ export default function Entregador() {
                         linkLocalizacao: linkMaps
                     })
                 });
+                // Marcar cliente como notificado
+                setClientesNotificados(prev => new Set([...prev, entrega.id]));
                 toast.success("Cliente avisado!");
             } catch (e) { toast.error("Erro ao enviar."); }
             finally { setEnviando(false); }
@@ -342,8 +410,24 @@ export default function Entregador() {
                 updateData.comprovante_pagamento_url = comprovanteUrl;
             }
 
-            await updateEntrega.mutateAsync({ id: entrega.id, data: updateData });
-            toast.success("Entrega finalizada com sucesso!");
+            // 🚀 AUTOMAÇÃO: Chamar o robô de WhatsApp para concluir e avisar o próximo
+            try {
+                const zapUrl = import.meta.env.VITE_ZAP_API_URL || 'http://localhost:3001';
+                await fetch(`${zapUrl}/concluir-entrega`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        id_concluida: entrega.id,
+                        // Passamos os dados extras para o robô salvar
+                        update_data: updateData 
+                    })
+                });
+            } catch (zapErr) {
+                console.error("Falha ao chamar automação do robô, tentando fallback direto no banco...");
+                await updateEntrega.mutateAsync({ id: entrega.id, data: updateData });
+            }
+
+            toast.success("Entrega finalizada! O próximo cliente será avisado em 5 min.");
             refetch();
         } catch (error) {
             toast.error("Erro ao finalizar entrega.");
@@ -800,12 +884,12 @@ export default function Entregador() {
 
                 {/* Botão Iniciar */}
                 <Button
-                    onClick={iniciarRota}
+                    onClick={prepararChecklist}
                     disabled={!caminhaoSelecionado || !turnoSelecionado || entregasRota.length === 0 || enviando}
                     className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700"
                 >
-                    <Navigation className="w-5 h-5 mr-2" />
-                    INICIAR ROTA ({entregasRota.length} entregas)
+                    <Package className="w-5 h-5 mr-2" />
+                    CONFERIR CARGA ({entregasRota.length} entregas)
                 </Button>
             </div >
         );
@@ -911,8 +995,18 @@ export default function Entregador() {
                                     <div className="space-y-2">
                                         {/* Botões principais */}
                                         <div className="grid grid-cols-2 gap-2">
-                                            <Button variant="outline" size="sm" onClick={() => avisarProximo(entrega)} disabled={enviando}>
-                                                <Send className="w-4 h-4 mr-1" /> Avisar
+                                            <Button
+                                                variant={clientesNotificados.has(entrega.id) ? "default" : "outline"}
+                                                size="sm"
+                                                onClick={() => avisarProximo(entrega)}
+                                                disabled={enviando}
+                                                className={clientesNotificados.has(entrega.id) ? "bg-green-600 hover:bg-green-700" : ""}
+                                            >
+                                                {clientesNotificados.has(entrega.id) ? (
+                                                    <><Check className="w-4 h-4 mr-1" /> Avisado</>
+                                                ) : (
+                                                    <><Send className="w-4 h-4 mr-1" /> Avisar</>
+                                                )}
                                             </Button>
                                             <Button
                                                 size="sm"
@@ -933,23 +1027,19 @@ export default function Entregador() {
                                             <X className="w-4 h-4 mr-1" /> Não consegui entregar
                                         </Button>
 
-                                        {/* Botão de link de pagamento (backup para máquina) */}
+                                        {/* Botão de confirmar pagamento (simplificado) */}
                                         {temPagamento && (
                                             <Button
                                                 variant="outline"
                                                 size="sm"
-                                                className="w-full border-blue-300 text-blue-600 hover:bg-blue-50"
+                                                className="w-full border-amber-400 text-amber-700 hover:bg-amber-50"
                                                 onClick={() => {
-                                                    setModalLinkPagamento(entrega);
-                                                    gerarLinkPagamento(entrega);
+                                                    setModalConfirmaPagamento(entrega);
+                                                    setPagamentoStatus('pago');
+                                                    setMotivoPendente("");
                                                 }}
-                                                disabled={gerandoLink}
                                             >
-                                                {gerandoLink ? (
-                                                    <><span className="animate-spin mr-1">⏳</span> Gerando...</>
-                                                ) : (
-                                                    <><Link2 className="w-4 h-4 mr-1" /> Gerar Link de Pagamento</>
-                                                )}
+                                                <DollarSign className="w-4 h-4 mr-1" /> Confirmar Pagamento
                                             </Button>
                                         )}
                                     </div>
@@ -1366,6 +1456,193 @@ export default function Entregador() {
                             Erro ao gerar link. Tente novamente.
                         </div>
                     )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal de Confirmação de Pagamento Simplificado */}
+            <Dialog open={!!modalConfirmaPagamento} onOpenChange={() => setModalConfirmaPagamento(null)}>
+                <DialogContent className="max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <DollarSign className="w-5 h-5 text-amber-600" />
+                            Confirmar Pagamento
+                        </DialogTitle>
+                    </DialogHeader>
+                    {modalConfirmaPagamento && (
+                        <div className="space-y-4">
+                            <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                                <p className="text-sm text-amber-800 font-medium">Valor a receber:</p>
+                                <p className="text-2xl font-bold text-amber-900">
+                                    R$ {(modalConfirmaPagamento.valor_a_receber || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </p>
+                                {modalConfirmaPagamento.forma_pagamento_entrega && (
+                                    <p className="text-xs text-amber-600 mt-1">
+                                        Forma: {modalConfirmaPagamento.forma_pagamento_entrega}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Opções Pago/Pendente */}
+                            <div className="grid grid-cols-2 gap-3">
+                                <Button
+                                    variant={pagamentoStatus === 'pago' ? 'default' : 'outline'}
+                                    onClick={() => setPagamentoStatus('pago')}
+                                    className={pagamentoStatus === 'pago' ? 'bg-green-600 hover:bg-green-700' : ''}
+                                >
+                                    <Check className="w-4 h-4 mr-1" /> Pago
+                                </Button>
+                                <Button
+                                    variant={pagamentoStatus === 'pendente' ? 'default' : 'outline'}
+                                    onClick={() => setPagamentoStatus('pendente')}
+                                    className={pagamentoStatus === 'pendente' ? 'bg-red-600 hover:bg-red-700' : ''}
+                                >
+                                    <X className="w-4 h-4 mr-1" /> Não Pago
+                                </Button>
+                            </div>
+
+                            {/* Motivo se Pendente */}
+                            {pagamentoStatus === 'pendente' && (
+                                <div className="space-y-2">
+                                    <p className="text-sm font-medium text-gray-700">Motivo:</p>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        {['Sem dinheiro', 'Cartão recusado', 'Máquina sem sinal', 'PIX não caiu', 'Vai pagar depois'].map(motivo => (
+                                            <Button
+                                                key={motivo}
+                                                variant={motivoPendente === motivo ? 'default' : 'outline'}
+                                                size="sm"
+                                                onClick={() => setMotivoPendente(motivo)}
+                                                className={motivoPendente === motivo ? 'bg-red-500' : ''}
+                                            >
+                                                {motivo}
+                                            </Button>
+                                        ))}
+                                    </div>
+                                    <Textarea
+                                        placeholder="Outro motivo..."
+                                        value={motivoPendente.startsWith('Sem dinheiro') || motivoPendente.startsWith('Cartão') || motivoPendente.startsWith('Máquina') || motivoPendente.startsWith('PIX') || motivoPendente.startsWith('Vai pagar') ? '' : motivoPendente}
+                                        onChange={(e) => setMotivoPendente(e.target.value)}
+                                        className="h-16"
+                                    />
+                                </div>
+                            )}
+
+                            {/* Botão Confirmar */}
+                            <Button
+                                className={`w-full ${pagamentoStatus === 'pago' ? 'bg-green-600 hover:bg-green-700' : 'bg-orange-600 hover:bg-orange-700'}`}
+                                onClick={async () => {
+                                    try {
+                                        const updates = {
+                                            pagamento_confirmado: pagamentoStatus === 'pago',
+                                            pagamento_pendente_motivo: pagamentoStatus === 'pendente' ? motivoPendente : null,
+                                            data_pagamento_confirmado: new Date().toISOString()
+                                        };
+                                        await supabase.from('entregas').update(updates).eq('id', modalConfirmaPagamento.id);
+
+                                        // Atualizar também a venda se aplicável
+                                        if (modalConfirmaPagamento.venda_id) {
+                                            await supabase.from('vendas').update({
+                                                pagamento_entrega_confirmado: pagamentoStatus === 'pago',
+                                                pagamento_entrega_observacao: pagamentoStatus === 'pendente' ? motivoPendente : null
+                                            }).eq('id', modalConfirmaPagamento.venda_id);
+                                        }
+
+                                        toast.success(pagamentoStatus === 'pago' ? 'Pagamento confirmado!' : 'Pendência registrada');
+                                        setModalConfirmaPagamento(null);
+                                        queryClient.invalidateQueries(['entregas']);
+                                    } catch (e) {
+                                        toast.error('Erro ao registrar pagamento');
+                                    }
+                                }}
+                                disabled={pagamentoStatus === 'pendente' && !motivoPendente}
+                            >
+                                {pagamentoStatus === 'pago' ? (
+                                    <><Check className="w-4 h-4 mr-1" /> Confirmar Recebimento</>
+                                ) : (
+                                    <><AlertTriangle className="w-4 h-4 mr-1" /> Registrar Pendência</>
+                                )}
+                            </Button>
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal de Checklist de Carregamento */}
+            <Dialog open={modalChecklist} onOpenChange={setModalChecklist}>
+                <DialogContent className="max-w-md max-h-[90vh] overflow-hidden flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Package className="w-5 h-5 text-blue-600" />
+                            Checklist de Carregamento
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+                        {itensChecklist.map((item, idx) => {
+                            const conferido = itensConferidos.has(item.id);
+                            return (
+                                <div
+                                    key={item.id}
+                                    onClick={() => {
+                                        const novo = new Set(itensConferidos);
+                                        if (conferido) novo.delete(item.id);
+                                        else novo.add(item.id);
+                                        setItensConferidos(novo);
+                                    }}
+                                    className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${conferido
+                                            ? 'bg-green-50 border-green-400'
+                                            : 'bg-white border-gray-200 hover:border-blue-300'
+                                        }`}
+                                >
+                                    <div className="flex items-start gap-3">
+                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${conferido ? 'bg-green-500 text-white' : 'bg-gray-200'
+                                            }`}>
+                                            {conferido ? <Check className="w-4 h-4" /> : <span className="text-xs text-gray-500">{idx + 1}</span>}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="font-medium text-gray-900 truncate">{item.produto}</p>
+                                            <div className="flex flex-wrap gap-2 mt-1 text-xs text-gray-500">
+                                                <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Ped #{item.pedido}</span>
+                                                <span>Qtd: {item.quantidade}</span>
+                                                {item.cor && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">{item.cor}</span>}
+                                            </div>
+                                            <p className="text-xs text-gray-400 mt-1 truncate">Cliente: {item.cliente}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                    <div className="pt-4 border-t space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                            <span className="text-gray-500">Conferidos:</span>
+                            <span className={`font-bold ${itensConferidos.size === itensChecklist.length ? 'text-green-600' : 'text-gray-700'}`}>
+                                {itensConferidos.size} / {itensChecklist.length}
+                            </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <Button
+                                variant="outline"
+                                onClick={() => setModalChecklist(false)}
+                            >
+                                Cancelar
+                            </Button>
+                            <Button
+                                onClick={() => {
+                                    setModalChecklist(false);
+                                    iniciarRota();
+                                }}
+                                disabled={itensConferidos.size < itensChecklist.length}
+                                className="bg-green-600 hover:bg-green-700"
+                            >
+                                <Navigation className="w-4 h-4 mr-1" />
+                                Iniciar Rota
+                            </Button>
+                        </div>
+                        {itensConferidos.size < itensChecklist.length && (
+                            <p className="text-xs text-center text-amber-600">
+                                Confira todos os itens para iniciar
+                            </p>
+                        )}
+                    </div>
                 </DialogContent>
             </Dialog>
         </div>

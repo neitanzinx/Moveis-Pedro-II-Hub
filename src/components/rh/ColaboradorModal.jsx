@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
+import { base44, supabase } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,7 +27,9 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { getZapApiUrl } from "@/utils/zapApiUrl";
-import { supabase } from "@/api/base44Client";
+import { formatarCPF, formatarTelefone, formatarCEP } from "@/utils/formatters";
+
+
 
 const STATUS_OPTIONS = ["Ativo", "Férias", "Licença", "Afastado", "Desligado"];
 const SETOR_OPTIONS = ["Vendas", "Logística", "Montagem", "Administrativo", "Financeiro", "RH", "Estoque", "Atendimento"];
@@ -167,10 +169,29 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
     const [showPassword, setShowPassword] = useState(false);
     const [systemLoading, setSystemLoading] = useState(false);
 
+    // Fetch all collaborators to check for used user_ids
+    const { data: todosColaboradores = [] } = useQuery({
+        queryKey: ['colaboradores_lista_completa'],
+        queryFn: () => base44.entities.Colaborador.list(),
+        staleTime: 5000
+    });
+
     // Find linked user object
     const linkedUser = useMemo(() => {
         return usuarios.find(u => u.id === formData.user_id);
     }, [formData.user_id, usuarios]);
+
+    // Filter available users (not linked to another collaborator)
+    const usuariosDisponiveis = useMemo(() => {
+        const userIdsEmUso = new Set(
+            todosColaboradores
+                .filter(c => c.id !== colaborador?.id) // Exclude current collaborator
+                .map(c => c.user_id)
+                .filter(Boolean)
+        );
+
+        return usuarios.filter(u => !userIdsEmUso.has(u.id));
+    }, [usuarios, todosColaboradores, colaborador]);
 
     const copyToClipboard = (text, label) => {
         navigator.clipboard.writeText(text);
@@ -247,11 +268,11 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                 matricula: credenciaisData?.matricula || null
             };
 
-            const { error: upsertError } = await supabase
+            const { error: insertError } = await supabase
                 .from('public_users')
-                .upsert(userPayload, { onConflict: 'id' });
+                .insert(userPayload);
 
-            if (upsertError) throw upsertError;
+            if (insertError) throw insertError;
 
             return {
                 user_id: authUser.user.id,
@@ -422,8 +443,9 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                                 <Input
                                     id="cpf"
                                     value={formData.cpf}
-                                    onChange={(e) => handleChange("cpf", e.target.value)}
+                                    onChange={(e) => handleChange("cpf", formatarCPF(e.target.value))}
                                     placeholder="000.000.000-00"
+                                    maxLength={14}
                                 />
                             </div>
                             <div>
@@ -449,8 +471,9 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                                 <Input
                                     id="telefone"
                                     value={formData.telefone}
-                                    onChange={(e) => handleChange("telefone", e.target.value)}
+                                    onChange={(e) => handleChange("telefone", formatarTelefone(e.target.value))}
                                     placeholder="(00) 00000-0000"
+                                    maxLength={15}
                                 />
                             </div>
                             <div className="col-span-2">
@@ -774,10 +797,10 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                                 <Input
                                     id="cep"
                                     value={formData.cep}
-                                    onChange={(e) => handleChange("cep", e.target.value.replace(/\D/g, ''))}
+                                    onChange={(e) => handleChange("cep", formatarCEP(e.target.value))}
                                     onBlur={buscarCep}
                                     placeholder="00000-000"
-                                    maxLength={8}
+                                    maxLength={9}
                                 />
                             </div>
                             <div className="col-span-2">
@@ -974,7 +997,7 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="none">Nenhum</SelectItem>
-                                            {usuarios.map(u => (
+                                            {usuariosDisponiveis.map(u => (
                                                 <SelectItem key={u.id} value={u.id}>
                                                     {u.full_name || u.email} - {u.matricula || 'S/ Matrícula'}
                                                 </SelectItem>

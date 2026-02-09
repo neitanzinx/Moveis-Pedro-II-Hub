@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Plus, X } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 
 // Paleta de cores de móveis comuns no Brasil
 const CORES_MOVEIS = [
@@ -119,6 +120,43 @@ export default function FurnitureColorPicker({
 }) {
     const [open, setOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [isDual, setIsDual] = useState(false);
+    const [activeSelector, setActiveSelector] = useState('primary'); // 'primary' or 'secondary'
+
+    // Parse values
+    // Parse values robustly
+    const splitValue = value ? value.split(/\s*\/\s*/) : [''];
+    const primaryName = splitValue[0] || '';
+    const secondaryName = splitValue[1] || '';
+
+    const primaryHex = hexValue ? hexValue.split(',')[0] : getColorHex(primaryName);
+    const secondaryHex = hexValue && hexValue.includes(',') ? hexValue.split(',')[1] : (secondaryName ? getColorHex(secondaryName) : '#FFFFFF');
+
+    // Initialize isDual based on regex check
+    useEffect(() => {
+        if (value && /\s*\/\s*/.test(value)) {
+            setIsDual(true);
+        }
+    }, [value]);
+
+    const handleToggleDual = (checked) => {
+        setIsDual(checked);
+        if (!checked) {
+            // Revert to single color (keep primary)
+            onChange(primaryName);
+            onHexChange(primaryHex);
+            setActiveSelector('primary');
+        } else {
+            // Initialize secondary if empty
+            if (!secondaryName) {
+                const initialSecondary = "Branco";
+                const initialSecondaryHex = "#FFFFFF";
+                onChange(`${primaryName || ''} / ${initialSecondary}`);
+                onHexChange(`${primaryHex || '#CCCCCC'},${initialSecondaryHex}`);
+                setActiveSelector('secondary'); // Focus on secondary immediately
+            }
+        }
+    };
 
     // Agrupa cores por categoria
     const groupedColors = useMemo(() => {
@@ -150,21 +188,36 @@ export default function FurnitureColorPicker({
 
     // Atualiza a cor selecionada
     const handleSelectColor = (cor) => {
-        onChange(cor.nome);
-        onHexChange(cor.hex);
-        setOpen(false);
+        if (!isDual) {
+            onChange(cor.nome);
+            onHexChange(cor.hex);
+            setOpen(false);
+        } else {
+            if (activeSelector === 'primary') {
+                onChange(`${cor.nome} / ${secondaryName || 'Branco'}`);
+                onHexChange(`${cor.hex},${secondaryHex || '#FFFFFF'}`);
+                setActiveSelector('secondary'); // Auto-advance
+            } else {
+                onChange(`${primaryName || 'Branco'} / ${cor.nome}`);
+                onHexChange(`${primaryHex || '#FFFFFF'},${cor.hex}`);
+                setOpen(false); // Close after second selection
+            }
+        }
         setSearchTerm('');
     };
 
     // Quando digita uma cor, tenta encontrar o hex correspondente
     const handleInputChange = (e) => {
         const newValue = e.target.value;
+        // Manual typing only supported for single color mode or complex manual handling
+        // For simplicity, we'll suggest using the picker for dual colors
         onChange(newValue);
 
-        // Tenta encontrar a cor pela digitação
-        const hex = getColorHex(newValue);
-        if (hex !== '#CCCCCC') {
-            onHexChange(hex);
+        if (!newValue.includes('/')) {
+            const hex = getColorHex(newValue);
+            if (hex !== '#CCCCCC') {
+                onHexChange(hex);
+            }
         }
     };
 
@@ -177,25 +230,67 @@ export default function FurnitureColorPicker({
                 <PopoverTrigger asChild>
                     <div className="relative">
                         <div
-                            className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md border shadow-sm"
-                            style={{ backgroundColor: currentHex }}
-                        />
+                            className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-6 rounded-md border shadow-sm flex overflow-hidden"
+                        >
+                            <div style={{ backgroundColor: primaryHex, flex: 1 }} />
+                            {isDual && <div style={{ backgroundColor: secondaryHex, flex: 1 }} />}
+                        </div>
                         <Input
                             value={value}
                             onChange={handleInputChange}
                             placeholder={placeholder}
-                            className="pl-12 pr-10 cursor-pointer"
+                            className="pl-14 pr-10 cursor-pointer text-ellipsis"
                             onClick={() => setOpen(true)}
+                            readOnly={isDual} // Prevent manual mess-up in dual mode
                         />
                         <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     </div>
                 </PopoverTrigger>
                 <PopoverContent className="w-80 p-0" align="start">
-                    <div className="p-3 border-b">
+                    <div className="p-3 border-b space-y-3">
+                        <div
+                            className="flex items-center justify-between"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <Label htmlFor="dual-mode" className="text-sm cursor-pointer">Combinar duas cores</Label>
+                            <Switch
+                                id="dual-mode"
+                                checked={isDual}
+                                onCheckedChange={handleToggleDual}
+                            />
+                        </div>
+
+                        {isDual && (
+                            <div className="flex gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveSelector('primary')}
+                                    className={cn(
+                                        "flex-1 p-2 rounded border flex items-center justify-between gap-2 text-xs",
+                                        activeSelector === 'primary' ? "ring-2 ring-green-500 bg-green-50" : "bg-gray-50"
+                                    )}
+                                >
+                                    <div className="w-4 h-4 rounded border" style={{ backgroundColor: primaryHex }} />
+                                    <span className="truncate flex-1 text-left">{primaryName || 'Selecione'}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveSelector('secondary')}
+                                    className={cn(
+                                        "flex-1 p-2 rounded border flex items-center justify-between gap-2 text-xs",
+                                        activeSelector === 'secondary' ? "ring-2 ring-green-500 bg-green-50" : "bg-gray-50"
+                                    )}
+                                >
+                                    <div className="w-4 h-4 rounded border" style={{ backgroundColor: secondaryHex }} />
+                                    <span className="truncate flex-1 text-left">{secondaryName || 'Selecione'}</span>
+                                </button>
+                            </div>
+                        )}
+
                         <Input
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder="Buscar cor..."
+                            placeholder={isDual ? `Buscar cor ${activeSelector === 'primary' ? 'principal' : 'secundária'}...` : "Buscar cor..."}
                             className="h-9"
                             autoFocus
                         />
@@ -208,7 +303,9 @@ export default function FurnitureColorPicker({
                                 </Label>
                                 <div className="grid grid-cols-4 gap-1">
                                     {cores.map((cor) => {
-                                        const isSelected = value?.toLowerCase() === cor.nome.toLowerCase();
+                                        const isSelected = isDual
+                                            ? (activeSelector === 'primary' ? primaryName === cor.nome : secondaryName === cor.nome)
+                                            : value?.toLowerCase() === cor.nome.toLowerCase();
                                         return (
                                             <button
                                                 key={cor.nome}
@@ -254,28 +351,38 @@ export default function FurnitureColorPicker({
                     </div>
 
                     {/* Cor customizada */}
-                    <div className="p-3 border-t bg-gray-50">
-                        <Label className="text-xs text-gray-500 mb-2 block">
-                            Cor personalizada
-                        </Label>
-                        <div className="flex gap-2 items-center">
-                            <input
-                                type="color"
-                                value={currentHex}
-                                onChange={(e) => onHexChange(e.target.value)}
-                                className="w-10 h-10 rounded cursor-pointer border-0"
-                            />
-                            <Input
-                                value={hexValue || currentHex}
-                                onChange={(e) => onHexChange(e.target.value)}
-                                placeholder="#FFFFFF"
-                                className="flex-1 h-9 font-mono text-sm"
-                            />
-                        </div>
-                    </div>
-                </PopoverContent>
-            </Popover>
-        </div>
+
+
+                    {/* Cor customizada - apenas mostrar se não for dual por enquanto, ou adaptar depois */}
+                    {
+                        !isDual && (
+                            <div className="p-3 border-t bg-gray-50">
+                                <Label className="text-xs text-gray-500 mb-2 block">
+                                    Cor personalizada
+                                </Label>
+                                <div className="flex gap-2 items-center">
+                                    <input
+                                        type="color"
+                                        value={primaryHex || '#CCCCCC'}
+                                        onChange={(e) => {
+                                            onHexChange(e.target.value);
+                                            // Optional: clear text name or set as custom
+                                        }}
+                                        className="w-10 h-10 rounded cursor-pointer border-0"
+                                    />
+                                    <Input
+                                        value={hexValue || primaryHex}
+                                        onChange={(e) => onHexChange(e.target.value)}
+                                        placeholder="#FFFFFF"
+                                        className="flex-1 h-9 font-mono text-sm"
+                                    />
+                                </div>
+                            </div>
+                        )
+                    }
+                </PopoverContent >
+            </Popover >
+        </div >
     );
 }
 

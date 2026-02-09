@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
     Star, ArrowRight, ChevronRight, Award, ShieldCheck, Heart, Crown,
-    Check, Instagram, Facebook, Mail, MapPin, Phone, MessageCircle
+    Check, Instagram, Facebook, Mail, MapPin, Phone, MessageCircle, Hammer
 } from "lucide-react";
 
 // Image Constants
@@ -14,7 +14,59 @@ const SOFA_IMAGE = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?q=
 const BED_IMAGE = "https://images.unsplash.com/photo-1505693416388-c03dc043955b?q=80&w=800&auto=format&fit=crop";
 const DINING_IMAGE = "https://images.unsplash.com/photo-1617806118233-18e1de247200?q=80&w=800&auto=format&fit=crop";
 
+
+// --- PÁGINA DE MANUTENÇÃO (TEMPORÁRIA) ---
 export default function LandingPage() {
+    return (
+        <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center p-4">
+            <div className="max-w-md w-full text-center space-y-8 bg-white p-10 rounded-2xl shadow-xl border border-stone-100">
+                <div className="flex justify-center mb-6">
+                    <img
+                        src={EMPRESA.logo_url}
+                        alt="Móveis Pedro II"
+                        className="h-20 w-auto object-contain"
+                    />
+                </div>
+
+                <div className="space-y-4">
+                    <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+                        <Hammer className="w-8 h-8" />
+                    </div>
+                    <h1 className="text-3xl font-serif font-bold text-green-950">Estamos em Obras</h1>
+                    <p className="text-stone-600 font-body leading-relaxed">
+                        Estamos preparando um novo site incrível para você. <br />
+                        Voltaremos em breve com muitas novidades!
+                    </p>
+                </div>
+
+                <div className="pt-6 border-t border-stone-100 flex flex-col gap-3">
+                    <Button
+                        onClick={() => window.open('https://wa.me/552422456349', '_blank')}
+                        className="w-full bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold"
+                    >
+                        <MessageCircle className="w-4 h-4 mr-2" />
+                        Fale Conosco no WhatsApp
+                    </Button>
+
+                    <Link to="/cliente-login">
+                        <Button variant="outline" className="w-full text-green-800 border-green-200 hover:bg-green-50">
+                            Acesso do Cliente
+                        </Button>
+                    </Link>
+                </div>
+
+                <div className="mt-8">
+                    <Link to="/login" className="text-xs text-stone-400 hover:text-stone-600 transition-colors">
+                        Acesso Administrativo
+                    </Link>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// --- CÓDIGO ORIGINAL (SUSPENSO) ---
+function LandingPageOriginal() {
     const [hoveredCategory, setHoveredCategory] = useState(null);
 
     // Scroll to section handler

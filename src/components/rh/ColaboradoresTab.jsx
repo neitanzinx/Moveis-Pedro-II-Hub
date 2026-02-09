@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import {
     Users, Search, Plus, Edit, Trash2, Eye, UserCheck,
     UserX, Phone, Mail, Building, Calendar, DollarSign,
-    Filter, Download, MoreVertical, FileText
+
+    Filter, Download, MoreVertical, FileText, KeyRound
 } from "lucide-react";
 import {
     Select,
@@ -36,7 +37,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import ColaboradorModal from "./ColaboradorModal";
 import ColaboradorDetalhesModal from "./ColaboradorDetalhesModal";
+
 import ContratacaoResumoModal from "./ContratacaoResumoModal";
+import ModalUsuario from "@/components/usuarios/ModalUsuario";
 
 const STATUS_OPTIONS = [
     { value: "todos", label: "Todos os Status" },
@@ -79,7 +82,9 @@ export default function ColaboradoresTab() {
     const [colaboradorSelecionado, setColaboradorSelecionado] = useState(null);
     const [novoColaborador, setNovoColaborador] = useState(null);
     const [confirmDelete, setConfirmDelete] = useState(null);
+
     const [initialTab, setInitialTab] = useState("pessoal");
+    const [modalUsuarioAberto, setModalUsuarioAberto] = useState(false);
 
     const handleGerarAcesso = () => {
         setModalResumo(false);
@@ -96,6 +101,11 @@ export default function ColaboradoresTab() {
     const { data: usuarios = [] } = useQuery({
         queryKey: ['usuarios'],
         queryFn: () => base44.entities.User.list(),
+    });
+
+    const { data: caminhoes = [] } = useQuery({
+        queryKey: ['caminhoes'],
+        queryFn: () => base44.entities.Caminhao.list()
     });
 
     const deleteMutation = useMutation({
@@ -294,6 +304,14 @@ export default function ColaboradoresTab() {
                             <Plus className="w-4 h-4" />
                             Novo Colaborador
                         </Button>
+                        <Button
+                            onClick={() => setModalUsuarioAberto(true)}
+                            className="gap-2 bg-blue-600 hover:bg-blue-700"
+                            title="Criar usuário apenas para acesso ao sistema (sem cadastro RH completo)"
+                        >
+                            <KeyRound className="w-4 h-4" />
+                            Acesso Rápido
+                        </Button>
                     </div>
                 </CardContent>
             </Card>
@@ -459,6 +477,14 @@ export default function ColaboradoresTab() {
                         setModalResumo(false);
                         setNovoColaborador(null);
                     }}
+                />
+            )}
+
+            {/* Quick System Access Modal */}
+            {modalUsuarioAberto && (
+                <ModalUsuario
+                    caminhoes={caminhoes}
+                    onClose={() => setModalUsuarioAberto(false)}
                 />
             )}
 

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,10 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
-import { Truck, User, Mail, Phone, Building2, Briefcase, KeyRound, RotateCcw } from "lucide-react";
+import { base44, supabase } from "@/api/base44Client";
+import { Truck, User, Mail, Phone, Building2, Briefcase, KeyRound, RotateCcw, Copy, Eye, EyeOff, Loader2, CheckCircle2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { getZapApiUrl } from "@/utils/zapApiUrl";
 import { toast } from "sonner";
 
 // Cargos que NÃO precisam de loja (trabalham para todas)
@@ -31,17 +31,49 @@ const CARGOS_DISPONIVEIS = [
   { value: 'Agendamento', label: 'Agendamento' },
 ];
 
+// Função para gerar matrícula no padrão MP-XX0001
+async function gerarMatricula(setorCode) {
+  // Buscar a maior matrícula existente para este setor
+  const { data: existingMatriculas, error } = await supabase
+    .from('public_users')
+    .select('matricula')
+    .like('matricula', `MP-${setorCode}%`)
+    .order('matricula', { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.error("Erro ao buscar matrículas:", error);
+  }
+
+  let nextNumber = 1;
+  if (existingMatriculas && existingMatriculas.length > 0) {
+    const lastMatricula = existingMatriculas[0].matricula; // MP-VE0005
+    const lastNumberStr = lastMatricula.replace(`MP-${setorCode}`, ''); // 0005
+    const lastNumber = parseInt(lastNumberStr, 10);
+    if (!isNaN(lastNumber)) {
+      nextNumber = lastNumber + 1;
+    }
+  }
+
+  // Formatar com 4 dígitos: 0001, 0002, etc.
+  const matricula = `MP-${setorCode}${nextNumber.toString().padStart(4, '0')}`;
+  return matricula;
+}
+
 export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
+  const isEditing = !!usuario;
   const [dados, setDados] = useState({
     full_name: usuario?.full_name || "",
     email: usuario?.email || "",
     telefone: usuario?.telefone || "",
     cargo: usuario?.cargo || "Vendedor",
     loja: usuario?.loja || "",
-    caminhao_master_id: usuario?.caminhao_master_id || "",
     ativo: usuario?.ativo ?? true
   });
   const [resetandoSenha, setResetandoSenha] = useState(false);
+  const [generatedPassword, setGeneratedPassword] = useState(null);
+  const [generatedMatricula, setGeneratedMatricula] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -53,7 +85,115 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
 
   const precisaLoja = !CARGOS_SEM_LOJA.includes(dados.cargo);
 
-  const salvarMutation = useMutation({
+  const copyToClipboard = (text, label) => {
+    navigator.clipboard.writeText(text);
+    toast.success(`${label} copiado!`);
+  };
+
+  const createMutation = useMutation({
+    mutationFn: async (data) => {
+      // 1. Verificar se email já existe no public_users
+      const { data: existingUser } = await supabase
+        .from('public_users')
+        .select('id, email')
+        .eq('email', data.email)
+        .maybeSingle();
+
+      if (existingUser) {
+        throw new Error("Este email já está cadastrado no sistema.");
+      }
+
+      // 2. Criar cliente temporário para signup (evita sobrescrever sessão atual)
+      const tempSupabase = createClient(
+        import.meta.env.VITE_SUPABASE_URL,
+        import.meta.env.VITE_SUPABASE_ANON_KEY,
+        { auth: { persistSession: false, storageKey: 'temp-signup-session' } }
+      );
+
+      // 3. SignUp no Supabase Auth
+      const senhaTemp = 'Temp' + Math.random().toString(36).substring(2, 8) + '1';
+      console.log('[SignUp] Criando usuário:', data.email);
+
+      const { data: authUser, error: authError } = await tempSupabase.auth.signUp({
+        email: data.email,
+        password: senhaTemp
+      });
+
+      if (authError) {
+        console.error('[SignUp] Erro:', authError);
+        if (authError.message?.includes('already registered') || authError.status === 422) {
+          throw new Error("Este email já está cadastrado no sistema.");
+        }
+        throw new Error(authError.message);
+      }
+
+      if (!authUser?.user?.id) {
+        throw new Error("Erro ao criar usuário: ID não retornado.");
+      }
+
+      // Supabase retorna identities vazio se email já existe
+      if (authUser?.user?.identities?.length === 0) {
+        throw new Error("Este email já está cadastrado no sistema.");
+      }
+
+      // 4. Gerar matrícula
+      const setorMap = {
+        'Administrador': 'AD', 'Gerente Geral': 'GG', 'Gerente': 'GE',
+        'Vendedor': 'VE', 'Estoque': 'ES', 'Financeiro': 'FI',
+        'Logística': 'LO', 'Entregador': 'EN', 'Montador': 'LO',
+        'Montador Externo': 'MO', 'RH': 'RH', 'Agendamento': 'AG'
+      };
+      const setor = setorMap[data.cargo] || 'AD';
+      const matricula = await gerarMatricula(setor);
+
+      // 5. Criar registro em public_users (upsert para lidar com registros órfãos)
+      const isVendedor = data.cargo === 'Vendedor';
+      const userPayload = {
+        id: authUser.user.id,
+        email: data.email,
+        full_name: data.full_name,
+        cargo: data.cargo,
+        loja: precisaLoja ? data.loja : null,
+        ativo: true,
+        primeiro_acesso: true,
+        matricula: matricula,
+        is_vendedor: isVendedor,
+        meta_mensal: 0
+      };
+
+      console.log('[SignUp] Inserindo em public_users:', userPayload);
+
+      const { error: insertError } = await supabase
+        .from('public_users')
+        .upsert(userPayload, {
+          onConflict: 'id',
+          ignoreDuplicates: false
+        });
+
+      if (insertError) {
+        console.error('[SignUp] Erro no insert:', insertError);
+        throw new Error(insertError.message);
+      }
+
+      console.log('[SignUp] Sucesso!');
+      return {
+        matricula: matricula,
+        senha_temporaria: senhaTemp
+      };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['usuarios'] });
+      setGeneratedMatricula(data.matricula);
+      setGeneratedPassword(data.senha_temporaria);
+      toast.success('Usuário criado com sucesso!');
+    },
+    onError: (error) => {
+      console.error('[CreateUser] Erro:', error);
+      toast.error("Erro ao criar usuário: " + error.message);
+    }
+  });
+
+  const updateMutation = useMutation({
     mutationFn: async (data) => {
       const dadosUsuario = {
         full_name: data.full_name,
@@ -61,8 +201,7 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
         cargo: data.cargo,
         loja: precisaLoja ? data.loja : null,
         ativo: data.ativo,
-        is_vendedor: data.cargo === 'Vendedor',
-        caminhao_master_id: data.caminhao_master_id || null
+        is_vendedor: data.cargo === 'Vendedor'
       };
 
       return base44.entities.User.update(usuario.id, dadosUsuario);
@@ -114,8 +253,78 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
     }
   });
 
-  // Verificar se este cargo pode ter caminhão master
-  const podeTerCaminhao = ['Entregador', 'Logística'].includes(dados.cargo);
+  const handleSave = () => {
+    if (isEditing) {
+      updateMutation.mutate(dados);
+    } else {
+      createMutation.mutate(dados);
+    }
+  };
+
+
+
+  // Se acabou de criar sucesso
+  if (generatedPassword) {
+    return (
+      <Dialog open onOpenChange={onClose}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-green-700">
+              <CheckCircle2 className="w-6 h-6" />
+              Usuário Criado com Sucesso!
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="bg-green-50 p-6 rounded-xl border border-green-200 mt-2 space-y-4">
+            <p className="text-green-800 text-sm">
+              O usuário foi criado e já pode acessar o sistema. Envie as credenciais abaixo:
+            </p>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-white p-4 rounded-lg border shadow-sm">
+                <span className="text-xs text-gray-500 uppercase font-bold tracking-wider">Matrícula</span>
+                <div className="flex justify-between items-center mt-1">
+                  <code className="text-xl font-bold text-gray-800">{generatedMatricula || 'N/A'}</code>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-green-600" onClick={() => copyToClipboard(generatedMatricula, 'Matrícula')}>
+                    <Copy className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="bg-white p-4 rounded-lg border shadow-sm">
+                <span className="text-xs text-gray-500 uppercase font-bold tracking-wider">Senha Temporária</span>
+                <div className="flex justify-between items-center mt-1">
+                  <div className="flex items-center gap-2">
+                    <code className="text-xl font-bold text-gray-800 tracking-wider">
+                      {showPassword ? generatedPassword : '••••••••'}
+                    </code>
+                    <button onClick={() => setShowPassword(!showPassword)} className="text-gray-400 hover:text-green-600 focus:outline-none">
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-green-600" onClick={() => copyToClipboard(generatedPassword, 'Senha')}>
+                    <Copy className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-green-700 bg-green-100 p-2 rounded">
+              <AlertDescription>
+                Esta senha é temporária e o usuário deverá alterá-la no primeiro acesso.
+              </AlertDescription>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-4">
+            <Button onClick={onClose} className="bg-green-600 hover:bg-green-700 w-full md:w-auto">
+              Concluir
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -123,7 +332,7 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <User className="w-5 h-5" />
-            Editar Usuário
+            {isEditing ? "Editar Usuário" : "Novo Usuário"}
           </DialogTitle>
         </DialogHeader>
 
@@ -167,13 +376,15 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
             <div>
               <Label className="flex items-center gap-2">
                 <Mail className="w-4 h-4" />
-                Email
+                Email *
               </Label>
               <Input
                 type="email"
                 value={dados.email}
-                disabled
-                className="mt-1 bg-gray-50 dark:bg-neutral-800"
+                onChange={!isEditing ? (e) => setDados({ ...dados, email: e.target.value }) : undefined}
+                disabled={isEditing}
+                placeholder="email@empresa.com"
+                className="mt-1 disabled:bg-gray-50"
               />
             </div>
           </div>
@@ -238,33 +449,7 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
             </div>
           )}
 
-          {podeTerCaminhao && caminhoes?.length > 0 && (
-            <div>
-              <Label className="flex items-center gap-2">
-                <Truck className="w-4 h-4" />
-                Caminhão Master (opcional)
-              </Label>
-              <Select
-                value={dados.caminhao_master_id || "none"}
-                onValueChange={(val) => setDados({ ...dados, caminhao_master_id: val === "none" ? "" : val })}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Selecione um caminhão" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Nenhum</SelectItem>
-                  {caminhoes.map(c => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.nome} - {c.placa || 'Sem placa'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-gray-500 mt-1">
-                Este usuário enviará a localização GPS deste caminhão
-              </p>
-            </div>
-          )}
+
 
           <div className="flex items-center gap-2 pt-2">
             <Checkbox
@@ -284,11 +469,16 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
             Cancelar
           </Button>
           <Button
-            onClick={() => salvarMutation.mutate(dados)}
-            disabled={!dados.full_name || (precisaLoja && !dados.loja) || salvarMutation.isPending}
+            onClick={handleSave}
+            disabled={!dados.full_name || !dados.email || (precisaLoja && !dados.loja) || updateMutation.isPending || createMutation.isPending}
             className="bg-green-600 hover:bg-green-700"
           >
-            {salvarMutation.isPending ? 'Salvando...' : 'Salvar'}
+            {updateMutation.isPending || createMutation.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Salvando...
+              </>
+            ) : 'Salvar'}
           </Button>
         </div>
       </DialogContent>

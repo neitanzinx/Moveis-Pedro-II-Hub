@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Warehouse, Users, ShoppingCart, Truck, Building2,
   FileText, DollarSign, UserCog, BarChart3, Receipt, MessageCircle, CreditCard,
-  Settings, CalendarDays, Tag, Smartphone, Wrench, PieChart, Package, FileSpreadsheet, Target
+  Settings, CalendarDays, Tag, Smartphone, Wrench, PieChart, Package, FileSpreadsheet, Target, ScanBarcode
 } from "lucide-react";
 
 // Níveis de Acesso aos Dados
@@ -24,7 +24,7 @@ export const ROLE_RULES = {
       'view_entregas', 'manage_entregas', 'view_assistencia', 'manage_assistencia',
       'view_financeiro', 'view_relatorios', 'view_rh', 'view_notas',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
-      'view_montagem', 'view_marketing'
+      'view_montagem', 'view_marketing', 'view_mostruario', 'view_saneamento'
     ],
     scope: SCOPES.STORE
   },
@@ -35,7 +35,7 @@ export const ROLE_RULES = {
       'view_entregas', 'manage_entregas', 'view_assistencia', 'manage_assistencia',
       'view_financeiro', 'view_relatorios', 'view_rh', 'view_notas',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
-      'view_montagem', 'view_marketing'
+      'view_montagem', 'view_marketing', 'view_mostruario', 'view_saneamento'
     ],
     scope: SCOPES.ALL
   },
@@ -94,7 +94,7 @@ export const ROLE_RULES = {
 // NOTA: A propriedade 'module' indica qual feature flag controla a visibilidade do item
 export const MENU_ITEMS = [
   { title: "Meu Painel", url: "/admin/Dashboard", icon: LayoutDashboard, permission: 'view_dashboard', section: "Principal" },
-  { title: "Painel Gerente", url: "/admin/DashboardGerente", icon: Target, permission: 'view_dashboard_gerente', section: "Principal" },
+  { title: "Visão Operacional (Gerente)", url: "/admin/DashboardGerente", icon: Target, permission: 'view_dashboard_gerente', section: "Principal" },
   { title: "PDV", url: "/admin/PDV", icon: CreditCard, permission: 'create_vendas', section: "Principal" },
 
   { title: "Vendas", url: "/admin/Vendas", icon: ShoppingCart, permission: 'view_vendas', section: "Vendas" },
@@ -103,6 +103,9 @@ export const MENU_ITEMS = [
 
   { title: "Produtos", url: "/admin/Produtos", icon: Tag, permission: 'view_produtos', section: "Operacional" },
   { title: "Estoque", url: "/admin/Estoque", icon: Warehouse, permission: 'view_estoque', section: "Operacional" },
+  { title: "Saneamento de Estoque", url: "/admin/Saneamento", icon: Target, permission: 'view_saneamento', section: "Operacional" },
+  { title: "Mostruário", url: "/admin/Mostruario", icon: Tag, permission: 'view_mostruario', section: "Operacional" },
+  { title: "Bipagem Rápida", url: "/admin/EstoqueBipagem", icon: ScanBarcode, permission: 'view_estoque', section: "Operacional" },
   { title: "Logística", url: "/admin/LogisticaSemanal", icon: CalendarDays, permission: 'view_entregas', section: "Operacional" },
   { title: "Montagem", url: "/admin/Montagem", icon: Building2, permission: 'view_montagem', section: "Operacional", module: 'montagem' },
   { title: "Assistência Técnica", url: "/admin/AssistenciaTecnica", icon: Wrench, permission: 'view_assistencia', section: "Operacional", module: 'assistencia_tecnica' },
@@ -113,7 +116,7 @@ export const MENU_ITEMS = [
   { title: "Marketing", url: "/admin/Marketing", icon: Tag, permission: 'view_marketing', section: "Gestão", module: 'marketing' },
   { title: "Relatórios", url: "/admin/RelatoriosAvancados", icon: BarChart3, permission: 'view_relatorios', section: "Gestão" },
   { title: "RH", url: "/admin/RecursosHumanos", icon: UserCog, permission: 'view_rh', section: "Gestão", module: 'rh' },
-  { title: "Dashboard BI", url: "/admin/DashboardBI", icon: PieChart, permission: 'view_relatorios', section: "Gestão", module: 'bi_dashboard' },
+  { title: "Visão Estratégica (BI)", url: "/admin/DashboardBI", icon: PieChart, permission: 'view_relatorios', section: "Gestão", module: 'bi_dashboard' },
   { title: "Exportação Contábil", url: "/admin/ExportacaoContabil", icon: FileSpreadsheet, permission: 'view_financeiro', section: "Gestão" },
 
   { title: "Setor de Compras", url: "/admin/SetorCompras", icon: Package, permission: 'view_estoque', section: "Operacional" },

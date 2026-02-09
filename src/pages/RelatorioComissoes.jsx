@@ -1,20 +1,37 @@
 
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DollarSign, TrendingUp, Users, FileDown, AlertCircle, Calendar } from "lucide-react";
+import { DollarSign, TrendingUp, Users, FileDown, AlertCircle, Calendar, Banknote } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
 
 export default function RelatorioComissoes() {
   const [user, setUser] = useState(null);
   const [vendedorFiltro, setVendedorFiltro] = useState("todos");
   const [mesInicio, setMesInicio] = useState(new Date().toISOString().slice(0, 7));
   const [mesFim, setMesFim] = useState(new Date().toISOString().slice(0, 7));
+
+  // States for payment modal
+  const [modalPagamento, setModalPagamento] = useState(false);
+  const [pagamentoSelecionado, setPagamentoSelecionado] = useState(null);
+  const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().slice(0, 10));
+  const [processandoPagamento, setProcessandoPagamento] = useState(false);
+  const [observacaoPagamento, setObservacaoPagamento] = useState("");
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     const loadUser = async () => {
@@ -94,11 +111,40 @@ export default function RelatorioComissoes() {
     return breakdown;
   };
 
+  const { data: assistencias = [] } = useQuery({
+    queryKey: ['assistencias-comissoes'],
+    queryFn: () => base44.entities.AssistenciaTecnica.list(),
+  });
+
   // Agrupar por vendedor
   const comissoesPorVendedor = vendedores.map(vendedor => {
     const vendasVendedor = vendasFiltradas.filter(v => v.vendedor_id === vendedor.id);
-    const totalComissao = vendasVendedor.reduce((sum, v) => sum + (v.comissao_calculada || 0), 0);
-    const totalVendas = vendasVendedor.reduce((sum, v) => sum + (v.valor_total || 0), 0);
+
+    // Calcular comissão subtraindo devoluções
+    const totalComissao = vendasVendedor.reduce((sum, v) => {
+      // Verificar se há assistência de devolução/troca concluída para este pedido
+      const assistencia = assistencias.find(a =>
+        a.numero_pedido === v.numero_pedido &&
+        a.status === 'Concluída' &&
+        (a.tipo === 'Devolução' || a.tipo === 'Troca')
+      );
+
+      // Se houve devolução total (valor_devolvido >= valor_total), comissão é 0
+      // Se houve devolução parcial, subtraímos proporcionalmente? 
+      // Por simplicidade, se houve devolução/troca de item, o custo da assistência ou perda de venda impacta aqui.
+      // Regra sugerida: Se valor_devolvido existe, subtraímos a comissão sobre esse valor.
+      const valorBaseComissao = Math.max(0, (v.valor_total || 0) - (assistencia?.valor_devolvido || 0));
+      const porcentagem = v.comissao_calculada / (v.valor_total || 1);
+      const comissaoAjustada = valorBaseComissao * porcentagem;
+
+      return sum + comissaoAjustada;
+    }, 0);
+
+    const totalVendas = vendasVendedor.reduce((sum, v) => {
+      const assistencia = assistencias.find(a => a.numero_pedido === v.numero_pedido && a.status === 'Concluída');
+      return sum + ((v.valor_total || 0) - (assistencia?.valor_devolvido || 0));
+    }, 0);
+
     const quantidadeVendas = vendasVendedor.length;
     const breakdownPagamentos = calcularBreakdownPorFormaPagamento(vendasVendedor);
 
@@ -124,12 +170,49 @@ export default function RelatorioComissoes() {
 
     csv += `\nTOTAL GERAL,,${comissoesPorVendedor.reduce((sum, i) => sum + i.quantidadeVendas, 0)},R$ ${totalGeralVendas.toFixed(2)},R$ ${totalGeralComissoes.toFixed(2)}`;
 
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `comissoes_${mesInicio}_${mesFim}.csv`;
     a.click();
+  };
+
+  const abrirModalPagamento = (item) => {
+    setPagamentoSelecionado(item);
+    setDataPagamento(new Date().toISOString().slice(0, 10));
+    setObservacaoPagamento("");
+    setModalPagamento(true);
+  };
+
+  const confirmarPagamentoComissao = async () => {
+    if (!pagamentoSelecionado) return;
+
+    setProcessandoPagamento(true);
+    try {
+      await base44.entities.LancamentoFinanceiro.create({
+        descricao: `Comissão - ${pagamentoSelecionado.vendedor.nome} - Ref: ${mesInicio === mesFim ? mesInicio : `${mesInicio} a ${mesFim}`}`,
+        valor: -Number(pagamentoSelecionado.totalComissao.toFixed(2)),
+        tipo: 'despesa',
+        categoria: 'Comissões',
+        data_lancamento: dataPagamento,
+        forma_pagamento: 'Transferência',
+        status: 'Pago',
+        observacoes: `Pgto ref. ${pagamentoSelecionado.quantidadeVendas} vendas. ${observacaoPagamento}`
+      });
+
+      toast.success(`Pagamento registrado para ${pagamentoSelecionado.vendedor.nome}!`);
+      setModalPagamento(false);
+      setPagamentoSelecionado(null);
+      // Opcional: invalidar queries se quisermos atualizar algo na tela, 
+      // mas como o relatório é calculado on-the-fly baseado nas vendas, 
+      // e o pagamento vai para o Financeiro, talvez não precise recarregar aqui.
+      // Mas podemos invalidar 'lancamentos' se estivermos em cache.
+      queryClient.invalidateQueries(['lancamentos']);
+
+    } catch (error) {
+      toast.error("Erro ao registrar pagamento: " + error.message);
+    } finally {
+      setProcessandoPagamento(false);
+    }
   };
 
   return (
@@ -285,6 +368,15 @@ export default function RelatorioComissoes() {
                       <p className="text-2xl font-bold" style={{ color: '#f38a4c' }}>
                         R$ {item.totalComissao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-2 h-8 text-green-700 border-green-200 hover:bg-green-50"
+                        onClick={() => abrirModalPagamento(item)}
+                      >
+                        <Banknote className="w-4 h-4 mr-1" />
+                        Registrar Pagamento
+                      </Button>
                     </div>
                   </div>
                 </CardHeader>
@@ -360,7 +452,63 @@ export default function RelatorioComissoes() {
             ))}
           </div>
         )}
+
+
+        {/* Modal de Pagamento */}
+        <Dialog open={modalPagamento} onOpenChange={setModalPagamento}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Banknote className="w-5 h-5 text-green-600" />
+                Registrar Pagamento de Comissão
+              </DialogTitle>
+              <DialogDescription>
+                Confirmar pagamento para <strong>{pagamentoSelecionado?.vendedor.nome}</strong>
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              <div className="p-4 bg-green-50 rounded-lg border border-green-100 text-center">
+                <p className="text-sm text-gray-500 mb-1">Valor a Pagar</p>
+                <p className="text-3xl font-bold text-green-700">
+                  R$ {pagamentoSelecionado?.totalComissao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="dataPagamento">Data do Pagamento</Label>
+                <Input
+                  id="dataPagamento"
+                  type="date"
+                  value={dataPagamento}
+                  onChange={(e) => setDataPagamento(e.target.value)}
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="obsPagamento">Observações (Opcional)</Label>
+                <Input
+                  id="obsPagamento"
+                  placeholder="Ex: Pix, Transferência, etc."
+                  value={observacaoPagamento}
+                  onChange={(e) => setObservacaoPagamento(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setModalPagamento(false)}>Cancelar</Button>
+              <Button
+                onClick={confirmarPagamentoComissao}
+                disabled={processandoPagamento}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {processandoPagamento ? "Processando..." : "Confirmar Pagamento"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
-    </div>
+    </div >
   );
 }

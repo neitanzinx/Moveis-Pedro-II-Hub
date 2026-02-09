@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { supabase } from "@/lib/supabase";
 import { DndContext, DragOverlay, pointerWithin, PointerSensor, useSensor, useSensors, useDroppable } from "@dnd-kit/core";
 import EntregaCard from "./EntregaCard";
 import AssistenciaCard from "./AssistenciaCard";
@@ -34,9 +35,51 @@ const TURNOS = [
 ];
 
 // Componente de slot de turno (drop zone)
-function SlotTurno({ turno, caminhaoId, dataAtual, entregas, vendas, onClickEntrega, corCaminhao, assistencias = [] }) {
+function SlotTurno({ turno, caminhaoId, dataAtual, entregas, vendas, onClickEntrega, corCaminhao, assistencias = [], activeEntrega }) {
   const dropId = `${dataAtual}-${caminhaoId}-${turno.id}`;
-  const { setNodeRef, isOver } = useDroppable({ id: dropId });
+  const { setNodeRef, isOver } = useDroppable({
+    id: dropId,
+    disabled: !!activeEntrega && (function () {
+      // --- LÓGICA DE RESTRIÇÃO VISUAL (MESMA DO DRAG END) ---
+      if (!activeEntrega) return false;
+
+      // 1. Data Passada
+      const hojeStr = new Date().toISOString().split('T')[0];
+      if (dataAtual < hojeStr) return true;
+
+      // 2. Restrição Específica (Data Bloqueada)
+      if (activeEntrega.data_restricao === dataAtual) {
+        return true;
+      }
+
+      // 3. Preferências (Dias e Turnos - BLACKLIST)
+      if (activeEntrega.preferencias_entrega) {
+        const { dias, turnos } = activeEntrega.preferencias_entrega;
+
+        // Check Dia da Semana
+        if (dias && dias.length > 0) {
+          const [y, m, d] = dataAtual.split('-').map(Number);
+          const diaSemanaSlot = new Date(y, m - 1, d).getDay(); // 0=Dom
+
+          const diasBloqueados = dias.map(d => Number(d));
+          if (diasBloqueados.includes(diaSemanaSlot)) {
+            return true;
+          }
+        }
+
+        // Check Turno
+        if (turnos && turnos.length > 0) {
+          const normalize = (str) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          const turnoSlotNorm = normalize(turno.id);
+
+          if (turnos.some(t => normalize(t) === turnoSlotNorm)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    })()
+  });
 
   const entregasDoSlot = entregas.filter(e =>
     e.data_agendada?.split('T')[0] === dataAtual &&
@@ -52,12 +95,53 @@ function SlotTurno({ turno, caminhaoId, dataAtual, entregas, vendas, onClickEntr
 
   const totalItens = entregasDoSlot.length + assistenciasDoSlot.length;
 
+  // --- CALCULO SE ESTÁ RESTRITO (PARA ESTILO) ---
+  const isRestricted = useMemo(() => {
+    if (!activeEntrega) return false;
+
+    // 1. Data Passada (Melhorado para Local Time)
+    const hoje = new Date();
+    const hojeStr = new Date(hoje.getTime() - (hoje.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+    if (dataAtual < hojeStr) return true;
+
+    // 2. Restrição Específica
+    if (activeEntrega.data_restricao === dataAtual) return true;
+
+    // 3. Preferências
+    if (activeEntrega.preferencias_entrega) {
+      const { dias, turnos } = activeEntrega.preferencias_entrega;
+
+      // Check Dia (Normalized)
+      if (dias && dias.length > 0) {
+        const [y, m, d] = dataAtual.split('-').map(Number);
+        const diaSemanaSlot = new Date(y, m - 1, d).getDay();
+        const diasBloqueados = dias.map(d => Number(d));
+        if (diasBloqueados.includes(diaSemanaSlot)) return true;
+      }
+
+      // Check Turno (Normalized)
+      if (turnos && turnos.length > 0) {
+        const normalize = (str) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const turnoSlotNorm = normalize(turno.id);
+
+        if (turnos.some(t => normalize(t) === turnoSlotNorm)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }, [activeEntrega, dataAtual, turno.id]);
+
+
   return (
     <div
       ref={setNodeRef}
-      className={`flex-1 flex flex-col border rounded-lg transition-all ${isOver
-        ? `${corCaminhao.ring} ring-2 ${turno.bg} scale-[1.01]`
-        : `${turno.border} ${turno.bg}/50 hover:${turno.bg}`
+      className={`flex-1 flex flex-col border rounded-lg transition-all 
+        ${isRestricted ? 'opacity-30 grayscale pointer-events-none bg-gray-100' : ''}
+        ${isOver && !isRestricted
+          ? `${corCaminhao.ring} ring-2 ${turno.bg} scale-[1.01]`
+          : `${turno.border} ${turno.bg}/50 hover:${turno.bg}`
         }`}
     >
       {/* Header do turno */}
@@ -101,8 +185,82 @@ function SlotTurno({ turno, caminhaoId, dataAtual, entregas, vendas, onClickEntr
   );
 }
 
+// Componente Visual da Aba de Data com Drop/Hover logic
+function DateTabVisual({ dia, index, isSelected, onClick, activeEntrega, onHoverSwitch }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `tab-date-${index}`,
+    data: { type: 'date-tab', index }
+  });
+
+  // Hover timer logic
+  useEffect(() => {
+    if (isOver && activeEntrega) {
+      const timer = setTimeout(() => {
+        onHoverSwitch(index);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [isOver, activeEntrega, index, onHoverSwitch]);
+
+  // Restrição Visual logic
+  const isRestricted = useMemo(() => {
+    if (!activeEntrega) return false;
+
+    // 1. Data Passada (Melhorado para Local Time)
+    const hoje = new Date();
+    const hojeStr = new Date(hoje.getTime() - (hoje.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+    if (dia.id < hojeStr) return true;
+
+    // 2. Restrição Específica
+    if (activeEntrega.data_restricao === dia.id) return true;
+
+    // 3. Preferências (Dia da Semana - BLACKLIST)
+    if (activeEntrega.preferencias_entrega?.dias?.length > 0) {
+      const diasBloqueados = activeEntrega.preferencias_entrega.dias.map(d => Number(d));
+      // SE ESTÁ NA LISTA -> BLOQUEADO
+      if (diasBloqueados.includes(dia.diaSemana)) return true;
+    }
+
+    return false;
+  }, [activeEntrega, dia]);
+
+  return (
+    <button
+      ref={setNodeRef}
+      onClick={onClick}
+      className={`flex-1 min-w-[80px] px-3 py-2 rounded-lg text-center transition-all relative
+        ${isRestricted ? 'opacity-30 grayscale cursor-not-allowed bg-gray-100' : ''}
+        ${isSelected
+          ? 'bg-blue-600 text-white shadow-md'
+          : dia.isHoje
+            ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+            : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+        }
+        ${isOver && !isRestricted && !isSelected ? 'ring-2 ring-blue-400 bg-blue-50' : ''}
+      `}
+    >
+      {/* Loading indicator if hover switching */}
+      {isOver && !isRestricted && !isSelected && (
+        <div className="absolute top-0 left-0 w-full h-1 bg-blue-200 overflow-hidden rounded-t-lg">
+          <div className="h-full bg-blue-600 animate-[progress_1s_linear]" />
+        </div>
+      )}
+
+      <p className="font-bold text-sm">{dia.label}</p>
+      <p className={`text-[10px] ${isSelected ? 'text-blue-100' : 'text-gray-400'}`}>
+        {dia.dataFormatada}
+      </p>
+      {dia.totalEntregas > 0 && (
+        <Badge className={`mt-1 text-[9px] ${isSelected ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-600'}`}>
+          {dia.totalEntregas}
+        </Badge>
+      )}
+    </button>
+  );
+}
+
 // Componente de coluna para cada caminhão
-function ColunaCaminhao({ caminhao, cor, dataAtual, entregas, vendas, onClickEntrega, onNotificar, onOtimizar, assistencias = [] }) {
+function ColunaCaminhao({ caminhao, cor, dataAtual, entregas, vendas, onClickEntrega, onNotificar, onOtimizar, assistencias = [], activeEntrega }) {
   const entregasDoCaminhao = entregas.filter(e =>
     e.data_agendada?.split('T')[0] === dataAtual &&
     e.caminhao_id === caminhao.id
@@ -145,7 +303,7 @@ function ColunaCaminhao({ caminhao, cor, dataAtual, entregas, vendas, onClickEnt
           <p className="text-[10px] text-gray-500">{caminhao.placa}</p>
         </div>
 
-        {/* Botão de Notificação do Caminhão */}
+        {/* Botão de Confirmar (Antigo Notificar) */}
         {totalParaDisparo > 0 && (
           <button
             onClick={() => onNotificar(caminhao, {
@@ -158,13 +316,14 @@ function ColunaCaminhao({ caminhao, cor, dataAtual, entregas, vendas, onClickEnt
               totalNaoNotificadas,
               totalJaNotificadas
             })}
-            className={`p-1.5 rounded-md transition-all ${totalNaoNotificadas > 0
-              ? 'bg-green-500 hover:bg-green-600 text-white'
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-all text-[10px] font-bold uppercase tracking-wide ${totalNaoNotificadas > 0
+              ? 'bg-green-600 hover:bg-green-700 text-white shadow-sm'
               : 'bg-gray-200 text-gray-500'
               }`}
-            title={totalNaoNotificadas > 0 ? `Notificar ${totalNaoNotificadas}` : 'Todos notificados'}
+            title={totalNaoNotificadas > 0 ? `Solicitar confirmação de ${totalNaoNotificadas} itens` : 'Todos confirmados'}
           >
-            <MessageCircle className="w-3.5 h-3.5" />
+            <CheckCircle className="w-3.5 h-3.5" />
+            {totalNaoNotificadas > 0 && <span>Confirmar</span>}
           </button>
         )}
 
@@ -197,6 +356,7 @@ function ColunaCaminhao({ caminhao, cor, dataAtual, entregas, vendas, onClickEnt
             onClickEntrega={onClickEntrega}
             corCaminhao={cor}
             assistencias={assistencias}
+            activeEntrega={activeEntrega}
           />
         ))}
       </div>
@@ -225,6 +385,10 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
   // Estado para otimização de rotas
   const [modalOtimizacao, setModalOtimizacao] = useState(null); // Array de entregas para otimizar
 
+  // Estados para reagendamento
+  const [modalReagendamento, setModalReagendamento] = useState(null); // { entrega }
+  const [motivoReagendamento, setMotivoReagendamento] = useState("");
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const { setNodeRef: setTriagemRef, isOver: isOverTriagem } = useDroppable({ id: 'triagem' });
@@ -239,31 +403,49 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
   const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
-  // Gerar os 7 próximos dias
+  // Calcular início e fim da semana (Segunda a Domingo)
+  const getWeekRange = (offset = 0) => {
+    const hoje = new Date();
+    const diaSemana = hoje.getDay(); // 0 = Domingo, 1 = Segunda, ...
+
+    // Ajustar para Monday ser o primeiro dia (1) e Domingo o último (7)
+    // Se hoje é Domingo (0), queremos voltar 6 dias para pegar a Segunda passada
+    // Se hoje é Segunda (1), voltamos 0 dias
+    const diffToMonday = diaSemana === 0 ? -6 : 1 - diaSemana;
+
+    const inicioSemana = new Date(hoje);
+    inicioSemana.setDate(hoje.getDate() + diffToMonday + (offset * 7));
+    inicioSemana.setHours(0, 0, 0, 0);
+
+    return inicioSemana;
+  };
+
+  const inicioSemanaAtual = getWeekRange(semanaOffset);
+
+  // Gerar os 7 dias da semana (Segunda a Domingo)
   const diasDisponiveis = useMemo(() => {
     const dias = [];
-    const hoje = new Date();
+    const hojeStr = new Date().toISOString().split('T')[0];
 
     for (let i = 0; i < 7; i++) {
-      const dia = new Date(hoje);
-      dia.setDate(hoje.getDate() + i + (semanaOffset * 7));
+      const dia = new Date(inicioSemanaAtual);
+      dia.setDate(inicioSemanaAtual.getDate() + i);
       const dataKey = dia.toISOString().split('T')[0];
-      const hojeKey = new Date().toISOString().split('T')[0];
 
       // Contar entregas do dia
       const entregasDoDia = (entregas || []).filter(e => e.data_agendada?.split('T')[0] === dataKey);
 
       dias.push({
         id: dataKey,
-        label: i === 0 && semanaOffset === 0 ? 'Hoje' : i === 1 && semanaOffset === 0 ? 'Amanhã' : diasSemana[dia.getDay()],
-        dataFormatada: `${dia.getDate()}/${dia.getMonth() + 1}`,
-        isHoje: dataKey === hojeKey,
+        label: diasSemana[dia.getDay()],
+        dataFormatada: `${dia.getDate().toString().padStart(2, '0')}/${(dia.getMonth() + 1).toString().padStart(2, '0')}`,
+        isHoje: dataKey === hojeStr,
         totalEntregas: entregasDoDia.length,
         diaSemana: dia.getDay()
       });
     }
     return dias;
-  }, [entregas, semanaOffset]);
+  }, [entregas, inicioSemanaAtual]);
 
   const dataAtual = diaSelecionado !== null ? diasDisponiveis[diaSelecionado]?.id : null;
 
@@ -284,7 +466,21 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
   );
 
   // Entrega ativa (sendo arrastada)
-  const activeEntrega = activeId ? (entregas || []).find(e => e.id === activeId) : null;
+  // Entrega ou Assistência ativa (sendo arrastada)
+  const activeEntrega = useMemo(() => {
+    if (!activeId) return null;
+    const idStr = activeId.toString();
+
+    // Se for assistência
+    if (idStr.startsWith('at-')) {
+      const cleanId = idStr.replace('at-', '');
+      const assist = (assistencias || []).find(a => a.id.toString() === cleanId);
+      if (assist) return { ...assist, isAssistencia: true, cliente_nome: `(AT) ${assist.cliente_nome}` };
+    }
+
+    // Se for entrega
+    return (entregas || []).find(e => e.id.toString() === idStr);
+  }, [activeId, entregas, assistencias]);
 
   // Verificar servidor do bot
   const verificarServidor = async () => {
@@ -316,7 +512,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
       const totalParaEnviar = entregasNaoNotificadas.length + assistenciasNaoNotificadas.length;
 
       if (totalParaEnviar === 0) {
-        toast.success("✅ Todos já foram notificados!");
+        toast.success("✅ Todos já confirmados!");
         setModalDisparo(null);
         setLoadingDisparo(false);
         return;
@@ -367,7 +563,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
         for (const entrega of entregasNaoNotificadas) {
           try {
             await base44.entities.Entrega.update(entrega.id, {
-              status_confirmacao: 'Aguardando Resposta',
+              status_confirmacao: 'Confirmada', // Atualizado: Fluxo direto para Confirmada
               whatsapp_enviado: true,
               data_notificacao: entrega.data_agendada?.split('T')[0],
               turno_notificacao: entrega.turno,
@@ -391,7 +587,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
           }
         }
 
-        toast.success(`✅ ${totalParaEnviar} cliente(s) do ${caminhao.nome || caminhao.placa} notificado(s)!`);
+        toast.success(`✅ Solicitação de confirmação enviada para ${totalParaEnviar} clientes!`);
         setModalDisparo(null);
         queryClient.invalidateQueries({ queryKey: ['entregas'] });
         queryClient.invalidateQueries({ queryKey: ['assistencias'] });
@@ -423,6 +619,14 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
       const turnoMatch = overId.match(/^(\d{4}-\d{2}-\d{2})-(\d+)-(Manhã|Tarde|Comercial)$/);
       if (turnoMatch) {
         const dataAlvo = turnoMatch[1];
+
+        // Guardrail: Não permitir agendar para o passado
+        const hojeStr = new Date().toISOString().split('T')[0];
+        if (dataAlvo < hojeStr) {
+          toast.error("Não é possível agendar para uma data passada!");
+          return;
+        }
+
         const caminhaoId = parseInt(turnoMatch[2]);
         const turno = turnoMatch[3];
         const caminhao = caminhoes.find(c => c.id === caminhaoId);
@@ -445,9 +649,13 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
     }
 
     // É uma entrega normal
-    const entregaId = itemId;
-    const entregaAtual = (entregas || []).find(e => e.id === entregaId);
-    if (!entregaAtual) return;
+    const entregaId = itemId.toString();
+    const entregaAtual = (entregas || []).find(e => e.id.toString() === entregaId);
+
+    if (!entregaAtual) {
+      console.error("❌ Entrega não encontrada no drop:", itemId);
+      return;
+    }
 
     // 1. Soltou na Triagem → Desagendar
     if (overId === 'triagem') {
@@ -480,10 +688,66 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
     const turnoMatch = overId.match(/^(\d{4}-\d{2}-\d{2})-(\d+)-(Manhã|Tarde|Comercial)$/);
     if (turnoMatch) {
       const dataAlvo = turnoMatch[1];
+
+      // Guardrail: Não permitir agendar para o passado
+      const hojeStr = new Date().toISOString().split('T')[0];
+      if (dataAlvo < hojeStr) {
+        toast.error("Não é possível agendar para uma data passada!");
+        return;
+      }
+
       const caminhaoId = parseInt(turnoMatch[2]);
       const turno = turnoMatch[3];
 
+      // GUARDRAIL: Preferências de Entrega (BLACKLIST)
+      if (entregaAtual.preferencias_entrega) {
+        const { dias, turnos } = entregaAtual.preferencias_entrega;
+
+        // Verificar Dia da Semana (Blacklist)
+        if (dias && dias.length > 0) {
+          const [y, m, d] = dataAlvo.split('-').map(Number);
+          const diaSemanaAlvo = new Date(y, m - 1, d).getDay(); // 0=Dom
+
+          const diasBloqueados = dias.map(d => Number(d));
+          if (diasBloqueados.includes(diaSemanaAlvo)) {
+            const nomesDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+            toast.error(`BLOQUEADO: Dia Bloqueado pelo Cliente`, {
+              description: `Restrição configurada para: ${nomesDias[diaSemanaAlvo]}.`,
+              duration: 4000
+            });
+            return;
+          }
+        }
+
+        // Verificar Turno (Blacklist - Normalized)
+        if (turnos && turnos.length > 0) {
+          const normalize = (str) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          const turnoTargetNorm = normalize(turno);
+
+          if (turnos.some(t => normalize(t) === turnoTargetNorm)) {
+            toast.error(`BLOQUEADO: Turno Bloqueado pelo Cliente`, {
+              description: `Restrição configurada para: ${turno}.`,
+              duration: 4000
+            });
+            return;
+          }
+        }
+      }
+
+      // GUARDRAIL: Verificar se há restrição para esta data
+      if (entregaAtual.data_restricao === dataAlvo) {
+        toast.error(`AGENDAMENTO BLOQUEADO: Cliente não pode receber nesta data.`, {
+          description: `Motivo: ${entregaAtual.motivo_restricao || 'Não informado'}`,
+          duration: 5000
+        });
+        return;
+      }
+
       const caminhao = caminhoes.find(c => c.id === caminhaoId);
+      const isDateChange = entregaAtual.data_agendada?.split('T')[0] !== dataAlvo;
+
+      const normalize = (str) => (str || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const isShiftChange = normalize(entregaAtual.turno) !== normalize(turno);
 
       const updateData = {
         data_agendada: dataAlvo,
@@ -492,6 +756,25 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
         status: 'Agendada',
         caminhao_id: caminhaoId
       };
+
+      console.log("🛠️ Drag Check:", {
+        status: entregaAtual.status_confirmacao,
+        isConfirmada: entregaAtual.status_confirmacao === 'Confirmada',
+        isDateChange,
+        isShiftChange,
+        entTurno: entregaAtual.turno,
+        newTurno: turno
+      });
+
+      // 4. Se já está CONFIRMADA e trocou de data OU turno, pedir motivo
+      if (entregaAtual.status_confirmacao === 'Confirmada' && (isDateChange || isShiftChange)) {
+        setModalReagendamento({
+          entrega: entregaAtual,
+          novoAgendamento: updateData,
+          isMove: true
+        });
+        return; // Interrompe o drag imediato
+      }
 
       // Atualização otimista
       queryClient.setQueryData(['entregas'], (oldData) =>
@@ -534,6 +817,102 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
     setModalMotivoAguardando(null);
     setMotivoAguardando("");
+  };
+
+  const handleCardClick = (item, action) => {
+    if (action === 'reagendar') {
+      setModalReagendamento({ entrega: item });
+      setMotivoReagendamento("");
+    } else {
+      setEntregaSelecionada(item);
+    }
+  };
+
+  const confirmarReagendamento = async () => {
+    if (!modalReagendamento || !motivoReagendamento.trim()) {
+      toast.error("Informe o motivo do reagendamento");
+      return;
+    }
+
+    try {
+      const historicoAtual = modalReagendamento.entrega.historico_reagendamentos || [];
+      const novoEvento = {
+        data_anterior: modalReagendamento.entrega.data_agendada,
+        data_nova: modalReagendamento.isMove ? modalReagendamento.novoAgendamento.data_agendada : null,
+        motivo: motivoReagendamento,
+        data_registro: new Date().toISOString(),
+        usuario: 'Logistica',
+        tipo: modalReagendamento.isMove ? 'ALTERACAO_DATA' : 'CANCELAMENTO'
+      };
+
+      if (modalReagendamento.isMove) {
+        // CASO 1: MOVER (Trocar Data)
+        await atualizarEntregaMutation.mutateAsync({
+          id: modalReagendamento.entrega.id,
+          data: {
+            ...modalReagendamento.novoAgendamento,
+            status_confirmacao: 'Aguardando Resposta', // Resetar confirmação pois mudou data
+            historico_reagendamentos: [...historicoAtual, novoEvento]
+          }
+        });
+
+        // DISPARAR NOTIFICAÇÃO DE REAGENDAMENTO PARA O CLIENTE
+        try {
+          const venda = (vendas || []).find(v => v.id === modalReagendamento.entrega.venda_id);
+          const listaProdutos = venda?.itens?.map(item => `• ${item.quantidade}x ${item.produto_nome}`).join('\n') || "Itens não informados";
+
+          const payload = [{
+            id: modalReagendamento.entrega.id,
+            tipo: 'entrega',
+            numero_pedido: modalReagendamento.entrega.numero_pedido,
+            cliente_nome: modalReagendamento.entrega.cliente_nome,
+            telefone: modalReagendamento.entrega.cliente_telefone,
+            turno: modalReagendamento.novoAgendamento.turno || "Comercial",
+            produtos: listaProdutos,
+            data_agendada: modalReagendamento.novoAgendamento.data_agendada,
+            is_reagendamento: true // Flag para mensagem diferenciada
+          }];
+
+          await fetch(`${import.meta.env.VITE_ZAP_API_URL}/disparar-confirmacoes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entregas: payload })
+          });
+          toast.success("Cliente notificado via WhatsApp!");
+        } catch (err) {
+          console.error("Erro ao notificar reagendamento:", err);
+          toast.warning("Reagendado, mas erro ao notificar WhatsApp.");
+        }
+
+        toast.success("Entrega reagendada! Status resetado para 'Aguardando Resposta'.");
+      } else {
+        // CASO 2: CANCELAR (Voltar para Triagem)
+        await atualizarEntregaMutation.mutateAsync({
+          id: modalReagendamento.entrega.id,
+          data: {
+            status: 'Pendente',
+            data_agendada: null,
+            turno: null,
+            caminhao_id: null,
+            ordem_rota: null,
+            status_confirmacao: null, // Limpar confirmação
+            // Registrar restrição
+            data_restricao: modalReagendamento.entrega.data_agendada,
+            turno_restricao: modalReagendamento.entrega.turno,
+            motivo_restricao: motivoReagendamento,
+            historico_reagendamentos: [...historicoAtual, novoEvento]
+          }
+        });
+        toast.success("Entrega retornada para triagem com restrição de data.");
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['entregas'] });
+    } catch (error) {
+      console.error("Erro ao reagendar:", error);
+      toast.error("Erro ao processar solicitação");
+    }
+    setModalReagendamento(null);
+    setMotivoReagendamento("");
   };
 
   return (
@@ -587,7 +966,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
                       <EntregaCard
                         entrega={entrega}
                         venda={(vendas || []).find(v => v.id === entrega.venda_id)}
-                        onClick={setEntregaSelecionada}
+                        onClick={handleCardClick}
                         isColumn={false}
                       />
                     </div>
@@ -635,26 +1014,15 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
             <div className="flex-1 flex gap-1 overflow-x-auto">
               {diasDisponiveis.map((dia, index) => (
-                <button
+                <DateTabVisual
                   key={dia.id}
+                  dia={dia}
+                  index={index}
+                  isSelected={diaSelecionado === index}
                   onClick={() => setDiaSelecionado(index)}
-                  className={`flex-1 min-w-[80px] px-3 py-2 rounded-lg text-center transition-all ${diaSelecionado === index
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : dia.isHoje
-                      ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                    }`}
-                >
-                  <p className="font-bold text-sm">{dia.label}</p>
-                  <p className={`text-[10px] ${diaSelecionado === index ? 'text-blue-100' : 'text-gray-400'}`}>
-                    {dia.dataFormatada}
-                  </p>
-                  {dia.totalEntregas > 0 && (
-                    <Badge className={`mt-1 text-[9px] ${diaSelecionado === index ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-600'}`}>
-                      {dia.totalEntregas}
-                    </Badge>
-                  )}
-                </button>
+                  activeEntrega={activeEntrega}
+                  onHoverSwitch={setDiaSelecionado}
+                />
               ))}
             </div>
 
@@ -692,10 +1060,11 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
                     dataAtual={dataAtual}
                     entregas={entregas || []}
                     vendas={vendas || []}
-                    onClickEntrega={setEntregaSelecionada}
+                    onClickEntrega={handleCardClick}
                     onNotificar={handleNotificarCaminhao}
                     onOtimizar={(entregasDoCaminhao) => setModalOtimizacao(entregasDoCaminhao)}
                     assistencias={assistencias || []}
+                    activeEntrega={activeEntrega}
                   />
                 ))
               )}
@@ -755,13 +1124,13 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-green-600">
-              <MessageCircle className="w-5 h-5" />
-              Notificar - {modalDisparo?.caminhao?.nome || modalDisparo?.caminhao?.placa}
+              <CheckCircle className="w-5 h-5" />
+              Confirmar Entregas - {modalDisparo?.caminhao?.nome || modalDisparo?.caminhao?.placa}
             </DialogTitle>
             <DialogDescription>
               {(modalDisparo?.totalNaoNotificadas || 0) > 0
-                ? `Disparar WhatsApp para ${modalDisparo.totalNaoNotificadas} cliente(s)?`
-                : "Todos os clientes já foram notificados!"}
+                ? `Enviar mensagem de confirmação para ${modalDisparo.totalNaoNotificadas} cliente(s)?`
+                : "Todos os clientes já foram solicitados para confirmação!"}
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-3">
@@ -826,7 +1195,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
               disabled={statusServidor !== "online" || loadingDisparo || !(modalDisparo?.totalNaoNotificadas)}
               className="bg-green-600 hover:bg-green-700"
             >
-              {loadingDisparo ? <Loader2 className="animate-spin" /> : `Notificar ${modalDisparo?.totalNaoNotificadas || 0}`}
+              {loadingDisparo ? <Loader2 className="animate-spin" /> : `Encaminhar Confirmação (${modalDisparo?.totalNaoNotificadas || 0})`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -840,6 +1209,34 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
           entregas={modalOtimizacao}
         />
       )}
+
+      {/* Modal Solicitar Reagendamento */}
+      <Dialog open={!!modalReagendamento} onOpenChange={() => setModalReagendamento(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Calendar className="w-5 h-5" />
+              Solicitar Reagendamento
+            </DialogTitle>
+            <DialogDescription>
+              Por que o cliente não pode receber nesta data?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Textarea
+              placeholder="Ex: Cliente estará viajando, pediu para entregar próxima semana..."
+              value={motivoReagendamento}
+              onChange={(e) => setMotivoReagendamento(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModalReagendamento(null)}>Cancelar</Button>
+            <Button onClick={confirmarReagendamento} className="bg-red-600 hover:bg-red-700">Confirmar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </>
   );
 }

@@ -125,6 +125,7 @@ function RankingCard({ position, name, value, percentage, color }) {
 
 export default function RelatoriosAvancados() {
   const { user, loading: authLoading, can } = useAuth();
+  const isAdmin = user?.cargo === 'Administrador';
   const [filtros, setFiltros] = useState({
     dataInicio: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
     dataFim: new Date().toISOString().split('T')[0],
@@ -728,6 +729,20 @@ export default function RelatoriosAvancados() {
   const [generatedLink, setGeneratedLink] = useState(null);
   const [selectedVendaForNPS, setSelectedVendaForNPS] = useState(null);
 
+  // Lista de vendedores únicos (Moved up to avoid hooks error)
+  const vendedoresUnicos = useMemo(() => {
+    const names = new Set();
+    vendas.forEach(v => {
+      let name = v.responsavel_nome || v.vendedor_nome || 'Não informado';
+      if (v.responsavel_id) {
+        const u = users.find(user => user.id === v.responsavel_id);
+        if (u && u.full_name) name = u.full_name;
+      }
+      if (name) names.add(name);
+    });
+    return [...names].sort();
+  }, [vendas, users]);
+
   // Generate NPS link function
   const generateNPSLink = async (venda) => {
     if (!venda) return;
@@ -808,19 +823,7 @@ export default function RelatoriosAvancados() {
   const valorAnterior = vendasPeriodoAnterior.reduce((sum, v) => sum + (v.valor_total || 0), 0);
   const crescimentoVendas = valorAnterior > 0 ? ((valorTotal - valorAnterior) / valorAnterior) * 100 : 0;
 
-  // Lista de vendedores únicos
-  const vendedoresUnicos = useMemo(() => {
-    const names = new Set();
-    vendas.forEach(v => {
-      let name = v.responsavel_nome || v.vendedor_nome || 'Não informado';
-      if (v.responsavel_id) {
-        const u = users.find(user => user.id === v.responsavel_id);
-        if (u && u.full_name) name = u.full_name;
-      }
-      if (name) names.add(name);
-    });
-    return [...names].sort();
-  }, [vendas, users]);
+
 
   // Calcular valor máximo para percentuais nos rankings
   const maxValorVendedor = Math.max(...vendasPorVendedor.map(v => v.valor), 1);
@@ -1149,18 +1152,22 @@ export default function RelatoriosAvancados() {
               <Store className="w-4 h-4" />
               Lojas
             </TabsTrigger>
-            <TabsTrigger value="dre" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
-              <FileText className="w-4 h-4" />
-              D.R.E.
-            </TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger value="dre" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+                <FileText className="w-4 h-4" />
+                D.R.E.
+              </TabsTrigger>
+            )}
             <TabsTrigger value="curva-abc" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
               <BarChart3 className="w-4 h-4" />
               Curva ABC
             </TabsTrigger>
-            <TabsTrigger value="fluxo-caixa" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
-              <DollarSign className="w-4 h-4" />
-              Fluxo de Caixa
-            </TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger value="fluxo-caixa" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+                <DollarSign className="w-4 h-4" />
+                Fluxo de Caixa
+              </TabsTrigger>
+            )}
             <TabsTrigger value="nps" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
               <Star className="w-4 h-4" />
               NPS

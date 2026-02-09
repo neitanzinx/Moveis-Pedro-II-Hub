@@ -11,7 +11,7 @@ import {
     Building2, Save, CheckCircle, FileText, RefreshCw,
     Percent, MapPin, Edit, AlertCircle, Eye, EyeOff,
     Key, Cloud, ExternalLink, Loader2, ScrollText,
-    ShieldCheck, Factory
+    ShieldCheck, Factory, Search
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -139,6 +139,68 @@ export default function ConfiguracaoNfe() {
             cep: dados.cep || "",
         });
         setEditandoEmpresa(empresa);
+    };
+
+    const formatarTexto = (valor) => {
+        if (!valor) return "";
+        return valor.toLowerCase().replace(/(?:^|\s|["'([{])+\S/g, match => match.toUpperCase());
+    };
+
+    const buscarCEP = async (cep) => {
+        const cepLimpo = cep.replace(/\D/g, '');
+        if (cepLimpo.length !== 8) return;
+
+        try {
+            const response = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
+            const data = await response.json();
+
+            if (!data.erro) {
+                setFormEmpresa(prev => ({
+                    ...prev,
+                    logradouro: formatarTexto(data.logradouro || ""),
+                    bairro: formatarTexto(data.bairro || ""),
+                    municipio: formatarTexto(data.localidade || ""),
+                    uf: data.uf || "",
+                    codigoMunicipio: data.ibge || ""
+                }));
+            }
+        } catch (error) {
+            console.error("Erro ao buscar CEP:", error);
+        }
+    };
+
+    const buscarCNPJ = async (cnpj) => {
+        const cnpjLimpo = cnpj.replace(/\D/g, '');
+        if (cnpjLimpo.length !== 14) return;
+
+        try {
+            const response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
+            const data = await response.json();
+
+            // Tenta mapear o regime tributario (Simples Nacional = 1, Lucro Presumido/Real = 3)
+            // BrasilAPI retorna 'opcao_pelo_simples': true/false
+            let regime = "1"; // Default Simples
+            if (data.opcao_pelo_simples === false) {
+                regime = "3"; // Regime Normal
+            }
+
+            setFormEmpresa(prev => ({
+                ...prev,
+                municipio: formatarTexto(data.municipio || ""),
+                codigoMunicipio: data.codigo_municipio_ibge || "",
+                uf: data.uf || "",
+                logradouro: formatarTexto(data.logradouro || ""),
+                numero: data.numero || "",
+                complemento: formatarTexto(data.complemento || ""),
+                bairro: formatarTexto(data.bairro || ""),
+                cep: data.cep?.replace(/\D/g, '') || "",
+                regimeTributario: regime
+            }));
+            toast.success("Dados da empresa carregados com sucesso!");
+        } catch (error) {
+            console.error("Erro ao buscar CNPJ:", error);
+            toast.error("Erro ao buscar CNPJ. Verifique se está correto.");
+        }
     };
 
     const salvarDadosEmpresa = () => {
@@ -574,109 +636,124 @@ export default function ConfiguracaoNfe() {
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="space-y-6 py-4">
-                        <div className="space-y-4">
-                            <h4 className="font-semibold text-gray-900 border-b pb-2">Informações Fiscais</h4>
-                            <div className="grid md:grid-cols-2 gap-4">
-                                <div>
-                                    <Label>Inscrição Estadual (IE) *</Label>
-                                    <Input
-                                        value={formEmpresa.ie || ""}
-                                        onChange={(e) => setFormEmpresa({ ...formEmpresa, ie: e.target.value })}
-                                        className="mt-1"
-                                    />
-                                </div>
-                                <div>
-                                    <Label>Regime Tributário *</Label>
-                                    <Select
-                                        value={formEmpresa.regimeTributario || "1"}
-                                        onValueChange={(v) => setFormEmpresa({ ...formEmpresa, regimeTributario: v })}
-                                    >
-                                        <SelectTrigger className="mt-1">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {REGIMES_TRIBUTARIOS.map(r => (
-                                                <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
+                    <div className="space-y-4 py-4">
+
+                        {/* Atalhos de Busca */}
+                        <div className="bg-blue-50 border border-blue-100 rounded-md p-3 mb-4 flex gap-4 text-sm text-blue-800">
+                            <div className="flex items-center gap-2">
+                                <Search className="w-4 h-4" />
+                                <span className="font-semibold">Preencher via CNPJ:</span>
+                                <Button variant="link" className="p-0 h-auto font-normal text-blue-700 underline" onClick={() => buscarCNPJ(editandoEmpresa.cnpj)}>
+                                    Buscar dados de {editandoEmpresa.cnpjFormatado || editandoEmpresa.cnpj}
+                                </Button>
                             </div>
                         </div>
 
-                        <div className="space-y-4">
-                            <h4 className="font-semibold text-gray-900 border-b pb-2">Endereço</h4>
-                            <div className="grid md:grid-cols-3 gap-4">
+                        <div className="grid md:grid-cols-2 gap-4">
+                            <div>
+                                <Label>Inscrição Estadual (IE)</Label>
+                                <Input
+                                    value={formEmpresa.ie || ""}
+                                    onChange={(e) => setFormEmpresa({ ...formEmpresa, ie: e.target.value })}
+                                    placeholder="Somente números"
+                                />
+                            </div>
+                            <div>
+                                <Label>Regime Tributário</Label>
+                                <Select
+                                    value={formEmpresa.regimeTributario || "1"}
+                                    onValueChange={(v) => setFormEmpresa({ ...formEmpresa, regimeTributario: v })}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="1">1 - Simples Nacional</SelectItem>
+                                        <SelectItem value="3">3 - Regime Normal</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+
+                        <div className="border-t pt-4">
+                            <h4 className="font-medium mb-3 text-gray-700">Endereço Fiscal</h4>
+
+                            <div className="grid md:grid-cols-3 gap-4 mb-4">
+                                <div className="md:col-span-1">
+                                    <Label>CEP</Label>
+                                    <div className="flex gap-2">
+                                        <Input
+                                            value={formEmpresa.cep || ""}
+                                            onChange={(e) => setFormEmpresa({ ...formEmpresa, cep: e.target.value })}
+                                            onBlur={(e) => buscarCEP(e.target.value)}
+                                            placeholder="00000-000"
+                                        />
+                                        <Button size="icon" variant="ghost" type="button" onClick={() => buscarCEP(formEmpresa.cep)}>
+                                            <Search className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                </div>
                                 <div className="md:col-span-2">
-                                    <Label>Logradouro *</Label>
+                                    <Label>Logradouro</Label>
                                     <Input
                                         value={formEmpresa.logradouro || ""}
                                         onChange={(e) => setFormEmpresa({ ...formEmpresa, logradouro: e.target.value })}
-                                        className="mt-1"
-                                    />
-                                </div>
-                                <div>
-                                    <Label>Número *</Label>
-                                    <Input
-                                        value={formEmpresa.numero || ""}
-                                        onChange={(e) => setFormEmpresa({ ...formEmpresa, numero: e.target.value })}
-                                        className="mt-1"
                                     />
                                 </div>
                             </div>
-                            <div className="grid md:grid-cols-2 gap-4">
+
+                            <div className="grid md:grid-cols-3 gap-4 mb-4">
                                 <div>
+                                    <Label>Número</Label>
+                                    <Input
+                                        value={formEmpresa.numero || ""}
+                                        onChange={(e) => setFormEmpresa({ ...formEmpresa, numero: e.target.value })}
+                                    />
+                                </div>
+                                <div className="md:col-span-2">
                                     <Label>Complemento</Label>
                                     <Input
                                         value={formEmpresa.complemento || ""}
                                         onChange={(e) => setFormEmpresa({ ...formEmpresa, complemento: e.target.value })}
-                                        className="mt-1"
                                     />
                                 </div>
+                            </div>
+
+                            <div className="grid md:grid-cols-3 gap-4">
                                 <div>
-                                    <Label>Bairro *</Label>
+                                    <Label>Bairro</Label>
                                     <Input
                                         value={formEmpresa.bairro || ""}
                                         onChange={(e) => setFormEmpresa({ ...formEmpresa, bairro: e.target.value })}
-                                        className="mt-1"
                                     />
+                                </div>
+                                <div className="md:col-span-2">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <Label>Município *</Label>
+                                            <Input
+                                                value={formEmpresa.municipio || ""}
+                                                onChange={(e) => setFormEmpresa({ ...formEmpresa, municipio: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label>UF *</Label>
+                                            <Select
+                                                value={formEmpresa.uf || "ES"}
+                                                onValueChange={(v) => setFormEmpresa({ ...formEmpresa, uf: v })}
+                                            >
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    {["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"].map(uf => (
+                                                        <SelectItem key={uf} value={uf}>{uf}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div className="grid md:grid-cols-3 gap-4">
-                                <div>
-                                    <Label>Município *</Label>
-                                    <Input
-                                        value={formEmpresa.municipio || ""}
-                                        onChange={(e) => setFormEmpresa({ ...formEmpresa, municipio: e.target.value })}
-                                        className="mt-1"
-                                    />
-                                </div>
-                                <div>
-                                    <Label>UF *</Label>
-                                    <Select
-                                        value={formEmpresa.uf || "ES"}
-                                        onValueChange={(v) => setFormEmpresa({ ...formEmpresa, uf: v })}
-                                    >
-                                        <SelectTrigger className="mt-1">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"].map(uf => (
-                                                <SelectItem key={uf} value={uf}>{uf}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <Label>CEP *</Label>
-                                    <Input
-                                        value={formEmpresa.cep || ""}
-                                        onChange={(e) => setFormEmpresa({ ...formEmpresa, cep: e.target.value })}
-                                        className="mt-1"
-                                    />
-                                </div>
-                            </div>
+
                         </div>
                     </div>
 

@@ -162,9 +162,63 @@ export function isNCMFallback(produto) {
     return produto?.ncm_fonte === 'fallback';
 }
 
+/**
+ * Verifica se a chave do Gemini está configurada no banco (sem retornar a chave)
+ */
+export async function checkGeminiKeyConfigured() {
+    try {
+        const { data, error } = await supabase
+            .from('configuracao_sistema')
+            .select('dados')
+            .eq('tipo', 'integracoes')
+            .single();
+
+        if (error && error.code !== 'PGRST116') throw error; // Ignorar erro de não encontrado
+
+        return !!data?.dados?.gemini_api_key;
+    } catch (error) {
+        console.error('Erro ao verificar chave Gemini:', error);
+        return false;
+    }
+}
+
+/**
+ * Salva a chave do Gemini na tabela de configuração
+ */
+export async function saveGeminiApiKey(apiKey) {
+    if (!apiKey) throw new Error("Chave inválida");
+
+    // Primeiro busca se já existe para fazer merge
+    const { data: existing } = await supabase
+        .from('configuracao_sistema')
+        .select('dados')
+        .eq('tipo', 'integracoes')
+        .single();
+
+    // Preparar dados com merge
+    const dadosAtuais = existing?.dados || {};
+    const novosDados = {
+        ...dadosAtuais,
+        gemini_api_key: apiKey,
+        updated_at: new Date().toISOString()
+    };
+
+    const { error } = await supabase
+        .from('configuracao_sistema')
+        .upsert({
+            tipo: 'integracoes',
+            dados: novosDados
+        }, { onConflict: 'tipo' });
+
+    if (error) throw error;
+    return true;
+}
+
 export default {
     sugerirNCMsComIA,
     aplicarSugestoesNCM,
     isNCMSugeridoPorIA,
-    isNCMFallback
+    isNCMFallback,
+    checkGeminiKeyConfigured,
+    saveGeminiApiKey
 };

@@ -9,14 +9,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import PedidoCompraModal from "@/components/estoque/PedidoCompraModal";
+import SugestaoComprasTab from "@/components/compras/SugestaoComprasTab";
+import { Edit, Trash2, Plus, Calendar, Search, Filter, RefreshCw, ShoppingCart, Truck, CheckCircle, Smartphone } from "lucide-react";
 import {
-    Package, Plus, Search, FileText, Truck, CheckCircle, Clock, AlertTriangle,
-    Eye, Edit, Trash2, Send, PackageCheck, Building2, LayoutDashboard,
-    Tag, TrendingDown, Calendar, DollarSign
+    Package, FileText, Clock, AlertTriangle,
+    Eye, Send, PackageCheck, Building2, LayoutDashboard,
+    Tag, TrendingDown, DollarSign
 } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
-import PedidoCompraModal from "@/components/estoque/PedidoCompraModal";
 import RecebimentoPedido from "@/components/estoque/RecebimentoPedido";
 import { differenceInDays, format, isBefore } from "date-fns";
 
@@ -142,17 +144,21 @@ export default function SetorCompras() {
 
                 {/* Tabs principais */}
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                    <TabsList className="grid w-full max-w-lg grid-cols-3 h-12">
+                    <TabsList className="grid w-full max-w-lg grid-cols-4 h-12">
                         <TabsTrigger value="dashboard" className="gap-2">
                             <LayoutDashboard className="w-4 h-4" />
                             <span className="hidden md:inline">Dashboard</span>
                         </TabsTrigger>
-                        <TabsTrigger value="pedidos" className="gap-2">
-                            <FileText className="w-4 h-4" />
+                        <TabsTrigger value="pedidos" className="flex items-center gap-2">
+                            <ShoppingCart className="w-4 h-4" />
                             <span className="hidden md:inline">Pedidos</span>
                             {totalPorStatus('todos') > 0 && (
                                 <Badge variant="secondary" className="ml-1">{totalPorStatus('todos')}</Badge>
                             )}
+                        </TabsTrigger>
+                        <TabsTrigger value="sugestoes" className="flex items-center gap-2">
+                            <Smartphone className="w-4 h-4" />
+                            <span className="hidden md:inline">Sugestões (Smart)</span>
                         </TabsTrigger>
                         <TabsTrigger value="fornecedores" className="gap-2">
                             <Building2 className="w-4 h-4" />
@@ -311,9 +317,7 @@ export default function SetorCompras() {
                                                                         </span>
                                                                     )}
                                                                 </div>
-                                                            ) : (
-                                                                <Badge variant="outline">Tabela</Badge>
-                                                            )}
+                                                            ) : '-'}
                                                         </TableCell>
                                                         <TableCell className="text-right font-bold">
                                                             R$ {(pedido.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -334,39 +338,15 @@ export default function SetorCompras() {
                                                                 >
                                                                     <Eye className="w-4 h-4" />
                                                                 </Button>
-
                                                                 {pedido.status === 'Rascunho' && (
                                                                     <>
-                                                                        <Button
-                                                                            variant="ghost"
-                                                                            size="icon"
-                                                                            onClick={() => setModalEditar(pedido)}
-                                                                            title="Editar"
-                                                                        >
+                                                                        <Button variant="ghost" size="icon" onClick={() => setModalEditar(pedido)}>
                                                                             <Edit className="w-4 h-4" />
                                                                         </Button>
-                                                                        <Button
-                                                                            variant="ghost"
-                                                                            size="icon"
-                                                                            onClick={() => handleExcluir(pedido)}
-                                                                            title="Excluir"
-                                                                            className="text-red-600 hover:text-red-700"
-                                                                        >
+                                                                        <Button variant="ghost" size="icon" onClick={() => handleExcluir(pedido)} className="text-red-600">
                                                                             <Trash2 className="w-4 h-4" />
                                                                         </Button>
                                                                     </>
-                                                                )}
-
-                                                                {['Enviado', 'Confirmado', 'Parcialmente Recebido'].includes(pedido.status) && (
-                                                                    <Button
-                                                                        variant="outline"
-                                                                        size="sm"
-                                                                        onClick={() => setModalReceber(pedido)}
-                                                                        className="gap-1"
-                                                                    >
-                                                                        <PackageCheck className="w-4 h-4" />
-                                                                        Receber
-                                                                    </Button>
                                                                 )}
                                                             </div>
                                                         </TableCell>
@@ -380,171 +360,181 @@ export default function SetorCompras() {
                         </Card>
                     </TabsContent>
 
+                    <TabsContent value="sugestoes">
+                        <SugestaoComprasTab />
+                    </TabsContent>
+
                     {/* Tab Fornecedores */}
                     <TabsContent value="fornecedores" className="mt-6">
                         <Fornecedores />
                     </TabsContent>
                 </Tabs>
-            </div>
 
-            {/* Modal Novo Pedido */}
-            {modalNovo && (
-                <PedidoCompraModal
-                    open={modalNovo}
-                    onClose={() => setModalNovo(false)}
-                    fornecedores={fornecedores}
-                />
-            )}
+                {/* Modal Novo Pedido */}
+                {
+                    modalNovo && (
+                        <PedidoCompraModal
+                            open={modalNovo}
+                            onClose={() => setModalNovo(false)}
+                            fornecedores={fornecedores}
+                        />
+                    )
+                }
 
-            {/* Modal Editar Pedido */}
-            {modalEditar && (
-                <PedidoCompraModal
-                    open={!!modalEditar}
-                    onClose={() => setModalEditar(null)}
-                    pedido={modalEditar}
-                    fornecedores={fornecedores}
-                />
-            )}
+                {/* Modal Editar Pedido */}
+                {
+                    modalEditar && (
+                        <PedidoCompraModal
+                            open={!!modalEditar}
+                            onClose={() => setModalEditar(null)}
+                            pedido={modalEditar}
+                            fornecedores={fornecedores}
+                        />
+                    )
+                }
 
-            {/* Modal Receber Pedido */}
-            {modalReceber && (
-                <RecebimentoPedido
-                    open={!!modalReceber}
-                    onClose={() => setModalReceber(null)}
-                    pedido={modalReceber}
-                />
-            )}
+                {/* Modal Receber Pedido */}
+                {
+                    modalReceber && (
+                        <RecebimentoPedido
+                            open={!!modalReceber}
+                            onClose={() => setModalReceber(null)}
+                            pedido={modalReceber}
+                        />
+                    )
+                }
 
-            {/* Modal Detalhes */}
-            <Dialog open={!!modalDetalhes} onOpenChange={() => setModalDetalhes(null)}>
-                <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <FileText className="w-5 h-5" />
-                            Pedido {modalDetalhes?.numero_pedido}
-                        </DialogTitle>
-                    </DialogHeader>
-                    {modalDetalhes && (
-                        <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <p className="text-sm text-gray-500">Fornecedor</p>
-                                    <p className="font-medium">{modalDetalhes.fornecedor_nome}</p>
+                {/* Modal Detalhes */}
+                <Dialog open={!!modalDetalhes} onOpenChange={() => setModalDetalhes(null)}>
+                    <DialogContent className="max-w-2xl">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <FileText className="w-5 h-5" />
+                                Pedido {modalDetalhes?.numero_pedido}
+                            </DialogTitle>
+                        </DialogHeader>
+                        {modalDetalhes && (
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <p className="text-sm text-gray-500">Fornecedor</p>
+                                        <p className="font-medium">{modalDetalhes.fornecedor_nome}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-gray-500">Status</p>
+                                        <Badge className={statusConfig[modalDetalhes.status]?.cor}>
+                                            {modalDetalhes.status}
+                                        </Badge>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-gray-500">Data do Pedido</p>
+                                        <p className="font-medium">
+                                            {modalDetalhes.data_pedido ? format(new Date(modalDetalhes.data_pedido), 'dd/MM/yyyy') : '-'}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-gray-500">Previsão de Entrega</p>
+                                        <p className="font-medium">
+                                            {modalDetalhes.data_previsao_entrega ? format(new Date(modalDetalhes.data_previsao_entrega), 'dd/MM/yyyy') : '-'}
+                                        </p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p className="text-sm text-gray-500">Status</p>
-                                    <Badge className={statusConfig[modalDetalhes.status]?.cor}>
-                                        {modalDetalhes.status}
-                                    </Badge>
-                                </div>
-                                <div>
-                                    <p className="text-sm text-gray-500">Data do Pedido</p>
-                                    <p className="font-medium">
-                                        {modalDetalhes.data_pedido ? format(new Date(modalDetalhes.data_pedido), 'dd/MM/yyyy') : '-'}
-                                    </p>
-                                </div>
-                                <div>
-                                    <p className="text-sm text-gray-500">Previsão de Entrega</p>
-                                    <p className="font-medium">
-                                        {modalDetalhes.data_previsao_entrega ? format(new Date(modalDetalhes.data_previsao_entrega), 'dd/MM/yyyy') : '-'}
-                                    </p>
-                                </div>
-                            </div>
 
-                            {/* Info de promoção */}
-                            {modalDetalhes.tipo_preco === 'promocional' && (
-                                <Card className="bg-amber-50 border-amber-200">
-                                    <CardContent className="p-4">
-                                        <div className="flex items-center gap-2 text-amber-800 font-medium mb-2">
-                                            <Tag className="w-4 h-4" />
-                                            Compra com Preço Promocional
-                                        </div>
-                                        <div className="grid grid-cols-3 gap-4 text-sm">
-                                            {modalDetalhes.promocao_inicio && (
-                                                <div>
-                                                    <p className="text-gray-500">Início</p>
-                                                    <p className="font-medium">{format(new Date(modalDetalhes.promocao_inicio), 'dd/MM/yyyy')}</p>
-                                                </div>
-                                            )}
-                                            {modalDetalhes.promocao_fim && (
-                                                <div>
-                                                    <p className="text-gray-500">Fim</p>
-                                                    <p className="font-medium">{format(new Date(modalDetalhes.promocao_fim), 'dd/MM/yyyy')}</p>
-                                                </div>
-                                            )}
-                                            {modalDetalhes.economia_total > 0 && (
-                                                <div>
-                                                    <p className="text-gray-500">Economia</p>
-                                                    <p className="font-bold text-green-600">
-                                                        R$ {modalDetalhes.economia_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                    </p>
-                                                </div>
-                                            )}
-                                        </div>
-                                        {modalDetalhes.promocao_observacao && (
-                                            <p className="text-sm text-gray-600 mt-2">
-                                                📝 {modalDetalhes.promocao_observacao}
-                                            </p>
-                                        )}
-                                    </CardContent>
-                                </Card>
-                            )}
-
-                            <div>
-                                <p className="text-sm text-gray-500 mb-2">Itens do Pedido</p>
-                                <div className="border rounded-lg overflow-hidden">
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>Produto</TableHead>
-                                                <TableHead className="text-center">Qtd</TableHead>
-                                                {modalDetalhes.tipo_preco === 'promocional' && (
-                                                    <TableHead className="text-right">Preço Tabela</TableHead>
+                                {/* Info de promoção */}
+                                {modalDetalhes.tipo_preco === 'promocional' && (
+                                    <Card className="bg-amber-50 border-amber-200">
+                                        <CardContent className="p-4">
+                                            <div className="flex items-center gap-2 text-amber-800 font-medium mb-2">
+                                                <Tag className="w-4 h-4" />
+                                                Compra com Preço Promocional
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-4 text-sm">
+                                                {modalDetalhes.promocao_inicio && (
+                                                    <div>
+                                                        <p className="text-gray-500">Início</p>
+                                                        <p className="font-medium">{format(new Date(modalDetalhes.promocao_inicio), 'dd/MM/yyyy')}</p>
+                                                    </div>
                                                 )}
-                                                <TableHead className="text-right">Preço Unit.</TableHead>
-                                                <TableHead className="text-right">Total</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {(modalDetalhes.itens || []).map((item, index) => (
-                                                <TableRow key={index}>
-                                                    <TableCell>{item.produto_nome}</TableCell>
-                                                    <TableCell className="text-center">{item.quantidade_pedida}</TableCell>
+                                                {modalDetalhes.promocao_fim && (
+                                                    <div>
+                                                        <p className="text-gray-500">Fim</p>
+                                                        <p className="font-medium">{format(new Date(modalDetalhes.promocao_fim), 'dd/MM/yyyy')}</p>
+                                                    </div>
+                                                )}
+                                                {modalDetalhes.economia_total > 0 && (
+                                                    <div>
+                                                        <p className="text-gray-500">Economia</p>
+                                                        <p className="font-bold text-green-600">
+                                                            R$ {modalDetalhes.economia_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {modalDetalhes.promocao_observacao && (
+                                                <p className="text-sm text-gray-600 mt-2">
+                                                    📝 {modalDetalhes.promocao_observacao}
+                                                </p>
+                                            )}
+                                        </CardContent>
+                                    </Card>
+                                )}
+
+                                <div>
+                                    <p className="text-sm text-gray-500 mb-2">Itens do Pedido</p>
+                                    <div className="border rounded-lg overflow-hidden">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Produto</TableHead>
+                                                    <TableHead className="text-center">Qtd</TableHead>
                                                     {modalDetalhes.tipo_preco === 'promocional' && (
-                                                        <TableCell className="text-right text-gray-500">
-                                                            R$ {(item.preco_tabela || item.preco_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </TableCell>
+                                                        <TableHead className="text-right">Preço Tabela</TableHead>
                                                     )}
-                                                    <TableCell className="text-right">
-                                                        R$ {(item.preco_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                    </TableCell>
-                                                    <TableCell className="text-right font-medium">
-                                                        R$ {((item.quantidade_pedida || 0) * (item.preco_unitario || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                    </TableCell>
+                                                    <TableHead className="text-right">Preço Unit.</TableHead>
+                                                    <TableHead className="text-right">Total</TableHead>
                                                 </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {(modalDetalhes.itens || []).map((item, index) => (
+                                                    <TableRow key={index}>
+                                                        <TableCell>{item.produto_nome}</TableCell>
+                                                        <TableCell className="text-center">{item.quantidade_pedida}</TableCell>
+                                                        {modalDetalhes.tipo_preco === 'promocional' && (
+                                                            <TableCell className="text-right text-gray-500">
+                                                                R$ {(item.preco_tabela || item.preco_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            </TableCell>
+                                                        )}
+                                                        <TableCell className="text-right">
+                                                            R$ {(item.preco_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </TableCell>
+                                                        <TableCell className="text-right font-medium">
+                                                            R$ {((item.quantidade_pedida || 0) * (item.preco_unitario || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
                                 </div>
-                            </div>
 
-                            <div className="flex justify-between items-center pt-4 border-t">
-                                <span className="text-lg font-bold">Total do Pedido</span>
-                                <span className="text-2xl font-bold text-green-600">
-                                    R$ {(modalDetalhes.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                </span>
-                            </div>
-
-                            {modalDetalhes.observacoes && (
-                                <div className="bg-gray-50 rounded-lg p-3">
-                                    <p className="text-sm text-gray-500">Observações</p>
-                                    <p className="mt-1">{modalDetalhes.observacoes}</p>
+                                <div className="flex justify-between items-center pt-4 border-t">
+                                    <span className="text-lg font-bold">Total do Pedido</span>
+                                    <span className="text-2xl font-bold text-green-600">
+                                        R$ {(modalDetalhes.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </span>
                                 </div>
-                            )}
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
+
+                                {modalDetalhes.observacoes && (
+                                    <div className="bg-gray-50 rounded-lg p-3">
+                                        <p className="text-sm text-gray-500">Observações</p>
+                                        <p className="mt-1">{modalDetalhes.observacoes}</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </DialogContent>
+                </Dialog>
+            </div>
         </div>
     );
 }

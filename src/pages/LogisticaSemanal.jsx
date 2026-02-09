@@ -36,6 +36,12 @@ export default function LogisticaSemanal() {
     queryFn: () => base44.entities.AssistenciaTecnica.list('-created_at')
   });
 
+  // Query para itens de montagem interna (para o badge)
+  const { data: todasMontagens = [] } = useQuery({
+    queryKey: ['montagens-internas-badge'],
+    queryFn: () => base44.entities.MontagemItem.list()
+  });
+
   // Filtrar assistências que precisam de entrega/visita (não concluídas/canceladas)
   const assistenciasPendentes = assistencias.filter(a =>
     a.status !== 'Concluída' &&
@@ -59,9 +65,9 @@ export default function LogisticaSemanal() {
     e.status === 'Aguardando Liberação'
   );
 
-  // 3. Montagem
-  const entregasMontagemInterna = entregas.filter(e =>
-    e.itens_montagem_interna?.length > 0 && !e.montagem_concluida
+  // 3. Montagem (Filtrar itens pendentes de montagem interna)
+  const montagensPendentes = todasMontagens.filter(m =>
+    m.tipo_montagem === 'interna' && m.status !== 'concluida'
   );
 
   // 4. Semanal (Colunas)
@@ -116,7 +122,7 @@ export default function LogisticaSemanal() {
           </TabsTrigger>
           <TabsTrigger value="montagem" className="gap-2">
             <Calendar className="w-4 h-4" />
-            Montagem ({entregasMontagemInterna.length})
+            Montagem ({montagensPendentes.length})
           </TabsTrigger>
           <TabsTrigger value="aguardando" className="gap-2">
             <Clock className="w-4 h-4" />
@@ -144,7 +150,7 @@ export default function LogisticaSemanal() {
         </TabsContent>
 
         <TabsContent value="montagem" className="mt-6">
-          <MontagemInterna entregas={entregasMontagemInterna} />
+          <MontagemInterna />
         </TabsContent>
 
         <TabsContent value="aguardando" className="mt-6">

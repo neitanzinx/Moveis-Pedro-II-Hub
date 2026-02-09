@@ -442,7 +442,11 @@ export default function UserManagementTab({ users = [], isLoading, currentUser }
                 <Label>Cargo</Label>
                 <Select
                   value={selectedUser.cargo || ''}
-                  onValueChange={(v) => setSelectedUser({ ...selectedUser, cargo: v })}
+                  onValueChange={(v) => setSelectedUser({
+                    ...selectedUser,
+                    cargo: v,
+                    is_vendedor: v === 'Vendedor' ? true : selectedUser.is_vendedor
+                  })}
                 >
                   <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                   <SelectContent>

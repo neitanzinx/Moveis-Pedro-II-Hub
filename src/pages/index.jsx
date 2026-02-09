@@ -36,13 +36,14 @@ const Marketing = lazy(() => import("./Marketing.jsx"));
 const MontadorExterno = lazy(() => import("./MontadorExterno.jsx"));
 const CadastroMobile = lazy(() => import("./CadastroMobile.jsx"));
 const ExportacaoContabil = lazy(() => import("./ExportacaoContabil.jsx"));
-const PedidosCompra = lazy(() => import("./SetorCompras.jsx"));
 const SetorCompras = lazy(() => import("./SetorCompras.jsx"));
+const PedidosCompra = lazy(() => import("./PedidosCompra.jsx"));
 const DashboardBI = lazy(() => import("./DashboardBI.jsx"));
 const DashboardGerente = lazy(() => import("./DashboardGerente.jsx"));
 const AvaliacaoNPS = lazy(() => import("./AvaliacaoNPS.jsx"));
 const Mostruario = lazy(() => import("./Mostruario.jsx"));
 const EntradaEstoque = lazy(() => import("./EntradaEstoque.jsx"));
+const EstoqueBipagem = lazy(() => import("./EstoqueBipagem.jsx"));
 const SaneamentoEstoque = lazy(() => import("./SaneamentoEstoque.jsx"));
 
 // ============================================================================
@@ -53,6 +54,7 @@ import LandingVIP from "./LandingVIP.jsx";
 import ClienteAuth from "./ClienteAuth.jsx";
 import ClienteDashboard from "./ClienteDashboard.jsx";
 import AutoAtendimento from "./AutoAtendimento.jsx";
+import RastreioPublico from "./RastreioPublico.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation, Navigate } from 'react-router-dom';
 
@@ -80,7 +82,7 @@ const PAGES = {
     AlertasRecompra, Estoque, ModoReuniao, PDV, CatalogoWhatsApp, NotasFiscais,
     LogisticaSemanal, Entregador, Marketing, MontadorExterno,
     ExportacaoContabil, PedidosCompra, SetorCompras, DashboardBI, DashboardGerente, Mostruario,
-    EntradaEstoque, SaneamentoEstoque
+    EntradaEstoque, SaneamentoEstoque, EstoqueBipagem
 };
 
 function _getCurrentPage(url) {
@@ -151,13 +153,19 @@ function PagesContent() {
         return <AutoAtendimento />;
     }
 
+    // Rota de rastreio pública
+    if (location.pathname.startsWith('/rastreio/')) {
+        return <RastreioPublico />;
+    }
+
     // ===== LOGIN DE FUNCIONÁRIOS =====
     if (location.pathname === '/login') {
-        const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo', 'Montador'];
-
-        // Se já está logado como funcionário E tem cargo válido, redireciona
-        if (user && user.cargo && VALID_CARGOS.includes(user.cargo)) {
-            return <Navigate to="/admin/Dashboard" replace />;
+        // Se já está logado como funcionário E tem cargo válido (qualquer cargo não vazio), redireciona
+        // MAS APENAS se NÃO for primeiro acesso. Se for primeiro acesso, deixa renderizar o LoginFuncionario para trocar senha.
+        if (user && user.cargo && !user.primeiro_acesso) {
+            const params = new URLSearchParams(location.search);
+            const redirect = params.get('redirect');
+            return <Navigate to={redirect || "/admin/Dashboard"} replace />;
         }
 
         // Se está logado mas sem permissão, força logout ou mostra erro (aqui deixamos ficar no login para evitar loop)
@@ -176,9 +184,8 @@ function PagesContent() {
             return <Navigate to="/login" replace />;
         }
 
-        // Bloquear clientes (usuários sem cargo ou com cargo inválido)
-        const VALID_CARGOS = ['Administrador', 'Gerente', 'Vendedor', 'Estoque', 'Financeiro', 'RH', 'Entregador', 'Montador Externo', 'Montador'];
-        if (!user.cargo || !VALID_CARGOS.includes(user.cargo)) {
+        // Bloquear clientes (usuários sem cargo)
+        if (!user.cargo) {
             console.warn('[Router] Usuário sem cargo válido tentando acessar /admin:', user.email, '- Cargo:', user.cargo);
             // Redirecionar para login de funcionário (não área cliente)
             return <Navigate to="/login" replace />;
@@ -207,6 +214,15 @@ function PagesContent() {
                     <Entregador />
                 </Suspense>
             );
+        }
+
+        // Logística deve acessar /admin/LogisticaSemanal por padrão, mas pode navegar
+        if (user.cargo === 'Logística') {
+            // Se estiver na raiz do admin ou tentando ir pro dashboard, manda pro semanal
+            if (location.pathname === '/admin' || location.pathname === '/admin/Dashboard') {
+                return <Navigate to="/admin/LogisticaSemanal" replace />;
+            }
+            // Permite outras rotas
         }
 
         // Montador Interno só pode acessar /admin/Montagem
@@ -252,6 +268,7 @@ function PagesContent() {
                         <Route path="/admin/Produtos" element={<Produtos />} />
                         <Route path="/admin/Fornecedores" element={<Fornecedores />} />
                         <Route path="/admin/Entrada" element={<EntradaEstoque />} />
+                        <Route path="/admin/EstoqueBipagem" element={<EstoqueBipagem />} />
                         <Route path="/admin/Saneamento" element={<SaneamentoEstoque />} />
 
                         {/* Gestão e Financeiro */}
@@ -262,7 +279,6 @@ function PagesContent() {
                         <Route path="/admin/RecursosHumanos" element={<RecursosHumanos />} />
                         <Route path="/admin/Marketing" element={<Marketing />} />
                         <Route path="/admin/ExportacaoContabil" element={<ExportacaoContabil />} />
-                        <Route path="/admin/PedidosCompra" element={<PedidosCompra />} />
                         <Route path="/admin/SetorCompras" element={<SetorCompras />} />
                         <Route path="/admin/DashboardBI" element={<DashboardBI />} />
                         <Route path="/admin/DashboardGerente" element={<DashboardGerente />} />

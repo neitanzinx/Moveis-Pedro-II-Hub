@@ -25,6 +25,9 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 
 // Chaves para persistência
 const PDV_STATE_KEY = 'pdv_state';
@@ -229,7 +232,8 @@ export default function PDV() {
           },
           desconto: parsed.desconto || 0,
           observacoes: parsed.observacoes || "",
-          pagamentoEntrega: parsed.pagamentoEntrega || { ativo: false, valor: 0, forma: "" }
+          pagamentoEntrega: parsed.pagamentoEntrega || { ativo: false, valor: 0, forma: "" },
+          aguardandoLiberacao: parsed.aguardandoLiberacao || false
         };
       }
     } catch (e) { }
@@ -251,15 +255,18 @@ export default function PDV() {
   const [desconto, setDesconto] = useState(initialState?.desconto || 0);
   const [observacoes, setObservacoes] = useState(initialState?.observacoes || "");
   const [pagamentoEntrega, setPagamentoEntrega] = useState(initialState?.pagamentoEntrega || { ativo: false, valor: 0, forma: "" });
+  const [preferenciasEntrega, setPreferenciasEntrega] = useState(initialState?.preferenciasEntrega || { dias: [], turnos: [], obs: "" });
+  const [aguardandoLiberacao, setAguardandoLiberacao] = useState(initialState?.aguardandoLiberacao || false);
+  const [modalPreferenciasOpen, setModalPreferenciasOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [savingOrcamento, setSavingOrcamento] = useState(false);
   const [cupomAplicado, setCupomAplicado] = useState(null);
   const [tokenGerencial, setTokenGerencial] = useState(null);
 
   useEffect(() => {
-    const state = { etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega };
+    const state = { etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao };
     sessionStorage.setItem(PDV_STATE_KEY, JSON.stringify(state));
-  }, [etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega]);
+  }, [etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao]);
 
   useEffect(() => {
     if (user && !initialState) {
@@ -376,12 +383,16 @@ export default function PDV() {
 
       return [...prev, {
         produto_id: produto.id,
-        produto_nome: produto.nome,
+        produto_nome: `${produto.nome}${produto.modelo_referencia ? ' ' + produto.modelo_referencia : ''}`,
         quantidade: 1,
         preco_unitario: produto.preco_venda,
         subtotal: produto.preco_venda,
         // Default to 'retira' for showroom items, otherwise respect product default or 'montado'
-        tipo_montagem: (produto.origem === 'mostruario') ? 'retira' : (produto.tipo_entrega_padrao || 'montado'),
+        // Se for "nao_requer_montagem", inicia como "sem_montagem" (apenas entrega)
+        tipo_montagem: (produto.origem === 'mostruario')
+          ? 'retira'
+          : (produto.tipo_entrega_padrao === 'nao_requer_montagem' ? 'sem_montagem' : (produto.tipo_entrega_padrao || 'montado')),
+        tipo_entrega_padrao: produto.tipo_entrega_padrao, // Salvar para usar no carrinho
         origem: produto.origem, // Store origin used for delivery flagging
         // Preserve metadata for provisional products
         is_solicitacao: produto.is_solicitacao,
@@ -465,6 +476,18 @@ export default function PDV() {
       }
     }
 
+    // --- NOVA VALIDAÇÃO DE ENDEREÇO OBRIGATÓRIO ---
+    // Se NÃO for retirada na loja, o cliente precisa ter endereço
+    if (configVenda.prazo !== "Retirado na loja") {
+      const enderecoCompleto = construirEnderecoEntrega(clienteSelecionado);
+      if (!enderecoCompleto || enderecoCompleto === "Endereço a definir") {
+        isProcessingRef.current = false;
+        setLoading(false);
+        return toast.error("Endereço obrigatório para entrega. Cadastre o endereço do cliente ou selecione 'Retirado na loja'.");
+      }
+    }
+
+
     // 🖨️ ABRIR JANELA DE IMPRESSÃO AGORA (antes de qualquer operação async)
     // Isso evita que o navegador bloqueie o popup
     const printWindow = prepararNotaPedidoPDF();
@@ -546,6 +569,13 @@ export default function PDV() {
         const limite = new Date();
         limite.setDate(limite.getDate() + dias);
         const enderecoCompleto = construirEnderecoEntrega(clienteSelecionado);
+        const itensParaMontagemInterna = itens
+          .filter(i => i.tipo_montagem === 'montado')
+          .map(i => ({
+            produto_nome: i.produto_nome,
+            quantidade: i.quantidade,
+            montado: false
+          }));
 
         const entregaCriada = await base44.entities.Entrega.create({
           venda_id: vendaCriada.id,
@@ -554,11 +584,13 @@ export default function PDV() {
           cliente_telefone: clienteSelecionado.telefone,
           endereco_entrega: enderecoCompleto,
           data_limite: limite.toISOString().split('T')[0],
-          status: "Pendente",
+          status: aguardandoLiberacao ? "Aguardando Liberação" : "Pendente",
+          itens_montagem_interna: itensParaMontagemInterna,
           item_mostruario: itens.some(i => i.origem === 'mostruario'), // Flag if any item is showroom
           pagamento_na_entrega: pagamentoEntrega.ativo,
           valor_a_receber: pagamentoEntrega.ativo ? pagamentoEntrega.valor : 0,
-          forma_pagamento_entrega: pagamentoEntrega.ativo ? pagamentoEntrega.forma : null
+          forma_pagamento_entrega: pagamentoEntrega.ativo ? pagamentoEntrega.forma : null,
+          preferencias_entrega: preferenciasEntrega // Salva as preferências
         });
 
         // Criar itens de montagem conforme o tipo selecionado
@@ -594,7 +626,7 @@ export default function PDV() {
               numero_pedido: novoNumero
             });
           }
-          // Se for 'retira', não cria montagem
+          // Se for 'retira' ou 'sem_montagem', não cria montagem
         }
       } else {
         // Cliente Retira na Loja - Criar registro para arquivo
@@ -809,6 +841,8 @@ export default function PDV() {
     setObservacoes("");
     setPagamentoEntrega({ ativo: false, valor: 0, forma: "" });
     setConfigVenda(prev => ({ ...prev, data: new Date().toISOString().split('T')[0], prazo: "" }));
+    setPreferenciasEntrega({ dias: [], turnos: [], obs: "" });
+    setAguardandoLiberacao(false);
     setCupomAplicado(null);
     setEtapa(1);
     sessionStorage.removeItem(PDV_STATE_KEY);
@@ -976,6 +1010,117 @@ export default function PDV() {
                     </Select>
                   </div>
                 </div>
+
+                {/* Opção Aguardando Liberação */}
+                <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800 rounded-lg flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="aguardar-liberacao"
+                      checked={aguardandoLiberacao}
+                      onCheckedChange={setAguardandoLiberacao}
+                    />
+                    <Label htmlFor="aguardar-liberacao" className="text-sm cursor-pointer text-blue-800 dark:text-blue-300">
+                      <strong>Aguardar Liberação</strong>
+                      <p className="text-[10px] opacity-70">Marque se o cliente pediu para segurar a entrega (ex: obra)</p>
+                    </Label>
+                  </div>
+                  {aguardandoLiberacao && <Badge className="bg-blue-500">Ativado</Badge>}
+                </div>
+
+                {/* Botão de Restrições de Entrega */}
+                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-neutral-800">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setModalPreferenciasOpen(true)}
+                    className={`w-full justify-between ${(preferenciasEntrega.dias.length > 0 || preferenciasEntrega.turnos.length > 0 || preferenciasEntrega.obs) ? 'border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800' : ''}`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Calendar className="w-4 h-4" />
+                      Preferências de Entrega / Restrições
+                    </span>
+                    {(preferenciasEntrega.dias.length > 0 || preferenciasEntrega.turnos.length > 0 || preferenciasEntrega.obs) && (
+                      <Badge variant="secondary" className="bg-amber-200 text-amber-800 border-amber-300 hover:bg-amber-200">
+                        Definido
+                      </Badge>
+                    )}
+                  </Button>
+                </div>
+
+                {/* Modal de Preferências */}
+                <Dialog open={modalPreferenciasOpen} onOpenChange={setModalPreferenciasOpen}>
+                  <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                      <DialogTitle>Restrições de Entrega</DialogTitle>
+                      <DialogDescription>
+                        Informe quando o cliente <strong>PODE</strong> receber.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                      <div className="space-y-3">
+                        <Label>Dias da Semana Permitidos</Label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((dia, idx) => (
+                            <div key={idx} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`dia-${idx}`}
+                                checked={preferenciasEntrega.dias.includes(idx + 1)} // 1=Seg, 6=Sab
+                                onCheckedChange={(checked) => {
+                                  setPreferenciasEntrega(prev => ({
+                                    ...prev,
+                                    dias: checked
+                                      ? [...prev.dias, idx + 1]
+                                      : prev.dias.filter(d => d !== idx + 1)
+                                  }));
+                                }}
+                              />
+                              <label htmlFor={`dia-${idx}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
+                                {dia}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <Label>Turnos Permitidos</Label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {['Manhã', 'Tarde', 'Comercial'].map((turno) => (
+                            <div key={turno} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`turno-${turno}`}
+                                checked={preferenciasEntrega.turnos.includes(turno)}
+                                onCheckedChange={(checked) => {
+                                  setPreferenciasEntrega(prev => ({
+                                    ...prev,
+                                    turnos: checked
+                                      ? [...prev.turnos, turno]
+                                      : prev.turnos.filter(t => t !== turno)
+                                  }));
+                                }}
+                              />
+                              <label htmlFor={`turno-${turno}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
+                                {turno}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Observação da Restrição</Label>
+                        <Textarea
+                          placeholder="Ex: Porteiro recebe, ou ligar antes..."
+                          value={preferenciasEntrega.obs}
+                          onChange={(e) => setPreferenciasEntrega(prev => ({ ...prev, obs: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button onClick={() => setModalPreferenciasOpen(false)}>Confirmar</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </div>
               <div className="bg-gray-100 dark:bg-neutral-800/50 rounded-xl p-3">
                 <div className="flex items-center justify-between">

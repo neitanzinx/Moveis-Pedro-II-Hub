@@ -11,8 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
   CheckCircle, Clock, Package, User, Calendar,
+
   ChevronLeft, ChevronRight, Truck, PartyPopper, ArrowDown, Sofa, AlertTriangle,
-  UserCheck, Users, CheckSquare, Loader2
+  UserCheck, Users, CheckSquare, Loader2, RotateCcw, MoreVertical, ArrowRightLeft
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -191,34 +192,35 @@ export default function MontagemInterna() {
     setModalAtribuirOpen(true);
   };
 
-  // Atribuir montador
+  // Função para atribuir montador (com PIN se já houver um)
   const atribuirMontador = async () => {
     if (!montagemSelecionada) return;
 
     const executarAtribuicao = async () => {
-      const montador = montadoresInternos.find(m => m.id.toString() === montadorSelecionado);
+      try {
+        const id = montadorSelecionado === 'unassigned' ? null : parseInt(montadorSelecionado);
+        const montador = montadoresInternos.find(m => m.id === id);
 
-      await updateMutation.mutateAsync({
-        id: montagemSelecionada.id,
-        data: {
-          montador_id: montador?.id?.toString() || null,
-          montador_nome: montador?.nome || null
-        }
-      });
+        await updateMutation.mutateAsync({
+          id: montagemSelecionada.id,
+          data: {
+            montador_id: id,
+            montador_nome: montador ? montador.nome_completo : null
+          }
+        });
 
-      if (montador) {
-        toast.success(`Montagem atribuída a ${montador.nome}!`);
-      } else {
-        toast.info('Atribuição removida');
+        setModalAtribuirOpen(false);
+        setMontadorSelecionado("");
+        toast.success("Atribuição atualizada com sucesso!");
+      } catch (error) {
+        console.error('Erro ao atribuir montador:', error);
+        toast.error('Erro ao atribuir montador');
       }
-
-      setModalAtribuirOpen(false);
-      setMontagemSelecionada(null);
-      setMontadorSelecionado('');
     };
 
-    if (montadorSelecionado) {
-      solicitarPin(montadorSelecionado, executarAtribuicao);
+    // Se já existe um montador atribuído, pedir PIN dele para autorizar troca/remoção
+    if (montagemSelecionada.montador_id) {
+      solicitarPin(montagemSelecionada.montador_id, executarAtribuicao);
     } else {
       executarAtribuicao();
     }
@@ -316,6 +318,64 @@ export default function MontagemInterna() {
     };
 
     solicitarPin(montadorId, executarLote);
+  };
+
+  // Transferir para montagem externa
+  const transferirParaExterno = async (montagem, transferirTodos = false) => {
+    // Verificações de segurança
+    if (montagem.montador_id) {
+      toast.error('Não é possível transferir um item já atribuído a um montador interno.');
+      return;
+    }
+    if (montagem.status === 'concluida') {
+      toast.error('Não é possível transferir um item já montado.');
+      return;
+    }
+
+    // Definir quais itens serão afetados
+    let itensParaTransferir = [montagem];
+
+    if (transferirTodos && montagem.venda_id) {
+      // Buscar todos os itens dessa venda que estão pendentes e são internos
+      itensParaTransferir = todasMontagens.filter(m =>
+        m.venda_id === montagem.venda_id &&
+        m.tipo_montagem === 'interna' &&
+        !m.montador_id &&
+        m.status !== 'concluida'
+      );
+    }
+
+    if (itensParaTransferir.length === 0) {
+      toast.info('Nenhum item elegível para transferência.');
+      return;
+    }
+
+    const mensagemConfirmacao = transferirTodos
+      ? `Transferir ${itensParaTransferir.length} itens deste pedido para Montagem Externa?`
+      : `Transferir "${montagem.produto_nome}" para Montagem Externa?`;
+
+    // Usar toast.promise para feedback visual
+    toast.promise(
+      Promise.all(
+        itensParaTransferir.map(item =>
+          updateMutation.mutateAsync({
+            id: item.id,
+            data: {
+              tipo_montagem: 'terceirizada',
+              montador_id: null,
+              montador_nome: null,
+              status: 'pendente',
+              updated_at: new Date().toISOString()
+            }
+          })
+        )
+      ),
+      {
+        loading: 'Transferindo para montadores externos...',
+        success: (data) => `${data.length} item(ns) transferido(s) com sucesso!`,
+        error: 'Erro ao transferir itens'
+      }
+    );
   };
 
   // Resumo por montador
@@ -453,43 +513,6 @@ export default function MontagemInterna() {
           {totalPendentes} pendentes
         </Badge>
       </div>
-
-      {/* Resumo por Montador */}
-      {resumoPorMontador.length > 0 && (
-        <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 border-blue-200">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Users className="w-5 h-5 text-blue-600" />
-              <span className="font-medium text-blue-900 dark:text-blue-100">Montadores</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {resumoPorMontador.map(r => (
-                <div key={r.id} className="flex items-center gap-2">
-                  <Badge
-                    className={`${r.id === 'nao-atribuida'
-                      ? 'bg-orange-100 text-orange-700'
-                      : 'bg-blue-100 text-blue-700'
-                      }`}
-                  >
-                    {r.nome}: {r.pendentes}
-                  </Badge>
-                  {r.id !== 'nao-atribuida' && r.pendentes > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 text-xs text-green-600 hover:text-green-700 hover:bg-green-100"
-                      onClick={() => concluirEmLote(r.id.toString())}
-                    >
-                      <CheckSquare className="w-3 h-3 mr-1" />
-                      Concluir todas
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Navegação Semanal */}
       <Card>
@@ -702,6 +725,7 @@ export default function MontagemInterna() {
                       <th className="text-left py-2 px-3 text-gray-600 font-medium">Montador</th>
                       <th className="text-left py-2 px-3 text-gray-600 font-medium">Data Entrega</th>
                       <th className="text-left py-2 px-3 text-gray-600 font-medium">Status</th>
+                      <th className="text-right py-2 px-3 text-gray-600 font-medium">Ações</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -758,6 +782,17 @@ export default function MontagemInterna() {
                               ✓ Pronto
                             </Badge>
                           </td>
+                          <td className="py-2 px-3 text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-gray-400 hover:text-orange-500 hover:bg-orange-50"
+                              onClick={() => toggleMontado(montagem)}
+                              title="Retornar para pendente"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </Button>
+                          </td>
                         </tr>
                       );
                     })}
@@ -800,14 +835,14 @@ export default function MontagemInterna() {
                   <SelectValue placeholder="Escolha um montador..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">
+                  <SelectItem value="unassigned">
                     <span className="text-gray-500">Nenhum (remover atribuição)</span>
                   </SelectItem>
                   {montadoresInternos.map(montador => (
                     <SelectItem key={montador.id} value={montador.id.toString()}>
                       <div className="flex items-center gap-2">
                         <User className="w-4 h-4 text-blue-600" />
-                        {montador.nome}
+                        {montador.nome_completo}
                       </div>
                     </SelectItem>
                   ))}

@@ -349,17 +349,22 @@ export function abrirNotaInternaPDF(venda, cliente, vendedor) {
   }, 500);
 }
 
-export function enviarWhatsApp(telefone, numeroPedido, valorTotal, nomeCliente) {
+export function enviarWhatsApp(telefone, numeroPedido, valorTotal, nomeCliente, prazoEntrega = '') {
   // Limpa o telefone para formato internacional
   let tel = telefone?.replace(/\D/g, '') || '';
   if (tel.length === 11) tel = '55' + tel;
   if (tel.length === 10) tel = '55' + tel;
 
+  const isRetirada = prazoEntrega === 'Retirado na loja' || prazoEntrega === 'Retirada';
+
   const mensagem = encodeURIComponent(
     `Olá ${nomeCliente}! 🪑\n\n` +
     `Seu pedido *#${numeroPedido}* foi registrado com sucesso!\n\n` +
     `💰 *Valor Total:* R$ ${valorTotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n\n` +
-    `Em breve entraremos em contato para agendar a entrega.\n\n` +
+    (isRetirada
+      ? `Esperamos que você aproveite muito sua compra! 😍`
+      : `Em breve entraremos em contato para agendar a entrega.`
+    ) + `\n\n` +
     `Obrigado pela preferência!\n` +
     `*Móveis Pedro II*`
   );

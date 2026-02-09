@@ -30,7 +30,7 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleMontag
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <p className="font-medium text-gray-800 dark:text-gray-200 line-clamp-1">{item.produto_nome}</p>
+                  <p className="font-medium text-gray-800 dark:text-gray-200">{item.produto_nome}</p>
                   {item.is_solicitacao && (
                     <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800">
                       Novo
@@ -59,7 +59,7 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleMontag
           </div>
 
           {/* Toggle de Montagem */}
-          {onToggleMontagem && (
+          {onToggleMontagem && item.tipo_entrega_padrao !== 'nao_requer_montagem' && (
             <div className="mt-2 pt-2 border-t border-gray-100 dark:border-neutral-800">
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-gray-500 mb-1">Tipo de Entrega/Montagem:</span>
@@ -96,6 +96,46 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleMontag
                       : 'bg-gray-50 text-gray-500 dark:bg-neutral-800 dark:text-gray-400 hover:bg-orange-50'
                       }`}
                     title="Cliente retira na loja (sem entrega ou montagem)"
+                  >
+                    <Store className="w-3 h-3" />
+                    Cliente Retira
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Toggle para PRODUTOS QUE NÃO REQUEREM MONTAGEM */}
+          {onToggleMontagem && item.tipo_entrega_padrao === 'nao_requer_montagem' && (
+            <div className="mt-2 pt-2 border-t border-gray-100 dark:border-neutral-800">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-500">Tipo de Entrega:</span>
+                  <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-blue-50 text-blue-600 border-blue-200">
+                    Não requer montagem
+                  </Badge>
+                </div>
+                <div className="flex gap-1 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => onToggleMontagem(index, 'sem_montagem')}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${item.tipo_montagem === 'sem_montagem'
+                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border border-green-300'
+                      : 'bg-gray-50 text-gray-500 dark:bg-neutral-800 dark:text-gray-400 hover:bg-green-50'
+                      }`}
+                    title="Entregar para o cliente (sem serviço de montagem)"
+                  >
+                    <Truck className="w-3 h-3" />
+                    Entregar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onToggleMontagem(index, 'retira')}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${item.tipo_montagem === 'retira'
+                      ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border border-orange-300'
+                      : 'bg-gray-50 text-gray-500 dark:bg-neutral-800 dark:text-gray-400 hover:bg-orange-50'
+                      }`}
+                    title="Cliente retira na loja"
                   >
                     <Store className="w-3 h-3" />
                     Cliente Retira

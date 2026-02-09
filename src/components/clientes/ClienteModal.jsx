@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Plus, Trash2, Search, Cake, MapPin, Truck } from "lucide-react";
+import { Loader2, Plus, Trash2, Search, Cake, MapPin, Truck, Calendar, Ban } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoading, clientes = [] }) {
@@ -48,6 +48,9 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
     contatos: [],
     observacoes: "",
     data_nascimento: "",
+    // Preferências de Entrega
+    dias_bloqueados_entrega: [], // [0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sab]
+    turno_bloqueado_entrega: "", // "manha", "tarde", ""
   });
 
   const [buscandoCep, setBuscandoCep] = useState(false);
@@ -87,6 +90,10 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
         contatos: cliente.contatos || [],
         observacoes: cliente.observacoes || "",
         data_nascimento: cliente.data_nascimento || "",
+        // Preferências de Entrega
+        // Preferências de Entrega (Garante que sejam números)
+        dias_bloqueados_entrega: cliente.dias_bloqueados_entrega?.map(d => Number(d)) || [],
+        turno_bloqueado_entrega: cliente.turno_bloqueado_entrega || "",
       });
     } else {
       setFormData({
@@ -117,6 +124,8 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
         contatos: [],
         observacoes: "",
         data_nascimento: "",
+        dias_bloqueados_entrega: [],
+        turno_bloqueado_entrega: "",
       });
     }
   }, [cliente, isOpen]);
@@ -159,6 +168,19 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
     return valor.toLowerCase().replace(/(?:^|\s|["'([{])+\S/g, match => match.toUpperCase());
   };
 
+  // Função auxiliar para buscar com timeout
+  const fetchWithTimeout = async (resource, options = {}) => {
+    const { timeout = 5000 } = options;
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    const response = await fetch(resource, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  };
+
   const buscarCEP = async (cep, isEntrega = false) => {
     const cepLimpo = cep.replace(/\D/g, '');
     if (cepLimpo.length !== 8) return;
@@ -169,31 +191,61 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
       setBuscandoCep(true);
     }
 
-    try {
-      const response = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
-      const data = await response.json();
+    const preencherDados = (dados) => {
+      if (isEntrega) {
+        setFormData(prev => ({
+          ...prev,
+          endereco_entrega_rua: formatarTexto(dados.logradouro || dados.street || ""),
+          endereco_entrega_bairro: formatarTexto(dados.bairro || dados.neighborhood || ""),
+          endereco_entrega_cidade: formatarTexto(dados.localidade || dados.city || ""),
+          endereco_entrega_estado: dados.uf || dados.state || "",
+        }));
+      } else {
+        setFormData(prev => ({
+          ...prev,
+          endereco: formatarTexto(dados.logradouro || dados.street || ""),
+          bairro: formatarTexto(dados.bairro || dados.neighborhood || ""),
+          cidade: formatarTexto(dados.localidade || dados.city || ""),
+          estado: dados.uf || dados.state || "",
+        }));
+      }
+    };
 
-      if (!data.erro) {
+    try {
+      // Tentativa 1: ViaCEP
+      console.log(`🔍 Buscando CEP ${cepLimpo} via ViaCEP...`);
+      const response = await fetchWithTimeout(`https://viacep.com.br/ws/${cepLimpo}/json/`, { timeout: 3000 });
+      if (!response.ok) throw new Error("ViaCEP indisponível");
+
+      const data = await response.json();
+      if (data.erro) {
+        // Se o ViaCEP retornar { erro: true }, o CEP não existe, não adianta tentar outro serviço
+        console.warn("⚠️ CEP não encontrado no ViaCEP.");
+        // Opcional: tentar BrasilAPI mesmo assim caso seja um CEP muito novo
+        throw new Error("CEP não encontrado");
+      }
+
+      preencherDados(data);
+      console.log("✅ CEP encontrado via ViaCEP");
+
+    } catch (errorViaCep) {
+      console.warn(`⚠️ Falha no ViaCEP (${errorViaCep.message}). Tentando BrasilAPI...`);
+
+      try {
+        // Tentativa 2: BrasilAPI
+        const responseBrasil = await fetchWithTimeout(`https://brasilapi.com.br/api/cep/v1/${cepLimpo}`, { timeout: 3000 });
+        if (!responseBrasil.ok) throw new Error("BrasilAPI indisponível");
+
+        const dataBrasil = await responseBrasil.json();
+        preencherDados(dataBrasil);
+        console.log("✅ CEP encontrado via BrasilAPI");
+
+      } catch (errorBrasil) {
+        console.error("❌ Erro em todos os serviços de CEP:", errorBrasil);
         if (isEntrega) {
-          setFormData(prev => ({
-            ...prev,
-            endereco_entrega_rua: formatarTexto(data.logradouro || ""),
-            endereco_entrega_bairro: formatarTexto(data.bairro || ""),
-            endereco_entrega_cidade: formatarTexto(data.localidade || ""),
-            endereco_entrega_estado: data.uf || "",
-          }));
-        } else {
-          setFormData(prev => ({
-            ...prev,
-            endereco: formatarTexto(data.logradouro || ""),
-            bairro: formatarTexto(data.bairro || ""),
-            cidade: formatarTexto(data.localidade || ""),
-            estado: data.uf || "",
-          }));
+          // Opcional: mostrar erro visual
         }
       }
-    } catch (error) {
-      console.error("Erro ao buscar CEP:", error);
     } finally {
       if (isEntrega) {
         setBuscandoCepEntrega(false);
@@ -307,15 +359,16 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
     onSave(formData);
   };
 
-  // Componente reutilizável de campos de endereço
-  const CamposEndereco = ({ prefix = "", disabled = false }) => {
+  // Render function reutilizável de campos de endereço (convertido de componente para evitar remount)
+  const renderCamposEndereco = (prefix = "", disabled = false) => {
     const getField = (field) => prefix ? `${prefix}_${field}` : field;
     const getValue = (field) => formData[getField(field)] || "";
     const setValue = (field, value) => setFormData(prev => ({ ...prev, [getField(field)]: value }));
 
     const isEntrega = prefix === "endereco_entrega";
-    const cepField = isEntrega ? "endereco_entrega_cep" : "cep";
-    const ruaField = isEntrega ? "endereco_entrega_rua" : "endereco";
+
+    // Simplificando lógica de busca
+    const handleBuscaCEP = () => buscarCEP(getValue(isEntrega ? "cep" : "cep"), isEntrega);
 
     return (
       <div className="space-y-4">
@@ -326,14 +379,14 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
               <Input
                 value={getValue(isEntrega ? "cep" : "cep")}
                 onChange={(e) => setValue(isEntrega ? "cep" : "cep", e.target.value)}
-                onBlur={(e) => !disabled && buscarCEP(e.target.value, isEntrega)}
+                onBlur={(e) => !disabled && handleBuscaCEP()}
                 placeholder="00000-000"
                 disabled={disabled}
               />
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => buscarCEP(getValue(isEntrega ? "cep" : "cep"), isEntrega)}
+                onClick={handleBuscaCEP}
                 disabled={disabled || (isEntrega ? buscandoCepEntrega : buscandoCep)}
               >
                 {(isEntrega ? buscandoCepEntrega : buscandoCep) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
@@ -559,7 +612,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
                   <MapPin className="w-4 h-4" />
                   Endereço do Cliente
                 </h4>
-                <CamposEndereco />
+                {renderCamposEndereco()}
               </div>
 
               {/* Endereço de Entrega */}
@@ -618,7 +671,79 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
                     </p>
                   </div>
                 ) : (
-                  <CamposEndereco prefix="endereco_entrega" />
+                  renderCamposEndereco("endereco_entrega")
+                )}
+              </div>
+
+              {/* Preferências de Entrega */}
+              <div className="border-t pt-4 mt-4">
+                <h4 className="font-semibold mb-3 flex items-center gap-2" style={{ color: '#07593f' }}>
+                  <Ban className="w-4 h-4" />
+                  Restrições de Entrega
+                </h4>
+                <p className="text-xs text-gray-500 mb-3">
+                  Marque os dias em que o cliente <strong>NÃO PODE</strong> receber entregas:
+                </p>
+
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {[
+                    { dia: 0, nome: 'Dom' },
+                    { dia: 1, nome: 'Seg' },
+                    { dia: 2, nome: 'Ter' },
+                    { dia: 3, nome: 'Qua' },
+                    { dia: 4, nome: 'Qui' },
+                    { dia: 5, nome: 'Sex' },
+                    { dia: 6, nome: 'Sáb' }
+                  ].map(({ dia, nome }) => {
+                    const bloqueado = formData.dias_bloqueados_entrega?.includes(dia);
+                    return (
+                      <button
+                        key={dia}
+                        type="button"
+                        onClick={() => {
+                          const atual = formData.dias_bloqueados_entrega || [];
+                          const novo = bloqueado
+                            ? atual.filter(d => d !== dia)
+                            : [...atual, dia];
+                          setFormData({ ...formData, dias_bloqueados_entrega: novo });
+                        }}
+                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${bloqueado
+                          ? 'bg-red-100 text-red-700 border-2 border-red-300'
+                          : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:border-gray-300'
+                          }`}
+                      >
+                        {bloqueado && <Ban className="w-3 h-3 inline mr-1" />}
+                        {nome}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <Label className="text-sm text-red-700 font-bold">Turno que NÃO pode receber (Bloqueado):</Label>
+                  <Select
+                    value={formData.turno_bloqueado_entrega || "nenhum"}
+                    onValueChange={(value) => setFormData({
+                      ...formData,
+                      turno_bloqueado_entrega: value === "nenhum" ? "" : value
+                    })}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Nenhum" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="nenhum">Nenhum</SelectItem>
+                      <SelectItem value="manha">Manhã</SelectItem>
+                      <SelectItem value="tarde">Tarde</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {(formData.dias_bloqueados_entrega?.length > 0 || formData.turno_bloqueado_entrega) && (
+                  <div className="mt-3 flex items-center gap-2 text-xs text-red-600 font-medium animate-pulse">
+                    <Ban className="w-3 h-3" />
+                    <span>Restrições ativas para este cliente.</span>
+                  </div>
                 )}
               </div>
 

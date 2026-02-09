@@ -30,28 +30,31 @@ import {
   Upload,
   ChevronDown,
   ChevronUp,
-  Ruler
+  Ruler,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
 import ProdutoQuickEditModal from "@/components/produtos/ProdutoQuickEditModal";
-import ProdutoVariacoesModal from "@/components/produtos/ProdutoVariacoesModal";
 import ImportProdutosModal from "@/components/produtos/ImportProdutosModal";
 import { formatPrice } from "@/utils/productFormatters";
+import { getColorHex } from "@/components/produtos/FurnitureColorPicker";
 import { CATEGORIAS } from "@/constants/productConstants";
+import ProductQualityBadge from "@/components/produtos/ProductQualityBadge";
 
 export default function Produtos() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategoria, setSelectedCategoria] = useState("todas");
   const [selectedStatus, setSelectedStatus] = useState("todos");
   const [viewMode, setViewMode] = useState("grid"); // grid ou list
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 100;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQuickEditOpen, setIsQuickEditOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [isVariacoesModalOpen, setIsVariacoesModalOpen] = useState(false);
   const [editingProduto, setEditingProduto] = useState(null);
-  const [selectedProdutoPai, setSelectedProdutoPai] = useState(null);
   const [savingProduto, setSavingProduto] = useState(false);
   const { user, loading } = useAuth();
 
@@ -92,124 +95,82 @@ export default function Produtos() {
 
   // Categorias únicas dos produtos
   const categoriasDisponiveis = useMemo(() => {
-    // Pegar categorias apenas dos produtos pai
-    const cats = new Set((produtos || []).filter(p => p.is_parent === true).map(p => p.categoria).filter(Boolean));
+    // Pegar categorias de todos os produtos
+    const cats = new Set((produtos || []).map(p => p.categoria).filter(Boolean));
     return Array.from(cats).sort();
   }, [produtos]);
 
-  // Mapa de informações das variações por produto pai (contagem, preços, cores e estoque)
-  const variationInfoMap = useMemo(() => {
-    const map = {};
-    (produtos || []).forEach(p => {
-      if (p.parent_id) {
-        if (!map[p.parent_id]) {
-          map[p.parent_id] = {
-            count: 0,
-            prices: [],
-            minPrice: null,
-            maxPrice: null,
-            allSamePrice: true,
-            colorStock: {}, // { cor: estoque }
-            totalStock: 0
-          };
-        }
-        map[p.parent_id].count += 1;
-        if (p.preco_venda) {
-          map[p.parent_id].prices.push(p.preco_venda);
-        }
-        if (p.cor) {
-          // Calcular estoque total: CD + todas as lojas mostruário
-          const estoqueTotal = (p.estoque_cd || 0) +
-            (p.estoque_mostruario_mega_store || 0) +
-            (p.estoque_mostruario_centro || 0) +
-            (p.estoque_mostruario_ponte_branca || 0) +
-            (p.estoque_mostruario_futura || 0);
-          if (!map[p.parent_id].colorStock[p.cor]) {
-            map[p.parent_id].colorStock[p.cor] = 0;
-          }
-          map[p.parent_id].colorStock[p.cor] += estoqueTotal;
-          map[p.parent_id].totalStock += estoqueTotal;
-        }
-      }
-    });
-    // Calcular min, max e verificar se todos os preços são iguais
-    Object.keys(map).forEach(parentId => {
-      const info = map[parentId];
-      if (info.prices.length > 0) {
-        info.minPrice = Math.min(...info.prices);
-        info.maxPrice = Math.max(...info.prices);
-        info.allSamePrice = info.minPrice === info.maxPrice;
-      }
-      // Converter colorStock para lista com formato "COR (QTD)"
-      info.colorList = Object.entries(info.colorStock).map(([cor, qtd]) => `${cor} (${qtd})`);
-      info.colorNames = Object.keys(info.colorStock);
-    });
-    return map;
+  // Products are now treated as unique entities, so no parenting logic needed
+  const displayProducts = useMemo(() => {
+    return produtos || [];
   }, [produtos]);
 
-  // Atalho para contagem (compatibilidade)
-  const variationCountMap = useMemo(() => {
-    const map = {};
-    Object.keys(variationInfoMap).forEach(id => {
-      map[id] = variationInfoMap[id].count;
-    });
-    return map;
-  }, [variationInfoMap]);
-
-  // Estatísticas - apenas produtos pai
+  // Estatísticas
   const stats = useMemo(() => {
-    // Garantir que is_parent seja tratado como booleano
-    const produtosPai = (produtos || []).filter(p => !!p.is_parent);
-    const variacoes = (produtos || []).filter(p => !p.is_parent && p.parent_id);
+    // Agora "Total" conta o que está na tela (variações + standalone)
+    const items = displayProducts;
     return {
-      total: produtosPai.length,
-      variacoes: variacoes.length,
-      ativos: produtosPai.filter(p => p.ativo !== false).length,
-      inativos: produtosPai.filter(p => p.ativo === false).length,
-      semFoto: produtosPai.filter(p => !p.fotos?.length).length,
-      semPreco: produtosPai.filter(p => !p.preco_venda).length,
+      total: items.length,
+      ativos: items.filter(p => p.ativo !== false).length,
+      inativos: items.filter(p => p.ativo === false).length,
+      semFoto: items.filter(p => !p.fotos?.length).length,
+      semPreco: items.filter(p => !p.preco_venda).length,
     };
-  }, [produtos]);
+  }, [displayProducts]);
 
-  // Filtragem - apenas produtos pai
+
+  // Filtragem
   const filteredProdutos = useMemo(() => {
-    return (produtos || [])
-      .filter(produto => !!produto.is_parent) // Filtro robusto para Truthy
-      .filter(produto => {
-        // Busca multi-termo: cada palavra deve estar em algum campo
-        const searchTerms = searchTerm.toLowerCase().split(/\s+/).filter(t => t.length > 0);
-        const searchableText = [
-          produto.nome,
-          produto.modelo_referencia,
-          produto.categoria,
-          produto.ambiente,
-          produto.codigo_barras,
-          produto.sku,
-          produto.fornecedor_nome,
-          produto.cor,
-          String(produto.largura || ''),
-          String(produto.altura || '')
-        ].filter(Boolean).join(' ').toLowerCase();
+    return displayProducts.filter(produto => {
+      // Busca multi-termo
+      const searchTerms = searchTerm.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+      const searchableText = [
+        produto.nome,
+        produto.modelo_referencia,
+        produto.categoria,
+        produto.ambiente,
+        produto.codigo_barras,
+        produto.sku,
+        produto.fornecedor_nome,
+        produto.cor,
+        produto.tamanho,
+        String(produto.largura || ''),
+        String(produto.altura || '')
+      ].filter(Boolean).join(' ').toLowerCase();
 
-        const matchesSearch = searchTerms.length === 0 ||
-          searchTerms.every(term => searchableText.includes(term));
+      const matchesSearch = searchTerms.length === 0 ||
+        searchTerms.every(term => searchableText.includes(term));
 
-        const matchesCategoria = selectedCategoria === "todas" || produto.categoria === selectedCategoria;
+      const matchesCategoria = selectedCategoria === "todas" || produto.categoria === selectedCategoria;
 
-        const matchesStatus =
-          selectedStatus === "todos" ||
-          (selectedStatus === "ativo" && produto.ativo !== false) ||
-          (selectedStatus === "inativo" && produto.ativo === false) ||
-          (selectedStatus === "semFoto" && !produto.fotos?.length) ||
-          (selectedStatus === "atencao" && produto.requer_atencao);
+      const matchesStatus =
+        selectedStatus === "todos" ||
+        (selectedStatus === "ativo" && produto.ativo !== false) ||
+        (selectedStatus === "inativo" && produto.ativo === false) ||
+        (selectedStatus === "semFoto" && !produto.fotos?.length) ||
+        (selectedStatus === "atencao" && (produto.requer_atencao || !produto.preco_venda));
 
-        return matchesSearch && matchesCategoria && matchesStatus;
-      });
-  }, [produtos, searchTerm, selectedCategoria, selectedStatus]);
+      return matchesSearch && matchesCategoria && matchesStatus;
+    });
+  }, [displayProducts, searchTerm, selectedCategoria, selectedStatus]);
+
+  // Resetar página quando filtros mudarem
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedCategoria, selectedStatus]);
+
+  // Paginação
+  const paginatedProdutos = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredProdutos.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredProdutos, currentPage]);
+
+  const totalPages = Math.ceil(filteredProdutos.length / itemsPerPage);
 
   const handleEdit = (produto) => {
-    setEditingProduto(produto);
-    setIsQuickEditOpen(true);
+    // Edição direta - sem lógica de pai/filho
+    setEditingProduto({ ...produto, nomeDisplay: produto.nome }); // Mantém compatibilidade se forms usarem nomeDisplay
+    setIsModalOpen(true);
   };
 
   const handleQuickSave = async (data) => {
@@ -353,16 +314,7 @@ export default function Produtos() {
             </CardContent>
           </Card>
 
-          <Card
-            className={`cursor-pointer transition-all ${selectedStatus === 'comVariacoes' ? 'ring-2 ring-green-500' : 'hover:shadow-md'}`}
-            onClick={() => setSelectedStatus('comVariacoes')}
-          >
-            <CardContent className="p-4 text-center">
-              <Palette className="w-6 h-6 mx-auto mb-1 text-purple-500" />
-              <p className="text-2xl font-bold text-purple-600">{stats.comVariacoes}</p>
-              <p className="text-xs text-gray-500">Com Variações</p>
-            </CardContent>
-          </Card>
+
 
           <Card
             className={`cursor-pointer transition-all ${selectedStatus === 'semFoto' ? 'ring-2 ring-green-500' : 'hover:shadow-md'}`}
@@ -473,291 +425,262 @@ export default function Produtos() {
 
         {/* Grid View */}
         {!isLoading && filteredProdutos.length > 0 && viewMode === 'grid' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {filteredProdutos.map(produto => (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {paginatedProdutos.map(produto => (
               <Card
                 key={produto.id}
-                className={`group overflow-hidden transition-all hover:shadow-lg cursor-pointer ${produto.ativo === false ? 'opacity-60' : ''}`}
+                className={`group flex relative overflow-hidden cursor-pointer bg-white transition-all hover:shadow-lg hover:ring-1 hover:ring-green-500/20 ${produto.ativo === false ? 'opacity-75' : ''}`}
                 onClick={() => {
-                  setSelectedProdutoPai(produto);
-                  setIsVariacoesModalOpen(true);
+                  // Se for variação, abre edição do pai
+                  handleEdit(produto);
                 }}
               >
-                {/* Image */}
-                <div className="relative aspect-square bg-gray-100 overflow-hidden">
+                {/* Image Section (Left) */}
+                <div className="w-1/3 min-w-[120px] bg-gray-50 relative overflow-hidden border-r border-gray-100">
                   {produto.fotos?.[0] ? (
                     <img
                       src={produto.fotos[0]}
                       alt={produto.nome}
-                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <Package className="w-16 h-16 text-gray-300" />
+                    <div className="w-full h-full flex flex-col items-center justify-center text-gray-300">
+                      <Package className="w-8 h-8 mb-1" />
+                      <span className="text-[10px]">Sem foto</span>
                     </div>
                   )}
 
-                  {/* Status badges */}
-                  <div className="absolute top-2 left-2 flex flex-col gap-1">
-                    {produto.ativo === false && (
-                      <Badge className="bg-red-500 text-white">Inativo</Badge>
-                    )}
-                  </div>
-
-                  {/* Quick actions overlay */}
-                  {canEdit && (
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                      <Button
-                        size="icon"
-                        variant="secondary"
-                        onClick={() => handleEdit(produto)}
-                        title="Editar"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="secondary"
-                        onClick={() => handleDuplicate(produto)}
-                        title="Duplicar"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </Button>
-                      {canDelete && (
-                        <Button
-                          size="icon"
-                          variant="destructive"
-                          onClick={() => handleDelete(produto)}
-                          title="Excluir"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      )}
-                    </div>
+                  {/* Badges Overlay */}
+                  {produto.ativo === false && (
+                    <Badge variant="destructive" className="h-5 px-1.5 text-[10px] shadow-sm">Inativo</Badge>
+                  )}
+                  {(produto.requer_atencao || !produto.preco_venda) && (
+                    <Badge className="bg-orange-500 text-[10px] h-5 px-1.5 shadow-sm">
+                      {!produto.preco_venda ? 'S/ Preço' : 'Atenção'}
+                    </Badge>
                   )}
                 </div>
 
-                {/* Content */}
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-gray-900 truncate" title={`${produto.nome}${produto.modelo_referencia ? ' ' + produto.modelo_referencia : ''}`}>
-                        {produto.nome}{produto.modelo_referencia ? ` ${produto.modelo_referencia}` : ''}
-                      </h3>
-                      <p className="text-sm text-gray-500">{produto.categoria}</p>
-                      {produto.largura && produto.altura && (
-                        <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
-                          <Ruler className="w-3 h-3" />
-                          {produto.largura}×{produto.altura}{produto.profundidade ? `×${produto.profundidade}` : ''} cm
-                        </p>
+                {/* Quality Badge (Right) */}
+                <div className="absolute top-1.5 right-1.5 flex flex-col items-end gap-1 z-10 pointer-events-none">
+                  <div className="scale-75 origin-top-right">
+                    <ProductQualityBadge product={produto} showLabel={false} />
+                  </div>
+                </div>
+
+                {/* Quick Edit Button (Overlay) */}
+                {canEdit && (
+                  <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                    <Button size="icon" variant="secondary" className="h-7 w-7 shadow-sm bg-white/90 backdrop-blur" onClick={(e) => { e.stopPropagation(); setIsQuickEditOpen(true); setEditingProduto(produto); }} title="Editar">
+                      <Edit className="w-3.5 h-3.5 text-gray-700" />
+                    </Button>
+                  </div>
+                )}
+
+                {/* Content Section (Right) */}
+                <div className="flex-1 p-3 flex flex-col justify-between min-w-0">
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-start gap-2">
+                      <p className="text-[10px] font-bold text-green-700 uppercase tracking-wider">{produto.categoria}</p>
+                    </div>
+
+                    <h3 className="text-sm font-bold text-gray-900 leading-snug line-clamp-2" title={`${produto.nome} ${produto.modelo_referencia || ''}`}>
+                      {produto.nome} <span className="text-gray-500 font-normal">{produto.modelo_referencia}</span>
+                    </h3>
+
+                    {produto.fornecedor_nome && (
+                      <p className="text-[11px] text-gray-400 truncate clamp-1">{produto.fornecedor_nome}</p>
+                    )}
+
+                    {/* Atributos da Variação (Cor/Tamanho) */}
+                    {(produto.cor || produto.tamanho) && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {produto.cor && (
+                          <Badge variant="secondary" className="text-[10px] px-1.5 h-5 flex items-center gap-1 bg-gray-50 border border-gray-100">
+                            <div
+                              className="w-2 h-2 rounded-full border border-gray-300"
+                              style={{ background: getColorHex(produto.cor) }}
+                            />
+                            {produto.cor}
+                          </Badge>
+                        )}
+                        {produto.tamanho && (
+                          <Badge variant="secondary" className="text-[10px] px-1.5 h-5 bg-gray-50 border border-gray-100">
+                            <Ruler className="w-3 h-3 mr-1 text-gray-400" />
+                            {produto.tamanho}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer: Price & Stock */}
+                  <div className="pt-2 mt-1 border-t border-gray-50 flex items-end justify-between gap-1">
+                    <div className="flex flex-col">
+                      {produto.preco_venda ? (
+                        <span className="text-base font-bold text-green-800 leading-none">{formatPrice(produto.preco_venda)}</span>
+                      ) : (
+                        <span className="text-xs italic text-gray-400">Sob consulta</span>
                       )}
-                      {produto.fornecedor_nome && (
-                        <p className="text-xs text-gray-400 mt-0.5">{produto.fornecedor_nome}</p>
-                      )}
-                      {/* Lista de cores com estoque */}
-                      {variationInfoMap[produto.id]?.colorList?.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {variationInfoMap[produto.id].colorList.map((item, idx) => (
-                            <span
-                              key={idx}
-                              className="text-xs px-2 py-0.5 rounded-full"
-                              style={{ backgroundColor: '#e8f5e9', color: '#07593f' }}
-                            >
-                              {item}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                    </div>
+
+                    <div className="text-right">
+                      <Badge variant="secondary" className="font-mono text-[10px] bg-gray-50 text-gray-600 px-1.5 h-5">
+                        Est: {getEstoqueTotal(produto)}
+                      </Badge>
                     </div>
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between">
-                    {(() => {
-                      const info = variationInfoMap[produto.id];
-                      // Se tem variações com preços diferentes
-                      if (info && !info.allSamePrice && info.minPrice && info.maxPrice) {
-                        return (
-                          <p className="text-sm text-gray-600">
-                            <span className="font-bold" style={{ color: '#07593f' }}>
-                              {formatPrice(info.minPrice)}
-                            </span>
-                            <span className="mx-1">-</span>
-                            <span className="font-bold" style={{ color: '#07593f' }}>
-                              {formatPrice(info.maxPrice)}
-                            </span>
-                          </p>
-                        );
-                      }
-                      // Se tem variações com mesmo preço, usar o preço da variação
-                      if (info && info.allSamePrice && info.minPrice) {
-                        return (
-                          <p className="text-lg font-bold" style={{ color: '#07593f' }}>
-                            {formatPrice(info.minPrice)}
-                          </p>
-                        );
-                      }
-                      // Se não tem variações ou preço do pai
-                      if (produto.preco_venda) {
-                        return (
-                          <p className="text-lg font-bold" style={{ color: '#07593f' }}>
-                            {formatPrice(produto.preco_venda)}
-                          </p>
-                        );
-                      }
-                      // Sem preço definido
-                      return (
-                        <p className="text-sm text-gray-400 italic">Ver detalhes</p>
-                      );
-                    })()}
-                    <Badge variant="outline" className="text-xs">
-                      Est: {getEstoqueTotal(produto)}
-                    </Badge>
-                  </div>
-
-                  {/* Tags indicativas */}
-                  {(produto.requer_atencao || !produto.preco_venda) && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {!produto.preco_venda && (
-                        <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-300">
-                          Sem preço
-                        </Badge>
-                      )}
-                      {produto.requer_atencao && (
-                        <Badge variant="outline" className="text-xs text-orange-600 border-orange-300">
-                          Atenção
-                        </Badge>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Footer com indicação de clique */}
-                  <div className="mt-3 pt-3 border-t text-center">
-                    <p className="text-xs text-gray-400">
-                      {variationCountMap[produto.id] > 1
-                        ? `Clique para ver ${variationCountMap[produto.id]} opções`
-                        : 'Clique para ver detalhes'
-                      }
-                    </p>
-                  </div>
-                </CardContent>
+                </div>
               </Card>
             ))}
           </div>
         )}
 
         {/* List View */}
-        {!isLoading && filteredProdutos.length > 0 && viewMode === 'list' && (
-          <Card>
-            <div className="divide-y">
-              {filteredProdutos.map(produto => (
-                <div
-                  key={produto.id}
-                  className={`p-4 flex items-center gap-4 hover:bg-gray-50 transition-colors ${produto.ativo === false ? 'opacity-60' : ''}`}
-                >
-                  {/* Thumb */}
-                  <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
-                    {produto.fotos?.[0] ? (
-                      <img
-                        src={produto.fotos[0]}
-                        alt={produto.nome}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Package className="w-6 h-6 text-gray-300" />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-semibold text-gray-900">
-                        {produto.nome}{produto.modelo_referencia ? ` ${produto.modelo_referencia}` : ''}
-                      </h3>
-                      {produto.ativo === false && (
-                        <Badge className="bg-red-100 text-red-700">Inativo</Badge>
+        {
+          !isLoading && filteredProdutos.length > 0 && viewMode === 'list' && (
+            <Card>
+              <div className="divide-y">
+                {paginatedProdutos.map((produto) => (
+                  <div
+                    key={produto.id}
+                    className={`p-4 flex items-center gap-4 hover:bg-gray-50 transition-colors ${produto.ativo === false ? 'opacity-75' : ''}`}
+                  >
+                    {/* Thumb */}
+                    <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0 relative">
+                      {produto.fotos?.[0] ? (
+                        <img
+                          src={produto.fotos[0]}
+                          alt={produto.nome}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Package className="w-6 h-6 text-gray-300" />
+                        </div>
                       )}
                     </div>
-                    <p className="text-sm text-gray-500">
-                      {produto.categoria}
-                      {produto.fornecedor_nome && ` • ${produto.fornecedor_nome}`}
-                      {produto.largura && produto.altura && ` • ${produto.largura}×${produto.altura}${produto.profundidade ? `×${produto.profundidade}` : ''} cm`}
-                    </p>
-                    {/* Lista de cores com estoque */}
-                    {variationInfoMap[produto.id]?.colorList?.length > 0 && (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {variationInfoMap[produto.id].colorList.map((item, idx) => (
-                          <span
-                            key={idx}
-                            className="text-xs px-2 py-0.5 rounded-full"
-                            style={{ backgroundColor: '#e8f5e9', color: '#07593f' }}
-                          >
-                            {item}
-                          </span>
-                        ))}
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-semibold text-gray-900">
+                          {produto.nome}{produto.modelo_referencia ? ` ${produto.modelo_referencia}` : ''}
+                        </h3>
+                        {produto.ativo === false && (
+                          <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">Inativo</Badge>
+                        )}
+                        <div className="scale-75 origin-left">
+                          <ProductQualityBadge product={produto} showLabel={false} />
+                        </div>
                       </div>
+                      <p className="text-sm text-gray-500 mb-2">
+                        {produto.categoria}
+                        {produto.fornecedor_nome && ` • ${produto.fornecedor_nome}`}
+                        {produto.largura && produto.altura && ` • ${produto.largura}×${produto.altura}${produto.profundidade ? `×${produto.profundidade}` : ''} cm`}
+                      </p>
+
+                      {/* Atributos */}
+                      {(produto.cor || produto.tamanho) && (
+                        <div className="flex gap-2">
+                          {produto.cor && (
+                            <span className="text-xs text-gray-600 flex items-center gap-1">
+                              <div className="w-2 h-2 rounded-full border" style={{ background: getColorHex(produto.cor) }} />
+                              {produto.cor}
+                            </span>
+                          )}
+                          {produto.tamanho && (
+                            <span className="text-xs text-gray-600 flex items-center gap-1">
+                              <Ruler className="w-3 h-3" />
+                              {produto.tamanho}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Price and Stock */}
+                    <div className="text-right flex flex-col items-end gap-1">
+                      <div>
+                        {produto.preco_venda ? (
+                          <span className="text-base font-bold text-green-800">{formatPrice(produto.preco_venda)}</span>
+                        ) : (
+                          <span className="text-xs italic text-gray-400">Consulte</span>
+                        )}
+                      </div>
+                      <Badge variant="secondary" className="font-mono text-xs bg-gray-100 text-gray-600">
+                        Est: {getEstoqueTotal(produto)}
+                      </Badge>
+                    </div>
+
+                    {/* Actions */}
+                    {canEdit && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleEdit(produto)}>
+                            <Edit className="w-4 h-4 mr-2" />
+                            Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDuplicate(produto)}>
+                            <Copy className="w-4 h-4 mr-2" />
+                            Duplicar
+                          </DropdownMenuItem>
+                          {canDelete && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => handleDelete(produto)}
+                                className="text-red-600"
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Excluir
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     )}
                   </div>
+                ))}
+              </div>
+            </Card>
+          )
+        }
 
-                  {/* Price and Stock */}
-                  <div className="text-right">
-                    <p className="text-lg font-bold" style={{ color: '#07593f' }}>
-                      {variationInfoMap[produto.id]?.minPrice
-                        ? (variationInfoMap[produto.id].allSamePrice
-                          ? formatPrice(variationInfoMap[produto.id].minPrice)
-                          : `${formatPrice(variationInfoMap[produto.id].minPrice)} - ${formatPrice(variationInfoMap[produto.id].maxPrice)}`)
-                        : formatPrice(produto.preco_venda)
-                      }
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      Estoque: {variationInfoMap[produto.id]?.totalStock ?? getEstoqueTotal(produto)}
-                    </p>
-                  </div>
-
-                  {/* Actions */}
-                  {canEdit && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleEdit(produto)}>
-                          <Edit className="w-4 h-4 mr-2" />
-                          Editar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleDuplicate(produto)}>
-                          <Copy className="w-4 h-4 mr-2" />
-                          Duplicar
-                        </DropdownMenuItem>
-                        {canDelete && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={() => handleDelete(produto)}
-                              className="text-red-600"
-                            >
-                              <Trash2 className="w-4 h-4 mr-2" />
-                              Excluir
-                            </DropdownMenuItem>
-                          </>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
-
-        {/* Results Count */}
+        {/* Pagination Controls */}
         {!isLoading && filteredProdutos.length > 0 && (
-          <p className="text-center text-sm text-gray-500 mt-6">
-            Exibindo {filteredProdutos.length} de {stats.total} produtos
-          </p>
+          <div className="flex flex-col md:flex-row justify-between items-center mt-6 gap-4">
+            <p className="text-sm text-gray-500">
+              Exibindo {Math.min((currentPage - 1) * itemsPerPage + 1, filteredProdutos.length)} - {Math.min(currentPage * itemsPerPage, filteredProdutos.length)} de {filteredProdutos.length} produtos
+            </p>
+
+            <div className="flex gap-2 items-center">
+              <span className="text-sm text-gray-400 mr-2">Página {currentPage} de {totalPages}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="w-4 h-4 mr-2" /> Anterior
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+              >
+                Próximo <ChevronRight className="w-4 h-4 ml-2" />
+              </Button>
+            </div>
+          </div>
         )}
       </div>
 
@@ -789,21 +712,6 @@ export default function Produtos() {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onSuccess={() => queryClient.invalidateQueries({ queryKey: ['produtos'] })}
-      />
-
-      {/* Modal de Variações */}
-      <ProdutoVariacoesModal
-        isOpen={isVariacoesModalOpen}
-        onClose={() => {
-          setIsVariacoesModalOpen(false);
-          setSelectedProdutoPai(null);
-        }}
-        produtoPai={selectedProdutoPai}
-        onEditVariacao={(variacao) => {
-          setEditingProduto(variacao);
-          setIsQuickEditOpen(true);
-          setIsVariacoesModalOpen(false);
-        }}
       />
     </div>
   );

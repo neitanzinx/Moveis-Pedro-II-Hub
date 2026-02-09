@@ -177,6 +177,12 @@ export default function DashboardGerente() {
         enabled: !!user
     });
 
+    const { data: assistencias = [] } = useQuery({
+        queryKey: ['assistencias-gerente'],
+        queryFn: () => base44.entities.AssistenciaTecnica.list(),
+        enabled: !!user
+    });
+
     // Mutation para salvar metas
     const saveMeta = useMutation({
         mutationFn: async (meta) => {
@@ -411,11 +417,22 @@ export default function DashboardGerente() {
         const hoje = new Date();
         const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
 
-        // Totais
-        const totalHoje = vendasHoje.reduce((sum, v) => sum + (v.valor_total || 0), 0);
+        // Totais com ajuste de devoluções
+        const calcularTotalLiquido = (vendasArr) => {
+            return vendasArr.reduce((sum, v) => {
+                const assistencia = assistencias.find(a =>
+                    a.numero_pedido === v.numero_pedido &&
+                    a.status === 'Concluída' &&
+                    (a.tipo === 'Devolução' || a.tipo === 'Troca')
+                );
+                return sum + (v.valor_total || 0) - (assistencia?.valor_devolvido || 0);
+            }, 0);
+        };
+
+        const totalHoje = calcularTotalLiquido(vendasHoje);
         const qtdHoje = vendasHoje.length;
 
-        const totalMes = vendasMes.reduce((sum, v) => sum + (v.valor_total || 0), 0);
+        const totalMes = calcularTotalLiquido(vendasMes);
         const qtdMes = vendasMes.length;
         const ticketMedio = qtdMes > 0 ? totalMes / qtdMes : 0;
 
@@ -526,9 +543,20 @@ export default function DashboardGerente() {
             if (!agrupado[vendedorNome]) {
                 agrupado[vendedorNome] = { nome: vendedorNome, id: vendedorId, comissao: 0, vendas: 0, total: 0 };
             }
-            agrupado[vendedorNome].comissao += v.comissao_calculada || 0;
+
+            // Ajuste de comissão por devolução
+            const assistencia = assistencias.find(a =>
+                a.numero_pedido === v.numero_pedido &&
+                a.status === 'Concluída' &&
+                (a.tipo === 'Devolução' || a.tipo === 'Troca')
+            );
+
+            const valorTotalAjustado = (v.valor_total || 0) - (assistencia?.valor_devolvido || 0);
+            const taxaComissao = (v.comissao_calculada || 0) / (v.valor_total || 1);
+
+            agrupado[vendedorNome].comissao += valorTotalAjustado * taxaComissao;
             agrupado[vendedorNome].vendas += 1;
-            agrupado[vendedorNome].total += v.valor_total || 0;
+            agrupado[vendedorNome].total += valorTotalAjustado;
         });
 
 
@@ -625,8 +653,8 @@ export default function DashboardGerente() {
                     ? Math.floor((hoje - ultimaVenda) / (1000 * 60 * 60 * 24))
                     : 999; // Nunca vendido
 
-                // Calcular valor em estoque
-                const valorEstoque = (p.quantidade_estoque || 0) * (p.preco_venda || p.preco_custo || 0);
+                // Calcular valor em estoque (apenas preço de venda para segurança)
+                const valorEstoque = (p.quantidade_estoque || 0) * (p.preco_venda || 0);
 
                 // Buscar classificação ABC
                 const abcProduto = curvaABC.produtos.find(abc => abc.id === p.id);
@@ -756,8 +784,10 @@ export default function DashboardGerente() {
         const termo = buscaEntrega.toLowerCase().trim();
 
         const todasEntregas = statusEntregas.pendentes.concat(statusEntregas.emRota).concat(statusEntregas.atrasadas);
+        // Remover duplicatas (um item pode ser pendente E atrasado)
+        const entregasUnicas = Array.from(new Map(todasEntregas.map(item => [item.id, item])).values());
 
-        return todasEntregas.filter(e => {
+        return entregasUnicas.filter(e => {
             const vendaAssociada = vendas.find(v => v.id === e.venda_id);
             const cliente = (vendaAssociada?.cliente_nome || e.cliente_nome || '').toLowerCase();
             const endereco = (e.endereco || '').toLowerCase();
@@ -817,6 +847,46 @@ export default function DashboardGerente() {
             .sort((a, b) => b.total - a.total)
             .slice(0, 5);
     }, [vendasMes, metas]);
+
+    // Lista de todos os vendedores da loja (para dropdown de metas)
+    const vendedoresLoja = useMemo(() => {
+        const hoje = new Date();
+        const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
+
+        return users
+            .filter(u => {
+                // Filtrar por cargo de vendedor
+                if (u.cargo !== 'Vendedor') return false;
+                // Filtrar por loja ativa
+                if (lojaAtiva !== 'todas' && u.loja !== lojaAtiva) return false;
+                // Filtrar apenas ativos
+                if (u.ativo === false) return false;
+                return true;
+            })
+            .map(u => {
+                // Buscar vendas do vendedor no mês
+                const vendasVendedor = vendasMes.filter(v => v.responsavel_id === u.id);
+                const totalVendas = vendasVendedor.reduce((sum, v) => sum + (v.valor_total || 0), 0);
+
+                // Buscar meta individual
+                const metaVendedor = metas.find(m =>
+                    m.mes === mesAtual &&
+                    m.vendedor_id === u.id
+                );
+
+                return {
+                    id: u.id,
+                    nome: u.full_name || u.nome || 'Sem nome',
+                    total: totalVendas,
+                    qtd: vendasVendedor.length,
+                    meta: metaVendedor?.meta_valor || 0,
+                    progresso: metaVendedor?.meta_valor > 0
+                        ? (totalVendas / metaVendedor.meta_valor) * 100
+                        : 0
+                };
+            })
+            .sort((a, b) => a.nome.localeCompare(b.nome));
+    }, [users, lojaAtiva, vendasMes, metas]);
 
     // Dados para gráfico de evolução diária
     const dadosGrafico = useMemo(() => {
@@ -884,7 +954,7 @@ export default function DashboardGerente() {
             loja: lojaParaMeta,
             vendedor_id: metaVendedorSelecionado?.id || null,
             vendedor_nome: metaVendedorSelecionado?.nome || null,
-            meta_valor: parseFloat(novaMetaValor) || 0
+            meta_valor: parseFloat(novaMetaValor.replace(/\./g, '')) || 0
         });
     };
 
@@ -1254,7 +1324,7 @@ export default function DashboardGerente() {
                                                                     <div className="flex items-center gap-2 mt-1 min-w-0">
                                                                         <div className="h-1.5 w-1.5 rounded-full bg-gray-300"></div>
                                                                         <p className="text-xs text-gray-500 truncate max-w-md">
-                                                                            {entrega.endereco || 'Endereço não informado'}
+                                                                            {entrega.endereco || entrega.endereco_entrega || 'Endereço não informado'}
                                                                         </p>
                                                                     </div>
                                                                 </div>
@@ -1381,7 +1451,7 @@ export default function DashboardGerente() {
                                         <Select
                                             value={metaVendedorSelecionado?.id || ''}
                                             onValueChange={(value) => {
-                                                const vendedor = rankingVendedores.find(v => v.id === value);
+                                                const vendedor = vendedoresLoja.find(v => v.id === value);
                                                 setMetaVendedorSelecionado(vendedor);
                                                 // Buscar meta do vendedor
                                                 const hoje = new Date();
@@ -1394,7 +1464,7 @@ export default function DashboardGerente() {
                                                 <SelectValue placeholder="Selecione um vendedor..." />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {rankingVendedores.map(vendedor => (
+                                                {vendedoresLoja.map(vendedor => (
                                                     <SelectItem key={vendedor.id} value={vendedor.id}>
                                                         <div className="flex items-center gap-2">
                                                             <Users className="w-4 h-4" />
@@ -1409,15 +1479,19 @@ export default function DashboardGerente() {
                                         <Label htmlFor="meta-valor">Valor da Meta (R$)</Label>
                                         <Input
                                             id="meta-valor"
-                                            type="number"
+                                            type="text"
                                             value={novaMetaValor}
-                                            onChange={(e) => setNovaMetaValor(e.target.value)}
-                                            placeholder="Ex: 150000"
+                                            onChange={(e) => {
+                                                const raw = e.target.value.replace(/\D/g, '');
+                                                const formatted = raw.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+                                                setNovaMetaValor(formatted);
+                                            }}
+                                            placeholder="Ex: 150.000"
                                             className="mt-1"
                                         />
                                         {novaMetaValor && (
                                             <p className="text-xs text-gray-500 mt-1">
-                                                Meta diária: {formatarMoeda(parseFloat(novaMetaValor) / new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate())}
+                                                Meta diária: {formatarMoeda(parseFloat(novaMetaValor.replace(/\./g, '')) / new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate())}
                                             </p>
                                         )}
                                     </div>

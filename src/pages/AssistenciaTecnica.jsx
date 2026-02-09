@@ -156,13 +156,25 @@ export default function AssistenciaTecnica() {
                         const produto = produtos.find(p => p.id === item.produto_id);
                         if (produto) {
                             try {
+                                // Sincronização Global (PDV)
                                 await base44.entities.Produto.update(produto.id, {
                                     quantidade_estoque: (produto.quantidade_estoque || 0) + item.quantidade,
                                     quantidade_reservada: Math.max(0, (produto.quantidade_reservada || 0) - item.quantidade)
                                 });
-                                console.log('✅ Estoque atualizado:', item.produto_nome, '+', item.quantidade);
+
+                                // Sincronização Local (Scanner/Estoque Loja)
+                                // Usamos 'CD' como padrão se o usuário não tiver loja, similar ao EntradaEstoque.jsx
+                                const tenantId = user?.loja || 'CD';
+                                await supabase.from('estoque_loja').insert({
+                                    gtin: produto.gtin,
+                                    tenant_id: tenantId,
+                                    quantidade: item.quantidade,
+                                    volumes_recebidos: Array.from({ length: produto.volumes || 1 }, (_, i) => i + 1)
+                                });
+
+                                console.log('✅ Estoque sincronizado (Global + Local):', item.produto_nome, '+', item.quantidade);
                             } catch (err) {
-                                console.error('Erro ao atualizar estoque:', err);
+                                console.error('Erro ao atualizar estoque sincronizado:', err);
                             }
                         }
                     }

@@ -10,8 +10,10 @@ export default function StoreSelectorModal() {
     const [lojas, setLojas] = useState([]);
     const [fetching, setFetching] = useState(false);
 
-    // Derived state: Modal MUST be open if user is admin (no fixed loja) and hasn't selected a store yet.
-    const isOpen = !loading && !!user && !user.loja && !selectedStore;
+    // Derived state: Modal MUST be open if user is admin/manager (no fixed loja) and hasn't selected a store yet.
+    // Roles that require a store context:
+    const ROLES_REQUIRING_STORE = ['Administrador', 'Gerente Geral', 'Gerente', 'Vendedor'];
+    const isOpen = !loading && !!user && !user.loja && !selectedStore && ROLES_REQUIRING_STORE.includes(user.cargo);
 
     useEffect(() => {
         if (isOpen) {

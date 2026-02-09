@@ -167,6 +167,21 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                   onChange={(e) => setFormData({ ...formData, validade: e.target.value })}
                   required
                 />
+                <div className="flex gap-1 mt-1">
+                  {[7, 15, 30, 60].map(dias => (
+                    <button
+                      key={dias}
+                      type="button"
+                      onClick={() => {
+                        const novaValidade = new Date(Date.now() + dias * 86400000);
+                        setFormData({ ...formData, validade: novaValidade.toISOString().split('T')[0] });
+                      }}
+                      className="px-2 py-0.5 text-[10px] rounded-full border border-gray-200 hover:bg-gray-100 text-gray-600"
+                    >
+                      {dias}d
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 

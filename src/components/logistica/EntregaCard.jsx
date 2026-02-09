@@ -1,9 +1,13 @@
+
 import React from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useDraggable } from "@dnd-kit/core";
-import { Map, AlertTriangle, MessageCircle, Package, Truck, User, Wrench, Store, Sofa } from "lucide-react";
+import { Map, AlertTriangle, MessageCircle, Package, Truck, User, Wrench, Store, Sofa, CheckCircle, CalendarX, History, Settings } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 export default function EntregaCard({ entrega, venda, onClick, isColumn = false }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -30,17 +34,31 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
 
   // Core logic for border colors
   let statusColor = "blue";
-  if (entrega.data_agendada) {
-    if (isConfirmado) statusColor = "green";
-    else if (isPendente) statusColor = "yellow";
-    else if (isProblema) statusColor = "red";
-    else statusColor = "gray";
+  let bgColor = "bg-white";
+  let ringColor = "ring-gray-100";
+
+  if (isConfirmado) {
+    statusColor = "green";
+    bgColor = "bg-emerald-100";
+    ringColor = "ring-emerald-200";
+  } else if (isProblema) {
+    statusColor = "red";
+    bgColor = "bg-red-50";
+    ringColor = "ring-red-200";
+  } else if (isPendente) {
+    statusColor = "yellow";
+    bgColor = "bg-amber-50";
+    ringColor = "ring-amber-200";
   }
 
   const borderClass = `border-l-4 border-l-${statusColor}-500`;
-  const bgClass = entrega._notificado ? 'bg-green-50' : 'bg-white';
+  // const bgClass = entrega._notificado ? 'bg-green-50' : 'bg-white'; // Old logic
 
   const listaItens = venda?.itens?.map(i => i.produto_nome).join(', ') || "Itens não informados";
+
+  // Formatar restrição se houver
+  const temRestricao = entrega.data_restricao;
+  const dataRestricaoFormatada = temRestricao ? new Date(entrega.data_restricao).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '';
 
   return (
     <div
@@ -48,9 +66,9 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
       {...listeners}
       {...attributes}
       onClick={() => onClick && onClick(entrega)}
-      className={`cursor-grab active:cursor-grabbing transition-all group mb-2 ${isDragging ? 'opacity-50 scale-95' : ''} h-full`}
+      className={`cursor-grab active:cursor-grabbing transition-all group mb-2 ${isDragging ? 'opacity-50 scale-95' : ''} ${isColumn ? '' : 'h-full'}`}
     >
-      <Card className={`relative overflow-hidden hover:shadow-lg transition-all border-0 shadow-sm ring-1 ring-gray-100 ${borderClass} ${bgClass} flex flex-col justify-start ${isColumn ? 'p-2 min-h-[90px]' : 'p-2.5 h-full'} gap-1.5`}>
+      <Card className={`relative overflow-hidden hover:shadow-lg transition-all border-0 shadow-sm ring-1 ${ringColor} ${borderClass} ${bgColor} flex flex-col justify-start ${isColumn ? 'p-2 min-h-[90px]' : 'p-2.5 h-full'} gap-1.5`}>
 
         {/* Topo: Cliente E Num Pedido/Badge */}
         <div className="flex justify-between items-start">
@@ -61,9 +79,16 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
             </span>
           </div>
 
-          <div className="flex items-center gap-1 shrink-0 bg-blue-50 px-1 py-0.5 rounded ml-1">
+          <div className="flex items-center gap-1 shrink-0 bg-white/50 px-1 py-0.5 rounded ml-1 border border-gray-100">
             <span className="font-mono text-[9px] text-blue-700 font-bold">#{entrega.numero_pedido}</span>
-            {/* Badge de Mostruário */}
+            {/* Badge de Confirmação - VISÍVEL AGORA */}
+            {isConfirmado && (
+              <Badge className="text-[8px] px-1 py-0 h-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-none border-0 flex items-center gap-0.5" title="Entrega Confirmada">
+                <CheckCircle className="w-2 h-2" />
+              </Badge>
+            )}
+
+            {/* Outros Badges */}
             {(entrega.origem === 'mostruario' || entrega.item_mostruario) && (
               <Badge className="text-[8px] px-1 py-0 h-4 bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-none border-0 flex items-center gap-0.5" title="Item de Mostruário">
                 <Sofa className="w-2 h-2" />
@@ -86,15 +111,22 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
                 <Store className="w-2 h-2" />
               </Badge>
             )}
+            {/* Badge de Preferências de Entrega (Simplificado para evitar bugs visuais) */}
+            {entrega.preferencias_entrega && (entrega.preferencias_entrega.dias?.length > 0 || entrega.preferencias_entrega.turnos?.length > 0 || entrega.preferencias_entrega.obs || entrega.data_restricao) && (
+              <div className="inline-block" onClick={(e) => e.stopPropagation()}>
+                <Badge
+                  className="text-[8px] px-1 py-0 h-4 bg-purple-100 text-purple-700 font-bold shadow-none border border-purple-200 flex items-center gap-0.5 cursor-help"
+                  title={`RESTRIÇÕES:\n${entrega.data_restricao ? `• DATA BLOQUEADA: ${new Date(entrega.data_restricao).toLocaleDateString('pt-BR')}\n` : ''}${entrega.preferencias_entrega.dias?.length ? `• DIAS: ${[...new Set(entrega.preferencias_entrega.dias)].map(d => ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][Number(d)]).join(', ')}\n` : ''}${entrega.preferencias_entrega.turnos?.length ? `• TURNOS: ${entrega.preferencias_entrega.turnos.join(', ')}\n` : ''}${entrega.preferencias_entrega.obs ? `• OBS: ${entrega.preferencias_entrega.obs}` : ''}`}
+                >
+                  <Settings className="w-2 h-2" />
+                  Restrições
+                </Badge>
+              </div>
+            )}
             {/* Badge de Status da Montagem Interna */}
             {entrega.tipo_montagem === 'montado' && entrega.montagem_status === 'Concluída' && (
               <Badge className="text-[8px] px-1 py-0 h-4 bg-green-600 hover:bg-green-700 text-white font-bold shadow-none border-0 animate-pulse" title="Montagem Concluída - Pronto para Enviar">
-                ✓
-              </Badge>
-            )}
-            {entrega.tipo_montagem === 'montado' && !entrega.montagem_status && (
-              <Badge className="text-[8px] px-1 py-0 h-4 bg-yellow-500 hover:bg-yellow-600 text-white font-bold shadow-none border-0" title="Aguardando Montagem Interna">
-                ⚙️
+                ✓ Pronto
               </Badge>
             )}
           </div>
@@ -103,7 +135,7 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
 
         {/* Endereço - Agora no topo */}
         <div
-          className="flex items-center gap-1 text-gray-500 hover:text-blue-600 transition-colors cursor-pointer group/map w-full bg-gray-50/50 rounded py-0.5 px-1 border border-transparent hover:border-blue-100 hover:bg-white"
+          className="flex items-center gap-1 text-gray-500 hover:text-blue-600 transition-colors cursor-pointer group/map w-full bg-white/60 rounded py-0.5 px-1 border border-transparent hover:border-blue-100 hover:bg-white"
           onClick={abrirGoogleMaps}
           title="Abrir no Google Maps"
         >
@@ -122,27 +154,49 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
         </div>
 
         {/* Bottom: Ações/Status se necessário */}
-        {(entrega._notificado || (isColumn && (isPendente || isProblema))) && (
-          <div className={`mt-auto pt-1 border-t border-dashed border-gray-100 flex items-center justify-end gap-1`}>
-            {entrega._notificado && (
-              <Badge variant="outline" className="text-[8px] px-1 h-4 border-green-200 bg-green-50 text-green-700">
-                Avisado
-              </Badge>
-            )}
-            {isColumn && (isPendente || isProblema) && (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-4 w-4 hover:bg-green-50 text-green-600"
-                onClick={contatoManual}
-              >
-                <MessageCircle className="w-3 h-3" />
-              </Button>
-            )}
-          </div>
-        )}
+        {
+          (entrega._notificado || (isColumn && (isPendente || isProblema || entrega.data_agendada))) && (
+            <div className={`mt-auto pt-1 border-t border-dashed border-gray-300/50 flex items-center justify-end gap-1`}>
+              {entrega._notificado && !isConfirmado && (
+                <Badge variant="outline" className="text-[8px] px-1 h-4 border-green-300 bg-green-100/50 text-green-700">
+                  Avisado
+                </Badge>
+              )}
+              {isProblema && (
+                <Badge variant="outline" className="text-[8px] px-1 h-4 border-red-300 bg-red-100/50 text-red-700">
+                  Atenção
+                </Badge>
+              )}
+              {isColumn && (
+                <>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-4 w-4 hover:bg-red-50 text-red-400"
+                    title="Solicitar Reagendamento (Cliente não pode receber)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onClick) onClick(entrega, 'reagendar');
+                    }}
+                  >
+                    <CalendarX className="w-3 h-3" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-4 w-4 hover:bg-green-50 text-green-600"
+                    onClick={contatoManual}
+                    title="Contato Manual (WhatsApp)"
+                  >
+                    <MessageCircle className="w-3 h-3" />
+                  </Button>
+                </>
+              )}
+            </div>
+          )
+        }
 
-      </Card>
-    </div>
+      </Card >
+    </div >
   );
 }
