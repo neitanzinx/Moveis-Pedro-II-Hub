@@ -36,7 +36,8 @@ cron.schedule('0 8 * * *', async () => {
 
             try {
                 // Enviar lembrete via API local
-                const response = await fetch('http://localhost:3001/lembrete-montagem', {
+                const PORT = process.env.PORT || 3001;
+                const response = await fetch(`http://localhost:${PORT}/lembrete-montagem`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

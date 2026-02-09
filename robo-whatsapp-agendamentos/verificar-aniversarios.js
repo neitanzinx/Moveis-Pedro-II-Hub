@@ -118,7 +118,8 @@ async function buscarLojasAtivas() {
  */
 async function enviarMensagemAniversario(cliente, cupomCodigo, lojas) {
     try {
-        const response = await fetch('http://localhost:3001/enviar-mensagem-aniversario', {
+        const PORT = process.env.PORT || 3001;
+        const response = await fetch(`http://localhost:${PORT}/enviar-mensagem-aniversario`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
