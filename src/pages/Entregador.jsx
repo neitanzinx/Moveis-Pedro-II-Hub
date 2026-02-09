@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Truck, MapPin, Navigation, CheckCircle, Send, Radio, Sun, Sunset, Briefcase, ArrowLeft, Package, AlertTriangle, CreditCard, Camera, PenTool, X, DollarSign, LogOut, Wrench, Link2, MessageCircle, QrCode, Copy, Download, ExternalLink, Check } from "lucide-react";
-import { toast } from "sonner";
+import { getZapApiUrl } from '../utils/zapApiUrl';
 import { useConfirm } from "@/hooks/useConfirm";
 import AssinaturaCanvas from "@/components/logistica/AssinaturaCanvas";
 import CameraCapture from "@/components/logistica/CameraCapture";
@@ -412,14 +412,14 @@ export default function Entregador() {
 
             // 🚀 AUTOMAÇÃO: Chamar o robô de WhatsApp para concluir e avisar o próximo
             try {
-                const zapUrl = import.meta.env.VITE_ZAP_API_URL || 'http://localhost:3001';
+                const zapUrl = getZapApiUrl();
                 await fetch(`${zapUrl}/concluir-entrega`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
+                    body: JSON.stringify({
                         id_concluida: entrega.id,
                         // Passamos os dados extras para o robô salvar
-                        update_data: updateData 
+                        update_data: updateData
                     })
                 });
             } catch (zapErr) {
@@ -1588,8 +1588,8 @@ export default function Entregador() {
                                         setItensConferidos(novo);
                                     }}
                                     className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${conferido
-                                            ? 'bg-green-50 border-green-400'
-                                            : 'bg-white border-gray-200 hover:border-blue-300'
+                                        ? 'bg-green-50 border-green-400'
+                                        : 'bg-white border-gray-200 hover:border-blue-300'
                                         }`}
                                 >
                                     <div className="flex items-start gap-3">

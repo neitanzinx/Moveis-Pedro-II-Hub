@@ -20,12 +20,12 @@ import {
     Clock, CheckCircle2, AlertCircle, Loader2, Copy, Eye, EyeOff,
     Users, Edit, Store, TrendingUp, Trash2
 } from "lucide-react";
-import { toast } from "sonner";
+import { getZapApiUrl } from '../../utils/zapApiUrl';
 import { CARGOS, LOJAS, getCargoConfig } from "@/config/cargos";
 
 import { supabase } from "@/lib/supabase";
 
-const API_URL = import.meta.env.VITE_ZAP_API_URL || "http://localhost:3001";
+const API_URL = getZapApiUrl();
 
 export default function GestaoFuncionarios({ currentUser }) {
     const [searchTerm, setSearchTerm] = useState("");

@@ -188,9 +188,10 @@ serve(async (req) => {
             }
 
             // Enviar notificação via WhatsApp Bot (opcional)
-            if (cobranca.pagador_nome || cobranca.numero_pedido) {
+            const appUrl = Deno.env.get('APP_API_URL');
+            if (appUrl) {
                 try {
-                    await fetch('http://localhost:3001/pix-confirmado', {
+                    await fetch(`${appUrl}/pix-confirmado`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -200,9 +201,10 @@ serve(async (req) => {
                         })
                     });
                 } catch (e) {
-                    // WhatsApp bot pode não estar disponível, ignorar erro
-                    console.log('WhatsApp notification skipped:', e.message);
+                    console.log('WhatsApp notification failed:', e.message);
                 }
+            } else {
+                console.log('Skipping WhatsApp notification: APP_API_URL not set');
             }
         }
 

@@ -35,7 +35,16 @@ Variáveis essenciais:
 - `PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable`
 - `VITE_ZAP_API_URL=` (Deixe vazio ou use a URL do seu site se necessário, mas no modo monólito ele usa a relativa)
 
-## Passo 4: Deploy com Docker Compose
+## Passo 4: Configurar Segredos do Supabase (Novo!)
+Para o webhook de PIX funcionar e notificar o robô, você precisa informar a URL da sua VPS:
+
+```bash
+# Rode isso LOCALMENTE no seu PC (onde tem o Supabase CLI) ou no Dashboard do Supabase
+npx supabase secrets set APP_API_URL=http://SEU_IP_DA_VPS
+```
+*Substitua `http://SEU_IP_DA_VPS` pelo IP real da sua máquina (ex: `http://192.168.1.1`).*
+
+## Passo 5: Deploy com Docker Compose
 Use o arquivo de produção `docker-compose.prod.yml`:
 
 ```bash
@@ -49,7 +58,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 ### Por que `--build`?
 O comando `--build` é crucial porque ele força o Docker a recriar a imagem, o que inclui rodar o `npm run build` do React novamente para pegar suas últimas alterações do frontend.
 
-## Passo 5: Verificação e Login no WhatsApp
+## Passo 6: Verificação e Login no WhatsApp
 1.  **Verifique os Logs:**
     ```bash
     docker logs -f moveis-pedro-ii-app
@@ -68,7 +77,3 @@ chmod -R 777 "robo-whatsapp-agendamentos/.wwebjs_cache"
 
 ### O site não carrega (Tela Branca)
 Se o site carrega em branco, verifique os logs do navegador (F12 > Console). Se houver erros 404 para arquivos JS/CSS, certifique-se de que o `server.js` está servindo a pasta `dist` corretamente.
-
-### A rota /concluir-entrega dá erro ou recarrega o site
-Isso acontece se o React Router interceptar a requisição API.
-**Solução:** O `server.js` deve ter o middleware "catch-all" (`app.use(...)` que retorna `index.html`) **NO FINAL** do arquivo, depois de todas as rotas da API. (Isso já foi corrigido no commit mais recente).
