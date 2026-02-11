@@ -84,7 +84,7 @@ function createWhatsAppClient() {
         puppeteer: {
             headless: true,
             executablePath: puppeteer.executablePath(),
-            userDataDir: sessionPath, // Forçar userDataDir explícito
+            // userDataDir: sessionPath, // REMOVIDO: LocalAuth gerencia isso internamente
             protocolTimeout: 180000,
             dumpio: false, // Voltando ao normal
             args: [
