@@ -1,6 +1,11 @@
 const path = require("path");
 const fs = require("fs");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
+
+// 🚨 FORÇA BRUTA: Ignora qualquer configuração de path do Chrome que esteja no .env da VPS
+// O .env antigo aponta para /usr/bin/google-chrome-stable que NÃO EXISTE mais na imagem node:20
+delete process.env.PUPPETEER_EXECUTABLE_PATH;
+
 const express = require('express');
 const cors = require('cors');
 const { Client, LocalAuth } = require('whatsapp-web.js');
