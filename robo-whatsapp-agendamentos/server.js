@@ -75,8 +75,9 @@ app.use(express.static(distPath));
 // 🏭 FACTORY: Cria Client NOVO a cada tentativa.
 function createWhatsAppClient() {
     // 🛡️ Caminhos absolutos para evitar ambiguidade no Docker
-    const sessionPath = path.resolve(__dirname, '.wwebjs_auth');
-    const cachePath = path.resolve(__dirname, '.wwebjs_cache');
+    // MUDANÇA CRÍTICA: Usar /tmp para evitar problemas de permissão/lock no volume montado
+    const sessionPath = path.resolve('/tmp', '.wwebjs_auth');
+    const cachePath = path.resolve('/tmp', '.wwebjs_cache');
 
     const puppeteer = require('puppeteer'); // Require local para garantir execução
     console.log('Browser Path:', puppeteer.executablePath());
@@ -267,7 +268,8 @@ const whatsapp = {
         // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
         // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
         // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
-        const sessionDir = path.join(__dirname, '.wwebjs_auth', 'session-client-v2'); // Atualizado para V2
+        // Atualizado para usar /tmp
+        const sessionDir = path.join('/tmp', '.wwebjs_auth', 'session-client-v2');
         if (deleteSession) {
             // Modo nuclear: deleta tudo (força QR rescan)
             try {
