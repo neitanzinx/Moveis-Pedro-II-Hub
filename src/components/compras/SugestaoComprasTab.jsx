@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 import { base44 } from '@/api/base44Client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,11 +20,39 @@ export default function SugestaoComprasTab({ onPedidoCriado }) {
     const [selectedItens, setSelectedItens] = useState([]);
     const [filtroFornecedor, setFiltroFornecedor] = useState('todos');
 
-    // Buscar produtos com dados atualizados
-    const { data: produtos = [], isLoading: isLoadingProdutos } = useQuery({
-        queryKey: ['produtos'],
-        queryFn: () => base44.entities.Produto.list()
+    // Buscar produtos com paginação (Otimizado)
+    const {
+        data,
+        fetchNextPage,
+        hasNextPage,
+        isFetchingNextPage,
+        isLoading: isLoadingProdutos
+    } = useInfiniteQuery({
+        queryKey: ['produtos-sugestao'],
+        queryFn: async ({ pageParam = 0 }) => {
+            const limit = 100;
+            const from = pageParam * limit;
+            const to = from + limit - 1;
+
+            const { data, error } = await supabase
+                .from('produtos')
+                .select('id, nome, codigo_barras, quantidade_estoque, estoque_minimo, estoque_ideal, fornecedor_id, preco_custo, modelo_referencia, cor, material, largura, altura, profundidade, fotos, descricao')
+                .eq('ativo', true)
+                .not('nome', 'ilike', '%CONJUNTO%')
+                .range(from, to);
+
+            if (error) throw error;
+            return data;
+        },
+        getNextPageParam: (lastPage, allPages) => {
+            return lastPage.length === 100 ? allPages.length : undefined;
+        },
+        initialPageParam: 0
     });
+
+    const produtos = useMemo(() => {
+        return data?.pages.flatMap(page => page) || [];
+    }, [data]);
 
     // Buscar fornecedores para mapear nomes
     const { data: fornecedores = [] } = useQuery({
@@ -32,6 +61,7 @@ export default function SugestaoComprasTab({ onPedidoCriado }) {
     });
 
     // Filtra produtos que precisam de reposição e calcula sugestão
+    // NOTA: Isso só considera os produtos JÁ carregados.
     const sugestoes = useMemo(() => {
         return produtos
             .filter(p => {
@@ -45,7 +75,7 @@ export default function SugestaoComprasTab({ onPedidoCriado }) {
                 const estoqueIdeal = p.estoque_ideal || (estoqueMinimo * 2);
 
                 let sugestao = estoqueIdeal - estoqueAtual;
-                if (sugestao <= 0) sugestao = 1; // Mínimo 1 se algo deu errado na lógica
+                if (sugestao <= 0) sugestao = 1;
 
                 return {
                     ...p,
@@ -79,6 +109,8 @@ export default function SugestaoComprasTab({ onPedidoCriado }) {
             return await base44.entities.PedidoCompra.create(dadosPedido);
         },
         onSuccess: () => {
+            // Redireciona para aba de pedidos ou avisa.
+            // Invalidar queries
             queryClient.invalidateQueries({ queryKey: ['pedidos-compra'] });
         }
     });
@@ -125,7 +157,14 @@ export default function SugestaoComprasTab({ onPedidoCriado }) {
                 produto_codigo: item.codigo_barras,
                 quantidade_pedida: item.sugestao_qtd,
                 preco_unitario: item.preco_custo || 0,
-                isNew: false
+                isNew: false,
+                // Persistir detalhes para o pedido não ficar orfão de info
+                detalhes: {
+                    modelo: item.modelo_referencia,
+                    cor: item.cor,
+                    material: item.material,
+                    dimensoes: `${item.altura || ''}x${item.largura || ''}x${item.profundidade || ''}`
+                }
             });
         });
 
@@ -141,11 +180,8 @@ export default function SugestaoComprasTab({ onPedidoCriado }) {
             for (const fornId in pedidosPorFornecedor) {
                 const dados = pedidosPorFornecedor[fornId];
 
-                // Se não tiver fornecedor, define como null ou avisa
-                // Aqui vamos criar mesmo sem fornecedor se o backend permitir, ou pular
-
                 await criarPedidoMutation.mutateAsync({
-                    fornecedor_id: dados.fornecedor_id, // Pode ser null/undefined
+                    fornecedor_id: dados.fornecedor_id,
                     fornecedor_nome: dados.fornecedor_nome,
                     data_pedido: new Date().toISOString().split('T')[0],
                     status: 'Rascunho',
@@ -166,7 +202,10 @@ export default function SugestaoComprasTab({ onPedidoCriado }) {
     };
 
     if (isLoadingProdutos) {
-        return <div className="p-8 text-center">Carregando sugestões...</div>;
+        return <div className="p-8 text-center flex flex-col items-center gap-2">
+            <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
+            <p>Carregando sugestões...</p>
+        </div>;
     }
 
     return (
@@ -176,7 +215,7 @@ export default function SugestaoComprasTab({ onPedidoCriado }) {
                     <CardHeader className="pb-2">
                         <CardTitle className="text-lg flex items-center gap-2 text-blue-800">
                             <Lightbulb className="w-5 h-5" />
-                            Itens para Reposição
+                            Itens para Reposição (Carregados)
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
@@ -215,96 +254,137 @@ export default function SugestaoComprasTab({ onPedidoCriado }) {
                 </Card>
             </div>
 
-            {sugestoes.length === 0 ? (
-                <div className="flex flex-col items-center justify-center p-12 bg-white rounded-lg border border-dashed border-gray-300">
-                    <CheckCircle2 className="w-16 h-16 text-green-500 mb-4" />
-                    <h3 className="text-xl font-semibold text-gray-900">Estoque Saudável!</h3>
-                    <p className="text-gray-500">Nenhum produto está abaixo do estoque mínimo no momento.</p>
-                </div>
-            ) : (
-                <Card>
-                    <CardHeader>
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <CardTitle>Sugestões Detalhadas</CardTitle>
-                                <CardDescription>Baseado em Estoque Mínimo e Ideal configurados</CardDescription>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Filter className="w-4 h-4 text-gray-500" />
-                                <select
-                                    className="text-sm border rounded p-1"
-                                    value={filtroFornecedor}
-                                    onChange={(e) => setFiltroFornecedor(e.target.value)}
-                                >
-                                    <option value="todos">Todos Fornecedores</option>
-                                    {fornecedores.map(f => (
-                                        <option key={f.id} value={f.id}>{f.nome_empresa || f.razao_social}</option>
-                                    ))}
-                                </select>
-                            </div>
+            <Card>
+                <CardHeader>
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <CardTitle>Sugestões Detalhadas</CardTitle>
+                            <CardDescription>Baseado em Estoque Mínimo e Ideal configurados</CardDescription>
                         </div>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead className="w-[50px]">
-                                        <Checkbox
-                                            checked={selectedItens.length === sugestoes.length && sugestoes.length > 0}
-                                            onCheckedChange={handleSelectAll}
-                                        />
-                                    </TableHead>
-                                    <TableHead>Produto</TableHead>
-                                    <TableHead>Fornecedor</TableHead>
-                                    <TableHead className="text-center">Atual</TableHead>
-                                    <TableHead className="text-center">Mínimo</TableHead>
-                                    <TableHead className="text-center">Ideal</TableHead>
-                                    <TableHead className="text-right bg-blue-50 font-bold text-blue-700">Sugestão</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {sugestoes.map((produto) => {
-                                    const isSelected = selectedItens.includes(produto.id);
-                                    return (
-                                        <TableRow key={produto.id} className={isSelected ? "bg-blue-50/50" : ""}>
-                                            <TableCell>
-                                                <Checkbox
-                                                    checked={isSelected}
-                                                    onCheckedChange={() => handleSelectOne(produto.id)}
-                                                />
-                                            </TableCell>
-                                            <TableCell className="font-medium">
-                                                {produto.nome}
-                                                {produto.codigo_barras && (
-                                                    <div className="text-xs text-gray-500">{produto.codigo_barras}</div>
-                                                )}
-                                            </TableCell>
-                                            <TableCell>
-                                                <div className="flex items-center gap-1 text-sm text-gray-600">
-                                                    {produto.fornecedor_nome !== 'Não definido' && <Building2 className="w-3 h-3" />}
-                                                    {produto.fornecedor_nome}
+                        <div className="flex items-center gap-2">
+                            <Filter className="w-4 h-4 text-gray-500" />
+                            <select
+                                className="text-sm border rounded p-1"
+                                value={filtroFornecedor}
+                                onChange={(e) => setFiltroFornecedor(e.target.value)}
+                            >
+                                <option value="todos">Todos Fornecedores</option>
+                                {fornecedores.map(f => (
+                                    <option key={f.id} value={f.id}>{f.nome_empresa || f.razao_social}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className="w-[50px]">
+                                    <Checkbox
+                                        checked={selectedItens.length === sugestoes.length && sugestoes.length > 0}
+                                        onCheckedChange={handleSelectAll}
+                                    />
+                                </TableHead>
+                                <TableHead>Produto</TableHead>
+                                <TableHead>Fornecedor</TableHead>
+                                <TableHead className="text-center">Atual</TableHead>
+                                <TableHead className="text-center">Mínimo</TableHead>
+                                <TableHead className="text-center">Ideal</TableHead>
+                                <TableHead className="text-right bg-blue-50 font-bold text-blue-700">Sugestão</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {sugestoes.map((produto) => {
+                                const isSelected = selectedItens.includes(produto.id);
+                                return (
+                                    <TableRow key={produto.id} className={isSelected ? "bg-blue-50/50" : ""}>
+                                        <TableCell>
+                                            <Checkbox
+                                                checked={isSelected}
+                                                onCheckedChange={() => handleSelectOne(produto.id)}
+                                            />
+                                        </TableCell>
+                                        <TableCell className="font-medium">
+                                            <div className="flex flex-col">
+                                                <span className="text-base">{produto.nome}</span>
+                                                <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
+                                                    {produto.modelo_referencia && (
+                                                        <span title="Modelo/Referência">Ref: {produto.modelo_referencia}</span>
+                                                    )}
+                                                    {produto.cor && (
+                                                        <span title="Cor">Cor: {produto.cor}</span>
+                                                    )}
+                                                    {produto.material && (
+                                                        <span title="Material">Mat: {produto.material}</span>
+                                                    )}
+                                                    {(produto.largura || produto.altura || produto.profundidade) && (
+                                                        <span title="Dimensões (AxLxP)">
+                                                            Dim: {produto.altura || '?'}x{produto.largura || '?'}x{produto.profundidade || '?'}
+                                                        </span>
+                                                    )}
+                                                    {produto.codigo_barras && (
+                                                        <span title="EAN/GTIN">EAN: {produto.codigo_barras}</span>
+                                                    )}
                                                 </div>
-                                            </TableCell>
-                                            <TableCell className="text-center text-red-600 font-medium">
-                                                {produto.quantidade_estoque || 0}
-                                            </TableCell>
-                                            <TableCell className="text-center text-gray-500">
-                                                {produto.estoque_minimo || 0}
-                                            </TableCell>
-                                            <TableCell className="text-center text-gray-500">
-                                                {produto.estoque_ideal || '-'}
-                                            </TableCell>
-                                            <TableCell className="text-right font-bold text-blue-600 bg-blue-50/50">
-                                                {produto.sugestao_qtd}
-                                            </TableCell>
-                                        </TableRow>
-                                    );
-                                })}
-                            </TableBody>
-                        </Table>
-                    </CardContent>
-                </Card>
-            )}
+                                            </div>
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="flex items-center gap-1 text-sm text-gray-600">
+                                                {/* <Building2 className="w-3 h-3" /> */}
+                                                {produto.fornecedor_nome}
+                                            </div>
+                                        </TableCell>
+                                        <TableCell className="text-center text-red-600 font-medium">
+                                            {produto.quantidade_estoque || 0}
+                                        </TableCell>
+                                        <TableCell className="text-center text-gray-500">
+                                            {produto.estoque_minimo || 0}
+                                        </TableCell>
+                                        <TableCell className="text-center text-gray-500">
+                                            {produto.estoque_ideal || '-'}
+                                        </TableCell>
+                                        <TableCell className="text-right font-bold text-blue-600 bg-blue-50/50">
+                                            {produto.sugestao_qtd}
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })}
+                        </TableBody>
+                    </Table>
+
+                    {/* Botão Carregar Mais */}
+                    {hasNextPage && (
+                        <div className="p-4 text-center border-t bg-gray-50">
+                            <Button
+                                variant="outline"
+                                onClick={() => fetchNextPage()}
+                                disabled={isFetchingNextPage}
+                                className="w-full md:w-auto"
+                            >
+                                {isFetchingNextPage ? (
+                                    <>
+                                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                                        Carregando mais...
+                                    </>
+                                ) : (
+                                    'Carregar mais produtos para analisar'
+                                )}
+                            </Button>
+                            <p className="text-xs text-gray-500 mt-2">
+                                Carregados: {produtos.length} produtos
+                            </p>
+                        </div>
+                    )}
+
+                    {!hasNextPage && produtos.length > 0 && (
+                        <div className="p-4 text-center text-sm text-gray-500 bg-gray-50 border-t">
+                            Todos os produtos foram carregados.
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
         </div>
     );
 }

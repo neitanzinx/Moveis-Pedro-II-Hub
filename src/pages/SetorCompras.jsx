@@ -1,33 +1,28 @@
 import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Card, CardContent } from "@/components/ui/card";
 import PedidoCompraModal from "@/components/estoque/PedidoCompraModal";
 import SugestaoComprasTab from "@/components/compras/SugestaoComprasTab";
-import { Edit, Trash2, Plus, Calendar, Search, Filter, RefreshCw, ShoppingCart, Truck, CheckCircle, Smartphone } from "lucide-react";
+import PedidosList from "@/components/compras/PedidosList";
 import {
-    Package, FileText, Clock, AlertTriangle,
-    Eye, Send, PackageCheck, Building2, LayoutDashboard,
-    Tag, TrendingDown, DollarSign
+    Plus, FileText, Smartphone, LayoutDashboard, ShoppingCart,
+    Building2, Tag, TrendingDown
 } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import RecebimentoPedido from "@/components/estoque/RecebimentoPedido";
-import { differenceInDays, format, isBefore } from "date-fns";
+import { format } from "date-fns";
 
 import Fornecedores from "./Fornecedores";
 import DashboardComprasTab from "@/components/compras/DashboardComprasTab";
 
 export default function SetorCompras() {
-    const [busca, setBusca] = useState("");
-    const [filtroStatus, setFiltroStatus] = useState("todos");
     const [modalNovo, setModalNovo] = useState(false);
     const [modalEditar, setModalEditar] = useState(null);
     const [modalReceber, setModalReceber] = useState(null);
@@ -37,13 +32,7 @@ export default function SetorCompras() {
     const queryClient = useQueryClient();
     const confirm = useConfirm();
 
-    // Buscar pedidos de compra
-    const { data: pedidos = [], isLoading } = useQuery({
-        queryKey: ['pedidos-compra'],
-        queryFn: () => base44.entities.PedidoCompra.list('-created_at')
-    });
-
-    // Buscar fornecedores
+    // Buscar fornecedores (Necessário para o Modal de Novo Pedido)
     const { data: fornecedores = [] } = useQuery({
         queryKey: ['fornecedores'],
         queryFn: () => base44.entities.Fornecedor.list()
@@ -54,33 +43,19 @@ export default function SetorCompras() {
         mutationFn: (id) => base44.entities.PedidoCompra.delete(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['pedidos-compra'] });
+            queryClient.invalidateQueries({ queryKey: ['pedidos-compra-counts'] }); // Atualizar contadores
             toast.success('Pedido excluído');
         }
     });
 
-    // Filtrar pedidos
-    const pedidosFiltrados = pedidos.filter(p => {
-        const matchBusca = !busca ||
-            p.numero_pedido?.toLowerCase().includes(busca.toLowerCase()) ||
-            p.fornecedor_nome?.toLowerCase().includes(busca.toLowerCase());
-        const matchStatus = filtroStatus === 'todos' || p.status === filtroStatus;
-        return matchBusca && matchStatus;
-    });
-
-    // Status badges
+    // Status badges config (para modal detalhes)
     const statusConfig = {
-        'Rascunho': { cor: 'bg-gray-100 text-gray-800', icon: FileText },
-        'Enviado': { cor: 'bg-blue-100 text-blue-800', icon: Send },
-        'Confirmado': { cor: 'bg-purple-100 text-purple-800', icon: CheckCircle },
-        'Parcialmente Recebido': { cor: 'bg-orange-100 text-orange-800', icon: PackageCheck },
-        'Recebido': { cor: 'bg-green-100 text-green-800', icon: Truck },
-        'Cancelado': { cor: 'bg-red-100 text-red-800', icon: AlertTriangle }
-    };
-
-    const urgenciaConfig = {
-        'normal': { cor: '', label: '' },
-        'urgente': { cor: 'bg-orange-100 text-orange-700', label: '⚡ Urgente' },
-        'critico': { cor: 'bg-red-100 text-red-700', label: '🔥 Crítico' }
+        'Rascunho': { cor: 'bg-gray-100 text-gray-800' },
+        'Enviado': { cor: 'bg-blue-100 text-blue-800' },
+        'Confirmado': { cor: 'bg-purple-100 text-purple-800' },
+        'Parcialmente Recebido': { cor: 'bg-orange-100 text-orange-800' },
+        'Recebido': { cor: 'bg-green-100 text-green-800' },
+        'Cancelado': { cor: 'bg-red-100 text-red-800' }
     };
 
     const handleExcluir = async (pedido) => {
@@ -93,26 +68,6 @@ export default function SetorCompras() {
         if (confirmado) {
             deletarPedido.mutate(pedido.id);
         }
-    };
-
-    const totalPorStatus = (status) => {
-        if (status === 'todos') return pedidos.length;
-        return pedidos.filter(p => p.status === status).length;
-    };
-
-    // Calcular dias restantes para entrega
-    const getDiasEntrega = (dataPrevisao) => {
-        if (!dataPrevisao) return null;
-        const dias = differenceInDays(new Date(dataPrevisao), new Date());
-        return dias;
-    };
-
-    const getCorDiasEntrega = (dias) => {
-        if (dias === null) return 'text-gray-400';
-        if (dias < 0) return 'text-red-600 font-bold';
-        if (dias <= 2) return 'text-orange-600';
-        if (dias <= 5) return 'text-yellow-600';
-        return 'text-green-600';
     };
 
     // Navegação entre abas
@@ -152,9 +107,6 @@ export default function SetorCompras() {
                         <TabsTrigger value="pedidos" className="flex items-center gap-2">
                             <ShoppingCart className="w-4 h-4" />
                             <span className="hidden md:inline">Pedidos</span>
-                            {totalPorStatus('todos') > 0 && (
-                                <Badge variant="secondary" className="ml-1">{totalPorStatus('todos')}</Badge>
-                            )}
                         </TabsTrigger>
                         <TabsTrigger value="sugestoes" className="flex items-center gap-2">
                             <Smartphone className="w-4 h-4" />
@@ -171,193 +123,14 @@ export default function SetorCompras() {
                         <DashboardComprasTab onNavigate={handleNavigate} />
                     </TabsContent>
 
-                    {/* Tab Pedidos */}
+                    {/* Tab Pedidos - Refatorado para usar PedidosList */}
                     <TabsContent value="pedidos" className="space-y-6 mt-6">
-                        {/* Cards de resumo */}
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                            {[
-                                { status: 'todos', label: 'Todos', icon: FileText, cor: 'gray' },
-                                { status: 'Rascunho', label: 'Rascunhos', icon: FileText, cor: 'gray' },
-                                { status: 'Enviado', label: 'Enviados', icon: Send, cor: 'blue' },
-                                { status: 'Parcialmente Recebido', label: 'Em Recebimento', icon: PackageCheck, cor: 'orange' },
-                                { status: 'Recebido', label: 'Recebidos', icon: CheckCircle, cor: 'green' }
-                            ].map(item => (
-                                <Card
-                                    key={item.status}
-                                    className={`cursor-pointer transition-all hover:shadow-md ${filtroStatus === item.status ? `ring-2 ring-${item.cor}-500` : ''
-                                        }`}
-                                    onClick={() => setFiltroStatus(item.status)}
-                                >
-                                    <CardContent className="p-4">
-                                        <div className="flex items-center justify-between">
-                                            <item.icon className={`w-8 h-8 text-${item.cor}-500`} />
-                                            <span className="text-2xl font-bold">{totalPorStatus(item.status)}</span>
-                                        </div>
-                                        <p className="text-sm text-gray-500 mt-2">{item.label}</p>
-                                    </CardContent>
-                                </Card>
-                            ))}
-                        </div>
-
-                        {/* Filtros e busca */}
-                        <Card>
-                            <CardContent className="p-4">
-                                <div className="flex flex-col md:flex-row gap-4">
-                                    <div className="flex-1 relative">
-                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                                        <Input
-                                            placeholder="Buscar por número ou fornecedor..."
-                                            value={busca}
-                                            onChange={(e) => setBusca(e.target.value)}
-                                            className="pl-10"
-                                        />
-                                    </div>
-                                    <Select value={filtroStatus} onValueChange={setFiltroStatus}>
-                                        <SelectTrigger className="w-[200px]">
-                                            <SelectValue placeholder="Filtrar por status" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="todos">Todos os status</SelectItem>
-                                            <SelectItem value="Rascunho">Rascunho</SelectItem>
-                                            <SelectItem value="Enviado">Enviado</SelectItem>
-                                            <SelectItem value="Confirmado">Confirmado</SelectItem>
-                                            <SelectItem value="Parcialmente Recebido">Parcialmente Recebido</SelectItem>
-                                            <SelectItem value="Recebido">Recebido</SelectItem>
-                                            <SelectItem value="Cancelado">Cancelado</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        {/* Tabela de pedidos */}
-                        <Card>
-                            <CardContent className="p-0">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Pedido</TableHead>
-                                            <TableHead>Fornecedor</TableHead>
-                                            <TableHead>Data</TableHead>
-                                            <TableHead>Previsão</TableHead>
-                                            <TableHead>Tipo Preço</TableHead>
-                                            <TableHead className="text-right">Valor Total</TableHead>
-                                            <TableHead>Status</TableHead>
-                                            <TableHead className="text-right">Ações</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {isLoading ? (
-                                            <TableRow>
-                                                <TableCell colSpan={8} className="text-center py-8">
-                                                    Carregando...
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : pedidosFiltrados.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={8} className="text-center py-8 text-gray-500">
-                                                    Nenhum pedido encontrado
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : (
-                                            pedidosFiltrados.map((pedido) => {
-                                                const statusInfo = statusConfig[pedido.status] || statusConfig['Rascunho'];
-                                                const urgInfo = urgenciaConfig[pedido.urgencia] || urgenciaConfig['normal'];
-                                                const diasEntrega = getDiasEntrega(pedido.data_previsao_entrega);
-                                                const isAtrasado = diasEntrega !== null && diasEntrega < 0 && !['Recebido', 'Cancelado'].includes(pedido.status);
-
-                                                return (
-                                                    <TableRow key={pedido.id} className={`hover:bg-gray-50 ${isAtrasado ? 'bg-red-50' : ''}`}>
-                                                        <TableCell>
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="font-mono font-bold text-blue-600">
-                                                                    {pedido.numero_pedido}
-                                                                </span>
-                                                                {urgInfo.label && (
-                                                                    <Badge className={urgInfo.cor + " text-xs"}>
-                                                                        {urgInfo.label}
-                                                                    </Badge>
-                                                                )}
-                                                            </div>
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            <div className="flex items-center gap-2">
-                                                                <Building2 className="w-4 h-4 text-gray-400" />
-                                                                {pedido.fornecedor_nome || 'Não informado'}
-                                                            </div>
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            {pedido.data_pedido ? format(new Date(pedido.data_pedido), 'dd/MM/yy') : '-'}
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            {pedido.data_previsao_entrega ? (
-                                                                <div className="flex flex-col">
-                                                                    <span>{format(new Date(pedido.data_previsao_entrega), 'dd/MM/yy')}</span>
-                                                                    {!['Recebido', 'Cancelado'].includes(pedido.status) && (
-                                                                        <span className={`text-xs ${getCorDiasEntrega(diasEntrega)}`}>
-                                                                            {diasEntrega === 0 ? 'Hoje!' :
-                                                                                diasEntrega > 0 ? `em ${diasEntrega}d` :
-                                                                                    `${Math.abs(diasEntrega)}d atrasado`}
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                            ) : '-'}
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            {pedido.tipo_preco === 'promocional' ? (
-                                                                <div className="flex flex-col">
-                                                                    <Badge className="bg-amber-100 text-amber-700 gap-1 w-fit">
-                                                                        <Tag className="w-3 h-3" />
-                                                                        Promocional
-                                                                    </Badge>
-                                                                    {pedido.economia_total > 0 && (
-                                                                        <span className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                                                                            <TrendingDown className="w-3 h-3" />
-                                                                            -R$ {pedido.economia_total.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                            ) : '-'}
-                                                        </TableCell>
-                                                        <TableCell className="text-right font-bold">
-                                                            R$ {(pedido.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            <Badge className={`${statusInfo.cor} gap-1`}>
-                                                                <statusInfo.icon className="w-3 h-3" />
-                                                                {pedido.status}
-                                                            </Badge>
-                                                        </TableCell>
-                                                        <TableCell className="text-right">
-                                                            <div className="flex items-center justify-end gap-1">
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    onClick={() => setModalDetalhes(pedido)}
-                                                                    title="Ver detalhes"
-                                                                >
-                                                                    <Eye className="w-4 h-4" />
-                                                                </Button>
-                                                                {pedido.status === 'Rascunho' && (
-                                                                    <>
-                                                                        <Button variant="ghost" size="icon" onClick={() => setModalEditar(pedido)}>
-                                                                            <Edit className="w-4 h-4" />
-                                                                        </Button>
-                                                                        <Button variant="ghost" size="icon" onClick={() => handleExcluir(pedido)} className="text-red-600">
-                                                                            <Trash2 className="w-4 h-4" />
-                                                                        </Button>
-                                                                    </>
-                                                                )}
-                                                            </div>
-                                                        </TableCell>
-                                                    </TableRow>
-                                                );
-                                            })
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </CardContent>
-                        </Card>
+                        <PedidosList
+                            onEdit={setModalEditar}
+                            onView={setModalDetalhes}
+                            onDelete={handleExcluir}
+                            onReceber={setModalReceber}
+                        />
                     </TabsContent>
 
                     <TabsContent value="sugestoes">
@@ -406,7 +179,7 @@ export default function SetorCompras() {
 
                 {/* Modal Detalhes */}
                 <Dialog open={!!modalDetalhes} onOpenChange={() => setModalDetalhes(null)}>
-                    <DialogContent className="max-w-2xl">
+                    <DialogContent className="max-w-2xl text-left">
                         <DialogHeader>
                             <DialogTitle className="flex items-center gap-2">
                                 <FileText className="w-5 h-5" />
@@ -422,7 +195,7 @@ export default function SetorCompras() {
                                     </div>
                                     <div>
                                         <p className="text-sm text-gray-500">Status</p>
-                                        <Badge className={statusConfig[modalDetalhes.status]?.cor}>
+                                        <Badge className={(statusConfig[modalDetalhes.status] || statusConfig['Rascunho']).cor}>
                                             {modalDetalhes.status}
                                         </Badge>
                                     </div>
@@ -497,7 +270,18 @@ export default function SetorCompras() {
                                             <TableBody>
                                                 {(modalDetalhes.itens || []).map((item, index) => (
                                                     <TableRow key={index}>
-                                                        <TableCell>{item.produto_nome}</TableCell>
+                                                        <TableCell>
+                                                            <div className="flex flex-col">
+                                                                <span className="font-medium">{item.produto_nome}</span>
+                                                                {item.detalhes && (
+                                                                    <span className="text-xs text-gray-500">
+                                                                        {item.detalhes.modelo && `Ref: ${item.detalhes.modelo} | `}
+                                                                        {item.detalhes.cor && `Cor: ${item.detalhes.cor} | `}
+                                                                        {item.detalhes.dimensoes && `Dim: ${item.detalhes.dimensoes}`}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </TableCell>
                                                         <TableCell className="text-center">{item.quantidade_pedida}</TableCell>
                                                         {modalDetalhes.tipo_preco === 'promocional' && (
                                                             <TableCell className="text-right text-gray-500">

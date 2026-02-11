@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { base44, supabase } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, MoreHorizontal, Trash2, Edit, ArrowRightLeft, Filter, Loader2, PackageOpen, Plus, AlertCircle, Palette } from "lucide-react";
@@ -16,12 +16,21 @@ import { toast } from "sonner";
 
 export default function EstoqueTab({ user }) {
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedCategoria, setSelectedCategoria] = useState("todas");
   const [filtroAtencao, setFiltroAtencao] = useState(false);
   const [editingProduto, setEditingProduto] = useState(null);
   const [movingProduto, setMovingProduto] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   // Listen for header action event
   useEffect(() => {
@@ -38,15 +47,73 @@ export default function EstoqueTab({ user }) {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
 
-  const { data: produtos, isLoading } = useQuery({
-    queryKey: ['produtos'],
-    queryFn: () => base44.entities.Produto.list('nome'),
+  // 1. Categories Query (Distinct)
+  const { data: categorias = [] } = useQuery({
+    queryKey: ['categorias-produtos'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('produtos').select('categoria').not('categoria', 'is', null);
+      if (error) throw error;
+      const cats = [...new Set(data?.map(p => p.categoria))].filter(Boolean).sort();
+      return cats;
+    },
+    staleTime: 1000 * 60 * 5 // Cache for 5 mins
+  });
+
+  // 2. Attention Count Query
+  // Note: This matches the filter logic used in the main query
+  const { data: produtosComAtencao = 0 } = useQuery({
+    queryKey: ['produtos-atencao-count'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('produtos')
+        .select('*', { count: 'exact', head: true })
+        .eq('requer_atencao', true);
+      if (error) throw error;
+      return count || 0;
+    }
+  });
+
+  // 3. Main Infinite Query
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    isError,
+    error
+  } = useInfiniteQuery({
+    queryKey: ['produtos-paginated', debouncedSearch, selectedCategoria, filtroAtencao],
+    queryFn: async ({ pageParam = 1 }) => {
+      const filters = {};
+
+      if (selectedCategoria !== 'todas') filters.categoria = selectedCategoria;
+      if (filtroAtencao) filters.requer_atencao = 'true'; // converted to string due to object entry
+
+      return await base44.entities.Produto.search({
+        page: pageParam,
+        limit: 100,
+        filters,
+        search: debouncedSearch,
+        orderBy: 'nome'
+      });
+    },
+    getNextPageParam: (lastPage, allPages) => {
+      // lastPage is { data, count }
+      const currentCount = allPages.flatMap(p => p.data).length;
+      if (currentCount < lastPage.count) {
+        return allPages.length + 1;
+      }
+      return undefined;
+    },
+    keepPreviousData: true
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => base44.entities.Produto.delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['produtos'] });
+      queryClient.invalidateQueries({ queryKey: ['produtos-paginated'] });
+      queryClient.invalidateQueries({ queryKey: ['produtos-atencao-count'] });
       toast.success("Produto excluido com sucesso");
     }
   });
@@ -56,30 +123,9 @@ export default function EstoqueTab({ user }) {
   const isWarehouse = user?.cargo === 'Estoque';
   const canEdit = isAdmin || isManager || isWarehouse;
 
-  // Filtrar para mostrar apenas produtos "finais" (filhos ou standalone), escondendo os containers (pais)
-  // Se o usuário quer "cada variação como um produto único", não devemos mostrar o Pai agrupador.
-  const produtosFinais = (produtos || []).filter(p => !p.is_parent);
-
-  // Get unique categories from visible products
-  const categorias = [...new Set(produtosFinais.map(p => p.categoria).filter(Boolean))].sort();
-
-  // Count products needing attention
-  const produtosComAtencao = produtosFinais.filter(p => p.requer_atencao).length;
-
-  // Mapa de contagem de variações removido (não agrupamos mais)
-
-  const filteredProdutos = produtosFinais.filter(produto => {
-    const matchesSearch =
-      produto.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      produto.categoria?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      produto.codigo_barras?.includes(searchTerm);
-
-    const matchesCategoria = selectedCategoria === "todas" || produto.categoria === selectedCategoria;
-
-    const matchesAtencao = !filtroAtencao || produto.requer_atencao;
-
-    return matchesSearch && matchesCategoria && matchesAtencao;
-  });
+  // Flatten pages to get all loaded products
+  const flatProdutos = data?.pages.flatMap(page => page.data) || [];
+  const totalCount = data?.pages[0]?.count || 0;
 
   const handleDelete = async (id) => {
     const confirmed = await confirm({
@@ -161,18 +207,18 @@ export default function EstoqueTab({ user }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading ? (
+            {isLoading && flatProdutos.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-16">
+                <TableCell colSpan={6} className="text-center py-16">
                   <div className="flex flex-col items-center gap-3">
                     <Loader2 className="w-8 h-8 animate-spin text-green-600" />
                     <p className="text-gray-500">Carregando estoque...</p>
                   </div>
                 </TableCell>
               </TableRow>
-            ) : filteredProdutos.length === 0 ? (
+            ) : flatProdutos.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-16">
+                <TableCell colSpan={6} className="text-center py-16">
                   <div className="flex flex-col items-center gap-4">
                     <div className="w-16 h-16 rounded-full bg-gray-100 dark:bg-neutral-800 flex items-center justify-center">
                       <PackageOpen className="w-8 h-8 text-gray-400" />
@@ -198,7 +244,7 @@ export default function EstoqueTab({ user }) {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredProdutos.map(produto => {
+              flatProdutos.map(produto => {
                 const isLowStock = produto.quantidade_estoque <= (produto.estoque_minimo || 0);
 
                 return (
@@ -271,7 +317,12 @@ export default function EstoqueTab({ user }) {
                         {isLowStock && (
                           <Badge variant="destructive" className="h-4 px-1 text-[10px]">Baixo</Badge>
                         )}
-                        {/* Badge de variação removido */}
+                        <div className="text-[10px] text-gray-500 flex gap-1 flex-wrap justify-center max-w-[120px]">
+                          {(produto.estoque_cd > 0) && <span title="Depósito/CD">CD:{produto.estoque_cd}</span>}
+                          {(produto.estoque_loja_centro > 0) && <span title="Loja Centro">CN:{produto.estoque_loja_centro}</span>}
+                          {(produto.estoque_loja_carangola > 0) && <span title="Loja Carangola">CR:{produto.estoque_loja_carangola}</span>}
+                          {(produto.estoque_loja_ponte_branca > 0) && <span title="Loja P. Branca">PB:{produto.estoque_loja_ponte_branca}</span>}
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-medium text-gray-900 dark:text-white">
@@ -308,6 +359,27 @@ export default function EstoqueTab({ user }) {
         </Table>
       </div>
 
+      {/* Load More Trigger */}
+      {hasNextPage && (
+        <div className="flex justify-center py-6">
+          <Button
+            onClick={() => fetchNextPage()}
+            disabled={isFetchingNextPage}
+            variant="outline"
+            className="w-full sm:w-auto min-w-[200px]"
+          >
+            {isFetchingNextPage ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Carregando mais...
+              </>
+            ) : (
+              `Carregar mais (Visualizando ${flatProdutos.length} de ${totalCount})`
+            )}
+          </Button>
+        </div>
+      )}
+
       <ProdutoCadastroCompleto
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -321,7 +393,9 @@ export default function EstoqueTab({ user }) {
               await base44.entities.Produto.create(data);
               toast.success("Produto criado com sucesso");
             }
-            queryClient.invalidateQueries({ queryKey: ['produtos'] });
+            queryClient.invalidateQueries({ queryKey: ['produtos-paginated'] });
+            queryClient.invalidateQueries({ queryKey: ['produtos-atencao-count'] });
+            queryClient.invalidateQueries({ queryKey: ['categorias-produtos'] }); // Update categories too
             setIsModalOpen(false);
           } catch (error) {
             console.error("Erro ao salvar produto:", error);

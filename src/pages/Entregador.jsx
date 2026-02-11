@@ -15,6 +15,7 @@ import CameraCapture from "@/components/logistica/CameraCapture";
 import FotoEntregaCapture from "@/components/logistica/FotoEntregaCapture";
 import { supabase } from "@/api/base44Client";
 import { Input } from "@/components/ui/input";
+import { whatsappService } from "@/services/whatsappService";
 
 export default function Entregador() {
     const [user, setUser] = useState(null);
@@ -280,11 +281,7 @@ export default function Entregador() {
                 }
             }
 
-            await fetch(`${import.meta.env.VITE_ZAP_API_URL}/aviso-inicio-rota`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ entregas: entregasRota })
-            }).catch(() => { });
+            await whatsappService.notifyRouteStart(entregasRota);
 
             setRotaIniciada(true);
             setEtapa('rota');
@@ -316,26 +313,36 @@ export default function Entregador() {
 
     const avisarProximo = async (entrega) => {
         setEnviando(true);
-        navigator.geolocation.getCurrentPosition(async (position) => {
-            const { latitude, longitude } = position.coords;
-            const linkMaps = `https://www.google.com/maps?q=${latitude},${longitude}`;
+        try {
+            const linkRastreio = `${window.location.origin}/rastreio/${entrega.id}`;
+            const telefone = entrega.cliente_telefone;
 
-            try {
-                await fetch(`${import.meta.env.VITE_ZAP_API_URL}/aviso-proxima-parada`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        telefone: entrega.cliente_telefone,
-                        nome: entrega.cliente_nome,
-                        linkLocalizacao: linkMaps
-                    })
+            if (!telefone) {
+                toast.error("Telefone do cliente não cadastrado.");
+                setEnviando(false);
+                return;
+            }
+
+            // Atualizar status para "Próxima parada" para permitir o rastreio (se não estiver em rota/caminho)
+            const statusPermitidos = ["Próxima parada", "A caminho", "Em rota"];
+            if (!statusPermitidos.includes(entrega.status)) {
+                await updateEntrega.mutateAsync({
+                    id: entrega.id,
+                    data: { status: 'Próxima parada' }
                 });
-                // Marcar cliente como notificado
-                setClientesNotificados(prev => new Set([...prev, entrega.id]));
-                toast.success("Cliente avisado!");
-            } catch (e) { toast.error("Erro ao enviar."); }
-            finally { setEnviando(false); }
-        });
+            }
+
+            await whatsappService.sendDeliveryNextStop(telefone, entrega, linkRastreio);
+
+            // Marcar cliente como notificado
+            setClientesNotificados(prev => new Set([...prev, entrega.id]));
+            toast.success("Cliente avisado e link de rastreio enviado!");
+        } catch (e) {
+            console.error(e);
+            toast.error("Erro ao enviar aviso.");
+        } finally {
+            setEnviando(false);
+        }
     };
 
     // Iniciar processo de finalizar entrega (abre assinatura)
@@ -412,16 +419,7 @@ export default function Entregador() {
 
             // 🚀 AUTOMAÇÃO: Chamar o robô de WhatsApp para concluir e avisar o próximo
             try {
-                const zapUrl = getZapApiUrl();
-                await fetch(`${zapUrl}/concluir-entrega`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        id_concluida: entrega.id,
-                        // Passamos os dados extras para o robô salvar
-                        update_data: updateData
-                    })
-                });
+                await whatsappService.notifyDeliveryCompletion(entrega.id, updateData);
             } catch (zapErr) {
                 console.error("Falha ao chamar automação do robô, tentando fallback direto no banco...");
                 await updateEntrega.mutateAsync({ id: entrega.id, data: updateData });
@@ -481,17 +479,14 @@ export default function Entregador() {
                 }
             });
 
-            // 2. Notificar cliente via bot
-            await fetch(`${import.meta.env.VITE_ZAP_API_URL}/entrega-nao-realizada`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    telefone: entrega.cliente_telefone,
-                    nome: entrega.cliente_nome,
-                    numero_pedido: entrega.numero_pedido,
-                    motivo: observacaoFalha
-                })
-            }).catch(() => { });
+            // 2. Notificar cliente via bot/service
+            if (entrega.cliente_telefone) {
+                await whatsappService.sendDeliveryFailure(
+                    entrega.cliente_telefone,
+                    entrega.cliente_nome,
+                    observacaoFalha
+                );
+            }
 
             setModalFalha(null);
             toast.success("Entrega retornada para triagem. Cliente notificado.");

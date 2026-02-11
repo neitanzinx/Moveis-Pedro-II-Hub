@@ -6,6 +6,7 @@ import { base44 } from "@/api/base44Client";
 import { useQueryClient } from "@tanstack/react-query";
 import { format, addDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { whatsappService } from "@/services/whatsappService";
 
 export default function BotaoConfirmacaoWhatsApp({ entregas, vendas }) {
   const [loading, setLoading] = useState(false);
@@ -26,8 +27,11 @@ export default function BotaoConfirmacaoWhatsApp({ entregas, vendas }) {
   const verificarServidor = async () => {
     setStatusServidor("verificando");
     try {
-      await fetch(`${import.meta.env.VITE_ZAP_API_URL}/status`, { method: 'GET' });
-      setStatusServidor("online");
+      if (await whatsappService.checkStatus()) {
+        setStatusServidor("online");
+      } else {
+        setStatusServidor("offline");
+      }
     } catch (e) {
       setStatusServidor("offline");
     }
@@ -59,11 +63,7 @@ export default function BotaoConfirmacaoWhatsApp({ entregas, vendas }) {
       });
 
       // Manda para o seu PC
-      const response = await fetch(`${import.meta.env.VITE_ZAP_API_URL}/disparar-confirmacoes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entregas: payload })
-      });
+      const response = await whatsappService.sendConfirmations(payload);
 
       if (response.ok) {
         // Marca como aguardando no sistema

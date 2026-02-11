@@ -644,7 +644,7 @@ export default function ConfiguracaoNfe() {
                                 <Search className="w-4 h-4" />
                                 <span className="font-semibold">Preencher via CNPJ:</span>
                                 <Button variant="link" className="p-0 h-auto font-normal text-blue-700 underline" onClick={() => buscarCNPJ(editandoEmpresa.cnpj)}>
-                                    Buscar dados de {editandoEmpresa.cnpjFormatado || editandoEmpresa.cnpj}
+                                    Buscar dados de {editandoEmpresa?.cnpjFormatado || editandoEmpresa?.cnpj}
                                 </Button>
                             </div>
                         </div>
@@ -768,6 +768,6 @@ export default function ConfiguracaoNfe() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-        </div>
+        </div >
     );
 }

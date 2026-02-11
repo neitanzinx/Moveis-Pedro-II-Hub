@@ -8,8 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Eye, EyeOff, Lock, IdCard, Loader2 } from "lucide-react";
 import { supabase } from "@/api/base44Client";
 
-// API URL baseada no ambiente
-const API_URL = import.meta.env.VITE_ZAP_API_URL || '';
+
 
 export default function LoginFuncionario() {
     const { brandName, brandLogo } = useTenant();

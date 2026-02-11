@@ -13,11 +13,8 @@ import {
 // Tab Components
 import EstoqueTab from "../components/estoque/EstoqueTab";
 
-import MovimentacaoTab from "../components/estoque/MovimentacaoTab";
-import AlertasTab from "../components/estoque/AlertasTab";
 import TransferenciasTab from "../components/estoque/TransferenciasTab";
 import InventarioTab from "../components/estoque/InventarioTab";
-import ImportarProdutos from "../components/estoque/ImportarProdutos";
 
 export default function Estoque() {
   const { user, loading } = useAuth();
@@ -28,17 +25,14 @@ export default function Estoque() {
     queryFn: () => base44.entities.Produto.list(),
   });
 
-  const { data: alertas = [] } = useQuery({
-    queryKey: ['alertas-recompra'],
-    queryFn: () => base44.entities.AlertaRecompra.list(),
-  });
+
 
   const { data: transferencias = [] } = useQuery({
     queryKey: ['transferencias-estoque'],
     queryFn: () => base44.entities.TransferenciaEstoque.list(),
   });
 
-  const alertasAtivos = alertas.filter(a => a.status === 'Ativo').length;
+
   const transferenciasPendentes = transferencias.filter(t => t.status === 'Pendente').length;
 
   if (loading || !user) {
@@ -53,12 +47,9 @@ export default function Estoque() {
   }
 
   const tabs = [
-    { id: "estoque", label: "Produtos", icon: Package, count: produtos.filter(p => !!p.is_parent).length },
-    { id: "importar", label: "Importar", icon: Upload },
-    { id: "movimentacao", label: "Movimentacao", icon: Package },
-    { id: "alertas", label: "Alertas", icon: AlertTriangle, count: alertasAtivos, variant: "destructive" },
-    { id: "transferencias", label: "Transferencias", icon: ArrowRightLeft, count: transferenciasPendentes },
-    { id: "inventario", label: "Inventario", icon: ClipboardCheck },
+    { id: "estoque", label: "Produtos", icon: Package, count: produtos.length },
+    { id: "transferencias", label: "Transferências", icon: ArrowRightLeft, count: transferenciasPendentes },
+    { id: "inventario", label: "Inventário", icon: ClipboardCheck },
   ];
 
   const handleNovoProduto = () => {
@@ -87,7 +78,7 @@ export default function Estoque() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full max-w-4xl grid-cols-6">
+        <TabsList className="grid w-full max-w-2xl grid-cols-3">
           {tabs.map(tab => (
             <TabsTrigger key={tab.id} value={tab.id} className="flex items-center gap-2">
               <tab.icon className="w-4 h-4" />
@@ -110,15 +101,6 @@ export default function Estoque() {
         <div className="mt-6">
           <TabsContent value="estoque" className="m-0">
             <EstoqueTab user={user} />
-          </TabsContent>
-          <TabsContent value="importar" className="m-0">
-            <ImportarProdutos />
-          </TabsContent>
-          <TabsContent value="movimentacao" className="m-0">
-            <MovimentacaoTab />
-          </TabsContent>
-          <TabsContent value="alertas" className="m-0">
-            <AlertasTab user={user} />
           </TabsContent>
           <TabsContent value="transferencias" className="m-0">
             <TransferenciasTab user={user} />

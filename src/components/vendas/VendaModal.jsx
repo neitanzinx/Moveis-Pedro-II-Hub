@@ -284,13 +284,21 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
   };
 
   const atualizarEstoque = async () => {
+    const { resolveStockField } = await import("@/utils/stockUtils");
+    const campoLoja = resolveStockField(formData.loja);
+
     for (const item of formData.itens) {
       const produto = produtos.find(p => p.id === item.produto_id);
       if (produto) {
-        const novoEstoque = produto.quantidade_estoque - item.quantidade;
-        await base44.entities.Produto.update(produto.id, {
-          quantidade_estoque: novoEstoque
-        });
+        const novoEstoque = Math.max(0, (produto.quantidade_estoque || 0) - item.quantidade);
+        const updates = { quantidade_estoque: novoEstoque };
+
+        // Also deduct from the per-store stock field
+        if (campoLoja) {
+          updates[campoLoja] = Math.max(0, (produto[campoLoja] || 0) - item.quantidade);
+        }
+
+        await base44.entities.Produto.update(produto.id, updates);
       }
     }
   };

@@ -76,8 +76,10 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
                             const produto = produtos.find(p => String(p.id) === String(item.produto_id));
                             if (produto) {
                                 const estoqueAtual = produto.quantidade_estoque || 0;
+                                const estoqueCdAtual = produto.estoque_cd || 0;
                                 await base44.entities.Produto.update(item.produto_id, {
-                                    quantidade_estoque: estoqueAtual + qtdRecebida
+                                    quantidade_estoque: estoqueAtual + qtdRecebida,
+                                    estoque_cd: estoqueCdAtual + qtdRecebida
                                 });
 
                                 // --- SINCRONIZAÇÃO COM ESTOQUE POR UNIDADE (estoque_loja) ---
@@ -223,16 +225,29 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
                                     return (
                                         <TableRow key={index} className={completo ? 'bg-green-50' : ''}>
                                             <TableCell>
-                                                <div className="flex items-center gap-2">
-                                                    <Package className="w-4 h-4 text-gray-400" />
-                                                    <div>
-                                                        <p className="font-medium">{item.produto_nome}</p>
-                                                        {item.produto_codigo && (
-                                                            <p className="text-xs text-gray-500">
-                                                                Cód: {item.produto_codigo}
-                                                            </p>
-                                                        )}
+                                                <div className="flex flex-col">
+                                                    <div className="flex items-center gap-2">
+                                                        <Package className="w-4 h-4 text-gray-400" />
+                                                        <span className="font-medium">{item.produto_nome}</span>
                                                     </div>
+                                                    {item.detalhes && (
+                                                        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-xs text-gray-500 ml-6">
+                                                            {item.detalhes.modelo && (
+                                                                <span title="Modelo/Referência">Ref: {item.detalhes.modelo}</span>
+                                                            )}
+                                                            {item.detalhes.cor && (
+                                                                <span title="Cor">Cor: {item.detalhes.cor}</span>
+                                                            )}
+                                                            {item.detalhes.dimensoes && item.detalhes.dimensoes !== 'x x' && item.detalhes.dimensoes !== 'xx' && (
+                                                                <span title="Dimensões">Dim: {item.detalhes.dimensoes}</span>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    {item.produto_codigo && (
+                                                        <p className="text-xs text-gray-500 ml-6">
+                                                            Cód: {item.produto_codigo}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </TableCell>
                                             <TableCell className="text-center font-bold">

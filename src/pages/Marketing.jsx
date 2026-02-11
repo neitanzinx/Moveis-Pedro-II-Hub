@@ -23,6 +23,7 @@ import {
     Cake, Gift, ShoppingCart, RefreshCw, Users, Printer, Search,
     FileText, Package, Filter, Star, Trophy, Target, Award, Save, Crown
 } from "lucide-react";
+import { whatsappService } from "@/services/whatsappService";
 
 // Print styles for labels
 
@@ -274,18 +275,14 @@ export default function Marketing() {
         setEnviandoMsg(prev => ({ ...prev, [key]: true }));
 
         try {
-            const response = await fetch(`${import.meta.env.VITE_ZAP_API_URL}/enviar-mensagem-marketing`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    telefone: dados.telefone,
-                    nome: dados.nome,
-                    tipo: tipo,
-                    dados_extras: dados.extras || {}
-                })
+            const responseOk = await whatsappService.sendMarketingMessage({
+                telefone: dados.telefone,
+                nome: dados.nome,
+                tipo: tipo,
+                dados_extras: dados.extras || {}
             });
 
-            if (response.ok) {
+            if (responseOk) {
                 toast.success(`Mensagem enviada para ${dados.nome}!`);
             } else {
                 throw new Error("Falha no envio");
@@ -337,18 +334,14 @@ export default function Marketing() {
             const lojas = await base44.entities.Loja.list();
             const lojasAtivas = lojas.filter(l => l.ativa);
 
-            const response = await fetch(`${import.meta.env.VITE_ZAP_API_URL}/enviar-mensagem-aniversario`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    telefone: cliente.telefone,
-                    nome: cliente.nome_completo,
-                    cupom_codigo: codigoCupom,
-                    lojas: lojasAtivas
-                })
+            const responseOk = await whatsappService.sendBirthdayMessage({
+                telefone: cliente.telefone,
+                nome: cliente.nome_completo,
+                cupom_codigo: codigoCupom,
+                lojas: lojasAtivas
             });
 
-            if (response.ok) {
+            if (responseOk) {
                 queryClient.invalidateQueries({ queryKey: ['cupons'] });
                 toast.success(`Parabéns enviado para ${cliente.nome_completo} !Cupom: ${codigoCupom} `);
             } else {

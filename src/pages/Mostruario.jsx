@@ -64,27 +64,44 @@ export default function Mostruario() {
     const criarPedido = useMutation({
         mutationFn: async (pedidoData) => {
             const { criar_transferencia, necessita_montagem, local_montagem, ...dadosPedido } = pedidoData;
+            const { resolveStockField } = await import("@/utils/stockUtils");
 
             // 1. Create the Showroom Request
             const pedido = await base44.entities.PedidoMostruario.create(dadosPedido);
 
-            // 2. If requested, create Stock Transfer
+            // 2. Move stock: deduct from CD, add to destination store showroom
+            const produto = produtos.find(p => p.id === dadosPedido.produto_id);
+            if (produto) {
+                const qty = dadosPedido.quantidade || 1;
+                const campoDestino = resolveStockField(dadosPedido.loja);
+                const updates = {
+                    estoque_cd: Math.max(0, (produto.estoque_cd || 0) - qty),
+                };
+                if (campoDestino && campoDestino !== 'estoque_cd') {
+                    updates[campoDestino] = (produto[campoDestino] || 0) + qty;
+                }
+                // quantidade_estoque doesn't change (it's a transfer within the system)
+                await base44.entities.Produto.update(produto.id, updates);
+            }
+
+            // 3. If requested, create Stock Transfer record (audit trail)
             if (criar_transferencia) {
                 await base44.entities.TransferenciaEstoque.create({
                     numero_transferencia: `TRANSF-MOST-${Date.now()}`,
                     produto_id: dadosPedido.produto_id,
                     produto_nome: dadosPedido.produto_nome,
-                    loja_origem: 'Centro',
+                    loja_origem: 'Depósito / CD',
                     loja_destino: dadosPedido.loja,
                     quantidade: dadosPedido.quantidade,
                     data_solicitacao: new Date().toISOString().split('T')[0],
-                    status: 'Solicitada',
+                    status: 'Recebida', // Already moved stock above
+                    data_recebimento: new Date().toISOString().split('T')[0],
                     motivo: 'Solicitação de Mostruário',
                     observacoes: `Gerado a partir do Pedido de Mostruário #${pedido.id || '-'}`
                 });
             }
 
-            // 3. If requested, create Assembly Task
+            // 4. If requested, create Assembly Task
             if (necessita_montagem) {
                 await base44.entities.Montagem.create({
                     numero_pedido: `MOST-${pedido.id || Date.now()}`,
@@ -94,7 +111,9 @@ export default function Mostruario() {
                     endereco_montagem: local_montagem === 'cd' ? 'DEPÓSITO CENTRAL' : dadosPedido.loja,
                     data_montagem: new Date().toISOString().split('T')[0],
                     status: 'Pendente',
-                    observacoes: `Montagem de Mostruário. ${dadosPedido.observacoes || ''}`,
+                    tipo_montagem: 'mostruario',
+                    loja_mostruario: dadosPedido.loja,
+                    observacoes: `Montagem de Mostruário para ${dadosPedido.loja}. ${dadosPedido.observacoes || ''}`,
                     itens: [
                         {
                             produto_nome: dadosPedido.produto_nome,

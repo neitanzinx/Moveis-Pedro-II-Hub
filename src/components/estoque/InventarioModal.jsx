@@ -11,10 +11,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2, Trash2, Check, ChevronsUpDown, ScanBarcode, Search } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
-const lojas = ["Centro", "Carangola", "Ponte Branca"];
+const lojas = ["Depósito / CD", "Centro", "Carangola", "Ponte Branca"];
 
 export default function InventarioModal({ isOpen, onClose, onSave, produtos, isLoading, userLoja }) {
   const [formData, setFormData] = useState({
@@ -31,6 +46,8 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
 
   const [produtoSelecionado, setProdutoSelecionado] = useState("");
   const [quantidadeContada, setQuantidadeContada] = useState(0);
+  const [barcodeInput, setBarcodeInput] = useState("");
+  const [openCombobox, setOpenCombobox] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -46,8 +63,35 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
         status: "Concluído",
         observacoes: "",
       });
+      setProdutoSelecionado("");
+      setQuantidadeContada(0);
+      setBarcodeInput("");
     }
   }, [isOpen, userLoja]);
+
+  const handleBarcodeSubmit = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const code = barcodeInput.trim();
+      if (!code) return;
+
+      const produto = produtos.find(p => p.codigo_barras === code);
+      if (produto) {
+        if (formData.itens.some(i => i.produto_id === produto.id)) {
+          toast.warning("Produto já adicionado à lista. Edite a quantidade se necessário.");
+          // Optional: Highlight existing item
+        } else {
+          setProdutoSelecionado(produto.id);
+          toast.success(`Produto encontrado: ${produto.nome}`);
+          // Focus quantity input if possible, or just let user type
+          document.getElementById('qtd-input')?.focus();
+        }
+      } else {
+        toast.error("Produto não encontrado com este código de barras.");
+      }
+      setBarcodeInput(""); // Clear input for next scan
+    }
+  };
 
   const adicionarItem = () => {
     if (!produtoSelecionado || quantidadeContada < 0) {
@@ -64,12 +108,24 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
       return;
     }
 
+    const getEstoquePorLoja = (prod, loja) => {
+      switch (loja) {
+        case "Depósito / CD": return prod.estoque_cd || 0;
+        case "Centro": return prod.estoque_loja_centro || 0;
+        case "Carangola": return prod.estoque_loja_carangola || 0;
+        case "Ponte Branca": return prod.estoque_loja_ponte_branca || 0;
+        default: return prod.quantidade_estoque || 0;
+      }
+    };
+
+    const qtdSistema = getEstoquePorLoja(produto, formData.loja);
+
     const novoItem = {
       produto_id: produto.id,
       produto_nome: produto.nome,
-      quantidade_sistema: produto.quantidade_estoque || 0,
+      quantidade_sistema: qtdSistema,
       quantidade_contada: quantidadeContada,
-      diferenca: quantidadeContada - (produto.quantidade_estoque || 0),
+      diferenca: quantidadeContada - qtdSistema,
       justificativa: ""
     };
 
@@ -101,7 +157,7 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
+
     if (!formData.loja || !formData.responsavel || formData.itens.length === 0) {
       alert("Preencha todos os campos e adicione pelo menos um produto");
       return;
@@ -113,6 +169,8 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
   const produtosDisponiveis = produtos.filter(
     p => !formData.itens.some(i => i.produto_id === p.id)
   );
+
+  const selectedProductDetails = produtos.find(p => p.id === produtoSelecionado);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -178,35 +236,95 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
             </div>
 
             <div className="border rounded-xl p-4" style={{ borderColor: '#E5E0D8', backgroundColor: '#f0f9ff' }}>
-              <h4 className="font-semibold mb-4" style={{ color: '#07593f' }}>
+              <h4 className="font-semibold mb-4 flex items-center gap-2" style={{ color: '#07593f' }}>
+                <ScanBarcode className="w-5 h-5" />
                 Adicionar Produto
               </h4>
-              <div className="grid md:grid-cols-12 gap-3">
-                <div className="md:col-span-8">
-                  <Label>Produto</Label>
-                  <Select value={produtoSelecionado} onValueChange={setProdutoSelecionado}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione um produto" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {produtosDisponiveis.map(produto => (
-                        <SelectItem key={produto.id} value={produto.id}>
-                          {produto.nome} (Sistema: {produto.quantidade_estoque || 0})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+
+              {/* Barcode Input */}
+              <div className="mb-4">
+                <Label htmlFor="barcode">Bipar Código de Barras (Enter para buscar)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="barcode"
+                    value={barcodeInput}
+                    onChange={(e) => setBarcodeInput(e.target.value)}
+                    onKeyDown={handleBarcodeSubmit}
+                    placeholder="Escaneie ou digite o código..."
+                    className="bg-white"
+                    autoFocus
+                  />
+                  <Button type="button" variant="secondary" onClick={() => handleBarcodeSubmit({ key: 'Enter', preventDefault: () => { } })}>
+                    <Search className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-12 gap-3 items-end">
+                <div className="md:col-span-8 flex flex-col gap-1.5">
+                  <Label>Buscar Produto (Nome ou Código)</Label>
+                  <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={openCombobox}
+                        className="w-full justify-between bg-white"
+                      >
+                        {produtoSelecionado
+                          ? produtos.find((p) => p.id === produtoSelecionado)?.nome
+                          : "Selecione um produto..."}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[400px] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Buscar produto..." />
+                        <CommandList>
+                          <CommandEmpty>Nenhum produto encontrado.</CommandEmpty>
+                          <CommandGroup>
+                            {produtosDisponiveis.map((produto) => (
+                              <CommandItem
+                                key={produto.id}
+                                value={produto.nome}
+                                onSelect={() => {
+                                  setProdutoSelecionado(produto.id === produtoSelecionado ? "" : produto.id);
+                                  setOpenCombobox(false);
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    produtoSelecionado === produto.id ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                {produto.nome}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  {selectedProductDetails && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Estoque Atual: <strong>{selectedProductDetails.quantidade_estoque || 0}</strong> •
+                      Ref: {selectedProductDetails.modelo_referencia || 'N/A'}
+                    </p>
+                  )}
                 </div>
                 <div className="md:col-span-3">
-                  <Label>Quantidade Contada</Label>
+                  <Label htmlFor="qtd-input">Quantidade Contada</Label>
                   <Input
+                    id="qtd-input"
                     type="number"
                     min="0"
                     value={quantidadeContada}
                     onChange={(e) => setQuantidadeContada(parseInt(e.target.value) || 0)}
+                    className="bg-white"
                   />
                 </div>
-                <div className="md:col-span-1 flex items-end">
+                <div className="md:col-span-1">
                   <Button
                     type="button"
                     onClick={adicionarItem}
@@ -226,10 +344,10 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
                   Produtos Contados ({formData.itens.length})
                 </h5>
                 {formData.itens.map((item, index) => (
-                  <div 
+                  <div
                     key={index}
                     className="flex items-center justify-between p-3 rounded-lg border"
-                    style={{ 
+                    style={{
                       borderColor: item.diferenca !== 0 ? '#FCD34D' : '#E5E0D8',
                       backgroundColor: item.diferenca !== 0 ? '#FEF3C7' : '#FAF8F5'
                     }}
@@ -239,7 +357,7 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
                         {item.produto_nome}
                       </p>
                       <p className="text-sm" style={{ color: '#8B8B8B' }}>
-                        Sistema: {item.quantidade_sistema} | Contado: {item.quantidade_contada} | 
+                        Sistema: {item.quantidade_sistema} | Contado: {item.quantidade_contada} |
                         Diferença: <strong className={item.diferenca !== 0 ? 'text-orange-600' : ''}>
                           {item.diferenca > 0 ? '+' : ''}{item.diferenca}
                         </strong>
@@ -285,8 +403,8 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar
             </Button>
-            <Button 
-              type="submit" 
+            <Button
+              type="submit"
               disabled={isLoading || formData.itens.length === 0}
               style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
             >

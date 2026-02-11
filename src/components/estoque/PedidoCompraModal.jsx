@@ -205,7 +205,13 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                 quantidade_pedida: quantidade,
                 preco_unitario: precoUnitario || produtoSelecionado.preco_custo || 0,
                 preco_tabela: form.compra_promocional ? (precoTabela || produtoSelecionado.preco_custo_tabela || produtoSelecionado.preco_custo || precoUnitario) : null,
-                isNew: false
+                isNew: false,
+                detalhes: {
+                    modelo: produtoSelecionado.modelo_referencia,
+                    cor: produtoSelecionado.cor,
+                    material: produtoSelecionado.material,
+                    dimensoes: `${produtoSelecionado.altura || ''}x${produtoSelecionado.largura || ''}x${produtoSelecionado.profundidade || ''}`
+                }
             };
         } else {
             novoItem = {
@@ -290,7 +296,13 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                 ...novosItens[itemIndex],
                 produto_id: novoProduto.id,
                 produto_codigo: novoProduto.codigo_barras || '',
-                isNew: false
+                isNew: false,
+                detalhes: {
+                    modelo: novoProduto.modelo_referencia,
+                    cor: novoProduto.cor,
+                    material: novoProduto.material,
+                    dimensoes: `${novoProduto.altura || ''}x${novoProduto.largura || ''}x${novoProduto.profundidade || ''}`
+                }
             };
             setForm({ ...form, itens: novosItens });
 
@@ -814,13 +826,31 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                                             return (
                                                 <TableRow key={index} className={item.isNew ? 'bg-blue-50' : ''}>
                                                     <TableCell className="font-medium">
-                                                        <div className="flex items-center gap-2">
-                                                            {item.produto_nome}
-                                                            {item.isNew && (
-                                                                <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700 border-blue-300">
-                                                                    <Sparkles className="w-3 h-3 mr-1" />
-                                                                    Novo
-                                                                </Badge>
+                                                        <div className="flex flex-col">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-base">{item.produto_nome}</span>
+                                                                {item.isNew && (
+                                                                    <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700 border-blue-300">
+                                                                        <Sparkles className="w-3 h-3 mr-1" />
+                                                                        Novo
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
+                                                            {item.detalhes && (
+                                                                <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-xs text-gray-500">
+                                                                    {item.detalhes.modelo && (
+                                                                        <span title="Modelo/Referência">Ref: {item.detalhes.modelo}</span>
+                                                                    )}
+                                                                    {item.detalhes.cor && (
+                                                                        <span title="Cor">Cor: {item.detalhes.cor}</span>
+                                                                    )}
+                                                                    {item.detalhes.material && (
+                                                                        <span title="Material">Mat: {item.detalhes.material}</span>
+                                                                    )}
+                                                                    {item.detalhes.dimensoes && item.detalhes.dimensoes !== 'x x' && item.detalhes.dimensoes !== 'xx' && (
+                                                                        <span title="Dimensões">Dim: {item.detalhes.dimensoes}</span>
+                                                                    )}
+                                                                </div>
                                                             )}
                                                         </div>
                                                     </TableCell>

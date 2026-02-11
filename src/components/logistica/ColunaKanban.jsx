@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import EntregaCard from "./EntregaCard";
+import { whatsappService } from "@/services/whatsappService";
 
 export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEntrega, onCalcularRota, calculandoRota }) {
   const queryClient = useQueryClient();
@@ -51,8 +52,11 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
   const verificarServidor = async () => {
     setStatusServidor("verificando");
     try {
-      await fetch(`${import.meta.env.VITE_ZAP_API_URL}/status`, { method: 'GET' });
-      setStatusServidor("online");
+      if (await whatsappService.checkStatus()) {
+        setStatusServidor("online");
+      } else {
+        setStatusServidor("offline");
+      }
     } catch (e) { setStatusServidor("offline"); }
   };
 
@@ -86,11 +90,7 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
         };
       });
 
-      const response = await fetch(`${import.meta.env.VITE_ZAP_API_URL}/disparar-confirmacoes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entregas: payload })
-      });
+      const response = await whatsappService.sendConfirmations(payload);
 
       if (response.ok) {
         // Marcar como notificado com data e turno
@@ -131,11 +131,7 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
         numero_pedido: e.numero_pedido
       }));
 
-      await fetch(`${import.meta.env.VITE_ZAP_API_URL}/reagendar-entregas`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entregas: payload })
-      }).catch(() => { });
+      await whatsappService.rescheduleDeliveries(payload);
 
       // Voltar todas para triagem
       for (const entrega of entregasParaDisparo) {
@@ -172,17 +168,11 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
 
     try {
       // Notificar cliente
-      await fetch(`${import.meta.env.VITE_ZAP_API_URL}/reagendar-entregas`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          entregas: [{
-            telefone: entrega.cliente_telefone,
-            nome: entrega.cliente_nome,
-            numero_pedido: entrega.numero_pedido
-          }]
-        })
-      }).catch(() => { });
+      await whatsappService.rescheduleDeliveries([{
+        telefone: entrega.cliente_telefone,
+        nome: entrega.cliente_nome,
+        numero_pedido: entrega.numero_pedido
+      }]);
 
       // Voltar para triagem
       await updateEntrega.mutateAsync({

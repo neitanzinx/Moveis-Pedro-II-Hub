@@ -61,15 +61,47 @@ export default function TransferenciasTab({ user }) {
 
   const handleConfirmarRecebimento = async (transferencia) => {
     if (confirm(`Confirmar recebimento de ${transferencia.quantidade} unidades de ${transferencia.produto_nome}?`)) {
-      await updateMutation.mutateAsync({
-        id: transferencia.id,
-        data: {
-          ...transferencia,
-          status: 'Recebida',
-          data_recebimento: new Date().toISOString().split('T')[0],
-          responsavel_recebimento: user.full_name
+      try {
+        const { resolveStockField } = await import("@/utils/stockUtils");
+
+        // Find the product to update its stock
+        const produto = produtos.find(p => p.id === transferencia.produto_id);
+        if (produto) {
+          const campoOrigem = resolveStockField(transferencia.loja_origem);
+          const campoDestino = resolveStockField(transferencia.loja_destino);
+          const qty = transferencia.quantidade || 0;
+
+          const updates = {};
+
+          // Deduct from origin store
+          if (campoOrigem) {
+            updates[campoOrigem] = Math.max(0, (produto[campoOrigem] || 0) - qty);
+          }
+
+          // Add to destination store
+          if (campoDestino) {
+            updates[campoDestino] = (produto[campoDestino] || 0) + qty;
+          }
+
+          // Total quantity_estoque stays the same (it's a transfer)
+          if (Object.keys(updates).length > 0) {
+            await base44.entities.Produto.update(produto.id, updates);
+          }
         }
-      });
+
+        // Update transfer status
+        await updateMutation.mutateAsync({
+          id: transferencia.id,
+          data: {
+            ...transferencia,
+            status: 'Recebida',
+            data_recebimento: new Date().toISOString().split('T')[0],
+            responsavel_recebimento: user.full_name
+          }
+        });
+      } catch (error) {
+        console.error("Erro ao confirmar recebimento:", error);
+      }
     }
   };
 

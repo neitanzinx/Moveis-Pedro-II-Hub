@@ -16,6 +16,7 @@ import {
   UserCheck, Users, CheckSquare, Loader2, RotateCcw, MoreVertical, ArrowRightLeft
 } from "lucide-react";
 import { toast } from "sonner";
+import { whatsappService } from "@/services/whatsappService";
 
 export default function MontagemInterna() {
   const queryClient = useQueryClient();
@@ -509,9 +510,52 @@ export default function MontagemInterna() {
             Itens que precisam ser montados no galpão antes da entrega
           </p>
         </div>
-        <Badge className="bg-orange-100 text-orange-700 text-lg px-4 py-2">
-          {totalPendentes} pendentes
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const hoje = new Date().toISOString().split('T')[0];
+              const montagensHoje = montagensInternas.filter(m => {
+                const entrega = entregas.find(e => e.id === m.entrega_id);
+                return entrega?.data_agendada === hoje;
+              });
+
+              if (montagensHoje.length === 0) {
+                toast.info("Nenhuma montagem interna para hoje.");
+                return;
+              }
+
+              // Agrupar por montador
+              const porMontador = {};
+              montagensHoje.forEach(m => {
+                if (m.montador_id) {
+                  if (!porMontador[m.montador_id]) porMontador[m.montador_id] = [];
+                  porMontador[m.montador_id].push(m);
+                }
+              });
+
+              // Enviar (simulação de envio em massa)
+              Object.entries(porMontador).forEach(([montadorId, itens]) => {
+                const montador = montadoresInternos.find(m => m.id.toString() === montadorId);
+                if (montador && montador.telefone) {
+                  const msg = `Bom dia ${montador.nome}! ☀️\n\n` +
+                    `Você tem ${itens.length} montagens internas programadas para hoje.\n` +
+                    `Confira no painel. Bom trabalho!`;
+                  whatsappService.sendMessage(montador.telefone, msg);
+                }
+              });
+
+              toast.success(`Briefing enviado para ${Object.keys(porMontador).length} montadores.`);
+            }}
+          >
+            <Users className="w-4 h-4 mr-2" />
+            Enviar Briefing Diário
+          </Button>
+          <Badge className="bg-orange-100 text-orange-700 text-lg px-4 py-2">
+            {totalPendentes} pendentes
+          </Badge>
+        </div>
       </div>
 
       {/* Navegação Semanal */}

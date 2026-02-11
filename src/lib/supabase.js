@@ -165,23 +165,223 @@ const createHandler = (tableName) => ({
             console.error(`Erro Supabase (Criar em ${tableName}):`, error);
             throw error;
         }
+
+        // Audit Log
+        if (tableName !== 'audit_logs') {
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    supabase.from('audit_logs').insert({
+                        table_name: tableName,
+                        action: 'INSERT',
+                        record_id: created.id,
+                        new_data: created,
+                        user_id: user.id
+                    }).then(({ error: auditError }) => {
+                        if (auditError) console.error("Erro Audit Log (Insert):", auditError);
+                    });
+                }
+            } catch (e) {
+                console.error("Erro ao registrar auditoria (Insert):", e);
+            }
+        }
+
         return created;
     },
     update: async (id, data) => {
+        // Fetch old data for audit
+        let oldData = null;
+        if (tableName !== 'audit_logs') {
+            try {
+                const { data: current } = await supabase.from(tableName).select('*').eq('id', id).single();
+                oldData = current;
+            } catch (e) { /* ignore */ }
+        }
+
         const { data: updated, error } = await supabase.from(tableName).update(data).eq('id', id).select().single();
         if (error) {
             console.error(`Erro Supabase (Atualizar ${id} em ${tableName}):`, error, 'Dados enviados:', data);
             throw error;
         }
+
+        // Audit Log
+        if (tableName !== 'audit_logs') {
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    supabase.from('audit_logs').insert({
+                        table_name: tableName,
+                        action: 'UPDATE',
+                        record_id: id,
+                        old_data: oldData,
+                        new_data: updated,
+                        user_id: user.id
+                    }).then(({ error: auditError }) => {
+                        if (auditError) console.error("Erro Audit Log (Update):", auditError);
+                    });
+                }
+            } catch (e) {
+                console.error("Erro ao registrar auditoria (Update):", e);
+            }
+        }
+
         return updated;
     },
     delete: async (id) => {
+        // Fetch old data for audit
+        let oldData = null;
+        if (tableName !== 'audit_logs') {
+            try {
+                const { data: current } = await supabase.from(tableName).select('*').eq('id', id).single();
+                oldData = current;
+            } catch (e) { /* ignore */ }
+        }
+
         const { error } = await supabase.from(tableName).delete().eq('id', id);
         if (error) {
             console.error(`Erro Supabase (Deletar ${id} em ${tableName}):`, error);
             throw error;
         }
+
+        // Audit Log
+        if (tableName !== 'audit_logs') {
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    supabase.from('audit_logs').insert({
+                        table_name: tableName,
+                        action: 'DELETE',
+                        record_id: id,
+                        old_data: oldData,
+                        user_id: user.id
+                    }).then(({ error: auditError }) => {
+                        if (auditError) console.error("Erro Audit Log (Delete):", auditError);
+                    });
+                }
+            } catch (e) {
+                console.error("Erro ao registrar auditoria (Delete):", e);
+            }
+        }
+
         return true;
+    },
+    search: async ({ page = 1, limit = 100, filters = {}, search = '', orderBy = null }) => {
+        const from = (page - 1) * limit;
+        const to = from + limit - 1;
+
+        let query = supabase.from(tableName).select('*', { count: 'exact' });
+
+        // Aplicar filtros (match exato)
+        if (filters && typeof filters === 'object') {
+            Object.entries(filters).forEach(([key, value]) => {
+                if (value !== undefined && value !== null && value !== 'todas') {
+                    // Tratamento especial para booleanos convertidos em string
+                    if (value === 'true') value = true;
+                    if (value === 'false') value = false;
+                    query = query.eq(key, value);
+                }
+            });
+        }
+
+        // Aplicar busca textual
+        if (search) {
+            // Construir filtro OR genérico para campos comuns
+            // Usando ilike para case-insensitive
+            // Importante: Verifique se as colunas existem na tabela antes de usar
+            // Para ser genérico, vamos tentar campos comuns. 
+            // Se falhar em tabelas sem esses campos, precisaremos de um tratamento melhor.
+            // O ideal é passar os campos de busca como parâmetro, mas vamos assumir um padrão aqui.
+            const searchLower = search.toLowerCase();
+
+            // Estratégia: Tentar identificar colunas textuais comuns
+            // Mas como é genérico, vamos focar no que sabemos que existe na tabela Produto e Cliente
+            // ou deixar que o erro aconteça se a coluna não existir (o que é ruim).
+
+            // Melhor abordagem: Se for Produto, busca em nome, codigo_barras, categoria
+            if (tableName === 'produtos') {
+                query = query.or(`nome.ilike.%${search}%,codigo_barras.ilike.%${search}%,categoria.ilike.%${search}%,modelo_referencia.ilike.%${search}%`);
+            } else if (tableName === 'clientes') {
+                query = query.or(`nome.ilike.%${search}%,cpf_cnpj.ilike.%${search}%,email.ilike.%${search}%`);
+            } else {
+                // Fallback genérico - tenta 'nome' se existir, senão pode dar erro se não tiver
+                // O supabase ignora filtros em colunas inexistentes? Não, ele dá erro.
+                // Vamos arriscar 'nome' pois é o mais comum.
+                // TODO: Passar searchFields como argumento na chamada
+                query = query.ilike('nome', `%${search}%`);
+            }
+        }
+
+        // Ordenação
+        if (orderBy && typeof orderBy === 'string') {
+            const isDesc = orderBy.startsWith('-');
+            const field = isDesc ? orderBy.substring(1) : orderBy;
+            const dbField = field === 'created_date' ? 'created_at' : field;
+            query = query.order(dbField, { ascending: !isDesc });
+        } else {
+            query = query.order('id', { ascending: true });
+        }
+
+        query = query.range(from, to);
+
+        const { data, count, error } = await query;
+
+        if (error) {
+            console.error(`Erro Supabase (Search ${tableName}):`, error);
+            throw error;
+        }
+        return { data, count };
+    },
+
+    search: async ({ page = 1, limit = 100, filters = {}, search = '', orderBy = null }) => {
+        const from = (page - 1) * limit;
+        const to = from + limit - 1;
+
+        let query = supabase.from(tableName).select('*', { count: 'exact' });
+
+        // Aplicar filtros (match exato)
+        if (filters && typeof filters === 'object') {
+            Object.entries(filters).forEach(([key, value]) => {
+                if (value !== undefined && value !== null && value !== 'todas') {
+                    // Tratamento especial para booleanos convertidos em string
+                    if (value === 'true') value = true;
+                    if (value === 'false') value = false;
+                    query = query.eq(key, value);
+                }
+            });
+        }
+
+        // Aplicar busca textual
+        if (search) {
+            const searchLower = search.toLowerCase();
+
+            if (tableName === 'produtos') {
+                query = query.or(`nome.ilike.%${search}%,codigo_barras.ilike.%${search}%,categoria.ilike.%${search}%,modelo_referencia.ilike.%${search}%`);
+            } else if (tableName === 'clientes') {
+                query = query.or(`nome.ilike.%${search}%,cpf_cnpj.ilike.%${search}%,email.ilike.%${search}%`);
+            } else {
+                query = query.ilike('nome', `%${search}%`);
+            }
+        }
+
+        // Ordenação
+        if (orderBy && typeof orderBy === 'string') {
+            const isDesc = orderBy.startsWith('-');
+            const field = isDesc ? orderBy.substring(1) : orderBy;
+            const dbField = field === 'created_date' ? 'created_at' : field;
+            query = query.order(dbField, { ascending: !isDesc });
+        } else {
+            query = query.order('id', { ascending: true });
+        }
+
+        query = query.range(from, to);
+
+        const { data, count, error } = await query;
+
+        if (error) {
+            console.error(`Erro Supabase (Search ${tableName}):`, error);
+            throw error;
+        }
+        return { data, count };
     },
     filter: async (filters, orderBy = null) => {
         let allData = [];

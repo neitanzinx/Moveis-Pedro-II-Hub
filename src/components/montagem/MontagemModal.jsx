@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { whatsappService } from "@/services/whatsappService";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -21,13 +23,33 @@ export default function MontagemModal({ isOpen, onClose, montagem, vendas, valor
     venda_id: "",
     data_montagem: "",
     horario_montagem: "09:00",
-    montador: "Carlos",
+    montador_id: "", // Changed from 'montador' string to ID
     status: "Agendada",
     observacoes: "",
     itens: []
   });
 
   const queryClient = useQueryClient();
+
+  // Fetch assemblers dynamically
+  const { data: montadores = [] } = useQuery({
+    queryKey: ['montadores'],
+    queryFn: () => base44.entities.Montador.list('nome'),
+    staleTime: 1000 * 60 * 5 // Cache for 5 mins
+  });
+
+  // Fetch existing assemblies for the selected date to check availability
+  const { data: montagensDoDia = [] } = useQuery({
+    queryKey: ['montagens', formData.data_montagem, formData.montador_id],
+    queryFn: async () => {
+      if (!formData.data_montagem || !formData.montador_id) return [];
+      return base44.entities.Montagem.filter({
+        data_montagem: formData.data_montagem,
+        montador_id: formData.montador_id
+      });
+    },
+    enabled: !!formData.data_montagem && !!formData.montador_id
+  });
 
   useEffect(() => {
     if (montagem) {
@@ -37,7 +59,7 @@ export default function MontagemModal({ isOpen, onClose, montagem, vendas, valor
         venda_id: "",
         data_montagem: "",
         horario_montagem: "09:00",
-        montador: "Carlos",
+        montador_id: "",
         status: "Agendada",
         observacoes: "",
         itens: []
@@ -45,18 +67,47 @@ export default function MontagemModal({ isOpen, onClose, montagem, vendas, valor
     }
   }, [montagem, isOpen]);
 
+  const notifyCliente = async (dadosMontagem) => {
+    if (dadosMontagem.status !== 'Agendada') return;
+
+    try {
+      const venda = vendas.find(v => v.id === dadosMontagem.venda_id);
+      const montador = montadores.find(m => m.id === dadosMontagem.montador_id);
+
+      if (!venda || !montador) {
+        console.warn("Venda ou Montador não encontrados para notificação");
+        return;
+      }
+
+      const dadosCliente = {
+        nome: venda.cliente_nome,
+        telefone: venda.cliente_telefone
+      };
+
+      await whatsappService.sendAssemblyConfirmation(dadosCliente, dadosMontagem, montador);
+      toast.success("Notificação enviada para o cliente via WhatsApp!");
+    } catch (error) {
+      console.error("Erro ao enviar notificação:", error);
+    }
+  };
+
   const createMutation = useMutation({
     mutationFn: (data) => base44.entities.Montagem.create(data),
-    onSuccess: () => {
+    onSuccess: (newItem) => {
       queryClient.invalidateQueries({ queryKey: ['montagens'] });
+      notifyCliente(newItem);
       onClose();
     },
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => base44.entities.Montagem.update(id, data),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['montagens'] });
+      // Optionally notify on update too, if critical fields changed
+      if (variables.data.status === 'Agendada') {
+        notifyCliente({ ...variables.data, id: variables.id });
+      }
       onClose();
     },
   });
@@ -65,10 +116,10 @@ export default function MontagemModal({ isOpen, onClose, montagem, vendas, valor
     const venda = vendas.find(v => v.id === vendaId);
     if (venda) {
       const itensComValores = (venda.itens || []).map(item => {
-        const valorRef = valores.find(v => 
+        const valorRef = valores.find(v =>
           v.modelo_movel.toLowerCase().includes(item.produto_nome.toLowerCase())
         );
-        
+
         return {
           produto_nome: item.produto_nome,
           quantidade: item.quantidade,
@@ -92,30 +143,35 @@ export default function MontagemModal({ isOpen, onClose, montagem, vendas, valor
   const handleItemChange = (index, field, value) => {
     const newItens = [...formData.itens];
     newItens[index] = { ...newItens[index], [field]: value };
-    
+
     // Se mudou montagem_externa, atualizar valor
     if (field === 'montagem_externa') {
-      const valorRef = valores.find(v => 
+      const valorRef = valores.find(v =>
         v.modelo_movel.toLowerCase().includes(newItens[index].produto_nome.toLowerCase())
       );
-      
-      newItens[index].valor_montagem = value 
+
+      newItens[index].valor_montagem = value
         ? (valorRef?.valor_montagem_externa || 0)
         : (valorRef?.valor_montagem || 0);
     }
-    
+
     setFormData({ ...formData, itens: newItens });
   };
 
   const calcularTotal = () => {
-    return formData.itens.reduce((sum, item) => 
+    return formData.itens.reduce((sum, item) =>
       sum + (item.valor_montagem * item.quantidade), 0
     );
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
+
+    if (!formData.montador_id) {
+      toast.error("Selecione um montador");
+      return;
+    }
+
     const dataToSave = {
       ...formData,
       valor_total_montagem: calcularTotal()
@@ -167,17 +223,19 @@ export default function MontagemModal({ isOpen, onClose, montagem, vendas, valor
               <div>
                 <Label htmlFor="montador">Montador *</Label>
                 <Select
-                  value={formData.montador}
-                  onValueChange={(value) => setFormData({ ...formData, montador: value })}
+                  value={formData.montador_id}
+                  onValueChange={(value) => setFormData({ ...formData, montador_id: value })}
                   required
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="Selecione..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Carlos">Carlos</SelectItem>
-                    <SelectItem value="Luis">Luis</SelectItem>
-                    <SelectItem value="Guilherme">Guilherme</SelectItem>
+                    {montadores.map(m => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.nome}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -189,6 +247,7 @@ export default function MontagemModal({ isOpen, onClose, montagem, vendas, valor
                 <Input
                   id="data"
                   type="date"
+                  min={new Date().toISOString().split('T')[0]}
                   value={formData.data_montagem}
                   onChange={(e) => setFormData({ ...formData, data_montagem: e.target.value })}
                   required
@@ -206,15 +265,20 @@ export default function MontagemModal({ isOpen, onClose, montagem, vendas, valor
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="08:00">08:00</SelectItem>
-                    <SelectItem value="09:00">09:00</SelectItem>
-                    <SelectItem value="10:00">10:00</SelectItem>
-                    <SelectItem value="11:00">11:00</SelectItem>
-                    <SelectItem value="13:00">13:00</SelectItem>
-                    <SelectItem value="14:00">14:00</SelectItem>
-                    <SelectItem value="15:00">15:00</SelectItem>
-                    <SelectItem value="16:00">16:00</SelectItem>
-                    <SelectItem value="17:00">17:00</SelectItem>
+                    {["08:00", "09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00"].map(horario => {
+                      // Verificar disponibilidade
+                      const isTaken = montagensDoDia?.some(m =>
+                        m.montador_id === formData.montador_id &&
+                        m.horario_montagem === horario &&
+                        m.id !== montagem?.id // Ignora a própria montagem se estiver editando
+                      );
+
+                      return (
+                        <SelectItem key={horario} value={horario} disabled={isTaken} className={isTaken ? "opacity-50 line-through" : ""}>
+                          {horario} {isTaken ? '(Ocupado)' : ''}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>

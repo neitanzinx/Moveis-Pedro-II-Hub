@@ -37,7 +37,7 @@ const MontadorExterno = lazy(() => import("./MontadorExterno.jsx"));
 const CadastroMobile = lazy(() => import("./CadastroMobile.jsx"));
 const ExportacaoContabil = lazy(() => import("./ExportacaoContabil.jsx"));
 const SetorCompras = lazy(() => import("./SetorCompras.jsx"));
-const PedidosCompra = lazy(() => import("./PedidosCompra.jsx"));
+
 const DashboardBI = lazy(() => import("./DashboardBI.jsx"));
 const DashboardGerente = lazy(() => import("./DashboardGerente.jsx"));
 const AvaliacaoNPS = lazy(() => import("./AvaliacaoNPS.jsx"));
@@ -81,7 +81,7 @@ const PAGES = {
     RecursosHumanos, RelatoriosAvancados, TransferenciaEstoque, Inventario,
     AlertasRecompra, Estoque, ModoReuniao, PDV, CatalogoWhatsApp, NotasFiscais,
     LogisticaSemanal, Entregador, Marketing, MontadorExterno,
-    ExportacaoContabil, PedidosCompra, SetorCompras, DashboardBI, DashboardGerente, Mostruario,
+    ExportacaoContabil, SetorCompras, DashboardBI, DashboardGerente, Mostruario,
     EntradaEstoque, SaneamentoEstoque, EstoqueBipagem
 };
 

@@ -107,7 +107,11 @@ const INITIAL_FORM_DATA = {
     cor: '',
     cor_hex: '',
     // Estoque
-    quantidade_estoque: '',
+    estoque_cd: '',
+    estoque_loja_centro: '',
+    estoque_loja_carangola: '',
+    estoque_loja_ponte_branca: '',
+    quantidade_estoque: '', // Será a soma
     estoque_minimo: '5',
     estoque_ideal: '10',
     fotos: [],
@@ -164,6 +168,11 @@ export default function ProdutoCadastroCompleto({
                 promocao_observacao: '',
                 tem_promocao: false, // Feature desabilitada
                 preco_venda: produto.preco_venda?.toString() || '',
+                // Estoque
+                estoque_cd: produto.estoque_cd?.toString() || '',
+                estoque_loja_centro: produto.estoque_loja_centro?.toString() || '',
+                estoque_loja_carangola: produto.estoque_loja_carangola?.toString() || '',
+                estoque_loja_ponte_branca: produto.estoque_loja_ponte_branca?.toString() || '',
                 quantidade_estoque: produto.quantidade_estoque?.toString() || '',
                 estoque_minimo: produto.estoque_minimo?.toString() || '5',
                 largura: produto.largura?.toString() || '',
@@ -334,8 +343,13 @@ export default function ProdutoCadastroCompleto({
     const handleSubmit = () => {
         if (!validateCurrentStep()) return;
 
-        // Calcula estoque total e preço
-        let estoqueTotal = parseInt(formData.quantidade_estoque) || 0;
+        // Calcula estoque total das lojas
+        let estoqueCd = parseInt(formData.estoque_cd) || 0;
+        let estoqueCentro = parseInt(formData.estoque_loja_centro) || 0;
+        let estoqueCarangola = parseInt(formData.estoque_loja_carangola) || 0;
+        let estoquePonteBranca = parseInt(formData.estoque_loja_ponte_branca) || 0;
+        let estoqueTotal = estoqueCd + estoqueCentro + estoqueCarangola + estoquePonteBranca;
+
         let precoVenda = parseFloat(formData.preco_venda) || 0;
         let precoCusto = parseFloat(formData.preco_custo) || 0;
         let largura = formData.largura ? parseFloat(formData.largura) : null;
@@ -370,6 +384,10 @@ export default function ProdutoCadastroCompleto({
             preco_custo: parseFloat(formData.preco_custo_tabela) || precoCusto || null,
             preco_venda: precoVenda,
             quantidade_estoque: estoqueTotal,
+            estoque_cd: estoqueCd,
+            estoque_loja_centro: estoqueCentro,
+            estoque_loja_carangola: estoqueCarangola,
+            estoque_loja_ponte_branca: estoquePonteBranca,
             estoque_minimo: parseInt(formData.estoque_minimo) || 5,
             estoque_ideal: parseInt(formData.estoque_ideal) || 10,
             cor: formData.cor || null,
@@ -830,24 +848,77 @@ export default function ProdutoCadastroCompleto({
                                                 )}
                                             </div>
 
-                                            <div className="pt-4 border-t grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <Label>Estoque Atual</Label>
-                                                    <Input
-                                                        type="number"
-                                                        value={formData.quantidade_estoque}
-                                                        onChange={(e) => handleChange('quantidade_estoque', e.target.value)}
-                                                        placeholder="0"
-                                                    />
+                                            <div className="pt-4 border-t space-y-4">
+                                                <div className="flex items-center justify-between">
+                                                    <Label className="font-semibold text-gray-900">Distribuição de Estoque</Label>
+                                                    <Badge variant="outline" className="bg-green-50">
+                                                        Total: {
+                                                            (parseInt(formData.estoque_cd) || 0) +
+                                                            (parseInt(formData.estoque_loja_centro) || 0) +
+                                                            (parseInt(formData.estoque_loja_carangola) || 0) +
+                                                            (parseInt(formData.estoque_loja_ponte_branca) || 0)
+                                                        }
+                                                    </Badge>
                                                 </div>
-                                                <div>
-                                                    <Label>Estoque Ideal</Label>
-                                                    <Input
-                                                        type="number"
-                                                        value={formData.estoque_ideal}
-                                                        onChange={(e) => handleChange('estoque_ideal', e.target.value)}
-                                                        placeholder="Opcional"
-                                                    />
+
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <div>
+                                                        <Label className="text-xs text-gray-500">Depósito / CD</Label>
+                                                        <Input
+                                                            type="number"
+                                                            value={formData.estoque_cd}
+                                                            onChange={(e) => handleChange('estoque_cd', e.target.value)}
+                                                            placeholder="0"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label className="text-xs text-gray-500">Loja Centro</Label>
+                                                        <Input
+                                                            type="number"
+                                                            value={formData.estoque_loja_centro}
+                                                            onChange={(e) => handleChange('estoque_loja_centro', e.target.value)}
+                                                            placeholder="0"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label className="text-xs text-gray-500">Loja Carangola</Label>
+                                                        <Input
+                                                            type="number"
+                                                            value={formData.estoque_loja_carangola}
+                                                            onChange={(e) => handleChange('estoque_loja_carangola', e.target.value)}
+                                                            placeholder="0"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label className="text-xs text-gray-500">Loja Ponte Branca</Label>
+                                                        <Input
+                                                            type="number"
+                                                            value={formData.estoque_loja_ponte_branca}
+                                                            onChange={(e) => handleChange('estoque_loja_ponte_branca', e.target.value)}
+                                                            placeholder="0"
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                <div className="grid grid-cols-2 gap-3 pt-2">
+                                                    <div>
+                                                        <Label>Estoque Mínimo</Label>
+                                                        <Input
+                                                            type="number"
+                                                            value={formData.estoque_minimo}
+                                                            onChange={(e) => handleChange('estoque_minimo', e.target.value)}
+                                                            placeholder="5"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label>Estoque Ideal</Label>
+                                                        <Input
+                                                            type="number"
+                                                            value={formData.estoque_ideal}
+                                                            onChange={(e) => handleChange('estoque_ideal', e.target.value)}
+                                                            placeholder="10"
+                                                        />
+                                                    </div>
                                                 </div>
                                             </div>
                                         </CardContent>

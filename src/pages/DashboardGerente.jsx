@@ -264,17 +264,61 @@ export default function DashboardGerente() {
     // Mutation para criar pedido de mostruário (solicitação para montagem interna)
     const criarPedidoMostruario = useMutation({
         mutationFn: async (pedido) => {
-            return base44.entities.PedidoMostruario.create(pedido);
+            const { resolveStockField } = await import("@/utils/stockUtils");
+
+            // 1. Create PedidoMostruario record
+            const novoPedido = await base44.entities.PedidoMostruario.create(pedido);
+
+            // 2. Move stock: deduct from CD, add to destination store showroom
+            if (pedido.produto_id) {
+                const produtosAll = await base44.entities.Produto.list();
+                const produto = produtosAll.find(p => String(p.id) === String(pedido.produto_id));
+                if (produto) {
+                    const qty = pedido.quantidade || 1;
+                    const campoDestino = resolveStockField(pedido.loja);
+                    const updates = {
+                        estoque_cd: Math.max(0, (produto.estoque_cd || 0) - qty),
+                    };
+                    if (campoDestino && campoDestino !== 'estoque_cd') {
+                        updates[campoDestino] = (produto[campoDestino] || 0) + qty;
+                    }
+                    await base44.entities.Produto.update(produto.id, updates);
+                }
+            }
+
+            // 3. Create assembly order tagged as mostruário
+            await base44.entities.Montagem.create({
+                numero_pedido: `MOST-${novoPedido.id || Date.now()}`,
+                venda_id: null,
+                cliente_nome: `MOSTRUÁRIO - ${pedido.loja}`,
+                cliente_telefone: '-',
+                endereco_montagem: pedido.loja,
+                data_montagem: new Date().toISOString().split('T')[0],
+                status: 'Pendente',
+                tipo_montagem: 'mostruario',
+                loja_mostruario: pedido.loja,
+                observacoes: `Montagem de Mostruário para ${pedido.loja}. ${pedido.observacoes || ''}`,
+                itens: [{
+                    produto_nome: pedido.produto_nome,
+                    quantidade: pedido.quantidade || 1,
+                    valor_montagem: 0,
+                    montagem_externa: false
+                }]
+            });
+
+            return novoPedido;
         },
         onSuccess: () => {
             queryClient.invalidateQueries(['pedidos-mostruario']);
             queryClient.invalidateQueries(['pedidos-mostruario-montagem']);
+            queryClient.invalidateQueries(['montagens']);
+            queryClient.invalidateQueries(['produtos']);
             setSolicitarMostruarioModalOpen(false);
             setBuscaProdutoMostruario('');
             setProdutoSelecionadoMostruario(null);
             setQuantidadeMostruario(1);
             toast.success('🔧 Montagem solicitada!', {
-                description: 'O pedido foi enviado para os montadores internos.'
+                description: 'Estoque movido CD → loja e montagem agendada.'
             });
         }
     });

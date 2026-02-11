@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { whatsappService } from "@/services/whatsappService";
 import RouteOptimizer from "./RouteOptimizer";
 
 // Cores para cada caminhão
@@ -486,10 +487,17 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
   const verificarServidor = async () => {
     setStatusServidor("verificando");
     try {
-      await fetch(`${import.meta.env.VITE_ZAP_API_URL}/status`, { method: 'GET' });
-      setStatusServidor("online");
-    } catch (e) { setStatusServidor("offline"); }
+      if (await whatsappService.checkStatus()) {
+        setStatusServidor("online");
+      } else {
+        setStatusServidor("offline");
+      }
+    } catch (error) {
+      console.error("Erro ao verificar servidor:", error);
+      setStatusServidor("offline");
+    }
   };
+
 
   // Abrir modal de notificação para um caminhão específico
   const handleNotificarCaminhao = (caminhao, dados) => {
@@ -552,11 +560,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
       const payloadCompleto = [...payloadEntregas, ...payloadAssistencias];
 
-      const response = await fetch(`${import.meta.env.VITE_ZAP_API_URL}/disparar-confirmacoes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entregas: payloadCompleto })
-      });
+      const response = await whatsappService.sendConfirmations(payloadCompleto);
 
       if (response.ok) {
         // Marcar entregas como notificadas
@@ -873,11 +877,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
             is_reagendamento: true // Flag para mensagem diferenciada
           }];
 
-          await fetch(`${import.meta.env.VITE_ZAP_API_URL}/disparar-confirmacoes`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ entregas: payload })
-          });
+          await whatsappService.sendConfirmations(payload);
           toast.success("Cliente notificado via WhatsApp!");
         } catch (err) {
           console.error("Erro ao notificar reagendamento:", err);

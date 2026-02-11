@@ -12,8 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-
-const lojas = ["Centro", "Carangola", "Ponte Branca"];
+import { LOJAS_MOSTRUARIO } from "@/constants/productConstants";
 
 export default function TransferenciaModal({ isOpen, onClose, onSave, transferencia, produtos, isLoading }) {
   const [formData, setFormData] = useState({
@@ -60,7 +59,7 @@ export default function TransferenciaModal({ isOpen, onClose, onSave, transferen
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
+
     if (!formData.produto_id || !formData.loja_origem || !formData.loja_destino || formData.quantidade <= 0) {
       alert("Preencha todos os campos obrigatórios");
       return;
@@ -126,8 +125,8 @@ export default function TransferenciaModal({ isOpen, onClose, onSave, transferen
                     <SelectValue placeholder="Origem" />
                   </SelectTrigger>
                   <SelectContent>
-                    {lojas.map(loja => (
-                      <SelectItem key={loja} value={loja}>{loja}</SelectItem>
+                    {LOJAS_MOSTRUARIO.map(loja => (
+                      <SelectItem key={loja.id} value={loja.nome}>{loja.nome}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -144,8 +143,8 @@ export default function TransferenciaModal({ isOpen, onClose, onSave, transferen
                     <SelectValue placeholder="Destino" />
                   </SelectTrigger>
                   <SelectContent>
-                    {lojas.map(loja => (
-                      <SelectItem key={loja} value={loja}>{loja}</SelectItem>
+                    {LOJAS_MOSTRUARIO.map(loja => (
+                      <SelectItem key={loja.id} value={loja.nome}>{loja.nome}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -189,8 +188,8 @@ export default function TransferenciaModal({ isOpen, onClose, onSave, transferen
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar
             </Button>
-            <Button 
-              type="submit" 
+            <Button
+              type="submit"
               disabled={isLoading}
               style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
             >

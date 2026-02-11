@@ -22,6 +22,7 @@ import {
     DialogTitle,
     DialogFooter,
 } from "@/components/ui/dialog";
+import { whatsappService } from "@/services/whatsappService";
 
 export default function MontadorExterno() {
     // Estado para busca na aba "Minhas"
@@ -164,19 +165,15 @@ export default function MontadorExterno() {
             });
 
             try {
-                await fetch(`${import.meta.env.VITE_ZAP_API_URL}/aviso-montagem-agendada`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        telefone: selectedMontagem.cliente_telefone,
-                        cliente_nome: selectedMontagem.cliente_nome,
-                        numero_pedido: selectedMontagem.numero_pedido,
-                        produto_nome: selectedMontagem.produto_nome,
-                        data_formatada: dataFormatada,
-                        turno: agendamentoData.horario,
-                        montador_nome: montadorData.nome,
-                        montador_telefone: montadorData.telefone
-                    })
+                await whatsappService.notifyAssemblyScheduled({
+                    telefone: selectedMontagem.cliente_telefone,
+                    cliente_nome: selectedMontagem.cliente_nome,
+                    numero_pedido: selectedMontagem.numero_pedido,
+                    produto_nome: selectedMontagem.produto_nome,
+                    data_formatada: dataFormatada,
+                    turno: agendamentoData.horario,
+                    montador_nome: montadorData.nome,
+                    montador_telefone: montadorData.telefone
                 });
                 toast.success("Montagem agendada! Cliente notificado via WhatsApp.");
             } catch (botError) {
@@ -254,15 +251,11 @@ export default function MontadorExterno() {
 
             // Notificar cliente via bot
             try {
-                await fetch(`${import.meta.env.VITE_ZAP_API_URL}/aviso-montagem-cancelada`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        telefone: montagem.cliente_telefone,
-                        cliente_nome: montagem.cliente_nome,
-                        numero_pedido: montagem.numero_pedido,
-                        produto_nome: montagem.produto_nome
-                    })
+                await whatsappService.notifyAssemblyCancelled({
+                    telefone: montagem.cliente_telefone,
+                    cliente_nome: montagem.cliente_nome,
+                    numero_pedido: montagem.numero_pedido,
+                    produto_nome: montagem.produto_nome
                 });
                 toast.success("Montagem cancelada. Cliente notificado via WhatsApp.");
             } catch (botError) {
@@ -323,18 +316,14 @@ export default function MontadorExterno() {
 
             // Notificar cliente via bot
             try {
-                await fetch(`${import.meta.env.VITE_ZAP_API_URL}/aviso-montagem-reagendada`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        telefone: montagemReagendar.cliente_telefone,
-                        cliente_nome: montagemReagendar.cliente_nome,
-                        numero_pedido: montagemReagendar.numero_pedido,
-                        produto_nome: montagemReagendar.produto_nome,
-                        data_formatada: dataFormatada,
-                        turno: reagendarData.horario,
-                        montador_nome: montador?.nome
-                    })
+                await whatsappService.notifyAssemblyRescheduled({
+                    telefone: montagemReagendar.cliente_telefone,
+                    cliente_nome: montagemReagendar.cliente_nome,
+                    numero_pedido: montagemReagendar.numero_pedido,
+                    produto_nome: montagemReagendar.produto_nome,
+                    data_formatada: dataFormatada,
+                    turno: reagendarData.horario,
+                    montador_nome: montador?.nome
                 });
                 toast.success("Montagem reagendada! Cliente notificado via WhatsApp.");
             } catch (botError) {

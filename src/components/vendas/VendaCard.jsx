@@ -32,16 +32,26 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
 
   const cancelarVendaMutation = useMutation({
     mutationFn: async () => {
+      const { resolveStockField } = await import("@/utils/stockUtils");
+      const campoLoja = resolveStockField(venda.loja);
+
       // Devolver produtos ao estoque
       for (const item of venda.itens) {
         const produtos = await base44.entities.Produto.list();
         const produto = produtos.find(p => p.id === item.produto_id);
 
         if (produto) {
-          await base44.entities.Produto.update(produto.id, {
-            quantidade_estoque: produto.quantidade_estoque + item.quantidade,
+          const updates = {
+            quantidade_estoque: (produto.quantidade_estoque || 0) + item.quantidade,
             quantidade_reservada: Math.max(0, (produto.quantidade_reservada || 0) - item.quantidade)
-          });
+          };
+
+          // Also restore the per-store stock field
+          if (campoLoja) {
+            updates[campoLoja] = (produto[campoLoja] || 0) + item.quantidade;
+          }
+
+          await base44.entities.Produto.update(produto.id, updates);
         }
       }
 
