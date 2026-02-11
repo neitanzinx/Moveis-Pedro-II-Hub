@@ -66,15 +66,13 @@ app.use(express.static(distPath));
 
 // 🏭 FACTORY: Cria Client NOVO a cada tentativa.
 // Motivo: whatsapp-web.js NÃO suporta reinicializar o mesmo objeto Client
-// após destroy(). O Puppeteer interno mantém referências ao browser antigo
-// e lança "browser is already running" na próxima chamada a initialize().
+// após destroy(). O Puppeteer interno mantém referências ao browser antigo.
 function createWhatsAppClient() {
     return new Client({
         authStrategy: new LocalAuth({
             clientId: "client-one",
             dataPath: "./.wwebjs_auth"
         }),
-        authTimeoutMs: 0, // Desabilita timeout de auth — permite QR scan sem pressa
         puppeteer: {
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
@@ -104,13 +102,14 @@ function createWhatsAppClient() {
 }
 
 // --- Estado global de conexão ---
-let client = createWhatsAppClient();
+let connectionStatus = 'disconnected';
 let currentQR = null;
-let connectionStatus = 'initializing';
 let connectionInfo = null;
 
+// -- Client WhatsApp (LET porque precisa ser recriado) ---
+let client = createWhatsAppClient();
+
 // 🔗 Registrar event handlers no client atual
-// Chamado sempre que um novo client é criado
 function attachClientEvents(c) {
     c.on('qr', qr => {
         currentQR = qr;
@@ -125,6 +124,7 @@ function attachClientEvents(c) {
         currentQR = null;
         whatsapp.reconnectAttempts = 0;
         whatsapp.disconnectedSince = null;
+        whatsapp.isInitializing = false; // ← Liberar trava de init
         try {
             const info = await client.info;
             if (info) {
@@ -149,6 +149,7 @@ function attachClientEvents(c) {
                     currentQR = null;
                     connectionStatus = 'connected';
                     whatsapp.disconnectedSince = null;
+                    whatsapp.isInitializing = false; // ← Liberar trava de init
                     try {
                         const info = await client.info;
                         connectionInfo = {
@@ -172,6 +173,7 @@ function attachClientEvents(c) {
         whatsapp.reconnectAttempts = 0;
         whatsapp.disconnectedSince = null;
         whatsapp.lastHeartbeat = new Date().toISOString();
+        whatsapp.isInitializing = false; // ← Liberar trava de init
         try {
             const info = await client.info;
             connectionInfo = {
@@ -192,6 +194,7 @@ function attachClientEvents(c) {
         connectionInfo = null;
         whatsapp.disconnectedSince = whatsapp.disconnectedSince || Date.now();
         console.log('❌ WhatsApp desconectado:', reason);
+        whatsapp.isInitializing = false; // ← Liberar trava
         whatsapp.reconnect(`desconexão: ${reason}`);
     });
 
@@ -200,6 +203,7 @@ function attachClientEvents(c) {
         connectionStatus = 'disconnected';
         whatsapp.disconnectedSince = whatsapp.disconnectedSince || Date.now();
         console.log('⚠️ Falha na autenticação:', msg);
+        whatsapp.isInitializing = false; // ← Liberar trava
         whatsapp.reconnect(`auth_failure: ${msg}`);
     });
 }
@@ -210,7 +214,7 @@ attachClientEvents(client);
 // --- WhatsApp Manager ---
 const whatsapp = {
     isReconnecting: false,
-    isInitializing: false, // 🔒 Impede race condition entre init e reconnect
+    isInitializing: false,
     reconnectAttempts: 0,
     maxReconnectAttempts: 5,
     watchdogInterval: null,
@@ -220,45 +224,27 @@ const whatsapp = {
     reconnectCount: 0,
     disconnectedSince: null,
 
-    // Backoff delays em segundos: 10s, 30s, 60s, 120s, 300s
     getBackoffDelay() {
         const delays = [10, 30, 60, 120, 300];
         return (delays[Math.min(this.reconnectAttempts, delays.length - 1)]) * 1000;
     },
 
-    // 💀 NUKE: Matar Chrome + deletar TODA a sessão (locks, sockets, tudo)
-    //
-    // Motivo: Chrome usa ProcessSingleton (Unix domain socket + symlinks).
-    // Em Docker com volume montado, esses sockets persistem entre containers.
-    //
-    // Bug anterior: `pkill -9 -f "chrome"` usa matching na command line inteira.
-    // Em Docker, isso pode falhar silenciosamente porque:
-    //  a) Node (PID 1) pode ter "chrome" nos args/env e pkill não pode matar PID 1
-    //  b) Chrome child processes respawnam antes do pkill terminar
-    //
-    // Fix: Usar `killall -9` com nome exato do binário + fallback por PID individual
-    nukeChrome() {
+    // 💀 Matar Chrome + limpar APENAS lock files (preserva sessão/auth!)
+    cleanChrome(deleteSession = false) {
         const { execSync } = require('child_process');
-        console.log('💀 [NUKE] Matando Chrome + limpando sessão...');
+        console.log(`💀 [CLEAN] Matando Chrome... (deleteSession=${deleteSession})`);
 
-        // 1) Matar por nome exato do binário (mais preciso que pkill -f)
-        const killCmds = [
-            'killall -9 google-chrome-stable 2>/dev/null',
-            'killall -9 chrome 2>/dev/null',
-            'killall -9 chromium 2>/dev/null',
-            'killall -9 chromium-browser 2>/dev/null',
-        ];
-        for (const cmd of killCmds) {
-            try { execSync(cmd, { stdio: 'ignore', timeout: 5000 }); } catch (e) { /* ok */ }
+        // 1) Matar por nome exato do binário
+        for (const name of ['google-chrome-stable', 'chrome', 'chromium', 'chromium-browser']) {
+            try { execSync(`killall -9 ${name} 2>/dev/null`, { stdio: 'ignore', timeout: 5000 }); } catch (e) { /* ok */ }
         }
 
-        // 2) Fallback: matar por PID individual (pega zumbis que killall pode perder)
+        // 2) Fallback por PID individual
         try {
             const pids = execSync('pgrep -f "google-chrome|chromium" 2>/dev/null || true', { encoding: 'utf8', timeout: 3000 }).trim();
             if (pids) {
                 for (const pid of pids.split('\n').filter(p => p.trim())) {
                     const pidNum = parseInt(pid.trim());
-                    // NUNCA matar PID 1 (init do container) nem o próprio Node
                     if (pidNum > 1 && pidNum !== process.pid) {
                         try { execSync(`kill -9 ${pidNum} 2>/dev/null`, { stdio: 'ignore', timeout: 1000 }); } catch (e) { /* ok */ }
                     }
@@ -266,31 +252,34 @@ const whatsapp = {
             }
         } catch (e) { /* ok */ }
 
-        // 3) Esperar processos morrerem
-        try { execSync('sleep 3', { stdio: 'ignore' }); } catch (e) { /* ok */ }
+        // 3) Esperar
+        try { execSync('sleep 2', { stdio: 'ignore' }); } catch (e) { /* ok */ }
 
-        // 4) Deletar a pasta de sessão INTEIRA
+        // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
         const sessionDir = path.join(__dirname, '.wwebjs_auth', 'session-client-one');
-        try {
-            fs.rmSync(sessionDir, { recursive: true, force: true });
-            console.log('🧹 [NUKE] Pasta de sessão removida:', sessionDir);
-        } catch (e) {
-            // rmSync com force:true não deveria falhar, mas por segurança
-            console.warn('⚠️ [NUKE] Erro ao remover sessão:', e.message);
+        if (deleteSession) {
+            // Modo nuclear: deleta tudo (força QR rescan)
+            try {
+                fs.rmSync(sessionDir, { recursive: true, force: true });
+                console.log('🧹 [CLEAN] Pasta de sessão REMOVIDA (QR será necessário)');
+            } catch (e) { /* ok */ }
+        } else {
+            // Modo suave: apenas remove Chrome lock files
+            const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
+            for (const f of lockFiles) {
+                const fp = path.join(sessionDir, f);
+                try { fs.rmSync(fp, { force: true }); } catch (e) { /* ok */ }
+            }
+            // Também limpar Default/SingletonLock se existir
+            const defaultDir = path.join(sessionDir, 'Default');
+            for (const f of lockFiles) {
+                const fp = path.join(defaultDir, f);
+                try { fs.rmSync(fp, { force: true }); } catch (e) { /* ok */ }
+            }
+            console.log('🧹 [CLEAN] Lock files removidos (sessão preservada)');
         }
 
-        // 5) Verificação final
-        try {
-            const result = execSync('pgrep -c "google-chrome|chromium" 2>/dev/null || echo 0', { encoding: 'utf8', timeout: 3000 }).trim();
-            const count = parseInt(result) || 0;
-            if (count > 0) {
-                console.warn(`⚠️ [NUKE] Ainda há ${count} processos Chrome! Kill forçado final...`);
-                try { execSync('killall -9 google-chrome-stable chrome chromium 2>/dev/null', { stdio: 'ignore', timeout: 3000 }); } catch (e) { /* ok */ }
-                try { execSync('sleep 2', { stdio: 'ignore' }); } catch (e) { /* ok */ }
-            }
-        } catch (e) { /* ok */ }
-
-        console.log('✅ [NUKE] Limpeza concluída');
+        console.log('✅ [CLEAN] Limpeza concluída');
     },
 
     // 🔄 Cria novo Client e registra os event handlers
@@ -301,75 +290,95 @@ const whatsapp = {
         return client;
     },
 
-    // 🚀 Inicialização com retry automático
+    // 🚀 Inicialização — fire-and-forget com timeout safety
     async initialize() {
-        // 🔒 GUARD: Impedir chamadas simultâneas (race condition com frontend)
         if (this.isInitializing) {
-            console.log('⏳ [INIT] Já em andamento, ignorando chamada duplicada.');
+            console.log('⏳ [INIT] Já em andamento.');
             return false;
         }
         this.isInitializing = true;
         this.startedAt = Date.now();
-        const MAX_INIT_RETRIES = 3;
 
-        for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
-            try {
-                // 🔥 Nuke ANTES de cada tentativa (limpar resquícios anteriores)
-                this.nukeChrome();
+        // Limpar Chrome da execução anterior (preservar sessão!)
+        this.cleanChrome(false);
+        this.recreateClient();
 
-                // 🔄 CRÍTICO: Criar Client NOVO para cada tentativa!
-                // whatsapp-web.js mantém estado interno após destroy() que impede
-                // reinicialização do mesmo objeto.
-                this.recreateClient();
+        connectionStatus = 'initializing';
+        console.log('📱 [INIT] Iniciando WhatsApp...');
 
-                connectionStatus = 'initializing';
-                console.log(`📱 [INIT] Tentativa ${attempt}/${MAX_INIT_RETRIES}...`);
-                await client.initialize();
-                console.log('✅ [INIT] WhatsApp inicializado com sucesso!');
-                this.isInitializing = false;
-                this.startWatchdog();
-                return true;
-            } catch (err) {
-                console.error(`❌ [INIT] Falha na tentativa ${attempt}:`, err.message || err);
+        // Fire-and-forget: client.initialize() roda em background
+        // Os EVENTOS (qr, ready, authenticated) vão atualizar o status
+        client.initialize().then(() => {
+            console.log('✅ [INIT] client.initialize() resolveu com sucesso');
+            this.isInitializing = false;
+            this.startWatchdog();
+        }).catch(async (err) => {
+            console.error('❌ [INIT] client.initialize() falhou:', err.message);
 
-                // Destruir client atual (pode falhar se Chrome já morreu)
-                try {
-                    console.log('💣 [INIT] Destruindo client...');
-                    await client.destroy();
-                } catch (destroyErr) {
-                    console.warn('⚠️ [INIT] client.destroy() falhou (ok):', destroyErr.message);
-                }
+            // Destruir client
+            try { await client.destroy(); } catch (e) { /* ok */ }
 
-                if (attempt < MAX_INIT_RETRIES) {
-                    const waitSec = attempt * 10;
-                    console.log(`⏳ [INIT] Aguardando ${waitSec}s antes da próxima tentativa...`);
-                    await new Promise(r => setTimeout(r, waitSec * 1000));
-                } else {
-                    console.error('⚠️ [INIT] WhatsApp não inicializou após todas as tentativas.');
-                    console.error('⚠️ [INIT] Servidor web continua. Use /whatsapp/reconnect para tentar.');
-                    connectionStatus = 'disconnected';
-                    this.disconnectedSince = Date.now();
-                }
+            // Se o status já mudou para waiting_qr ou connected, NÃO reverter
+            if (connectionStatus === 'initializing') {
+                connectionStatus = 'disconnected';
+                this.disconnectedSince = Date.now();
             }
-        }
 
-        this.isInitializing = false;
-        this.startWatchdog(); // Watchdog roda mesmo offline
-        return false;
+            this.isInitializing = false;
+
+            // Retry automático após 15s se era a primeira tentativa
+            if (this.reconnectAttempts < 2) {
+                console.log('🔄 [INIT] Retry automático em 15s...');
+                setTimeout(() => {
+                    this.reconnectAttempts++;
+                    this.cleanChrome(true); // Nuclear no retry: deletar sessão inteira
+                    this.recreateClient();
+                    connectionStatus = 'initializing';
+
+                    client.initialize().then(() => {
+                        console.log('✅ [INIT] Retry bem-sucedido!');
+                        this.isInitializing = false;
+                        this.reconnectAttempts = 0;
+                        this.startWatchdog();
+                    }).catch(async (err2) => {
+                        console.error('❌ [INIT] Retry também falhou:', err2.message);
+                        try { await client.destroy(); } catch (e) { /* ok */ }
+                        if (connectionStatus === 'initializing') {
+                            connectionStatus = 'disconnected';
+                        }
+                        this.isInitializing = false;
+                        this.startWatchdog();
+                    });
+                }, 15000);
+            } else {
+                this.startWatchdog();
+            }
+        });
+
+        // Retorna imediatamente — não bloqueia o servidor
+        // Safety timeout: se após 2 minutos ainda estiver "initializing", forçar para disconnected
+        setTimeout(() => {
+            if (connectionStatus === 'initializing') {
+                console.warn('⚠️ [INIT] Safety timeout: 2min sem resposta, marcando como disconnected');
+                connectionStatus = 'disconnected';
+                this.isInitializing = false;
+            }
+        }, 120000);
+
+        return true;
     },
 
     // 🔄 Reconexão robusta com backoff exponencial
     async reconnect(reason = 'unknown') {
-        // 🔒 GUARD: Não reconectar se init ou outro reconnect está rodando
         if (this.isReconnecting || this.isInitializing) {
-            console.log(`⏳ [RECONNECT] Operação bloqueada (init=${this.isInitializing}, reconn=${this.isReconnecting})`);
+            console.log(`⏳ [RECONNECT] Bloqueado (init=${this.isInitializing}, reconn=${this.isReconnecting})`);
             return;
         }
 
         this.isReconnecting = true;
 
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error(`⛔ [RECONNECT] Máximo de ${this.maxReconnectAttempts} tentativas atingido.`);
+            console.error(`⛔ [RECONNECT] Máximo de ${this.maxReconnectAttempts} tentativas.`);
             connectionStatus = 'disconnected';
             this.isReconnecting = false;
             return;
@@ -378,85 +387,82 @@ const whatsapp = {
         this.reconnectAttempts++;
         this.reconnectCount++;
         const delay = this.getBackoffDelay();
-        console.log(`🔄 [RECONNECT] #${this.reconnectAttempts} (motivo: ${reason}) em ${delay / 1000}s...`);
 
+        console.log(`🔄 [RECONNECT] #${this.reconnectAttempts} (${reason}) em ${delay / 1000}s...`);
         await new Promise(r => setTimeout(r, delay));
 
-        try {
-            connectionStatus = 'initializing';
-            try { await client.destroy(); } catch (e) { /* ok */ }
-            this.nukeChrome();
-            this.recreateClient();
+        this.cleanChrome(false);
+        this.recreateClient();
+        connectionStatus = 'initializing';
 
+        try {
             await client.initialize();
-            console.log('✅ [RECONNECT] Bem-sucedida!');
+            console.log('✅ [RECONNECT] Sucesso!');
             this.reconnectAttempts = 0;
             this.disconnectedSince = null;
             this.isReconnecting = false;
         } catch (e) {
-            console.error(`❌ [RECONNECT] Falha #${this.reconnectAttempts}:`, e.message);
-
+            console.error(`❌ [RECONNECT] Falha:`, e.message);
             try { await client.destroy(); } catch (e2) { /* ok */ }
-            this.nukeChrome();
 
-            connectionStatus = 'disconnected';
+            if (connectionStatus === 'initializing') {
+                connectionStatus = 'disconnected';
+            }
             this.isReconnecting = false;
 
             if (this.reconnectAttempts < this.maxReconnectAttempts) {
-                this.reconnect('retry após falha');
-            } else {
-                console.error('⛔ [RECONNECT] Todas as tentativas esgotadas.');
+                this.reconnect('retry');
             }
         }
     },
 
     // 🔧 Reconexão manual forçada (via /whatsapp/reconnect)
     async forceReconnect() {
-        // 🔒 GUARD: Se init está rodando, não interferir!
         if (this.isInitializing) {
-            console.log('⏳ [FORCE] Init em andamento, ignorando reconexão manual.');
             return { blocked: true, reason: 'Inicialização em andamento' };
         }
 
-        console.log('🔧 [FORCE] Reconexão manual solicitada...');
+        console.log('🔧 [FORCE] Reconexão manual...');
         this.reconnectAttempts = 0;
         this.isReconnecting = false;
         this.watchdogFailures = 0;
-        this.isInitializing = true; // Bloquear outras operações
+        this.isInitializing = true;
 
         try { await client.destroy(); } catch (e) { /* ok */ }
-        this.nukeChrome();
+        this.cleanChrome(true); // Nuclear na reconexão manual
         this.recreateClient();
 
         connectionStatus = 'initializing';
         currentQR = null;
         connectionInfo = null;
 
-        try {
-            await client.initialize();
-            console.log('✅ [FORCE] Reconexão manual bem-sucedida!');
+        // Fire-and-forget (eventos vão atualizar o status)
+        client.initialize().then(() => {
+            console.log('✅ [FORCE] Sucesso!');
             this.disconnectedSince = null;
             this.isInitializing = false;
-            return { blocked: false, success: true };
-        } catch (e) {
-            console.error('❌ [FORCE] Falha na reconexão manual:', e.message);
-            connectionStatus = 'disconnected';
+        }).catch((e) => {
+            console.error('❌ [FORCE] Falha:', e.message);
+            if (connectionStatus === 'initializing') {
+                connectionStatus = 'disconnected';
+            }
             this.disconnectedSince = Date.now();
             this.isInitializing = false;
-            return { blocked: false, success: false, error: e.message };
-        }
+        });
+
+        // Retorna imediato — frontend vai pollar status
+        return { blocked: false, success: true, message: 'Inicialização disparada' };
     },
 
-    // 🫀 Watchdog — verifica a cada 5 min se o bot responde de verdade
+    // 🫀 Watchdog
     startWatchdog() {
         if (this.watchdogInterval) clearInterval(this.watchdogInterval);
 
-        const WATCHDOG_INTERVAL = 5 * 60 * 1000; // 5 minutos
-        const MAX_FAILURES = 3; // 3 falhas seguidas (15 min) = force reconnect
+        const WATCHDOG_INTERVAL = 5 * 60 * 1000;
+        const MAX_FAILURES = 3;
 
         this.watchdogInterval = setInterval(async () => {
-            // Se já está reconectando, pular
-            if (this.isReconnecting || connectionStatus === 'initializing' || connectionStatus === 'waiting_qr') {
+            if (this.isReconnecting || this.isInitializing || connectionStatus === 'initializing' || connectionStatus === 'waiting_qr') {
                 return;
             }
 
@@ -469,13 +475,12 @@ const whatsapp = {
                 if (state === 'CONNECTED') {
                     this.watchdogFailures = 0;
                     this.lastHeartbeat = new Date().toISOString();
-                    // Garantir que o status está correto
                     if (connectionStatus !== 'connected') {
                         connectionStatus = 'connected';
                         this.disconnectedSince = null;
                     }
                 } else {
-                    console.warn(`⚠️ [Watchdog] Estado inesperado: ${state}`);
+                    console.warn(`⚠️ [Watchdog] Estado: ${state}`);
                     this.watchdogFailures++;
                 }
             } catch (e) {
@@ -483,50 +488,43 @@ const whatsapp = {
                 console.warn(`⚠️ [Watchdog] Falha #${this.watchdogFailures}: ${e.message}`);
             }
 
-            // Se acumulou muitas falhas, forçar reconexão
             if (this.watchdogFailures >= MAX_FAILURES && !this.isReconnecting) {
-                console.error(`🚨 [Watchdog] ${MAX_FAILURES} falhas consecutivas! Forçando reconexão...`);
+                console.error(`🚨 [Watchdog] ${MAX_FAILURES} falhas! Reconectando...`);
                 this.watchdogFailures = 0;
                 connectionStatus = 'disconnected';
                 this.disconnectedSince = this.disconnectedSince || Date.now();
-                this.reconnect('watchdog detectou bot morto');
+                this.reconnect('watchdog');
             }
         }, WATCHDOG_INTERVAL);
 
-        console.log('🫀 Watchdog iniciado (verificação a cada 5 min)');
+        console.log('🫀 Watchdog iniciado (a cada 5 min)');
     },
 
     stopWatchdog() {
         if (this.watchdogInterval) {
             clearInterval(this.watchdogInterval);
-            this.watchdogInterval = null;
+            console.log('🛑 Watchdog parado');
         }
     },
 
-    // Dados para o healthcheck
     getHealthData() {
-        const uptimeSeconds = this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0;
-        const offlineMinutes = this.disconnectedSince
-            ? Math.floor((Date.now() - this.disconnectedSince) / 60000)
-            : 0;
-
+        const now = Date.now();
         return {
-            server: 'online',
             whatsapp: connectionStatus,
-            uptime_seconds: uptimeSeconds,
-            last_heartbeat: this.lastHeartbeat,
+            server: 'running',
+            uptime_minutes: this.startedAt ? Math.floor((now - this.startedAt) / 60000) : 0,
             reconnect_count: this.reconnectCount,
-            reconnect_attempts_current: this.reconnectAttempts,
-            is_reconnecting: this.isReconnecting,
-            offline_minutes: connectionStatus !== 'connected' ? offlineMinutes : 0,
-            info: connectionInfo
+            offline_minutes: this.disconnectedSince ? Math.floor((now - this.disconnectedSince) / 60000) : 0,
+            last_heartbeat: this.lastHeartbeat,
+            pid: process.pid,
+            memory_mb: Math.round(process.memoryUsage().rss / 1024 / 1024)
         };
     }
 };
 
 // 🛑 GRACEFUL SHUTDOWN
 const shutdown = async (signal) => {
-    console.log(`🛑 Recebido ${signal}. Encerrando...`);
+    console.log(`\n${signal} recebido. Encerrando...`);
     whatsapp.stopWatchdog();
     try {
         await client.destroy();
