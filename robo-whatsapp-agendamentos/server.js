@@ -119,33 +119,43 @@ const whatsapp = {
         return (delays[Math.min(this.reconnectAttempts, delays.length - 1)]) * 1000;
     },
 
-    // 💀 Matar processos Chromium/Chrome órfãos que travam a sessão
+    // 💀 Matar processos Chrome/Chromium órfãos que travam a sessão
     killStaleBrowsers() {
         const { execSync } = require('child_process');
-        try {
-            // Linux (Docker) — mata todos os processos chromium/chrome
-            execSync('pkill -9 -f chromium 2>/dev/null || true', { stdio: 'ignore' });
-            execSync('pkill -9 -f chrome 2>/dev/null || true', { stdio: 'ignore' });
-            console.log('💀 Processos Chrome/Chromium órfãos encerrados');
-        } catch (e) {
-            // pkill retorna exit code 1 se não encontrar processos — normal
+        console.log('💀 Matando processos Chrome órfãos...');
+
+        // 1) Matar processos via pkill (Debian/Ubuntu) ou killall (fallback)
+        const killCmds = [
+            'pkill -9 -f "google-chrome" 2>/dev/null',
+            'pkill -9 -f "chromium" 2>/dev/null',
+            'pkill -9 -f "chrome" 2>/dev/null',
+            'killall -9 google-chrome-stable 2>/dev/null',
+            'killall -9 chromium 2>/dev/null',
+        ];
+        for (const cmd of killCmds) {
+            try { execSync(cmd, { stdio: 'ignore', timeout: 5000 }); } catch (e) { /* ok */ }
         }
-        // Remover SingletonLock que trava a pasta de sessão
-        try {
-            const lockFile = path.join(__dirname, '.wwebjs_auth', 'session-client-one', 'Default', 'SingletonLock');
-            if (fs.existsSync(lockFile)) {
-                fs.unlinkSync(lockFile);
-                console.log('🔓 SingletonLock removido');
+
+        // 2) Remover TODOS os lock files que Chrome cria na pasta de sessão
+        const sessionDir = path.join(__dirname, '.wwebjs_auth', 'session-client-one');
+        const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
+        const lockDirs = [sessionDir, path.join(sessionDir, 'Default')];
+
+        for (const dir of lockDirs) {
+            for (const lock of lockFiles) {
+                try {
+                    const lockPath = path.join(dir, lock);
+                    if (fs.existsSync(lockPath)) {
+                        fs.unlinkSync(lockPath);
+                        console.log(`🔓 Removido: ${lock} em ${dir}`);
+                    }
+                } catch (e) { /* ok */ }
             }
-            // Também tentar remover lock no nível da pasta de sessão
-            const sessionLock = path.join(__dirname, '.wwebjs_auth', 'session-client-one', 'SingletonLock');
-            if (fs.existsSync(sessionLock)) {
-                fs.unlinkSync(sessionLock);
-                console.log('🔓 Session SingletonLock removido');
-            }
-        } catch (e) {
-            // OK se não existir
         }
+
+        // 3) Aguardar um pouco para garantir que os processos morreram
+        try { execSync('sleep 1', { stdio: 'ignore' }); } catch (e) { /* ok */ }
+        console.log('✅ Limpeza de processos concluída');
     },
 
     // 🧹 Limpar cache de sessão corrompida
@@ -186,13 +196,27 @@ const whatsapp = {
                 return true;
             } catch (err) {
                 console.error(`❌ Falha ao inicializar WhatsApp (tentativa ${attempt}):`, err.message || err);
+
+                // IMPORTANTE: Destruir o client para matar o Chrome que ele lançou
+                // Sem isso, o Chrome fica vivo e trava a sessão para a próxima tentativa
+                try {
+                    console.log('💣 Destruindo client após falha...');
+                    await client.destroy();
+                } catch (destroyErr) {
+                    console.warn('⚠️ client.destroy() falhou:', destroyErr.message);
+                }
+
                 if (attempt < MAX_INIT_RETRIES) {
+                    // Matar Chrome + limpar locks DEPOIS do destroy
+                    this.killStaleBrowsers();
                     console.log('🧹 Limpando cache para próxima tentativa...');
                     this.clearCache();
                     const waitSec = attempt * 10;
                     console.log(`⏳ Aguardando ${waitSec}s...`);
                     await new Promise(r => setTimeout(r, waitSec * 1000));
                 } else {
+                    // Última tentativa falhou — matar tudo mesmo assim
+                    this.killStaleBrowsers();
                     console.error('⚠️ WhatsApp não inicializou após todas as tentativas.');
                     console.error('⚠️ O servidor web continua funcionando. Use /whatsapp/reconnect para tentar.');
                     connectionStatus = 'disconnected';

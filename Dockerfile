@@ -28,10 +28,10 @@ RUN npm run build
 # === STAGE 2: Production Server ===
 FROM node:20-slim
 
-# Install Google Chrome Stable and fonts
+# Install Google Chrome Stable, fonts, and process tools (pkill/killall)
 # Note: "gnupg" and "wget" are installed to download the signing key.
 RUN apt-get update \
-  && apt-get install -y wget gnupg git \
+  && apt-get install -y wget gnupg git procps psmisc curl \
   && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
   && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
   && apt-get update \
