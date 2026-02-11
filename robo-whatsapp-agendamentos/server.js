@@ -104,6 +104,7 @@ let connectionInfo = null;
 // --- WhatsApp Manager ---
 const whatsapp = {
     isReconnecting: false,
+    isInitializing: false, // 🔒 Impede race condition entre init e reconnect
     reconnectAttempts: 0,
     maxReconnectAttempts: 5,
     watchdogInterval: null,
@@ -119,157 +120,134 @@ const whatsapp = {
         return (delays[Math.min(this.reconnectAttempts, delays.length - 1)]) * 1000;
     },
 
-    // 💀 Matar processos Chrome/Chromium órfãos que travam a sessão
-    killStaleBrowsers() {
+    // 💀 NUKE: Matar Chrome + deletar TODA a sessão (locks, sockets, tudo)
+    // Motivo: Chrome usa ProcessSingleton (Unix domain socket + symlinks).
+    // Em Docker com volume montado, esses sockets persistem entre containers.
+    // fs.existsSync() retorna false para symlinks quebrados.
+    // A ÚNICA solução confiável é deletar a pasta inteira.
+    nukeChrome() {
         const { execSync } = require('child_process');
-        console.log('💀 Matando processos Chrome órfãos...');
+        console.log('💀 [NUKE] Matando Chrome + limpando sessão...');
 
-        // 1) Matar processos via pkill (Debian/Ubuntu) ou killall (fallback)
+        // 1) Matar TODOS os processos Chrome/Chromium
         const killCmds = [
-            'pkill -9 -f "google-chrome" 2>/dev/null',
-            'pkill -9 -f "chromium" 2>/dev/null',
             'pkill -9 -f "chrome" 2>/dev/null',
-            'killall -9 google-chrome-stable 2>/dev/null',
-            'killall -9 chromium 2>/dev/null',
+            'pkill -9 -f "chromium" 2>/dev/null',
+            'pkill -9 -f "google-chrome" 2>/dev/null',
         ];
         for (const cmd of killCmds) {
             try { execSync(cmd, { stdio: 'ignore', timeout: 5000 }); } catch (e) { /* ok */ }
         }
 
-        // 2) Remover TODOS os lock files que Chrome cria na pasta de sessão
-        // IMPORTANTE: SingletonLock é um SYMLINK (aponta para hostname-PID).
-        // Quando o container antigo morre, vira um symlink quebrado.
-        // fs.existsSync() retorna FALSE para symlinks quebrados, então temos
-        // que usar rmSync({force:true}) que deleta sem verificar o alvo.
+        // 2) Esperar processos morrerem de verdade
+        try { execSync('sleep 2', { stdio: 'ignore' }); } catch (e) { /* ok */ }
+
+        // 3) Deletar a pasta de sessão INTEIRA
+        // Isso remove: SingletonLock (symlink), SingletonSocket (Unix socket),
+        // SingletonCookie, e qualquer outro artefato que trave o Chrome
         const sessionDir = path.join(__dirname, '.wwebjs_auth', 'session-client-one');
-        const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
-        const lockDirs = [sessionDir, path.join(sessionDir, 'Default')];
-
-        for (const dir of lockDirs) {
-            for (const lock of lockFiles) {
-                const lockPath = path.join(dir, lock);
-                try {
-                    // rmSync com force:true não joga erro se não existir
-                    // e funciona com symlinks quebrados (diferente de existsSync)
-                    fs.rmSync(lockPath, { force: true });
-                    // Verificar se realmente sumiu (lstat detecta symlinks quebrados)
-                    try {
-                        fs.lstatSync(lockPath);
-                        // Se chegou aqui, ainda existe — tentar unlink direto
-                        fs.unlinkSync(lockPath);
-                        console.log(`🔓 Removido (unlink): ${lock}`);
-                    } catch (statErr) {
-                        // Não existe mais — ótimo (pode ter sido removido pelo rmSync)
-                    }
-                } catch (e) {
-                    console.log(`⚠️ Não conseguiu remover ${lock}: ${e.message}`);
-                }
-            }
-        }
-
-        // 3) Verificação final: listar se ainda há locks na pasta
         try {
             if (fs.existsSync(sessionDir)) {
-                const remaining = fs.readdirSync(sessionDir).filter(f => f.startsWith('Singleton'));
-                if (remaining.length > 0) {
-                    console.warn(`⚠️ Locks restantes: ${remaining.join(', ')}`);
-                    // Forçar remoção de qualquer coisa que comece com Singleton
-                    for (const f of remaining) {
-                        try { fs.rmSync(path.join(sessionDir, f), { force: true, recursive: true }); } catch (e) { /* ok */ }
+                fs.rmSync(sessionDir, { recursive: true, force: true });
+                console.log('🧹 [NUKE] Pasta de sessão removida:', sessionDir);
+            } else {
+                // Pode não existir "normalmente" mas ter symlinks quebrados
+                // Tentar remover mesmo assim
+                try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) { /* ok */ }
+            }
+        } catch (e) {
+            console.warn('⚠️ [NUKE] Erro ao remover sessão:', e.message);
+            // Fallback: ao menos remover Singleton* files
+            try {
+                const items = fs.readdirSync(sessionDir);
+                for (const item of items) {
+                    if (item.startsWith('Singleton') || item === 'lockfile') {
+                        try { fs.rmSync(path.join(sessionDir, item), { force: true }); } catch (e2) { /* ok */ }
                     }
-                } else {
-                    console.log('🔓 Nenhum lock file restante na sessão');
                 }
+            } catch (e2) { /* dir may not exist */ }
+        }
+
+        // 4) Verificação: confirmar que não há processos Chrome restantes
+        try {
+            const result = execSync('pgrep -c chrome 2>/dev/null || echo 0', { encoding: 'utf8', timeout: 3000 }).trim();
+            if (parseInt(result) > 0) {
+                console.warn(`⚠️ [NUKE] Ainda há ${result} processos Chrome! Tentando kill novamente...`);
+                try { execSync('pkill -9 chrome 2>/dev/null', { stdio: 'ignore', timeout: 3000 }); } catch (e) { /* ok */ }
+                try { execSync('sleep 1', { stdio: 'ignore' }); } catch (e) { /* ok */ }
             }
         } catch (e) { /* ok */ }
 
-        // 3) Aguardar um pouco para garantir que os processos morreram
-        try { execSync('sleep 1', { stdio: 'ignore' }); } catch (e) { /* ok */ }
-        console.log('✅ Limpeza de processos concluída');
-    },
-
-    // 🧹 Limpar cache de sessão corrompida
-    clearCache() {
-        // Primeiro matar browsers que possam estar travando os arquivos
-        this.killStaleBrowsers();
-
-        const authPath = path.join(__dirname, '.wwebjs_auth');
-        const cachePath = path.join(__dirname, '.wwebjs_cache');
-        try {
-            if (fs.existsSync(authPath)) {
-                fs.rmSync(authPath, { recursive: true, force: true });
-                console.log('🧹 Cache de autenticação limpo (.wwebjs_auth)');
-            }
-            if (fs.existsSync(cachePath)) {
-                fs.rmSync(cachePath, { recursive: true, force: true });
-                console.log('🧹 Cache do navegador limpo (.wwebjs_cache)');
-            }
-        } catch (e) {
-            console.error('⚠️ Erro ao limpar cache:', e.message);
-        }
+        console.log('✅ [NUKE] Limpeza concluída');
     },
 
     // 🚀 Inicialização com retry automático
     async initialize() {
+        // 🔒 GUARD: Impedir chamadas simultâneas (race condition com frontend)
+        if (this.isInitializing) {
+            console.log('⏳ [INIT] Já em andamento, ignorando chamada duplicada.');
+            return false;
+        }
+        this.isInitializing = true;
         this.startedAt = Date.now();
         const MAX_INIT_RETRIES = 3;
+
+        // 🔥 ANTES de tudo: nuke completo para limpar resquícios do container anterior
+        this.nukeChrome();
 
         for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
             try {
                 connectionStatus = 'initializing';
-                // Matar browsers órfãos antes de tentar (evita "browser already running")
-                this.killStaleBrowsers();
-                console.log(`📱 Inicializando WhatsApp (tentativa ${attempt}/${MAX_INIT_RETRIES})...`);
+                console.log(`📱 [INIT] Tentativa ${attempt}/${MAX_INIT_RETRIES}...`);
                 await client.initialize();
-                console.log('✅ WhatsApp inicializado com sucesso!');
+                console.log('✅ [INIT] WhatsApp inicializado com sucesso!');
+                this.isInitializing = false;
                 this.startWatchdog();
                 return true;
             } catch (err) {
-                console.error(`❌ Falha ao inicializar WhatsApp (tentativa ${attempt}):`, err.message || err);
+                console.error(`❌ [INIT] Falha na tentativa ${attempt}:`, err.message || err);
 
-                // IMPORTANTE: Destruir o client para matar o Chrome que ele lançou
-                // Sem isso, o Chrome fica vivo e trava a sessão para a próxima tentativa
+                // Destruir client para matar o Chrome que ele lançou
                 try {
-                    console.log('💣 Destruindo client após falha...');
+                    console.log('💣 [INIT] Destruindo client...');
                     await client.destroy();
                 } catch (destroyErr) {
-                    console.warn('⚠️ client.destroy() falhou:', destroyErr.message);
+                    console.warn('⚠️ [INIT] client.destroy() falhou (ok):', destroyErr.message);
                 }
 
+                // Nuke completo entre tentativas
+                this.nukeChrome();
+
                 if (attempt < MAX_INIT_RETRIES) {
-                    // Matar Chrome + limpar locks DEPOIS do destroy
-                    this.killStaleBrowsers();
-                    console.log('🧹 Limpando cache para próxima tentativa...');
-                    this.clearCache();
                     const waitSec = attempt * 10;
-                    console.log(`⏳ Aguardando ${waitSec}s...`);
+                    console.log(`⏳ [INIT] Aguardando ${waitSec}s antes da próxima tentativa...`);
                     await new Promise(r => setTimeout(r, waitSec * 1000));
                 } else {
-                    // Última tentativa falhou — matar tudo mesmo assim
-                    this.killStaleBrowsers();
-                    console.error('⚠️ WhatsApp não inicializou após todas as tentativas.');
-                    console.error('⚠️ O servidor web continua funcionando. Use /whatsapp/reconnect para tentar.');
+                    console.error('⚠️ [INIT] WhatsApp não inicializou após todas as tentativas.');
+                    console.error('⚠️ [INIT] Servidor web continua. Use /whatsapp/reconnect para tentar.');
                     connectionStatus = 'disconnected';
                     this.disconnectedSince = Date.now();
-                    this.startWatchdog(); // Watchdog roda mesmo offline para tentar recovery
-                    return false;
                 }
             }
         }
+
+        this.isInitializing = false;
+        this.startWatchdog(); // Watchdog roda mesmo offline
+        return false;
     },
 
     // 🔄 Reconexão robusta com backoff exponencial
     async reconnect(reason = 'unknown') {
-        if (this.isReconnecting) {
-            console.log('⏳ Reconexão já em andamento, ignorando...');
+        // 🔒 GUARD: Não reconectar se init ou outro reconnect está rodando
+        if (this.isReconnecting || this.isInitializing) {
+            console.log(`⏳ [RECONNECT] Operação bloqueada (init=${this.isInitializing}, reconn=${this.isReconnecting})`);
             return;
         }
 
         this.isReconnecting = true;
 
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error(`⛔ Máximo de ${this.maxReconnectAttempts} tentativas atingido.`);
-            console.error('⚠️ Aguardando reconexão manual via /whatsapp/reconnect ou restart do Docker.');
+            console.error(`⛔ [RECONNECT] Máximo de ${this.maxReconnectAttempts} tentativas atingido.`);
             connectionStatus = 'disconnected';
             this.isReconnecting = false;
             return;
@@ -278,54 +256,54 @@ const whatsapp = {
         this.reconnectAttempts++;
         this.reconnectCount++;
         const delay = this.getBackoffDelay();
-        console.log(`🔄 Reconexão #${this.reconnectAttempts} (motivo: ${reason}) em ${delay / 1000}s...`);
+        console.log(`🔄 [RECONNECT] #${this.reconnectAttempts} (motivo: ${reason}) em ${delay / 1000}s...`);
 
         await new Promise(r => setTimeout(r, delay));
 
         try {
             connectionStatus = 'initializing';
-
-            // Tentar destruir o client antigo (pode falhar se já morreu)
             try { await client.destroy(); } catch (e) { /* ok */ }
-
-            // Sempre matar browsers órfãos (evita "browser already running")
-            this.killStaleBrowsers();
-
-            // Limpar cache se já passou da 2ª tentativa (sessão provavelmente corrompida)
-            if (this.reconnectAttempts >= 2) {
-                console.log('🧹 Limpando cache (tentativa ≥2)...');
-                this.clearCache();
-            }
+            this.nukeChrome();
 
             await client.initialize();
-            console.log('✅ Reconexão bem-sucedida!');
-            this.reconnectAttempts = 0; // Reset no sucesso
+            console.log('✅ [RECONNECT] Bem-sucedida!');
+            this.reconnectAttempts = 0;
             this.disconnectedSince = null;
             this.isReconnecting = false;
         } catch (e) {
-            console.error(`❌ Falha na reconexão #${this.reconnectAttempts}:`, e.message);
+            console.error(`❌ [RECONNECT] Falha #${this.reconnectAttempts}:`, e.message);
+
+            // Destruir + nuke após falha
+            try { await client.destroy(); } catch (e2) { /* ok */ }
+            this.nukeChrome();
+
             connectionStatus = 'disconnected';
             this.isReconnecting = false;
 
-            // Agendar próxima tentativa automaticamente
             if (this.reconnectAttempts < this.maxReconnectAttempts) {
                 this.reconnect('retry após falha');
             } else {
-                console.error('⛔ Todas as tentativas esgotadas. Aguardando intervenção.');
+                console.error('⛔ [RECONNECT] Todas as tentativas esgotadas.');
             }
         }
     },
 
-    // Reconexão manual forçada (reset dos contadores)
+    // 🔧 Reconexão manual forçada (via /whatsapp/reconnect)
     async forceReconnect() {
-        console.log('🔧 Reconexão manual forçada solicitada...');
+        // 🔒 GUARD: Se init está rodando, não interferir!
+        if (this.isInitializing) {
+            console.log('⏳ [FORCE] Init em andamento, ignorando reconexão manual.');
+            return { blocked: true, reason: 'Inicialização em andamento' };
+        }
+
+        console.log('🔧 [FORCE] Reconexão manual solicitada...');
         this.reconnectAttempts = 0;
         this.isReconnecting = false;
         this.watchdogFailures = 0;
+        this.isInitializing = true; // Bloquear outras operações
 
         try { await client.destroy(); } catch (e) { /* ok */ }
-        this.killStaleBrowsers();
-        this.clearCache();
+        this.nukeChrome();
 
         connectionStatus = 'initializing';
         currentQR = null;
@@ -333,12 +311,16 @@ const whatsapp = {
 
         try {
             await client.initialize();
-            console.log('✅ Reconexão manual bem-sucedida!');
+            console.log('✅ [FORCE] Reconexão manual bem-sucedida!');
             this.disconnectedSince = null;
+            this.isInitializing = false;
+            return { blocked: false, success: true };
         } catch (e) {
-            console.error('❌ Falha na reconexão manual:', e.message);
+            console.error('❌ [FORCE] Falha na reconexão manual:', e.message);
             connectionStatus = 'disconnected';
             this.disconnectedSince = Date.now();
+            this.isInitializing = false;
+            return { blocked: false, success: false, error: e.message };
         }
     },
 
@@ -685,6 +667,13 @@ app.post('/whatsapp/ai-settings', async (req, res) => {
 
 // --- ROTA PARA FORÇAR RECONEXÃO ---
 app.post('/whatsapp/reconnect', async (req, res) => {
+    // Se init já está rodando, informar imediatamente
+    if (whatsapp.isInitializing) {
+        return res.status(409).json({
+            success: false,
+            message: 'Inicialização já em andamento. Aguarde.'
+        });
+    }
     // Responde imediatamente — o reconnect roda em background
     res.json({ success: true, message: 'Reconexão iniciada em background' });
     // Executa em background (não bloqueia a response)
