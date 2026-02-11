@@ -137,21 +137,51 @@ const whatsapp = {
         }
 
         // 2) Remover TODOS os lock files que Chrome cria na pasta de sessão
+        // IMPORTANTE: SingletonLock é um SYMLINK (aponta para hostname-PID).
+        // Quando o container antigo morre, vira um symlink quebrado.
+        // fs.existsSync() retorna FALSE para symlinks quebrados, então temos
+        // que usar rmSync({force:true}) que deleta sem verificar o alvo.
         const sessionDir = path.join(__dirname, '.wwebjs_auth', 'session-client-one');
         const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
         const lockDirs = [sessionDir, path.join(sessionDir, 'Default')];
 
         for (const dir of lockDirs) {
             for (const lock of lockFiles) {
+                const lockPath = path.join(dir, lock);
                 try {
-                    const lockPath = path.join(dir, lock);
-                    if (fs.existsSync(lockPath)) {
+                    // rmSync com force:true não joga erro se não existir
+                    // e funciona com symlinks quebrados (diferente de existsSync)
+                    fs.rmSync(lockPath, { force: true });
+                    // Verificar se realmente sumiu (lstat detecta symlinks quebrados)
+                    try {
+                        fs.lstatSync(lockPath);
+                        // Se chegou aqui, ainda existe — tentar unlink direto
                         fs.unlinkSync(lockPath);
-                        console.log(`🔓 Removido: ${lock} em ${dir}`);
+                        console.log(`🔓 Removido (unlink): ${lock}`);
+                    } catch (statErr) {
+                        // Não existe mais — ótimo (pode ter sido removido pelo rmSync)
                     }
-                } catch (e) { /* ok */ }
+                } catch (e) {
+                    console.log(`⚠️ Não conseguiu remover ${lock}: ${e.message}`);
+                }
             }
         }
+
+        // 3) Verificação final: listar se ainda há locks na pasta
+        try {
+            if (fs.existsSync(sessionDir)) {
+                const remaining = fs.readdirSync(sessionDir).filter(f => f.startsWith('Singleton'));
+                if (remaining.length > 0) {
+                    console.warn(`⚠️ Locks restantes: ${remaining.join(', ')}`);
+                    // Forçar remoção de qualquer coisa que comece com Singleton
+                    for (const f of remaining) {
+                        try { fs.rmSync(path.join(sessionDir, f), { force: true, recursive: true }); } catch (e) { /* ok */ }
+                    }
+                } else {
+                    console.log('🔓 Nenhum lock file restante na sessão');
+                }
+            }
+        } catch (e) { /* ok */ }
 
         // 3) Aguardar um pouco para garantir que os processos morreram
         try { execSync('sleep 1', { stdio: 'ignore' }); } catch (e) { /* ok */ }
