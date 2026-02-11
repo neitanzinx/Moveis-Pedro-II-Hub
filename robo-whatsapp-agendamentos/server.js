@@ -83,16 +83,16 @@ function createWhatsAppClient() {
 
     return new Client({
         authStrategy: new LocalAuth({
-            clientId: "client-one",
+            clientId: "client-v2", // 🔄 ROTAÇÃO DE SESSÃO: V2 para fugir de locks antigos
             dataPath: sessionPath
         }),
-        authTimeoutMs: 60000, // Aumentado para 60s (VPS lenta)
+        authTimeoutMs: 60000,
         puppeteer: {
             headless: true,
             executablePath: puppeteer.executablePath(),
-            // userDataDir: sessionPath, // REMOVIDO: LocalAuth gerencia isso internamente
+            // userDataDir: sessionPath, 
             protocolTimeout: 180000,
-            dumpio: false,
+            dumpio: true, // 🔍 DEBUG: Ativado para ver o erro real do Chrome
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -266,7 +266,8 @@ const whatsapp = {
 
         // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
         // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
-        const sessionDir = path.join(__dirname, '.wwebjs_auth', 'session-client-one');
+        // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
+        const sessionDir = path.join(__dirname, '.wwebjs_auth', 'session-client-v2'); // Atualizado para V2
         if (deleteSession) {
             // Modo nuclear: deleta tudo (força QR rescan)
             try {
