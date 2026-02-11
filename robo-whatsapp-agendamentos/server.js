@@ -60,8 +60,11 @@ app.use(express.static(distPath));
 // const genAI = new GoogleGenerativeAI(GEMINI_KEY); // Movido para dentro da rota
 // const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
+// =============================================================================
+// 🤖 WHATSAPP MANAGER — Gerenciador de Ciclo de Vida Resiliente
+// =============================================================================
+
 const client = new Client({
-    // 🔐 AUTH PERSISTENTE: Salva a sessão para não precisar escanear QR code sempre
     authStrategy: new LocalAuth({
         clientId: "client-one",
         dataPath: "./.wwebjs_auth"
@@ -87,21 +90,253 @@ const client = new Client({
             '--remote-debugging-port=0'
         ],
         timeout: 180000,
-        handleSIGINT: false, // Vamos tratar manualmente
+        handleSIGINT: false,
         handleSIGTERM: false,
         handleSIGHUP: false
     }
 });
 
-// 🛑 GRACEFUL SHUTDOWN (Evita EBUSY e Zombis)
+// --- Estado global de conexão ---
+let currentQR = null;
+let connectionStatus = 'initializing';
+let connectionInfo = null;
+
+// --- WhatsApp Manager ---
+const whatsapp = {
+    isReconnecting: false,
+    reconnectAttempts: 0,
+    maxReconnectAttempts: 5,
+    watchdogInterval: null,
+    watchdogFailures: 0,
+    startedAt: null,
+    lastHeartbeat: null,
+    reconnectCount: 0,
+    disconnectedSince: null,
+
+    // Backoff delays em segundos: 10s, 30s, 60s, 120s, 300s
+    getBackoffDelay() {
+        const delays = [10, 30, 60, 120, 300];
+        return (delays[Math.min(this.reconnectAttempts, delays.length - 1)]) * 1000;
+    },
+
+    // 🧹 Limpar cache de sessão corrompida
+    clearCache() {
+        const authPath = path.join(__dirname, '.wwebjs_auth');
+        const cachePath = path.join(__dirname, '.wwebjs_cache');
+        try {
+            if (fs.existsSync(authPath)) {
+                fs.rmSync(authPath, { recursive: true, force: true });
+                console.log('🧹 Cache de autenticação limpo (.wwebjs_auth)');
+            }
+            if (fs.existsSync(cachePath)) {
+                fs.rmSync(cachePath, { recursive: true, force: true });
+                console.log('🧹 Cache do navegador limpo (.wwebjs_cache)');
+            }
+        } catch (e) {
+            console.error('⚠️ Erro ao limpar cache:', e.message);
+        }
+    },
+
+    // 🚀 Inicialização com retry automático
+    async initialize() {
+        this.startedAt = Date.now();
+        const MAX_INIT_RETRIES = 3;
+
+        for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
+            try {
+                connectionStatus = 'initializing';
+                console.log(`📱 Inicializando WhatsApp (tentativa ${attempt}/${MAX_INIT_RETRIES})...`);
+                await client.initialize();
+                console.log('✅ WhatsApp inicializado com sucesso!');
+                this.startWatchdog();
+                return true;
+            } catch (err) {
+                console.error(`❌ Falha ao inicializar WhatsApp (tentativa ${attempt}):`, err.message || err);
+                if (attempt < MAX_INIT_RETRIES) {
+                    console.log('🧹 Limpando cache para próxima tentativa...');
+                    this.clearCache();
+                    const waitSec = attempt * 10;
+                    console.log(`⏳ Aguardando ${waitSec}s...`);
+                    await new Promise(r => setTimeout(r, waitSec * 1000));
+                } else {
+                    console.error('⚠️ WhatsApp não inicializou após todas as tentativas.');
+                    console.error('⚠️ O servidor web continua funcionando. Use /whatsapp/reconnect para tentar.');
+                    connectionStatus = 'disconnected';
+                    this.disconnectedSince = Date.now();
+                    this.startWatchdog(); // Watchdog roda mesmo offline para tentar recovery
+                    return false;
+                }
+            }
+        }
+    },
+
+    // 🔄 Reconexão robusta com backoff exponencial
+    async reconnect(reason = 'unknown') {
+        if (this.isReconnecting) {
+            console.log('⏳ Reconexão já em andamento, ignorando...');
+            return;
+        }
+
+        this.isReconnecting = true;
+
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.error(`⛔ Máximo de ${this.maxReconnectAttempts} tentativas atingido.`);
+            console.error('⚠️ Aguardando reconexão manual via /whatsapp/reconnect ou restart do Docker.');
+            connectionStatus = 'disconnected';
+            this.isReconnecting = false;
+            return;
+        }
+
+        this.reconnectAttempts++;
+        this.reconnectCount++;
+        const delay = this.getBackoffDelay();
+        console.log(`🔄 Reconexão #${this.reconnectAttempts} (motivo: ${reason}) em ${delay / 1000}s...`);
+
+        await new Promise(r => setTimeout(r, delay));
+
+        try {
+            connectionStatus = 'initializing';
+
+            // Tentar destruir o client antigo (pode falhar se já morreu)
+            try { await client.destroy(); } catch (e) { /* ok */ }
+
+            // Limpar cache se já passou da 2ª tentativa (sessão provavelmente corrompida)
+            if (this.reconnectAttempts >= 2) {
+                console.log('🧹 Limpando cache (tentativa ≥2)...');
+                this.clearCache();
+            }
+
+            await client.initialize();
+            console.log('✅ Reconexão bem-sucedida!');
+            this.reconnectAttempts = 0; // Reset no sucesso
+            this.disconnectedSince = null;
+            this.isReconnecting = false;
+        } catch (e) {
+            console.error(`❌ Falha na reconexão #${this.reconnectAttempts}:`, e.message);
+            connectionStatus = 'disconnected';
+            this.isReconnecting = false;
+
+            // Agendar próxima tentativa automaticamente
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                this.reconnect('retry após falha');
+            } else {
+                console.error('⛔ Todas as tentativas esgotadas. Aguardando intervenção.');
+            }
+        }
+    },
+
+    // Reconexão manual forçada (reset dos contadores)
+    async forceReconnect() {
+        console.log('🔧 Reconexão manual forçada solicitada...');
+        this.reconnectAttempts = 0;
+        this.isReconnecting = false;
+        this.watchdogFailures = 0;
+
+        try { await client.destroy(); } catch (e) { /* ok */ }
+        this.clearCache();
+
+        connectionStatus = 'initializing';
+        currentQR = null;
+        connectionInfo = null;
+
+        try {
+            await client.initialize();
+            console.log('✅ Reconexão manual bem-sucedida!');
+            this.disconnectedSince = null;
+        } catch (e) {
+            console.error('❌ Falha na reconexão manual:', e.message);
+            connectionStatus = 'disconnected';
+            this.disconnectedSince = Date.now();
+        }
+    },
+
+    // 🫀 Watchdog — verifica a cada 5 min se o bot responde de verdade
+    startWatchdog() {
+        if (this.watchdogInterval) clearInterval(this.watchdogInterval);
+
+        const WATCHDOG_INTERVAL = 5 * 60 * 1000; // 5 minutos
+        const MAX_FAILURES = 3; // 3 falhas seguidas (15 min) = force reconnect
+
+        this.watchdogInterval = setInterval(async () => {
+            // Se já está reconectando, pular
+            if (this.isReconnecting || connectionStatus === 'initializing' || connectionStatus === 'waiting_qr') {
+                return;
+            }
+
+            try {
+                const state = await Promise.race([
+                    client.getState(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('watchdog timeout')), 15000))
+                ]);
+
+                if (state === 'CONNECTED') {
+                    this.watchdogFailures = 0;
+                    this.lastHeartbeat = new Date().toISOString();
+                    // Garantir que o status está correto
+                    if (connectionStatus !== 'connected') {
+                        connectionStatus = 'connected';
+                        this.disconnectedSince = null;
+                    }
+                } else {
+                    console.warn(`⚠️ [Watchdog] Estado inesperado: ${state}`);
+                    this.watchdogFailures++;
+                }
+            } catch (e) {
+                this.watchdogFailures++;
+                console.warn(`⚠️ [Watchdog] Falha #${this.watchdogFailures}: ${e.message}`);
+            }
+
+            // Se acumulou muitas falhas, forçar reconexão
+            if (this.watchdogFailures >= MAX_FAILURES && !this.isReconnecting) {
+                console.error(`🚨 [Watchdog] ${MAX_FAILURES} falhas consecutivas! Forçando reconexão...`);
+                this.watchdogFailures = 0;
+                connectionStatus = 'disconnected';
+                this.disconnectedSince = this.disconnectedSince || Date.now();
+                this.reconnect('watchdog detectou bot morto');
+            }
+        }, WATCHDOG_INTERVAL);
+
+        console.log('🫀 Watchdog iniciado (verificação a cada 5 min)');
+    },
+
+    stopWatchdog() {
+        if (this.watchdogInterval) {
+            clearInterval(this.watchdogInterval);
+            this.watchdogInterval = null;
+        }
+    },
+
+    // Dados para o healthcheck
+    getHealthData() {
+        const uptimeSeconds = this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0;
+        const offlineMinutes = this.disconnectedSince
+            ? Math.floor((Date.now() - this.disconnectedSince) / 60000)
+            : 0;
+
+        return {
+            server: 'online',
+            whatsapp: connectionStatus,
+            uptime_seconds: uptimeSeconds,
+            last_heartbeat: this.lastHeartbeat,
+            reconnect_count: this.reconnectCount,
+            reconnect_attempts_current: this.reconnectAttempts,
+            is_reconnecting: this.isReconnecting,
+            offline_minutes: connectionStatus !== 'connected' ? offlineMinutes : 0,
+            info: connectionInfo
+        };
+    }
+};
+
+// 🛑 GRACEFUL SHUTDOWN
 const shutdown = async (signal) => {
-    console.log(`🛑 Recebido ${signal}. Encerrando cliente WhatsApp e liberando arquivos...`);
+    console.log(`🛑 Recebido ${signal}. Encerrando...`);
+    whatsapp.stopWatchdog();
     try {
         await client.destroy();
         console.log('✅ Cliente WhatsApp encerrado.');
         process.exit(0);
     } catch (err) {
-        console.error('❌ Erro ao encerrar cliente:', err);
+        console.error('❌ Erro ao encerrar:', err);
         process.exit(1);
     }
 };
@@ -112,13 +347,8 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 let filaEspera = {};
 let mapaEntregas = {};
 
-// 🔐 Registrar rotas de autenticação de funcionários (com cliente WhatsApp)
+// 🔐 Registrar rotas de autenticação de funcionários
 setupEmployeeAuthRoutes(app, supabase, client);
-
-// --- ESTADO DA CONEXÃO WHATSAPP ---
-let currentQR = null;
-let connectionStatus = 'initializing'; // 'initializing' | 'waiting_qr' | 'connected' | 'disconnected'
-let connectionInfo = null;
 
 function limparJSON(texto) {
     try {
@@ -129,19 +359,16 @@ function limparJSON(texto) {
     } catch (e) { return null; }
 }
 
-// 🛡️ HELPER: Enviar mensagem com verificação real de conexão
+// 🛡️ Enviar mensagem com verificação de conexão
 async function enviarMensagemSegura(chatId, content, options = {}) {
-    // Verificar se o client está realmente conectado
     let state;
     try {
         state = await client.getState();
         console.log(`📡 Estado do WhatsApp: ${state}`);
     } catch (stateError) {
         console.error('❌ Erro ao verificar estado:', stateError.message);
-        // Continuar mesmo assim - o getState pode falhar mas o client funcionar
     }
 
-    // Tentar enviar a mensagem
     try {
         console.log(`📤 Enviando mensagem para ${chatId}...`);
         const result = await client.sendMessage(chatId, content, options);
@@ -149,36 +376,32 @@ async function enviarMensagemSegura(chatId, content, options = {}) {
         return { success: true, result };
     } catch (error) {
         console.error(`❌ Erro ao enviar mensagem:`, error.message);
-
-        // Se for erro markedUnread, a mensagem PODE ter sido enviada
         if (error.message && error.message.includes('markedUnread')) {
-            console.log('⚠️ Erro markedUnread detectado - verificando se mensagem foi enviada...');
-            // Retornar como warning, não como falha total
+            console.log('⚠️ Erro markedUnread detectado');
             return { success: true, warning: 'markedUnread - verifique manualmente' };
         }
-
         throw error;
     }
 }
 
+// =============================================================================
+// 📡 EVENTOS DO WHATSAPP
+// =============================================================================
+
 client.on('qr', qr => {
     currentQR = qr;
     connectionStatus = 'waiting_qr';
-    qrcode.generate(qr, { small: true }); // Manter no terminal também
-    console.log('📱 QR Code gerado - disponível na interface web');
+    qrcode.generate(qr, { small: true });
+    console.log('📱 QR Code gerado - escaneie pelo celular ou pela interface web');
 });
 
-// 🔐 Autenticação bem-sucedida (antes do ready)
-// 🔐 Autenticação bem-sucedida (antes do ready)
 client.on('authenticated', async () => {
     console.log('🔐 Autenticação bem-sucedida!');
-    console.log('🚀 FORÇANDO STATUS: CONECTADO (Workaround para loop infinito)');
-
-    // FORÇA BRUTA: Assume que está conectado assim que autentica
     connectionStatus = 'connected';
     currentQR = null;
+    whatsapp.reconnectAttempts = 0;
+    whatsapp.disconnectedSince = null;
 
-    // Tenta pegar info do usuário, mas não bloqueia o status
     try {
         const info = await client.info;
         if (info) {
@@ -189,24 +412,21 @@ client.on('authenticated', async () => {
             };
         }
     } catch (e) {
-        // Ignora erro, já estamos "conectados"
-        console.log('⚠️ Info do usuário indisponível no momento, mas status setado para connected.');
+        console.log('⚠️ Info do usuário indisponível, mas status setado para connected.');
     }
 });
 
-// 📶 Tela de carregamento do WhatsApp (com workaround para ready não disparar)
 client.on('loading_screen', async (percent, message) => {
     console.log(`📶 Carregando WhatsApp: ${percent}% - ${message}`);
 
-    // 🔧 Workaround: se loading chegar a 100% e ready não disparar
     if (percent >= 100 && connectionStatus !== 'connected') {
         console.log('⏳ Aguardando evento ready (3s timeout)...');
         setTimeout(async () => {
-            // Se ainda não estiver conectado após 3s, forçar conexão
             if (connectionStatus !== 'connected') {
                 console.log('⚠️ Evento ready não disparou, forçando conexão...');
                 currentQR = null;
                 connectionStatus = 'connected';
+                whatsapp.disconnectedSince = null;
                 try {
                     const info = await client.info;
                     connectionInfo = {
@@ -214,10 +434,10 @@ client.on('loading_screen', async (percent, message) => {
                         pushname: info?.pushname || 'WhatsApp Bot',
                         platform: info?.platform || 'unknown'
                     };
-                    console.log(`✅ Robô Logístico 6.0 (Informativo) Online! - Conectado como: ${connectionInfo.pushname}`);
+                    console.log(`✅ Robô Online! Conectado como: ${connectionInfo.pushname}`);
                 } catch (e) {
                     connectionInfo = null;
-                    console.log('✅ Robô Logístico 6.0 (Informativo) Online!');
+                    console.log('✅ Robô Online!');
                 }
             }
         }, 3000);
@@ -227,6 +447,9 @@ client.on('loading_screen', async (percent, message) => {
 client.on('ready', async () => {
     currentQR = null;
     connectionStatus = 'connected';
+    whatsapp.reconnectAttempts = 0;
+    whatsapp.disconnectedSince = null;
+    whatsapp.lastHeartbeat = new Date().toISOString();
     try {
         const info = await client.info;
         connectionInfo = {
@@ -234,72 +457,28 @@ client.on('ready', async () => {
             pushname: info?.pushname || 'WhatsApp Bot',
             platform: info?.platform || 'unknown'
         };
-        console.log(`✅ Robô Logístico 6.0 (Informativo) Online! - Conectado como: ${connectionInfo.pushname}`);
+        console.log(`✅ Robô Logístico Online! Conectado como: ${connectionInfo.pushname}`);
     } catch (e) {
         connectionInfo = null;
-        console.log('✅ Robô Logístico 6.0 (Informativo) Online!');
+        console.log('✅ Robô Logístico Online!');
     }
 });
-
-// 🧹 Função para limpar cache do WhatsApp (sessão zumbi)
-function limparCacheWhatsApp() {
-    const authPath = path.join(__dirname, '.wwebjs_auth');
-    const cachePath = path.join(__dirname, '.wwebjs_cache');
-
-    try {
-        if (fs.existsSync(authPath)) {
-            fs.rmSync(authPath, { recursive: true, force: true });
-            console.log('🧹 Cache de autenticação limpo (.wwebjs_auth)');
-        }
-        if (fs.existsSync(cachePath)) {
-            fs.rmSync(cachePath, { recursive: true, force: true });
-            console.log('🧹 Cache do navegador limpo (.wwebjs_cache)');
-        }
-    } catch (e) {
-        console.error('⚠️ Erro ao limpar cache:', e.message);
-    }
-}
 
 client.on('disconnected', async (reason) => {
     currentQR = null;
     connectionStatus = 'disconnected';
     connectionInfo = null;
+    whatsapp.disconnectedSince = whatsapp.disconnectedSince || Date.now();
     console.log('❌ WhatsApp desconectado:', reason);
-
-    // 🧹 Limpar cache para evitar sessão zumbi
-    console.log('🧹 Limpando cache para garantir reconexão limpa...');
-    limparCacheWhatsApp();
-
-    // 🔄 Auto-reconnect após desconexão
-    console.log('🔄 Tentando reconectar automaticamente em 5 segundos...');
-    setTimeout(async () => {
-        try {
-            connectionStatus = 'initializing';
-            console.log('🔄 Reinicializando cliente WhatsApp...');
-            await client.initialize();
-        } catch (e) {
-            console.error('❌ Erro ao reconectar:', e.message);
-            connectionStatus = 'disconnected';
-        }
-    }, 5000);
+    whatsapp.reconnect(`desconexão: ${reason}`);
 });
 
 client.on('auth_failure', async (msg) => {
     currentQR = null;
     connectionStatus = 'disconnected';
+    whatsapp.disconnectedSince = whatsapp.disconnectedSince || Date.now();
     console.log('⚠️ Falha na autenticação:', msg);
-
-    // 🔄 Auto-reconnect após falha de auth (gerará novo QR)
-    console.log('🔄 Tentando gerar novo QR em 5 segundos...');
-    setTimeout(async () => {
-        try {
-            connectionStatus = 'initializing';
-            await client.initialize();
-        } catch (e) {
-            console.error('❌ Erro ao reinicializar após auth_failure:', e.message);
-            connectionStatus = 'disconnected';
-        }
-    }, 5000);
+    whatsapp.reconnect(`auth_failure: ${msg}`);
 });
 
 // --- ROTA DE HEALTH CHECK (RENDER) ---
@@ -307,6 +486,15 @@ app.get('/', (req, res) => res.status(200).send('Bot is running! 🚀'));
 
 // --- ROTA DE STATUS GERAL ---
 app.get('/status', (req, res) => res.json({ status: 'online' }));
+
+// --- ROTA DE HEALTH CHECK INTELIGENTE (para Docker) ---
+app.get('/whatsapp/health', (req, res) => {
+    const health = whatsapp.getHealthData();
+    // Se WhatsApp estiver offline há mais de 10 minutos, retorna 503
+    // Docker healthcheck vai captar isso e reiniciar o container
+    const isHealthy = health.whatsapp === 'connected' || health.offline_minutes < 10;
+    res.status(isHealthy ? 200 : 503).json(health);
+});
 
 // --- LOG CAPTURE SYSTEM (IN-MEMORY) ---
 const MAX_LOGS = 100;
@@ -405,19 +593,12 @@ app.post('/whatsapp/ai-settings', async (req, res) => {
 
 // --- ROTA PARA FORÇAR RECONEXÃO ---
 app.post('/whatsapp/reconnect', async (req, res) => {
-    try {
-        connectionStatus = 'initializing';
-        currentQR = null;
-
-        // Tentar reinicializar o cliente
-        await client.destroy();
-        await client.initialize();
-
-        res.json({ success: true, message: 'Reconexão iniciada' });
-    } catch (e) {
-        console.error('Erro ao reconectar:', e);
-        res.status(500).json({ error: e.message });
-    }
+    // Responde imediatamente — o reconnect roda em background
+    res.json({ success: true, message: 'Reconexão iniciada em background' });
+    // Executa em background (não bloqueia a response)
+    whatsapp.forceReconnect().catch(e => {
+        console.error('❌ Erro na reconexão forçada:', e.message);
+    });
 });
 
 // --- ROTA PARA DESCONECTAR ---
@@ -1251,30 +1432,6 @@ app.listen(PORT, async () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
     console.log(`🔗 Link local: http://localhost:${PORT}`);
 
-    // 🤖 Inicializar o cliente WhatsApp com retry automático
-    const MAX_RETRIES = 3;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            console.log(`📱 Inicializando WhatsApp (tentativa ${attempt}/${MAX_RETRIES})...`);
-            await client.initialize();
-            console.log('✅ WhatsApp inicializado com sucesso!');
-            break; // Saiu do loop — sucesso
-        } catch (err) {
-            console.error(`❌ Falha ao inicializar WhatsApp (tentativa ${attempt}):`, err.message || err);
-
-            if (attempt < MAX_RETRIES) {
-                // Limpar cache antes de tentar novamente (sessão pode estar corrompida)
-                console.log('🧹 Limpando cache de sessão para próxima tentativa...');
-                limparCacheWhatsApp();
-                const waitSec = attempt * 10;
-                console.log(`⏳ Aguardando ${waitSec}s antes de tentar novamente...`);
-                await new Promise(r => setTimeout(r, waitSec * 1000));
-            } else {
-                console.error('⚠️ WhatsApp não inicializou após todas as tentativas.');
-                console.error('⚠️ O servidor web continua funcionando normalmente.');
-                console.error('⚠️ Use a rota POST /whatsapp/reconnect para tentar reconectar manualmente.');
-                connectionStatus = 'disconnected';
-            }
-        }
-    }
+    // 🤖 Inicializar WhatsApp via manager (retry + watchdog automáticos)
+    await whatsapp.initialize();
 });

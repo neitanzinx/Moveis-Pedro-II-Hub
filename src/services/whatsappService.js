@@ -1,6 +1,5 @@
 import { toast } from "sonner";
-
-const API_URL = import.meta.env.VITE_ZAP_API_URL;
+import { ZAP_API_URL as API_URL } from "@/utils/zapApiUrl";
 
 export const whatsappService = {
     /**

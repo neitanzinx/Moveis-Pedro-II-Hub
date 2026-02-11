@@ -21,10 +21,7 @@ import {
 import { toast } from "sonner";
 import QRCode from "qrcode";
 
-const API_URL = import.meta.env.VITE_ZAP_API_URL;
-// Monolith Logic: If no env var, and we are not on localhost, assume we are on the server itself.
-// On localhost, fallback to the Render URL for testing.
-const WHATSAPP_BOT_URL = API_URL || (window.location.hostname === "localhost" ? "https://bot-whatsapp-connection.onrender.com" : window.location.origin);
+import { ZAP_API_URL as WHATSAPP_BOT_URL } from "@/utils/zapApiUrl";
 
 
 // Definição de todos os templates de mensagens

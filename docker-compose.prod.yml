@@ -14,9 +14,11 @@ services:
     volumes:
       - ./robo-whatsapp-agendamentos/.wwebjs_auth:/app/.wwebjs_auth # Persistir sessão do WhatsApp
       - ./robo-whatsapp-agendamentos/.wwebjs_cache:/app/.wwebjs_cache # Persistir cache do Puppeteer
-    # Healthcheck para garantir que o sistema está de pé
+    # Healthcheck inteligente: verifica se WhatsApp responde de verdade
+    # Retorna 503 se offline há mais de 10 min → Docker reinicia o container
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:3001/status" ]
-      interval: 1m30s
-      timeout: 10s
+      test: [ "CMD", "curl", "-f", "http://localhost:3001/whatsapp/health" ]
+      interval: 2m
+      timeout: 15s
       retries: 3
+      start_period: 60s
