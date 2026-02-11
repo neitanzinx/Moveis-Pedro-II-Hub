@@ -33,7 +33,13 @@ process.on('uncaughtException', (err) => {
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('🔥 CRITICAL ERROR (Unhandled Rejection):', reason);
+    const msg = reason?.message || String(reason);
+    // Auth timeout é esperado quando a sessão WhatsApp expira — não é crítico
+    if (msg.includes('auth timeout') || msg.includes('Navigation timeout') || msg.includes('Protocol error')) {
+        console.warn('⚠️ WhatsApp auth/timeout error (sessão expirada — será reconectado):', msg);
+    } else {
+        console.error('🔥 CRITICAL ERROR (Unhandled Rejection):', reason);
+    }
 });
 
 // Aumentar limite de listeners
@@ -1241,7 +1247,34 @@ app.use((req, res, next) => {
 });
 
 // --- INICIALIZAÇÃO DO SERVIDOR ---
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
     console.log(`🔗 Link local: http://localhost:${PORT}`);
+
+    // 🤖 Inicializar o cliente WhatsApp com retry automático
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`📱 Inicializando WhatsApp (tentativa ${attempt}/${MAX_RETRIES})...`);
+            await client.initialize();
+            console.log('✅ WhatsApp inicializado com sucesso!');
+            break; // Saiu do loop — sucesso
+        } catch (err) {
+            console.error(`❌ Falha ao inicializar WhatsApp (tentativa ${attempt}):`, err.message || err);
+
+            if (attempt < MAX_RETRIES) {
+                // Limpar cache antes de tentar novamente (sessão pode estar corrompida)
+                console.log('🧹 Limpando cache de sessão para próxima tentativa...');
+                limparCacheWhatsApp();
+                const waitSec = attempt * 10;
+                console.log(`⏳ Aguardando ${waitSec}s antes de tentar novamente...`);
+                await new Promise(r => setTimeout(r, waitSec * 1000));
+            } else {
+                console.error('⚠️ WhatsApp não inicializou após todas as tentativas.');
+                console.error('⚠️ O servidor web continua funcionando normalmente.');
+                console.error('⚠️ Use a rota POST /whatsapp/reconnect para tentar reconectar manualmente.');
+                connectionStatus = 'disconnected';
+            }
+        }
+    }
 });
