@@ -74,6 +74,7 @@ function createWhatsAppClient() {
             clientId: "client-one",
             dataPath: "./.wwebjs_auth"
         }),
+        authTimeoutMs: 0, // Desabilita timeout de auth — permite QR scan sem pressa
         puppeteer: {
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
@@ -92,7 +93,7 @@ function createWhatsAppClient() {
                 '--metrics-recording-only',
                 '--mute-audio',
                 '--no-default-browser-check',
-                '--single-process'
+                '--disable-features=TranslateUI'
             ],
             timeout: 180000,
             handleSIGINT: false,
