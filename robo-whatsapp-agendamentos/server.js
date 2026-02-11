@@ -250,6 +250,8 @@ const whatsapp = {
         for (const name of ['google-chrome-stable', 'chrome', 'chromium', 'chromium-browser']) {
             try { execSync(`killall -9 ${name} 2>/dev/null`, { stdio: 'ignore', timeout: 5000 }); } catch (e) { /* ok */ }
         }
+        // 🎯 SNIPER: Matar especificamente o Chrome do Puppeteer (que fica em cache)
+        try { execSync('pkill -9 -f "chrome-linux64/chrome" 2>/dev/null', { stdio: 'ignore' }); } catch (e) { /* ok */ }
 
         // 2) Fallback por PID individual
         try {
