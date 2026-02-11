@@ -67,31 +67,33 @@ app.use(express.static(distPath));
 // 🏭 FACTORY: Cria Client NOVO a cada tentativa.
 // Motivo: whatsapp-web.js NÃO suporta reinicializar o mesmo objeto Client
 // após destroy(). O Puppeteer interno mantém referências ao browser antigo.
+// 🏭 FACTORY: Cria Client NOVO a cada tentativa.
 function createWhatsAppClient() {
+    // 🛡️ Caminhos absolutos para evitar ambiguidade no Docker
+    const sessionPath = path.resolve(__dirname, '.wwebjs_auth');
+    const cachePath = path.resolve(__dirname, '.wwebjs_cache');
+
+    const puppeteer = require('puppeteer'); // Require local para garantir execução
+    console.log('Browser Path:', puppeteer.executablePath());
+
     return new Client({
         authStrategy: new LocalAuth({
             clientId: "client-one",
-            dataPath: "./.wwebjs_auth"
+            dataPath: sessionPath
         }),
         puppeteer: {
             headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            executablePath: puppeteer.executablePath(),
+            userDataDir: sessionPath, // Forçar userDataDir explícito
             protocolTimeout: 180000,
+            dumpio: false, // Voltando ao normal
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
-                '--disable-gpu',
-                '--disable-extensions',
-                '--disable-background-networking',
-                '--disable-default-apps',
-                '--disable-sync',
-                '--metrics-recording-only',
-                '--mute-audio',
-                '--no-default-browser-check',
-                '--disable-features=TranslateUI'
+                '--disable-gpu'
             ],
             timeout: 180000,
             handleSIGINT: false,
@@ -100,6 +102,7 @@ function createWhatsAppClient() {
         }
     });
 }
+
 
 // --- Estado global de conexão ---
 let connectionStatus = 'disconnected';
@@ -256,27 +259,57 @@ const whatsapp = {
         try { execSync('sleep 2', { stdio: 'ignore' }); } catch (e) { /* ok */ }
 
         // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
+        // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
         const sessionDir = path.join(__dirname, '.wwebjs_auth', 'session-client-one');
         if (deleteSession) {
             // Modo nuclear: deleta tudo (força QR rescan)
             try {
-                fs.rmSync(sessionDir, { recursive: true, force: true });
-                console.log('🧹 [CLEAN] Pasta de sessão REMOVIDA (QR será necessário)');
-            } catch (e) { /* ok */ }
+                console.log(`🧹 [CLEAN] Tentando remover pasta: ${sessionDir}`);
+                if (fs.existsSync(sessionDir)) {
+                    fs.rmSync(sessionDir, { recursive: true, force: true });
+                    console.log('🧹 [CLEAN] Pasta de sessão REMOVIDA (QR será necessário)');
+                } else {
+                    console.log('🧹 [CLEAN] Pasta de sessão não existia.');
+                }
+            } catch (e) {
+                console.error(`❌ [CLEAN] Falha ao remover pasta de sessão: ${e.message}`);
+                try {
+                    const files = fs.readdirSync(sessionDir);
+                    console.warn(`📂 [CLEAN] Conteúdo restante: ${files.join(', ')}`);
+                } catch (e2) { console.warn(`📂 [CLEAN] Não foi possível listar conteúdo.`); }
+            }
         } else {
             // Modo suave: apenas remove Chrome lock files
             const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
-            for (const f of lockFiles) {
-                const fp = path.join(sessionDir, f);
-                try { fs.rmSync(fp, { force: true }); } catch (e) { /* ok */ }
+            if (fs.existsSync(sessionDir)) {
+                for (const f of lockFiles) {
+                    const fp = path.join(sessionDir, f);
+                    try {
+                        if (fs.existsSync(fp)) {
+                            fs.rmSync(fp, { force: true });
+                            console.log(`🧹 [CLEAN] Removido: ${f}`);
+                        }
+                    } catch (e) {
+                        console.error(`❌ [CLEAN] Falha ao remover ${f}: ${e.message}`);
+                    }
+                }
+                // Também limpar Default/SingletonLock se existir
+                const defaultDir = path.join(sessionDir, 'Default');
+                if (fs.existsSync(defaultDir)) {
+                    for (const f of lockFiles) {
+                        const fp = path.join(defaultDir, f);
+                        try {
+                            if (fs.existsSync(fp)) {
+                                fs.rmSync(fp, { force: true });
+                                console.log(`🧹 [CLEAN] Removido (Default): ${f}`);
+                            }
+                        } catch (e) { /* silent fail for default dir */ }
+                    }
+                }
+                console.log('🧹 [CLEAN] Lock files verificados (sessão preservada)');
+            } else {
+                console.log('🧹 [CLEAN] Pasta de sessão não existe, nada a limpar.');
             }
-            // Também limpar Default/SingletonLock se existir
-            const defaultDir = path.join(sessionDir, 'Default');
-            for (const f of lockFiles) {
-                const fp = path.join(defaultDir, f);
-                try { fs.rmSync(fp, { force: true }); } catch (e) { /* ok */ }
-            }
-            console.log('🧹 [CLEAN] Lock files removidos (sessão preservada)');
         }
 
         console.log('✅ [CLEAN] Limpeza concluída');
@@ -313,7 +346,8 @@ const whatsapp = {
             this.isInitializing = false;
             this.startWatchdog();
         }).catch(async (err) => {
-            console.error('❌ [INIT] client.initialize() falhou:', err.message);
+            console.error('❌ [INIT] client.initialize() falhou:', err); // Log full error object
+            if (err.message) console.error('❌ [INIT] Mensagem de erro:', err.message);
 
             // Destruir client
             try { await client.destroy(); } catch (e) { /* ok */ }

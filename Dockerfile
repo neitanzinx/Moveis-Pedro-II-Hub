@@ -26,16 +26,17 @@ COPY . .
 RUN npm run build
 
 # === STAGE 2: Production Server ===
-FROM node:20-slim
+FROM node:20
 
 # Install Google Chrome Stable, fonts, and process tools (pkill/killall)
 # Note: "gnupg" and "wget" are installed to download the signing key.
+# Install dependencies for bundled Chromium (Headless)
+# These libraries are required for Puppeteer to launch the bundled browser
 RUN apt-get update \
-  && apt-get install -y wget gnupg git procps psmisc curl \
-  && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-  && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
-  && apt-get update \
-  && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
+  && apt-get install -y wget gnupg git procps psmisc curl dumb-init \
+  libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+  libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+  libgbm1 libasound2 libpangocairo-1.0-0 libpango-1.0-0 libcairo2 \
   --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
@@ -53,11 +54,11 @@ COPY ["robo-whatsapp-agendamentos/", "./"]
 COPY --from=builder /app/dist ./dist
 
 # Environment variables for Puppeteer
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-  PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable \
-  NODE_ENV=production
+ENV NODE_ENV=production
 
 EXPOSE 3001
 
 # Start the server
+# Start the server using dumb-init as PID 1
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD [ "node", "server.js" ]
