@@ -86,16 +86,17 @@ function createWhatsAppClient() {
             clientId: "client-one",
             dataPath: sessionPath
         }),
+        authTimeoutMs: 60000, // Aumentado para 60s (VPS lenta)
         puppeteer: {
             headless: true,
             executablePath: puppeteer.executablePath(),
             // userDataDir: sessionPath, // REMOVIDO: LocalAuth gerencia isso internamente
             protocolTimeout: 180000,
-            dumpio: false, // Voltando ao normal
+            dumpio: false,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
+                '--disable-dev-shm-usage', // Mantido pois é essencial em Docker
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--disable-gpu'
@@ -1580,5 +1581,7 @@ app.listen(PORT, async () => {
     console.log(`🔗 Link local: http://localhost:${PORT}`);
 
     // 🤖 Inicializar WhatsApp via manager (retry + watchdog automáticos)
+    // 🚨 FORÇA BRUTA: Limpa a sessão antiga para garantir que o navegador suba limpo.
+    await cleanChrome(true);
     await whatsapp.initialize();
 });
