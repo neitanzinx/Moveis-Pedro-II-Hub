@@ -338,8 +338,9 @@ const whatsapp = {
         this.isInitializing = true;
         this.startedAt = Date.now();
 
-        // Limpar Chrome da execução anterior (preservar sessão!)
-        this.cleanChrome(false);
+        // 🚨 Limpar Chrome da execução anterior (MODO NUCLEAR: deletar sessão inteira)
+        // Isso força QR Code a cada restart, mas GARANTE que não haverá "Browser already running"
+        this.cleanChrome(true);
         this.recreateClient();
 
         connectionStatus = 'initializing';
@@ -1581,7 +1582,5 @@ app.listen(PORT, async () => {
     console.log(`🔗 Link local: http://localhost:${PORT}`);
 
     // 🤖 Inicializar WhatsApp via manager (retry + watchdog automáticos)
-    // 🚨 FORÇA BRUTA: Limpa a sessão antiga para garantir que o navegador suba limpo.
-    await cleanChrome(true);
     await whatsapp.initialize();
 });
