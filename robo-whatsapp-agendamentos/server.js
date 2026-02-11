@@ -490,84 +490,83 @@ const whatsapp = {
         }).catch((e) => {
             console.error('❌ [FORCE] Falha:', e);
             this.startWatchdog();
+            if (connectionStatus === 'initializing') {
+                connectionStatus = 'disconnected';
+            }
+            this.disconnectedSince = Date.now();
+            this.isInitializing = false;
         });
-        if (connectionStatus === 'initializing') {
-            connectionStatus = 'disconnected';
-        }
-        this.disconnectedSince = Date.now();
-        this.isInitializing = false;
-    });
 
-// Retorna imediato — frontend vai pollar status
-return { blocked: false, success: true, message: 'Inicialização disparada' };
+        // Retorna imediato — frontend vai pollar status
+        return { blocked: false, success: true, message: 'Inicialização disparada' };
     },
 
-// 🫀 Watchdog
-startWatchdog() {
-    if (this.watchdogInterval) clearInterval(this.watchdogInterval);
+    // 🫀 Watchdog
+    startWatchdog() {
+        if (this.watchdogInterval) clearInterval(this.watchdogInterval);
 
-    const WATCHDOG_INTERVAL = 5 * 60 * 1000;
-    const MAX_FAILURES = 3;
+        const WATCHDOG_INTERVAL = 5 * 60 * 1000;
+        const MAX_FAILURES = 3;
 
-    this.watchdogInterval = setInterval(async () => {
-        if (this.isReconnecting || this.isInitializing || connectionStatus === 'initializing' || connectionStatus === 'waiting_qr') {
-            return;
-        }
-
-        try {
-            const state = await Promise.race([
-                client.getState(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('watchdog timeout')), 15000))
-            ]);
-
-            if (state === 'CONNECTED') {
-                this.watchdogFailures = 0;
-                this.lastHeartbeat = new Date().toISOString();
-                if (connectionStatus !== 'connected') {
-                    connectionStatus = 'connected';
-                    this.disconnectedSince = null;
-                }
-            } else {
-                console.warn(`⚠️ [Watchdog] Estado: ${state}`);
-                this.watchdogFailures++;
+        this.watchdogInterval = setInterval(async () => {
+            if (this.isReconnecting || this.isInitializing || connectionStatus === 'initializing' || connectionStatus === 'waiting_qr') {
+                return;
             }
-        } catch (e) {
-            this.watchdogFailures++;
-            console.warn(`⚠️ [Watchdog] Falha #${this.watchdogFailures}: ${e.message}`);
+
+            try {
+                const state = await Promise.race([
+                    client.getState(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('watchdog timeout')), 15000))
+                ]);
+
+                if (state === 'CONNECTED') {
+                    this.watchdogFailures = 0;
+                    this.lastHeartbeat = new Date().toISOString();
+                    if (connectionStatus !== 'connected') {
+                        connectionStatus = 'connected';
+                        this.disconnectedSince = null;
+                    }
+                } else {
+                    console.warn(`⚠️ [Watchdog] Estado: ${state}`);
+                    this.watchdogFailures++;
+                }
+            } catch (e) {
+                this.watchdogFailures++;
+                console.warn(`⚠️ [Watchdog] Falha #${this.watchdogFailures}: ${e.message}`);
+            }
+
+            if (this.watchdogFailures >= MAX_FAILURES && !this.isReconnecting) {
+                console.error(`🚨 [Watchdog] ${MAX_FAILURES} falhas! Reconectando...`);
+                this.watchdogFailures = 0;
+                connectionStatus = 'disconnected';
+                this.disconnectedSince = this.disconnectedSince || Date.now();
+                this.reconnect('watchdog');
+            }
+        }, WATCHDOG_INTERVAL);
+
+        console.log('🫀 Watchdog iniciado (a cada 5 min)');
+    },
+
+    stopWatchdog() {
+        if (this.watchdogInterval) {
+            clearInterval(this.watchdogInterval);
+            console.log('🛑 Watchdog parado');
         }
+    },
 
-        if (this.watchdogFailures >= MAX_FAILURES && !this.isReconnecting) {
-            console.error(`🚨 [Watchdog] ${MAX_FAILURES} falhas! Reconectando...`);
-            this.watchdogFailures = 0;
-            connectionStatus = 'disconnected';
-            this.disconnectedSince = this.disconnectedSince || Date.now();
-            this.reconnect('watchdog');
-        }
-    }, WATCHDOG_INTERVAL);
-
-    console.log('🫀 Watchdog iniciado (a cada 5 min)');
-},
-
-stopWatchdog() {
-    if (this.watchdogInterval) {
-        clearInterval(this.watchdogInterval);
-        console.log('🛑 Watchdog parado');
+    getHealthData() {
+        const now = Date.now();
+        return {
+            whatsapp: connectionStatus,
+            server: 'running',
+            uptime_minutes: this.startedAt ? Math.floor((now - this.startedAt) / 60000) : 0,
+            reconnect_count: this.reconnectCount,
+            offline_minutes: this.disconnectedSince ? Math.floor((now - this.disconnectedSince) / 60000) : 0,
+            last_heartbeat: this.lastHeartbeat,
+            pid: process.pid,
+            memory_mb: Math.round(process.memoryUsage().rss / 1024 / 1024)
+        };
     }
-},
-
-getHealthData() {
-    const now = Date.now();
-    return {
-        whatsapp: connectionStatus,
-        server: 'running',
-        uptime_minutes: this.startedAt ? Math.floor((now - this.startedAt) / 60000) : 0,
-        reconnect_count: this.reconnectCount,
-        offline_minutes: this.disconnectedSince ? Math.floor((now - this.disconnectedSince) / 60000) : 0,
-        last_heartbeat: this.lastHeartbeat,
-        pid: process.pid,
-        memory_mb: Math.round(process.memoryUsage().rss / 1024 / 1024)
-    };
-}
 };
 
 // 🛑 GRACEFUL SHUTDOWN
