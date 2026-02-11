@@ -11,12 +11,12 @@ services:
       - "80:3001" # Mapeia a porta 80 (HTTP padrão) da VPS para a 3001 do App
     env_file:
       - .env
-    volumes:
+      # volumes:
       # - ./robo-whatsapp-agendamentos/.wwebjs_auth:/app/.wwebjs_auth # Persistir sessão do WhatsApp
       # - ./robo-whatsapp-agendamentos/.wwebjs_cache:/app/.wwebjs_cache # Persistir cache do Puppeteer
       # Healthcheck inteligente: verifica se WhatsApp responde de verdade
 
-    # Retorna 503 se offline há mais de 10 min → Docker reinicia o container
+      # Retorna 503 se offline há mais de 10 min → Docker reinicia o container
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:3001/whatsapp/health" ]
       interval: 2m
