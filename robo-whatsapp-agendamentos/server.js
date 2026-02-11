@@ -351,6 +351,15 @@ const whatsapp = {
         this.recreateClient();
 
         connectionStatus = 'initializing';
+
+        // 🕵️ CSM - DIAGNOSTICO DE LOCK
+        try {
+            console.log('🕵️ [DIAG] Processos Chrome ativos:');
+            console.log(require('child_process').execSync('ps aux | grep chrome || true').toString());
+            console.log('🕵️ [DIAG] Lock files em /tmp:');
+            console.log(require('child_process').execSync('ls -lR /tmp/.wwebjs_auth || true').toString());
+        } catch (e) { console.error('Diag falhou:', e.message); }
+
         console.log('📱 [INIT] Iniciando WhatsApp...');
 
         // Fire-and-forget: client.initialize() roda em background
