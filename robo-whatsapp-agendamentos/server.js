@@ -154,7 +154,7 @@ function createWhatsAppClient(clientId = "client-v2") {
                 '--disable-gpu',           // 🚀 CRÍTICO PARA DOCKER
                 '--no-first-run',
                 '--no-zygote',
-                '--single-process',        // 🚀 CRÍTICO PARA DOCKER
+                // '--single-process',       // ❌ REMOVIDO: Causa erro de Proxy resolver e instabilidade
                 '--disable-extensions',
                 '--disable-setuid-sandbox',
                 '--disable-accelerated-2d-canvas',
@@ -338,6 +338,18 @@ const whatsapp = {
         // 4) Limpar lock files / Sessão (usando os.tmpdir para consistência)
         const basePath = isWindows ? path.join(process.cwd(), '.wwebjs_auth') : '/app/.wwebjs_auth';
         const sessionDir = path.join(basePath, `session-${currentClientId}`);
+
+        // 🚀 AGGRESSIVE CLEAN: Deletar arquivos de lock específicos do Chrome que o Docker mantém vivos
+        const lockFiles = ['SingletonLock', 'Lock', 'SingletonCookie'];
+        lockFiles.forEach(f => {
+            const lockPath = path.join(sessionDir, f);
+            try {
+                if (fs.existsSync(lockPath)) {
+                    console.log(`🧹 [CLEAN] Removendo arquivo de trava: ${f}`);
+                    fs.unlinkSync(lockPath);
+                }
+            } catch (e) { /* ignore */ }
+        });
 
         const removeFolder = (dir) => {
             let deleted = false;
