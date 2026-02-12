@@ -336,7 +336,6 @@ const whatsapp = {
         } catch (e) { /* ok */ }
 
         // 4) Limpar lock files / Sessão (usando os.tmpdir para consistência)
-        const isWindows = process.platform === "win32";
         const basePath = isWindows ? path.join(process.cwd(), '.wwebjs_auth') : '/app/.wwebjs_auth';
         const sessionDir = path.join(basePath, `session-${currentClientId}`);
 
