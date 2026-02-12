@@ -150,25 +150,32 @@ function createWhatsAppClient(clientId = "client-v2") {
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage', // 🚀 CRÍTICO PARA DOCKER
-                '--disable-gpu',           // 🚀 CRÍTICO PARA DOCKER
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                // '--single-process',       // ❌ REMOVIDO: Causa erro de Proxy resolver e instabilidade
+                '--single-process',
+                '--disable-gpu',
                 '--disable-extensions',
-                '--disable-setuid-sandbox',
-                '--disable-accelerated-2d-canvas',
-                '--disable-notifications',
                 '--disable-background-networking',
                 '--disable-default-apps',
-                '--disable-sync'
+                '--disable-sync',
+                '--disable-translate',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process', // 🚀 Economia de Memória
+                '--disable-site-isolation-trials',
+                '--disable-audio-output',
+                '--disable-software-rasterizer',
+                '--mute-audio',
+                '--ignore-certificate-errors',
+                '--ignore-ssl-errors'
             ],
             timeout: 180000,
             handleSIGINT: false,
             handleSIGTERM: false,
             handleSIGHUP: false
         },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     });
 }
 
