@@ -153,7 +153,7 @@ function createWhatsAppClient(clientId = "client-v2") {
                 '--disable-dev-shm-usage',
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
-                '--no-zygote',
+                // '--no-zygote', // ❌ REMOVIDO: Pode causar instabilidade em containers modernos
                 '--disable-gpu',
                 '--disable-extensions',
                 '--disable-background-networking',
@@ -161,13 +161,15 @@ function createWhatsAppClient(clientId = "client-v2") {
                 '--disable-sync',
                 '--disable-translate',
                 '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process', // 🚀 Economia de Memória
+                '--disable-features=IsolateOrigins,site-per-process,AudioServiceOutOfProcess', // 🚀 +AudioServiceOutOfProcess
                 '--disable-site-isolation-trials',
                 '--disable-audio-output',
                 '--disable-software-rasterizer',
                 '--mute-audio',
                 '--ignore-certificate-errors',
-                '--ignore-ssl-errors'
+                '--ignore-ssl-errors',
+                '--disable-ipc-flooding-protection', // 🚀 Evitar crash por IPC em VPS lenta
+                '--disable-breakpad' // 🚀 Desabilitar report de crash
             ],
             timeout: 180000,
             handleSIGINT: false,
