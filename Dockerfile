@@ -26,43 +26,44 @@ COPY . .
 RUN npm run build
 
 # === STAGE 2: Production Server ===
-FROM node:20
+FROM node:20-slim
 
-# Install Google Chrome Stable, fonts, and process tools (pkill/killall)
-RUN apt-get update && apt-get install -y \
-  wget \
-  gnupg \
-  ca-certificates \
-  apt-transport-https \
+# Install latest chrome dev package and fonts to support major charsets (Chinese, Japanese, Arabic, Hebrew, Thai and a few others)
+# Note: this installs the necessary libs to make the bundled version of Chromium that Puppeteer
+# installs, work.
+RUN apt-get update \
+  && apt-get install -y wget gnupg \
   && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg \
-  && sh -c 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list' \
+  && sh -c 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
   && apt-get update \
-  && apt-get install -y google-chrome-stable --no-install-recommends \
-  && apt-get install -y git procps psmisc curl dumb-init \
-  libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
-  libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-  libgbm1 libasound2 libpangocairo-1.0-0 libpango-1.0-0 libcairo2 \
+  && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
+  --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
+
+# If running Docker >= 1.13.0 use docker run's --init arg to reap zombie processes, otherwise
+# uncomment the following lines to have `dumb-init` as PID 1
+ADD https://github.com/Yelp/dumb-init/releases/download/v1.2.2/dumb-init_1.2.2_x86_64 /usr/local/bin/dumb-init
+RUN chmod +x /usr/local/bin/dumb-init
+ENTRYPOINT ["dumb-init", "--"]
 
 WORKDIR /app
 
-# Copy Backend Dependencies
+# Copy Backend Dependencies and install
 COPY ["robo-whatsapp-agendamentos/package.json", "./"]
+# Install dependencies including Puppeteer
 RUN npm install --production
 
 # Copy Backend Source Code
-# We copy line by line or folder to avoid clutter, or just copy the whole folder
 COPY ["robo-whatsapp-agendamentos/", "./"]
 
 # Copy Built Frontend from Stage 1 to 'dist' folder in backend
 COPY --from=builder /app/dist ./dist
 
-# Environment variables for Puppeteer
+# Environment variables
 ENV NODE_ENV=production
+# Force Puppeteer to use installed Chrome
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 EXPOSE 3001
 
-# Start the server
-# Start the server using dumb-init as PID 1
-ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD [ "node", "server.js" ]

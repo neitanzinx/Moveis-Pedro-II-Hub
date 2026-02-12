@@ -143,33 +143,34 @@ function createWhatsAppClient(clientId = "client-v2") {
         }),
         authTimeoutMs: 60000,
         puppeteer: {
-            headless: true,
+            headless: "new", // Usa o novo modo headless do Chrome (mais estável)
             executablePath: executablePath || puppeteer.executablePath(),
-            protocolTimeout: 180000,
-            dumpio: true, // Habilitado para debug na VPS
+            protocolTimeout: 360000, // Timeout bem longo para VPS lenta
+            dumpio: true,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                // '--no-zygote', // ❌ REMOVIDO: Pode causar instabilidade em containers modernos
+                '--disable-dev-shm-usage', // CRUCIAL para Docker
                 '--disable-gpu',
                 '--disable-extensions',
-                '--disable-background-networking',
+                '--disable-component-extensions-with-background-pages',
                 '--disable-default-apps',
-                '--disable-sync',
-                '--disable-translate',
-                '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process,AudioServiceOutOfProcess', // 🚀 +AudioServiceOutOfProcess
-                '--disable-site-isolation-trials',
-                '--disable-audio-output',
-                '--disable-software-rasterizer',
                 '--mute-audio',
+                '--no-default-browser-check',
+                '--autoplay-policy=user-gesture-required',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-notifications',
+                '--disable-popup-blocking',
+                '--disable-print-preview',
+                '--disable-prompt-on-repost',
+                '--disable-renderer-backgrounding',
+                '--disable-speech-api',
+                // Flags de estabilidade
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-site-isolation-trials',
                 '--ignore-certificate-errors',
-                '--ignore-ssl-errors',
-                '--disable-ipc-flooding-protection', // 🚀 Evitar crash por IPC em VPS lenta
-                '--disable-breakpad' // 🚀 Desabilitar report de crash
+                '--ignore-ssl-errors'
             ],
             timeout: 180000,
             handleSIGINT: false,
