@@ -1,10 +1,10 @@
 services:
   app:
     build: .
-    container_name: whatsapp-bot-sistema
-    restart: always # 🛡️ Garante que o bot reinicie se cair ou o servidor reiniciar
+    container_name: moveis-pedro-ii-app
+    restart: always
     ports:
-      - "3001:3001"
+      - "80:3001"
     env_file:
       - .env
     volumes:

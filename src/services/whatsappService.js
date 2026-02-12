@@ -40,7 +40,11 @@ export const whatsappService = {
                 }),
             });
 
-            if (!response.ok) throw new Error('Falha ao enviar mensagem');
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                console.error("Detalhes do erro do servidor:", errData);
+                throw new Error(errData.error || 'Falha ao enviar mensagem');
+            }
             return true;
         } catch (error) {
             console.error("Erro no envio do WhatsApp:", error);

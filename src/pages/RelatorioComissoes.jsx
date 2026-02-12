@@ -51,6 +51,11 @@ export default function RelatorioComissoes() {
     queryFn: () => base44.entities.Vendedor.list(),
   });
 
+  const { data: assistencias = [] } = useQuery({
+    queryKey: ['assistencias-comissoes'],
+    queryFn: () => base44.entities.AssistenciaTecnica.list(),
+  });
+
   if (!user) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -111,10 +116,7 @@ export default function RelatorioComissoes() {
     return breakdown;
   };
 
-  const { data: assistencias = [] } = useQuery({
-    queryKey: ['assistencias-comissoes'],
-    queryFn: () => base44.entities.AssistenciaTecnica.list(),
-  });
+
 
   // Agrupar por vendedor
   const comissoesPorVendedor = vendedores.map(vendedor => {

@@ -39,9 +39,43 @@ process.on('uncaughtException', (err) => {
 
 process.on('unhandledRejection', (reason, promise) => {
     const msg = reason?.message || String(reason);
+
+    // 🛡️ Tratamento específico para o erro de "Browser already running" (Sessão travada)
+    if (msg.includes('browser is already running') || msg.includes('EBUSY') || msg.includes('EPERM')) {
+        console.warn('⚠️ BLOQUEIO DE SESSÃO DETECTADO (Unhandled Rejection):', msg);
+        console.log('🔄 Iniciando protocolo de recuperação de emergência...');
+
+        try {
+            if (typeof whatsapp !== 'undefined' && typeof currentClientId !== 'undefined') {
+                // Forçar rotação de ID
+                currentClientId = `client-v2-${Date.now()}`;
+                console.log(`🆔 Novo ID gerado na emergência: ${currentClientId}`);
+
+                // Reiniciar
+                whatsapp.isInitializing = false;
+                setTimeout(() => whatsapp.initialize(), 2500);
+            } else {
+                console.error('❌ Não foi possível acessar o objeto whatsapp para recuperação. Reiniciando processo...');
+                process.exit(1);
+            }
+        } catch (e) {
+            console.error('❌ Erro fatal na recuperação:', e);
+            process.exit(1);
+        }
+        return;
+    }
+
     // Auth timeout é esperado quando a sessão WhatsApp expira — não é crítico
-    if (msg.includes('auth timeout') || msg.includes('Navigation timeout') || msg.includes('Protocol error')) {
-        console.warn('⚠️ WhatsApp auth/timeout error (sessão expirada — será reconectado):', msg);
+    // Auth timeout é esperado quando a sessão WhatsApp expira — não é crítico
+    if (msg.includes('auth timeout') ||
+        msg.includes('Navigation timeout') ||
+        msg.includes('Protocol error') ||
+        msg.includes('LifecycleWatcher disposed') ||
+        msg.includes('Target closed')
+    ) {
+        console.warn('⚠️ WhatsApp auth/retry warning (não crítico):', msg);
+        // Tentar reconexão suave se possível
+        try { if (typeof whatsapp !== 'undefined') whatsapp.reconnect(`unhandled: ${msg}`); } catch (e) { }
     } else {
         console.error('🔥 CRITICAL ERROR (Unhandled Rejection):', reason);
     }
@@ -73,35 +107,46 @@ app.use(express.static(distPath));
 // Motivo: whatsapp-web.js NÃO suporta reinicializar o mesmo objeto Client
 // após destroy(). O Puppeteer interno mantém referências ao browser antigo.
 // 🏭 FACTORY: Cria Client NOVO a cada tentativa.
-function createWhatsAppClient() {
-    // 🛡️ Caminhos absolutos para evitar ambiguidade no Docker
-    // MUDANÇA CRÍTICA: Usar /tmp para evitar problemas de permissão/lock no volume montado
-    const sessionPath = path.resolve('/tmp', '.wwebjs_auth');
-    const cachePath = path.resolve('/tmp', '.wwebjs_cache');
+// 🏭 FACTORY: Cria Client NOVO a cada tentativa.
+function createWhatsAppClient(clientId = "client-v2") {
+    // 🛡️ Caminhos absolutos e adaptativos (Windows/Linux)
+    const os = require('os');
+    const basePath = path.join(os.tmpdir(), 'whatsapp-bot-session');
 
-    const puppeteer = require('puppeteer'); // Require local para garantir execução
-    console.log('Browser Path:', puppeteer.executablePath());
+    // Cria diretório base se não existir
+    try {
+        if (!fs.existsSync(basePath)) fs.mkdirSync(basePath, { recursive: true });
+    } catch (e) { /* ignore */ }
+
+    const sessionPath = path.join(basePath, '.wwebjs_auth');
+
+    const puppeteer = require('puppeteer');
+    console.log(`🔧 [FACTORY] Client ID: ${clientId} | Path: ${sessionPath}`);
 
     return new Client({
         authStrategy: new LocalAuth({
-            clientId: "client-v2",
+            clientId: clientId,
             dataPath: sessionPath
         }),
         authTimeoutMs: 60000,
         puppeteer: {
             headless: true,
             executablePath: puppeteer.executablePath(),
-            // userDataDir: sessionPath, 
             protocolTimeout: 180000,
-            dumpio: true,
+            dumpio: false, // 🤫 Silenciar logs internos do Chrome (evita erros de GCM/Deprecated Endpoint)
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--disable-gpu',
-                '--disable-features=IsolateOrigins,site-per-process' // Ajuda em ambientes com pouca memória/Docker
+                // 🔇 GCM / Sync Suppression (Safe Flags)
+                '--disable-sync',
+                '--disable-extensions',
+                '--disable-component-extensions-with-background-pages',
+                '--disable-default-apps',
+                '--disable-notifications',
+                '--disable-background-networking',
+                '--disable-domain-reliability',
+                '--disable-client-side-phishing-detection',
+                '--disable-component-update'
             ],
             timeout: 180000,
             handleSIGINT: false,
@@ -119,7 +164,9 @@ let currentQR = null;
 let connectionInfo = null;
 
 // -- Client WhatsApp (LET porque precisa ser recriado) ---
-let client = createWhatsAppClient();
+// Estado global para guardar o ID atual (permite rotação em caso de erro)
+let currentClientId = "client-v4"; // Bump para v4 (Minimalist Config)
+let client = createWhatsAppClient(currentClientId);
 
 // 🔗 Registrar event handlers no client atual
 function attachClientEvents(c) {
@@ -244,84 +291,73 @@ const whatsapp = {
     // 💀 Matar Chrome + limpar APENAS lock files (preserva sessão/auth!)
     cleanChrome(deleteSession = false) {
         const { execSync } = require('child_process');
+        const fs = require('fs');
         console.log(`💀 [CLEAN] Matando Chrome... (deleteSession=${deleteSession})`);
 
-        // 1) Matar por nome exato do binário
-        for (const name of ['google-chrome-stable', 'chrome', 'chromium', 'chromium-browser']) {
-            try { execSync(`killall -9 ${name} 2>/dev/null`, { stdio: 'ignore', timeout: 5000 }); } catch (e) { /* ok */ }
-        }
-        // 🎯 SNIPER: Matar especificamente o Chrome do Puppeteer (que fica em cache)
-        try { execSync('pkill -9 -f "chrome-linux64/chrome" 2>/dev/null', { stdio: 'ignore' }); } catch (e) { /* ok */ }
+        const isWindows = process.platform === "win32";
 
-        // 2) Fallback por PID individual
-        try {
-            const pids = execSync('pgrep -f "google-chrome|chromium" 2>/dev/null || true', { encoding: 'utf8', timeout: 3000 }).trim();
-            if (pids) {
-                for (const pid of pids.split('\n').filter(p => p.trim())) {
-                    const pidNum = parseInt(pid.trim());
-                    if (pidNum > 1 && pidNum !== process.pid) {
-                        try { execSync(`kill -9 ${pidNum} 2>/dev/null`, { stdio: 'ignore', timeout: 1000 }); } catch (e) { /* ok */ }
-                    }
-                }
+        if (isWindows) {
+            // WINDOWS: Usar taskkill reforçado
+            try { execSync('taskkill /F /IM chrome.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { /* ok */ }
+            try { execSync('taskkill /F /IM chromium.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { /* ok */ }
+        } else {
+            // LINUX/MAC: Usar killall/pkill
+            const killCmds = [
+                'killall -9 google-chrome-stable',
+                'killall -9 chrome',
+                'killall -9 chromium',
+                'killall -9 chromium-browser',
+                'pkill -9 -f "chrome-linux64/chrome"'
+            ];
+            for (const cmd of killCmds) {
+                try { execSync(`${cmd} 2>/dev/null`, { stdio: 'ignore' }); } catch (e) { /* ok */ }
             }
+        }
+
+        // 3) Esperar 
+        try {
+            const sleepCmd = isWindows ? 'timeout /t 2 /nobreak >NUL' : 'sleep 2';
+            execSync(sleepCmd, { stdio: 'ignore' });
         } catch (e) { /* ok */ }
 
-        // 3) Esperar
-        try { execSync('sleep 2', { stdio: 'ignore' }); } catch (e) { /* ok */ }
+        // 4) Limpar lock files / Sessão (usando os.tmpdir para consistência)
+        const os = require('os');
+        const basePath = path.join(os.tmpdir(), 'whatsapp-bot-session');
+        const sessionDir = path.join(basePath, '.wwebjs_auth', `session-${currentClientId}`);
 
-        // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
-        // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
-        // 4) Limpar lock files (ProcessSingleton) MAS PRESERVAR sessão
-        // Atualizado para usar /tmp
-        const sessionDir = path.join('/tmp', '.wwebjs_auth', 'session-client-v2');
-        if (deleteSession) {
-            // Modo nuclear: deleta tudo (força QR rescan)
-            try {
-                console.log(`🧹 [CLEAN] Tentando remover pasta: ${sessionDir}`);
-                if (fs.existsSync(sessionDir)) {
-                    fs.rmSync(sessionDir, { recursive: true, force: true });
-                    console.log('🧹 [CLEAN] Pasta de sessão REMOVIDA (QR será necessário)');
-                } else {
-                    console.log('🧹 [CLEAN] Pasta de sessão não existia.');
-                }
-            } catch (e) {
-                console.error(`❌ [CLEAN] Falha ao remover pasta de sessão: ${e.message}`);
+        const removeFolder = (dir) => {
+            let deleted = false;
+            for (let i = 0; i < 3; i++) { // Reduzido para 3 tentativas
                 try {
-                    const files = fs.readdirSync(sessionDir);
-                    console.warn(`📂 [CLEAN] Conteúdo restante: ${files.join(', ')}`);
-                } catch (e2) { console.warn(`📂 [CLEAN] Não foi possível listar conteúdo.`); }
+                    if (fs.existsSync(dir)) {
+                        fs.rmSync(dir, { recursive: true, force: true });
+                    }
+                    deleted = true;
+                    break;
+                } catch (e) {
+                    console.warn(`⏳ [CLEAN] Tentativa ${i + 1}/3 falhou (${e.message}).`);
+                    try { execSync(isWindows ? 'timeout /t 1 /nobreak >NUL' : 'sleep 1', { stdio: 'ignore' }); } catch (s) { }
+                }
+            }
+            return deleted;
+        };
+
+        if (deleteSession) {
+            console.log(`🧹 [CLEAN] Tentando remover pasta: ${sessionDir}`);
+            if (removeFolder(sessionDir)) {
+                console.log('🧹 [CLEAN] Pasta de sessão REMOVIDA (QR será necessário)');
+            } else {
+                console.error('❌ [CLEAN] Falha ao remover pasta de sessão. Ignorando...');
+                // Não retorna erro fatal, pois vamos criar nova ID se falhar o init
             }
         } else {
-            // Modo suave: apenas remove Chrome lock files
-            const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
+            // Modo suave: remover apenas locks
             if (fs.existsSync(sessionDir)) {
-                for (const f of lockFiles) {
-                    const fp = path.join(sessionDir, f);
-                    try {
-                        if (fs.existsSync(fp)) {
-                            fs.rmSync(fp, { force: true });
-                            console.log(`🧹 [CLEAN] Removido: ${f}`);
-                        }
-                    } catch (e) {
-                        console.error(`❌ [CLEAN] Falha ao remover ${f}: ${e.message}`);
-                    }
-                }
-                // Também limpar Default/SingletonLock se existir
-                const defaultDir = path.join(sessionDir, 'Default');
-                if (fs.existsSync(defaultDir)) {
-                    for (const f of lockFiles) {
-                        const fp = path.join(defaultDir, f);
-                        try {
-                            if (fs.existsSync(fp)) {
-                                fs.rmSync(fp, { force: true });
-                                console.log(`🧹 [CLEAN] Removido (Default): ${f}`);
-                            }
-                        } catch (e) { /* silent fail for default dir */ }
-                    }
-                }
+                const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
+                lockFiles.forEach(f => {
+                    try { fs.rmSync(path.join(sessionDir, f), { force: true }); } catch (e) { }
+                });
                 console.log('🧹 [CLEAN] Lock files verificados (sessão preservada)');
-            } else {
-                console.log('🧹 [CLEAN] Pasta de sessão não existe, nada a limpar.');
             }
         }
 
@@ -330,8 +366,8 @@ const whatsapp = {
 
     // 🔄 Cria novo Client e registra os event handlers
     recreateClient() {
-        console.log('🔄 [CLIENT] Criando novo Client...');
-        client = createWhatsAppClient();
+        console.log(`🔄 [CLIENT] Criando novo Client (${currentClientId})...`);
+        client = createWhatsAppClient(currentClientId);
         attachClientEvents(client);
         return client;
     },
@@ -345,20 +381,11 @@ const whatsapp = {
         this.isInitializing = true;
         this.startedAt = Date.now();
 
-        // 🚨 Limpar Chrome da execução anterior (MODO NUCLEAR: deletar sessão inteira)
-        // Isso força QR Code a cada restart, mas GARANTE que não haverá "Browser already running"
-        this.cleanChrome(true);
+        // Limpeza inicial
+        this.cleanChrome(false);
         this.recreateClient();
 
         connectionStatus = 'initializing';
-
-        // 🕵️ CSM - DIAGNOSTICO DE LOCK
-        try {
-            console.log('🕵️ [DIAG] Processos Chrome ativos:');
-            console.log(require('child_process').execSync('ps aux | grep chrome || true').toString());
-            console.log('🕵️ [DIAG] Lock files em /tmp:');
-            console.log(require('child_process').execSync('ls -lR /tmp/.wwebjs_auth || true').toString());
-        } catch (e) { console.error('Diag falhou:', e.message); }
 
         console.log('📱 [INIT] Iniciando WhatsApp...');
 
@@ -369,13 +396,26 @@ const whatsapp = {
             this.isInitializing = false;
             this.startWatchdog();
         }).catch(async (err) => {
-            console.error('❌ [INIT] client.initialize() falhou:', err); // Log full error object
-            if (err.message) console.error('❌ [INIT] Mensagem de erro:', err.message);
+            console.error('❌ [INIT] client.initialize() falhou:', err.message);
 
-            // Destruir client
+            // Destruir client atual
             try { await client.destroy(); } catch (e) { /* ok */ }
 
-            // Se o status já mudou para waiting_qr ou connected, NÃO reverter
+            // ⚠️ ESTRATÉGIA ANTI-LOCK: Se o erro for de "browser already running", trocamos o ID da sessão!
+            if (err.message && (err.message.includes('browser is already running') || err.message.includes('EBUSY') || err.message.includes('EPERM'))) {
+                console.warn('⚠️ DETECTADO BLOQUEIO DE SESSÃO! Checkmate: Criando nova ID de sessão para contornar o lock.');
+
+                // Rotacionar ID
+                currentClientId = `client-v2-${Date.now()}`;
+                console.log(`🆔 Nova Session ID: ${currentClientId}`);
+
+                // Forçar recreação com novo ID
+                this.isInitializing = false; // Reset para permitir nova chamada
+                // Pequeno delay para OS processar
+                setTimeout(() => this.initialize(), 2000);
+                return;
+            }
+
             if (connectionStatus === 'initializing') {
                 connectionStatus = 'disconnected';
                 this.disconnectedSince = Date.now();
@@ -383,40 +423,20 @@ const whatsapp = {
 
             this.isInitializing = false;
 
-            // Retry automático após 15s se era a primeira tentativa
+            // Retry automático padrão (apenas se não foi resolvido pelo estratégia acima)
             if (this.reconnectAttempts < 2) {
-                console.log('🔄 [INIT] Retry automático em 15s...');
+                console.log('🔄 [INIT] Retry padrão em 10s...');
                 setTimeout(() => {
                     this.reconnectAttempts++;
-                    this.cleanChrome(true); // Nuclear no retry: deletar sessão inteira
-                    this.recreateClient();
-                    connectionStatus = 'initializing';
-
-                    client.initialize().then(() => {
-                        console.log('✅ [INIT] Retry bem-sucedido!');
-                        this.isInitializing = false;
-                        this.reconnectAttempts = 0;
-                        this.startWatchdog();
-                    }).catch(async (err2) => {
-                        console.error('❌ [INIT] Retry também falhou:', err2);
-                        try { await client.destroy(); } catch (e) { /* ok */ }
-                        if (connectionStatus === 'initializing') {
-                            connectionStatus = 'disconnected';
-                        }
-                        this.isInitializing = false;
-                        this.startWatchdog();
-                    });
-                }, 15000);
-            } else {
-                this.startWatchdog();
+                    this.initialize();
+                }, 10000);
             }
         });
 
-        // Retorna imediatamente — não bloqueia o servidor
-        // Safety timeout: se após 2 minutos ainda estiver "initializing", forçar para disconnected
+        // Safety timeout
         setTimeout(() => {
             if (connectionStatus === 'initializing') {
-                console.warn('⚠️ [INIT] Safety timeout: 2min sem resposta, marcando como disconnected');
+                console.warn('⚠️ [INIT] Safety timeout: 2min sem resposta.');
                 connectionStatus = 'disconnected';
                 this.isInitializing = false;
             }
@@ -629,10 +649,14 @@ async function enviarMensagemSegura(chatId, content, options = {}) {
         return { success: true, result };
     } catch (error) {
         console.error(`❌ Erro ao enviar mensagem:`, error.message);
-        if (error.message && error.message.includes('markedUnread')) {
-            console.log('⚠️ Erro markedUnread detectado');
-            return { success: true, warning: 'markedUnread - verifique manualmente' };
+
+        // 🚑 CORREÇÃO DE EMERGÊNCIA: Ignorar erro específico do whatsapp-web.js
+        // Esse erro acontece APÓS o envio, ao tentar montar a resposta.
+        if (error.message && (error.message.includes('markedUnread') || error.message.includes("reading 'getChat'"))) {
+            console.log('⚠️ Erro não crítico detectado (markedUnread/getChat) - Assumindo sucesso.');
+            return { success: true, warning: error.message };
         }
+
         throw error;
     }
 }
@@ -642,6 +666,47 @@ async function enviarMensagemSegura(chatId, content, options = {}) {
 
 // --- ROTA DE HEALTH CHECK (RENDER) ---
 app.get('/', (req, res) => res.status(200).send('Bot is running! 🚀'));
+
+// --- ROTA DE ENVIO DE TEXTO GENÉRICO (FALTANDO ANTERIORMENTE) ---
+app.post('/send-text', async (req, res) => {
+    const { phone, message } = req.body;
+
+    if (!phone || !message) {
+        return res.status(400).json({ error: "phone e message são obrigatórios" });
+    }
+
+    let tel = phone.replace(/\D/g, '');
+    if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
+
+    // Tentativa de correção para o erro: Cannot read properties of undefined (reading 'getChat')
+    // Validar se o número existe no WhatsApp antes de enviar
+    try {
+        let chatId = `${tel}@c.us`;
+
+        // Verificar se client está pronto
+        if (client) {
+            try {
+                const numberId = await client.getNumberId(tel);
+                if (numberId) {
+                    chatId = numberId._serialized;
+                    console.log(`🔍 Número validado: ${tel} -> ${chatId}`);
+                } else {
+                    console.warn(`⚠️ Número não registrado no WhatsApp: ${tel}`);
+                    return res.status(404).json({ error: "Número não registrado no WhatsApp" });
+                }
+            } catch (verError) {
+                console.warn(`⚠️ Falha ao validar número (tentando enviar direto): ${verError.message}`);
+                // Segue com o chatId padrão se a validação falhar (fallback)
+            }
+        }
+
+        const result = await enviarMensagemSegura(chatId, message);
+        res.json(result);
+    } catch (e) {
+        console.error("Erro ao enviar texto genérico:", e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
 
 // --- ROTA DE STATUS GERAL ---
 app.get('/status', (req, res) => res.json({ status: 'online' }));

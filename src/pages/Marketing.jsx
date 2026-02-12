@@ -875,9 +875,15 @@ export default function Marketing() {
                                                             checked={selectedProducts.some(p => p.id === produto.id)}
                                                             onCheckedChange={(checked) => handleSelectProduct(produto, checked)}
                                                         />
-                                                        <div className="flex-1">
-                                                            <p className="font-medium">{produto.nome}</p>
-                                                            <p className="text-sm text-gray-500">{produto.categoria}</p>
+                                                        <div className="flex-1 min-w-0 text-left">
+                                                            <p className="font-bold text-[#07593f] truncate">{produto.nome}</p>
+                                                            <div className="flex flex-wrap gap-x-2 text-[10px] text-gray-500 uppercase font-medium">
+                                                                {produto.modelo_referencia && <span>Ref: {produto.modelo_referencia}</span>}
+                                                                {(produto.largura || produto.altura || produto.profundidade) && (
+                                                                    <span className="text-amber-700">{produto.largura || '0'}x{produto.altura || '0'}x{produto.profundidade || '0'}cm</span>
+                                                                )}
+                                                                <span>{produto.categoria}</span>
+                                                            </div>
                                                         </div>
                                                         <p className="font-bold" style={{ color: '#07593f' }}>
                                                             {formatarValor(produto.preco_venda)}
@@ -1029,7 +1035,28 @@ export default function Marketing() {
                                             filteredProdutos.map(produto => (
                                                 <TableRow key={produto.id}>
                                                     <TableCell>
-                                                        <p className="font-medium">{produto.nome}</p>
+                                                        <div className="space-y-1">
+                                                            <p className="font-bold text-[#07593f] leading-none">{produto.nome}</p>
+                                                            <div className="flex items-center gap-2 text-[10px] text-gray-500 uppercase font-medium flex-wrap">
+                                                                {produto.modelo_referencia && (
+                                                                    <span className="bg-gray-100 px-1 rounded">Ref: {produto.modelo_referencia}</span>
+                                                                )}
+                                                                {produto.codigo_barras && (
+                                                                    <span className="bg-gray-100 px-1 rounded">EAN: {produto.codigo_barras}</span>
+                                                                )}
+                                                                {(produto.largura || produto.altura || produto.profundidade) && (
+                                                                    <span className="bg-amber-50 text-amber-700 px-1 rounded border border-amber-100">
+                                                                        {produto.largura || '0'}x{produto.altura || '0'}x{produto.profundidade || '0'} cm
+                                                                    </span>
+                                                                )}
+                                                                {produto.cor && (
+                                                                    <span className="bg-blue-50 text-blue-700 px-1 rounded border border-blue-100">Cor: {produto.cor}</span>
+                                                                )}
+                                                                {produto.tamanho && (
+                                                                    <span className="bg-purple-50 text-purple-700 px-1 rounded border border-purple-100">Tam: {produto.tamanho}</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
                                                     </TableCell>
                                                     <TableCell>
                                                         <Badge variant="secondary">{produto.categoria || '-'}</Badge>
@@ -1169,15 +1196,29 @@ export default function Marketing() {
                                             {formatarValor(produto.preco_venda)}
                                         </p>
 
-                                        {/* Category Badge */}
-                                        {produto.categoria && (
-                                            <p
-                                                className="mt-3 text-gray-500 uppercase tracking-widest"
-                                                style={{ fontSize: `calc(${layoutConfig.nameSize} * 0.5)` }}
-                                            >
-                                                {produto.categoria}
-                                            </p>
-                                        )}
+                                        {/* Sub-info (SKU, Dimensões, Cor) */}
+                                        <div className="mt-4 flex flex-col gap-1 items-center">
+                                            {produto.modelo_referencia && (
+                                                <p className="text-gray-500 font-medium uppercase tracking-widest" style={{ fontSize: `calc(${layoutConfig.nameSize} * 0.4)` }}>
+                                                    REF: {produto.modelo_referencia}
+                                                </p>
+                                            )}
+                                            {(produto.largura || produto.altura || produto.profundidade) && (
+                                                <p className="text-amber-700 font-bold" style={{ fontSize: `calc(${layoutConfig.nameSize} * 0.45)` }}>
+                                                    {produto.largura || '0'} x {produto.altura || '0'} x {produto.profundidade || '0'} CM
+                                                </p>
+                                            )}
+                                            {(produto.cor || produto.tamanho) && (
+                                                <p className="text-gray-400 font-medium uppercase" style={{ fontSize: `calc(${layoutConfig.nameSize} * 0.35)` }}>
+                                                    {produto.cor} {produto.tamanho ? ` • ${produto.tamanho}` : ''}
+                                                </p>
+                                            )}
+                                            {produto.categoria && (
+                                                <p className="mt-1 text-gray-400 uppercase tracking-widest border-t border-gray-100 pt-1" style={{ fontSize: `calc(${layoutConfig.nameSize} * 0.3)` }}>
+                                                    {produto.categoria}
+                                                </p>
+                                            )}
+                                        </div>
                                     </div>
                                 );
                             })}
@@ -1385,15 +1426,29 @@ export default function Marketing() {
                                     {formatarValor(produto.preco_venda)}
                                 </p>
 
-                                {/* Category */}
-                                {produto.categoria && (
-                                    <p
-                                        className="mt-4 text-gray-500 uppercase tracking-widest"
-                                        style={{ fontSize: `calc(${config.nameSize} * 0.5)` }}
-                                    >
-                                        {produto.categoria}
-                                    </p>
-                                )}
+                                {/* Sub-info (SKU, Dimensões, Cor) */}
+                                <div className="mt-4 flex flex-col gap-1 items-center">
+                                    {produto.modelo_referencia && (
+                                        <p className="text-gray-500 font-medium uppercase tracking-widest" style={{ fontSize: `calc(${config.nameSize} * 0.4)` }}>
+                                            REF: {produto.modelo_referencia}
+                                        </p>
+                                    )}
+                                    {(produto.largura || produto.altura || produto.profundidade) && (
+                                        <p className="text-amber-700 font-bold" style={{ fontSize: `calc(${config.nameSize} * 0.45)` }}>
+                                            {produto.largura || '0'} x {produto.altura || '0'} x {produto.profundidade || '0'} CM
+                                        </p>
+                                    )}
+                                    {(produto.cor || produto.tamanho) && (
+                                        <p className="text-gray-400 font-medium uppercase" style={{ fontSize: `calc(${config.nameSize} * 0.35)` }}>
+                                            {produto.cor} {produto.tamanho ? ` • ${produto.tamanho}` : ''}
+                                        </p>
+                                    )}
+                                    {produto.categoria && (
+                                        <p className="mt-1 text-gray-400 uppercase tracking-widest" style={{ fontSize: `calc(${config.nameSize} * 0.3)` }}>
+                                            {produto.categoria}
+                                        </p>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     );

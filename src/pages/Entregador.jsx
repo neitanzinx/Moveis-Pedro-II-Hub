@@ -16,6 +16,7 @@ import FotoEntregaCapture from "@/components/logistica/FotoEntregaCapture";
 import { supabase } from "@/api/base44Client";
 import { Input } from "@/components/ui/input";
 import { whatsappService } from "@/services/whatsappService";
+import { toast } from "sonner";
 
 export default function Entregador() {
     const [user, setUser] = useState(null);
@@ -141,7 +142,49 @@ export default function Entregador() {
         }
     });
 
-    // GPS a cada 5 segundos
+    // RECUPERAR ESTADO AO INICIAR
+    useEffect(() => {
+        try {
+            const savedRota = localStorage.getItem('rota_estado');
+            if (savedRota) {
+                const parsed = JSON.parse(savedRota);
+                // Só recupera se for do mesmo dia
+                const hoje = new Date().toISOString().split('T')[0];
+                if (parsed.dataSelecionada === hoje) {
+                    // Restaurar estados
+                    if (parsed.caminhaoSelecionado) setCaminhaoSelecionado(parsed.caminhaoSelecionado);
+                    if (parsed.turnoSelecionado) setTurnoSelecionado(parsed.turnoSelecionado);
+
+                    if (parsed.rotaIniciada) {
+                        setRotaIniciada(true);
+                        setEtapa('rota');
+                        // Reativar GPS
+                        iniciarRastreamento();
+                    }
+                    toast.success("Sessão restaurada!");
+                } else {
+                    // Limpar estado antigo se for de outro dia
+                    localStorage.removeItem('rota_estado');
+                }
+            }
+        } catch (e) {
+            console.error("Erro ao restaurar sessão:", e);
+        }
+    }, []);
+
+    // SALVAR ESTADO
+    useEffect(() => {
+        if (caminhaoSelecionado && turnoSelecionado) {
+            const estado = {
+                caminhaoSelecionado,
+                turnoSelecionado,
+                rotaIniciada,
+                dataSelecionada,
+                timestamp: Date.now()
+            };
+            localStorage.setItem('rota_estado', JSON.stringify(estado));
+        }
+    }, [caminhaoSelecionado, turnoSelecionado, rotaIniciada, dataSelecionada]);
     const iniciarRastreamento = () => {
         if (!navigator.geolocation) {
             toast.error("GPS não suportado neste dispositivo.");
@@ -198,17 +241,29 @@ export default function Entregador() {
             return;
         }
 
-        // Buscar itens de cada venda para criar checklist
-        const itens = [];
-        for (const entrega of entregasRota) {
-            if (entrega.venda_id) {
-                try {
-                    const { data: venda } = await supabase
-                        .from('vendas')
-                        .select('itens, numero_pedido')
-                        .eq('id', entrega.venda_id)
-                        .single();
+        setEnviando(true);
+        try {
+            // Buscar itens de todas as vendas de uma vez
+            const vendaIds = entregasRota.map(e => e.venda_id).filter(Boolean);
 
+            let vendasMap = {};
+            if (vendaIds.length > 0) {
+                const { data: vendas, error } = await supabase
+                    .from('vendas')
+                    .select('id, itens, numero_pedido')
+                    .in('id', vendaIds);
+
+                if (error) throw error;
+
+                vendas.forEach(v => {
+                    vendasMap[v.id] = v;
+                });
+            }
+
+            const itens = [];
+            for (const entrega of entregasRota) {
+                if (entrega.venda_id && vendasMap[entrega.venda_id]) {
+                    const venda = vendasMap[entrega.venda_id];
                     if (venda?.itens) {
                         const vendaItens = typeof venda.itens === 'string' ? JSON.parse(venda.itens) : venda.itens;
                         vendaItens.forEach(item => {
@@ -224,23 +279,30 @@ export default function Entregador() {
                             });
                         });
                     }
-                } catch (e) {
-                    console.error('Erro ao buscar itens:', e);
                 }
             }
-        }
 
-        if (itens.length === 0) {
-            iniciarRota();
-            return;
-        }
+            console.log('Itens parsed:', itens.length);
 
-        setItensChecklist(itens);
-        setItensConferidos(new Set());
-        setModalChecklist(true);
+            if (itens.length === 0) {
+                console.log('Nenhum item, chamando iniciarRota...');
+                await iniciarRota();
+                return;
+            }
+
+            setItensChecklist(itens);
+            setItensConferidos(new Set());
+            setModalChecklist(true);
+        } catch (error) {
+            console.error('Erro ao preparar checklist:', error);
+            toast.error("Erro ao carregar itens da carga.");
+        } finally {
+            setEnviando(false);
+        }
     };
 
     const iniciarRota = async () => {
+        console.log('iniciarRota chamado');
         if (!caminhaoSelecionado || !turnoSelecionado) {
             toast.error("Selecione caminhão e turno primeiro.");
             return;
@@ -249,6 +311,7 @@ export default function Entregador() {
         // Verificar se tem pedidos a receber
         // Verificar se tem pedidos a receber
         if (pedidosAReceber.length > 0) {
+            console.log('Pedidos a receber:', pedidosAReceber.length);
             const formas = [...new Set(pedidosAReceber.map(p => p.forma_pagamento_entrega || p.forma_pagamento).filter(Boolean))];
             const totalReceber = pedidosAReceber.reduce((sum, p) => sum + (p.valor_a_receber || 0), 0);
 
@@ -266,11 +329,13 @@ export default function Entregador() {
             if (!continuar) return;
         }
 
+        console.log('Pedindo confirmação de rota...');
         const confirmed = await confirm({
             title: "Iniciar Rota",
             message: `Iniciar rota ${turnoSelecionado} com ${entregasRota.length} entregas?`,
             confirmText: "Iniciar"
         });
+        console.log('Confirmação:', confirmed);
         if (!confirmed) return;
 
         setEnviando(true);
@@ -312,12 +377,17 @@ export default function Entregador() {
     };
 
     const avisarProximo = async (entrega) => {
+        console.log('avisarProximo chamado para:', entrega.id);
         setEnviando(true);
         try {
-            const linkRastreio = `${window.location.origin}/rastreio/${entrega.id}`;
+            // Usar IP da VPS se estiver em localhost, senão usa a origin atual
+            const origin = window.location.hostname === 'localhost' ? 'http://191.101.234.247' : window.location.origin;
+            const linkRastreio = `${origin}/rastreio/${entrega.id}`;
             const telefone = entrega.cliente_telefone;
+            console.log('Telefone:', telefone, 'Link:', linkRastreio);
 
             if (!telefone) {
+                console.warn('Telefone não encontrado');
                 toast.error("Telefone do cliente não cadastrado.");
                 setEnviando(false);
                 return;
@@ -326,19 +396,26 @@ export default function Entregador() {
             // Atualizar status para "Próxima parada" para permitir o rastreio (se não estiver em rota/caminho)
             const statusPermitidos = ["Próxima parada", "A caminho", "Em rota"];
             if (!statusPermitidos.includes(entrega.status)) {
+                console.log('Atualizando status para Próxima parada...');
                 await updateEntrega.mutateAsync({
                     id: entrega.id,
                     data: { status: 'Próxima parada' }
                 });
             }
 
-            await whatsappService.sendDeliveryNextStop(telefone, entrega, linkRastreio);
+            console.log('Enviando mensagem WhatsApp...');
+            const sent = await whatsappService.sendDeliveryNextStop(telefone, entrega, linkRastreio);
+            console.log('Mensagem enviada?', sent);
 
-            // Marcar cliente como notificado
-            setClientesNotificados(prev => new Set([...prev, entrega.id]));
-            toast.success("Cliente avisado e link de rastreio enviado!");
+            if (sent) {
+                // Marcar cliente como notificado
+                setClientesNotificados(prev => new Set([...prev, entrega.id]));
+                toast.success("Cliente avisado e link de rastreio enviado!");
+            } else {
+                toast.error("Erro ao enviar mensagem.");
+            }
         } catch (e) {
-            console.error(e);
+            console.error('Erro em avisarProximo:', e);
             toast.error("Erro ao enviar aviso.");
         } finally {
             setEnviando(false);
@@ -877,15 +954,103 @@ export default function Entregador() {
                     )
                 }
 
-                {/* Botão Iniciar */}
                 <Button
                     onClick={prepararChecklist}
                     disabled={!caminhaoSelecionado || !turnoSelecionado || entregasRota.length === 0 || enviando}
-                    className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700"
+                    className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                    <Package className="w-5 h-5 mr-2" />
-                    CONFERIR CARGA ({entregasRota.length} entregas)
+                    {enviando ? (
+                        <>
+                            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                            CARREGANDO...
+                        </>
+                    ) : (
+                        <>
+                            <Package className="w-5 h-5 mr-2" />
+                            CONFERIR CARGA ({entregasRota.length} entregas)
+                        </>
+                    )}
                 </Button>
+
+                {/* Modal de Checklist de Carregamento (Cópia para view de seleção) */}
+                <Dialog open={modalChecklist} onOpenChange={setModalChecklist}>
+                    <DialogContent className="max-w-md max-h-[90vh] overflow-hidden flex flex-col">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <Package className="w-5 h-5 text-blue-600" />
+                                Checklist de Carregamento
+                            </DialogTitle>
+                        </DialogHeader>
+                        <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+                            {itensChecklist.map((item, idx) => {
+                                const conferido = itensConferidos.has(item.id);
+                                return (
+                                    <div
+                                        key={item.id}
+                                        onClick={() => {
+                                            const novo = new Set(itensConferidos);
+                                            if (conferido) novo.delete(item.id);
+                                            else novo.add(item.id);
+                                            setItensConferidos(novo);
+                                        }}
+                                        className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${conferido
+                                            ? 'bg-green-50 border-green-400'
+                                            : 'bg-white border-gray-200 hover:border-blue-300'
+                                            }`}
+                                    >
+                                        <div className="flex items-start gap-3">
+                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${conferido ? 'bg-green-500 text-white' : 'bg-gray-200'
+                                                }`}>
+                                                {conferido ? <Check className="w-4 h-4" /> : <span className="text-xs text-gray-500">{idx + 1}</span>}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-medium text-gray-900 truncate">{item.produto}</p>
+                                                <div className="flex flex-wrap gap-2 mt-1 text-xs text-gray-500">
+                                                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Ped #{item.pedido}</span>
+                                                    <span>Qtd: {item.quantidade}</span>
+                                                    {item.cor && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">{item.cor}</span>}
+                                                </div>
+                                                <p className="text-xs text-gray-400 mt-1 truncate">Cliente: {item.cliente}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <div className="pt-4 border-t space-y-2">
+                            <div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-500">Conferidos:</span>
+                                <span className={`font-bold ${itensConferidos.size === itensChecklist.length ? 'text-green-600' : 'text-gray-700'}`}>
+                                    {itensConferidos.size} / {itensChecklist.length}
+                                </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setModalChecklist(false)}
+                                >
+                                    Cancelar
+                                </Button>
+                                <Button
+                                    onClick={() => {
+                                        setModalChecklist(false);
+                                        iniciarRota();
+                                    }}
+                                    disabled={itensConferidos.size < itensChecklist.length}
+                                    className="bg-green-600 hover:bg-green-700"
+                                >
+                                    <Navigation className="w-4 h-4 mr-1" />
+                                    Iniciar Rota
+                                </Button>
+                            </div>
+                            {itensConferidos.size < itensChecklist.length && (
+                                <p className="text-xs text-center text-amber-600">
+                                    Confira todos os itens para iniciar
+                                </p>
+                            )}
+                        </div>
+                    </DialogContent>
+                </Dialog>
             </div >
         );
     }
