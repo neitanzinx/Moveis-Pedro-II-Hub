@@ -154,7 +154,6 @@ function createWhatsAppClient(clientId = "client-v2") {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--single-process',
                 '--disable-gpu',
                 '--disable-extensions',
                 '--disable-background-networking',
@@ -185,9 +184,9 @@ let connectionStatus = 'disconnected';
 let currentQR = null;
 let connectionInfo = null;
 
-// -- Client WhatsApp (LET porque precisa ser recriado) ---
+// --- Client WhatsApp (LET porque precisa ser recriado) ---
 // Estado global para guardar o ID atual (permite rotação em caso de erro)
-let currentClientId = "client-v4"; // Bump para v4 (Minimalist Config)
+let currentClientId = "client-v5"; // Bump para v5 (Fresh Start)
 let client = createWhatsAppClient(currentClientId);
 
 // 🔗 Registrar event handlers no client atual
@@ -342,21 +341,31 @@ const whatsapp = {
             execSync(sleepCmd, { stdio: 'ignore' });
         } catch (e) { /* ok */ }
 
-        // 4) Limpar lock files / Sessão (usando os.tmpdir para consistência)
-        const basePath = isWindows ? path.join(process.cwd(), '.wwebjs_auth') : '/app/.wwebjs_auth';
-        const sessionDir = path.join(basePath, `session-${currentClientId}`);
-
-        // 🚀 AGGRESSIVE CLEAN: Deletar arquivos de lock específicos do Chrome que o Docker mantém vivos
+        // 🚀 AGGRESSIVE CLEAN: Deletar arquivo de trava E SE NECESSÁRIO A SESSÃO INTEIRA
         const lockFiles = ['SingletonLock', 'Lock', 'SingletonCookie'];
+        let sessionCorrupted = false;
+
         lockFiles.forEach(f => {
             const lockPath = path.join(sessionDir, f);
             try {
                 if (fs.existsSync(lockPath)) {
-                    console.log(`🧹 [CLEAN] Removendo arquivo de trava: ${f}`);
-                    fs.unlinkSync(lockPath);
+                    console.log(`🧹 [CLEAN] Arquivo de trava detectado: ${f}`);
+                    sessionCorrupted = true;
                 }
             } catch (e) { /* ignore */ }
         });
+
+        // Se encontrou travas, pode ser melhor limpar a sessão inteira para garantir (Opcional: Pode ser configurado via ENV)
+        if (sessionCorrupted || deleteSession) {
+            console.log(`🧹 [CLEAN] Sessão corrompida ou solicitação de limpeza excecutada. Removendo: ${sessionDir}`);
+            removeFolder(sessionDir);
+        } else {
+            // Tenta remover apenas os locks se não for deletar tudo (backup strategy)
+            lockFiles.forEach(f => {
+                const lockPath = path.join(sessionDir, f);
+                try { if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath); } catch (e) { }
+            });
+        }
 
         const removeFolder = (dir) => {
             let deleted = false;
