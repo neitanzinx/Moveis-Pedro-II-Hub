@@ -341,6 +341,10 @@ const whatsapp = {
             execSync(sleepCmd, { stdio: 'ignore' });
         } catch (e) { /* ok */ }
 
+        // 4) Limpar lock files / Sessão (usando os.tmpdir para consistência)
+        const basePath = isWindows ? path.join(process.cwd(), '.wwebjs_auth') : '/app/.wwebjs_auth';
+        const sessionDir = path.join(basePath, `session-${currentClientId}`);
+
         // 🚀 AGGRESSIVE CLEAN: Deletar arquivo de trava E SE NECESSÁRIO A SESSÃO INTEIRA
         const lockFiles = ['SingletonLock', 'Lock', 'SingletonCookie'];
         let sessionCorrupted = false;
