@@ -29,15 +29,19 @@ RUN npm run build
 FROM node:20
 
 # Install Google Chrome Stable, fonts, and process tools (pkill/killall)
-# Note: "gnupg" and "wget" are installed to download the signing key.
-# Install dependencies for bundled Chromium (Headless)
-# These libraries are required for Puppeteer to launch the bundled browser
-RUN apt-get update \
-  && apt-get install -y wget gnupg git procps psmisc curl dumb-init \
+RUN apt-get update && apt-get install -y \
+  wget \
+  gnupg \
+  ca-certificates \
+  apt-transport-https \
+  && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+  && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.json' \
+  && apt-get update \
+  && apt-get install -y google-chrome-stable --no-install-recommends \
+  && apt-get install -y git procps psmisc curl dumb-init \
   libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
   libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
   libgbm1 libasound2 libpangocairo-1.0-0 libpango-1.0-0 libcairo2 \
-  --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -4,7 +4,7 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 // 🚨 FORÇA BRUTA: Ignora qualquer configuração de path do Chrome que esteja no .env da VPS
 // O .env antigo aponta para /usr/bin/google-chrome-stable que NÃO EXISTE mais na imagem node:20
-delete process.env.PUPPETEER_EXECUTABLE_PATH;
+// delete process.env.PUPPETEER_EXECUTABLE_PATH; // Removido para permitir config via ENV se necessário
 
 const express = require('express');
 const cors = require('cors');
@@ -110,18 +110,31 @@ app.use(express.static(distPath));
 // 🏭 FACTORY: Cria Client NOVO a cada tentativa.
 function createWhatsAppClient(clientId = "client-v2") {
     // 🛡️ Caminhos absolutos e adaptativos (Windows/Linux)
-    const os = require('os');
-    const basePath = path.join(os.tmpdir(), 'whatsapp-bot-session');
+    const isWindows = process.platform === "win32";
+
+    // USAR PASTA LOCAL EM PRODUÇÃO (Para persistir via Docker Volumes)
+    // Local: ./.wwebjs_auth
+    const basePath = isWindows ? path.join(process.cwd(), '.wwebjs_auth') : '/app/.wwebjs_auth';
 
     // Cria diretório base se não existir
     try {
         if (!fs.existsSync(basePath)) fs.mkdirSync(basePath, { recursive: true });
     } catch (e) { /* ignore */ }
 
-    const sessionPath = path.join(basePath, '.wwebjs_auth');
+    const sessionPath = basePath; // LocalAuth já concatena o 'session-' + clientId
 
     const puppeteer = require('puppeteer');
+
+    // Localizar executável do Chrome (Docker vs Local)
+    let executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    if (!isWindows && !executablePath) {
+        if (fs.existsSync('/usr/bin/google-chrome-stable')) executablePath = '/usr/bin/google-chrome-stable';
+        else if (fs.existsSync('/usr/bin/google-chrome')) executablePath = '/usr/bin/google-chrome';
+        else if (fs.existsSync('/usr/bin/chromium')) executablePath = '/usr/bin/chromium';
+    }
+
     console.log(`🔧 [FACTORY] Client ID: ${clientId} | Path: ${sessionPath}`);
+    if (executablePath) console.log(`🚀 [FACTORY] Usando Chrome em: ${executablePath}`);
 
     return new Client({
         authStrategy: new LocalAuth({
@@ -131,22 +144,24 @@ function createWhatsAppClient(clientId = "client-v2") {
         authTimeoutMs: 60000,
         puppeteer: {
             headless: true,
-            executablePath: puppeteer.executablePath(),
+            executablePath: executablePath || puppeteer.executablePath(),
             protocolTimeout: 180000,
-            dumpio: false, // 🤫 Silenciar logs internos do Chrome (evita erros de GCM/Deprecated Endpoint)
+            dumpio: true, // Habilitado para debug na VPS
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                // 🔇 GCM / Sync Suppression (Safe Flags)
-                '--disable-sync',
+                '--disable-dev-shm-usage', // 🚀 CRÍTICO PARA DOCKER
+                '--disable-gpu',           // 🚀 CRÍTICO PARA DOCKER
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',        // 🚀 CRÍTICO PARA DOCKER
                 '--disable-extensions',
-                '--disable-component-extensions-with-background-pages',
-                '--disable-default-apps',
+                '--disable-setuid-sandbox',
+                '--disable-accelerated-2d-canvas',
                 '--disable-notifications',
                 '--disable-background-networking',
-                '--disable-domain-reliability',
-                '--disable-client-side-phishing-detection',
-                '--disable-component-update'
+                '--disable-default-apps',
+                '--disable-sync'
             ],
             timeout: 180000,
             handleSIGINT: false,
@@ -321,9 +336,9 @@ const whatsapp = {
         } catch (e) { /* ok */ }
 
         // 4) Limpar lock files / Sessão (usando os.tmpdir para consistência)
-        const os = require('os');
-        const basePath = path.join(os.tmpdir(), 'whatsapp-bot-session');
-        const sessionDir = path.join(basePath, '.wwebjs_auth', `session-${currentClientId}`);
+        const isWindows = process.platform === "win32";
+        const basePath = isWindows ? path.join(process.cwd(), '.wwebjs_auth') : '/app/.wwebjs_auth';
+        const sessionDir = path.join(basePath, `session-${currentClientId}`);
 
         const removeFolder = (dir) => {
             let deleted = false;
