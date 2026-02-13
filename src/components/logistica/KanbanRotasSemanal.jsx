@@ -53,27 +53,27 @@ function SlotTurno({ turno, caminhaoId, dataAtual, entregas, vendas, onClickEntr
         return true;
       }
 
-      // 3. Preferências (Dias e Turnos - BLACKLIST)
+      // 3. Preferências (Dias e Turnos - WHITELIST)
       if (activeEntrega.preferencias_entrega) {
         const { dias, turnos } = activeEntrega.preferencias_entrega;
 
-        // Check Dia da Semana
+        // Check Dia da Semana - WHITELIST: Only allow if in the list
         if (dias && dias.length > 0) {
           const [y, m, d] = dataAtual.split('-').map(Number);
           const diaSemanaSlot = new Date(y, m - 1, d).getDay(); // 0=Dom
 
-          const diasBloqueados = dias.map(d => Number(d));
-          if (diasBloqueados.includes(diaSemanaSlot)) {
+          const diasPermitidos = dias.map(d => Number(d));
+          if (!diasPermitidos.includes(diaSemanaSlot)) {
             return true;
           }
         }
 
-        // Check Turno
+        // Check Turno - WHITELIST: Only allow if in the list
         if (turnos && turnos.length > 0) {
           const normalize = (str) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
           const turnoSlotNorm = normalize(turno.id);
 
-          if (turnos.some(t => normalize(t) === turnoSlotNorm)) {
+          if (!turnos.some(t => normalize(t) === turnoSlotNorm)) {
             return true;
           }
         }
@@ -703,34 +703,34 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
       const caminhaoId = parseInt(turnoMatch[2]);
       const turno = turnoMatch[3];
 
-      // GUARDRAIL: Preferências de Entrega (BLACKLIST)
+      // GUARDRAIL: Preferências de Entrega (WHITELIST)
       if (entregaAtual.preferencias_entrega) {
         const { dias, turnos } = entregaAtual.preferencias_entrega;
 
-        // Verificar Dia da Semana (Blacklist)
+        // Verificar Dia da Semana (Whitelist)
         if (dias && dias.length > 0) {
           const [y, m, d] = dataAlvo.split('-').map(Number);
           const diaSemanaAlvo = new Date(y, m - 1, d).getDay(); // 0=Dom
 
-          const diasBloqueados = dias.map(d => Number(d));
-          if (diasBloqueados.includes(diaSemanaAlvo)) {
+          const diasPermitidos = dias.map(d => Number(d));
+          if (!diasPermitidos.includes(diaSemanaAlvo)) {
             const nomesDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-            toast.error(`BLOQUEADO: Dia Bloqueado pelo Cliente`, {
-              description: `Restrição configurada para: ${nomesDias[diaSemanaAlvo]}.`,
+            toast.error(`BLOQUEADO: Dia não permitido pelo Cliente`, {
+              description: `O cliente só permite receber em: ${diasPermitidos.map(d => nomesDias[d]).join(', ')}.`,
               duration: 4000
             });
             return;
           }
         }
 
-        // Verificar Turno (Blacklist - Normalized)
+        // Verificar Turno (Whitelist - Normalized)
         if (turnos && turnos.length > 0) {
           const normalize = (str) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
           const turnoTargetNorm = normalize(turno);
 
-          if (turnos.some(t => normalize(t) === turnoTargetNorm)) {
-            toast.error(`BLOQUEADO: Turno Bloqueado pelo Cliente`, {
-              description: `Restrição configurada para: ${turno}.`,
+          if (!turnos.some(t => normalize(t) === turnoTargetNorm)) {
+            toast.error(`BLOQUEADO: Turno não permitido pelo Cliente`, {
+              description: `O cliente só permite receber no turno: ${turnos.join(', ')}.`,
               duration: 4000
             });
             return;
