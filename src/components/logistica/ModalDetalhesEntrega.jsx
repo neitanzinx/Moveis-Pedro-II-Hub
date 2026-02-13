@@ -291,14 +291,14 @@ export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
 
                     {entrega.preferencias_entrega?.dias?.length > 0 && (
                       <div className="text-gray-700">
-                        <span className="font-semibold">Dias Bloqueados (Cliente):</span> {' '}
+                        <span className="font-semibold">Dias Permitidos (Cliente):</span> {' '}
                         {entrega.preferencias_entrega.dias.map(d => ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][Number(d)]).join(', ')}
                       </div>
                     )}
 
                     {entrega.preferencias_entrega?.turnos?.length > 0 && (
                       <div className="text-gray-700">
-                        <span className="font-semibold">Turnos Bloqueados:</span> {entrega.preferencias_entrega.turnos.join(', ')}
+                        <span className="font-semibold">Turnos Permitidos:</span> {entrega.preferencias_entrega.turnos.join(', ')}
                       </div>
                     )}
                   </div>

@@ -112,20 +112,20 @@ function SlotTurno({ turno, caminhaoId, dataAtual, entregas, vendas, onClickEntr
     if (activeEntrega.preferencias_entrega) {
       const { dias, turnos } = activeEntrega.preferencias_entrega;
 
-      // Check Dia (Normalized)
+      // Check Dia (Normalized) - WHITELIST: Only allow if in the list
       if (dias && dias.length > 0) {
         const [y, m, d] = dataAtual.split('-').map(Number);
         const diaSemanaSlot = new Date(y, m - 1, d).getDay();
-        const diasBloqueados = dias.map(d => Number(d));
-        if (diasBloqueados.includes(diaSemanaSlot)) return true;
+        const diasPermitidos = dias.map(d => Number(d));
+        if (!diasPermitidos.includes(diaSemanaSlot)) return true;
       }
 
-      // Check Turno (Normalized)
+      // Check Turno (Normalized) - WHITELIST: Only allow if in the list
       if (turnos && turnos.length > 0) {
         const normalize = (str) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         const turnoSlotNorm = normalize(turno.id);
 
-        if (turnos.some(t => normalize(t) === turnoSlotNorm)) {
+        if (!turnos.some(t => normalize(t) === turnoSlotNorm)) {
           return true;
         }
       }
@@ -215,11 +215,11 @@ function DateTabVisual({ dia, index, isSelected, onClick, activeEntrega, onHover
     // 2. Restrição Específica
     if (activeEntrega.data_restricao === dia.id) return true;
 
-    // 3. Preferências (Dia da Semana - BLACKLIST)
+    // 3. Preferências (Dia da Semana - WHITELIST)
     if (activeEntrega.preferencias_entrega?.dias?.length > 0) {
-      const diasBloqueados = activeEntrega.preferencias_entrega.dias.map(d => Number(d));
-      // SE ESTÁ NA LISTA -> BLOQUEADO
-      if (diasBloqueados.includes(dia.diaSemana)) return true;
+      const diasPermitidos = activeEntrega.preferencias_entrega.dias.map(d => Number(d));
+      // SE NÃO ESTÁ NA LISTA -> BLOQUEADO
+      if (!diasPermitidos.includes(dia.diaSemana)) return true;
     }
 
     return false;

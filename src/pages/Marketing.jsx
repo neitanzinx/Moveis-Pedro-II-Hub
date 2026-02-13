@@ -439,7 +439,8 @@ export default function Marketing() {
 
     const isExpired = (validade) => {
         if (!validade) return false;
-        return new Date(validade) < new Date();
+        const hojeIso = new Date().toLocaleDateString('en-CA');
+        return validade.split('T')[0] < hojeIso;
     };
 
     const isEsgotado = (cupom) => {

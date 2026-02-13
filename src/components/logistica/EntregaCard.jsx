@@ -116,10 +116,10 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
               <div className="inline-block" onClick={(e) => e.stopPropagation()}>
                 <Badge
                   className="text-[8px] px-1 py-0 h-4 bg-purple-100 text-purple-700 font-bold shadow-none border border-purple-200 flex items-center gap-0.5 cursor-help"
-                  title={`RESTRIÇÕES:\n${entrega.data_restricao ? `• DATA BLOQUEADA: ${new Date(entrega.data_restricao).toLocaleDateString('pt-BR')}\n` : ''}${entrega.preferencias_entrega.dias?.length ? `• DIAS: ${[...new Set(entrega.preferencias_entrega.dias)].map(d => ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][Number(d)]).join(', ')}\n` : ''}${entrega.preferencias_entrega.turnos?.length ? `• TURNOS: ${entrega.preferencias_entrega.turnos.join(', ')}\n` : ''}${entrega.preferencias_entrega.obs ? `• OBS: ${entrega.preferencias_entrega.obs}` : ''}`}
+                  title={`PREFERÊNCIAS DE ENTREGA:\n${entrega.data_restricao ? `• DATA BLOQUEADA: ${new Date(entrega.data_restricao).toLocaleDateString('pt-BR')}\n` : ''}${entrega.preferencias_entrega.dias?.length ? `• DIAS PERMITIDOS: ${[...new Set(entrega.preferencias_entrega.dias)].map(d => ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][Number(d)]).join(', ')}\n` : ''}${entrega.preferencias_entrega.turnos?.length ? `• TURNOS PERMITIDOS: ${entrega.preferencias_entrega.turnos.join(', ')}\n` : ''}${entrega.preferencias_entrega.obs ? `• OBS: ${entrega.preferencias_entrega.obs}` : ''}`}
                 >
                   <Settings className="w-2 h-2" />
-                  Restrições
+                  Preferências
                 </Badge>
               </div>
             )}

@@ -399,6 +399,7 @@ export default function DashboardGerente() {
 
     // Filtrar vendas por período e loja
     const vendasFiltradas = useMemo(() => {
+        const hojeIso = new Date().toLocaleDateString('en-CA');
         const hoje = new Date();
         hoje.setHours(0, 0, 0, 0);
 
@@ -411,12 +412,13 @@ export default function DashboardGerente() {
 
             // Filtro de período
             if (!v.data_venda) return false;
+            const dataVendaStr = v.data_venda.split('T')[0];
             const d = new Date(v.data_venda);
             d.setHours(0, 0, 0, 0);
 
             switch (periodo) {
                 case 'hoje':
-                    return d.getTime() === hoje.getTime();
+                    return dataVendaStr === hojeIso;
                 case 'semana':
                     const inicioSemana = new Date(hoje);
                     inicioSemana.setDate(hoje.getDate() - hoje.getDay());
@@ -431,16 +433,14 @@ export default function DashboardGerente() {
 
     // Vendas de hoje específicas
     const vendasHoje = useMemo(() => {
-        const hoje = new Date();
-        hoje.setHours(0, 0, 0, 0);
+        const hojeIso = new Date().toLocaleDateString('en-CA');
 
         return vendas.filter(v => {
             if (v.status === 'Cancelada') return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
-            const d = new Date(v.data_venda);
-            d.setHours(0, 0, 0, 0);
-            return d.getTime() === hoje.getTime();
+            const dataVendaStr = v.data_venda.split('T')[0];
+            return dataVendaStr === hojeIso;
         });
     }, [vendas, lojaAtiva]);
 
@@ -736,8 +736,7 @@ export default function DashboardGerente() {
 
     // Status de entregas
     const statusEntregas = useMemo(() => {
-        const hoje = new Date();
-        hoje.setHours(0, 0, 0, 0);
+        const hojeIso = new Date().toLocaleDateString('en-CA');
 
         const entregasFiltradas = entregas.filter(e => {
             if (lojaAtiva === 'todas') return true;
@@ -749,10 +748,11 @@ export default function DashboardGerente() {
         const emRota = entregasFiltradas.filter(e => e.status === 'Em Rota' || e.status === 'Em Transito');
         const atrasadas = entregasFiltradas.filter(e => {
             if (e.status === 'Entregue' || e.status === 'Cancelada') return false;
-            const dataAgendada = e.data_agendada ? new Date(e.data_agendada) : null;
-            if (!dataAgendada) return false;
-            dataAgendada.setHours(0, 0, 0, 0);
-            return dataAgendada < hoje;
+            if (!e.data_agendada) return false;
+
+            // Comparação segura de strings YYYY-MM-DD
+            const dataAgendadaStr = e.data_agendada.split('T')[0];
+            return dataAgendadaStr < hojeIso;
         });
 
         return { pendentes, emRota, atrasadas };
@@ -974,6 +974,11 @@ export default function DashboardGerente() {
 
     const formatarMoeda = (valor) => {
         return (valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    };
+
+    const formatarData = (data) => {
+        if (!data) return "-";
+        return new Date(data.split('T')[0] + 'T12:00:00').toLocaleDateString('pt-BR');
     };
 
     const loading = loadingVendas || loadingEntregas || loadingMontagens;
@@ -1374,7 +1379,7 @@ export default function DashboardGerente() {
                                                                 </div>
                                                                 <div className="text-right text-sm pl-4 border-l border-gray-100 ml-4">
                                                                     <p className="font-medium text-gray-900">
-                                                                        {entrega.data_agendada ? new Date(entrega.data_agendada).toLocaleDateString('pt-BR') : '-'}
+                                                                        {entrega.data_agendada ? new Date(entrega.data_agendada.split('T')[0] + 'T12:00:00').toLocaleDateString('pt-BR') : '-'}
                                                                     </p>
                                                                     <p className="text-xs text-gray-500 capitalize">{entrega.turno || ''}</p>
                                                                 </div>

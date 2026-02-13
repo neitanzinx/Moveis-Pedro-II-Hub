@@ -248,7 +248,8 @@ export default function PainelPagamento({
         return;
       }
 
-      if (cupom.validade && new Date(cupom.validade) < new Date()) {
+      const hojeIso = new Date().toLocaleDateString('en-CA');
+      if (cupom.validade && cupom.validade.split('T')[0] < hojeIso) {
         setErroCupom("Cupom expirado");
         setAplicandoCupom(false);
         return;
@@ -310,7 +311,8 @@ export default function PainelPagamento({
         return;
       }
 
-      if (token.expira_em && new Date(token.expira_em) < new Date()) {
+      const hojeIso = new Date().toLocaleDateString('en-CA');
+      if (token.expira_em && token.expira_em.split('T')[0] < hojeIso) {
         setErroToken("Token expirado");
         setAplicandoToken(false);
         return;

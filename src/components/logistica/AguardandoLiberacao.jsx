@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Search, Unlock, Clock, MapPin, Package } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
 import { base44 } from "@/api/base44Client";
 
 export default function AguardandoLiberacao({ entregas, vendas }) {
+  const { user } = useAuth();
   const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
 
@@ -45,8 +47,8 @@ export default function AguardandoLiberacao({ entregas, vendas }) {
         </div>
         <div className="relative w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input 
-            placeholder="Buscar cliente ou pedido..." 
+          <Input
+            placeholder="Buscar cliente ou pedido..."
             className="pl-9"
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -60,18 +62,23 @@ export default function AguardandoLiberacao({ entregas, vendas }) {
             const venda = (vendas || []).find(v => v.id === entrega.venda_id);
             const itens = venda?.itens?.map(i => `${i.quantidade}x ${i.produto_nome}`).join(', ');
 
+            // Apenas o vendedor da venda ou admin pode liberar
+            const podeLiberar = user?.cargo === 'Administrador' || venda?.responsavel_id === user?.id;
+
+            if (!podeLiberar) return null;
+
             return (
               <Card key={entrega.id} className="hover:shadow-md transition-all border-l-4 border-l-amber-400">
                 <CardContent className="p-4">
                   <div className="flex justify-between items-start mb-2">
                     <Badge variant="outline" className="font-mono">#{entrega.numero_pedido}</Badge>
                     <span className="text-xs text-gray-400 font-medium">
-                      {new Date(entrega.created_date).toLocaleDateString()}
+                      {entrega.created_date ? new Date(entrega.created_date).toLocaleDateString() : '-'}
                     </span>
                   </div>
-                  
+
                   <h3 className="font-bold text-gray-800 mb-1">{entrega.cliente_nome}</h3>
-                  
+
                   <div className="bg-gray-50 p-2 rounded text-xs text-gray-600 mb-3 flex gap-2">
                     <Package className="w-4 h-4 shrink-0 mt-0.5 text-gray-400" />
                     <p className="line-clamp-2">{itens || "Sem itens"}</p>
@@ -82,13 +89,14 @@ export default function AguardandoLiberacao({ entregas, vendas }) {
                     <span className="truncate">{entrega.endereco_entrega}</span>
                   </div>
 
-                  <Button 
+                  <Button
                     className="w-full bg-green-600 hover:bg-green-700 gap-2"
                     onClick={() => {
-                        if(confirm(`Liberar entrega do pedido #${entrega.numero_pedido}? Ele voltará para a Triagem.`)) {
-                            liberarEntregaMutation.mutate(entrega.id);
-                        }
+                      if (confirm(`Liberar entrega do pedido #${entrega.numero_pedido}? Ele voltará para a Triagem.`)) {
+                        liberarEntregaMutation.mutate(entrega.id);
+                      }
                     }}
+                    disabled={liberarEntregaMutation.isPending}
                   >
                     <Unlock className="w-4 h-4" />
                     Entrega Liberada

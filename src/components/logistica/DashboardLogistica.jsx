@@ -15,7 +15,7 @@ export default function DashboardLogistica({ entregas, colunas }) {
   const comMontagem = entregas.filter(e => e.itens_montagem_interna?.length > 0);
   const montagemConcluida = comMontagem.filter(e => e.montagem_concluida).length;
   const montagemPendente = comMontagem.length - montagemConcluida;
-  
+
   const dadosMontagem = [
     { name: "Concluídas", value: montagemConcluida, color: "#10b981" },
     { name: "Pendentes", value: montagemPendente, color: "#f59e0b" }
@@ -23,13 +23,13 @@ export default function DashboardLogistica({ entregas, colunas }) {
 
   // KPI 3: Tempo médio até data limite
   const entregasComData = entregas.filter(e => e.data_agendada && e.data_limite);
-  const tempoMedio = entregasComData.length > 0 
+  const tempoMedio = entregasComData.length > 0
     ? entregasComData.reduce((acc, e) => {
-        const agendada = new Date(e.data_agendada);
-        const limite = new Date(e.data_limite);
-        const diff = Math.ceil((limite - agendada) / (1000 * 60 * 60 * 24));
-        return acc + diff;
-      }, 0) / entregasComData.length
+      const agendada = new Date(e.data_agendada);
+      const limite = new Date(e.data_limite);
+      const diff = Math.ceil((limite - agendada) / (1000 * 60 * 60 * 24));
+      return acc + diff;
+    }, 0) / entregasComData.length
     : 0;
 
   // KPI 4: Volume total por dia (simulado - pode ser calculado com dados reais)
@@ -41,8 +41,9 @@ export default function DashboardLogistica({ entregas, colunas }) {
   const totalEntregas = entregas.filter(e => e.data_agendada).length;
   const entregasHoje = entregas.filter(e => {
     if (!e.data_agendada) return false;
-    const hoje = new Date().toISOString().split('T')[0];
-    return e.data_agendada === hoje;
+    const hojeStr = new Date().toLocaleDateString('en-CA');
+    const dataAgendadaStr = e.data_agendada.split('T')[0];
+    return dataAgendadaStr === hojeStr;
   }).length;
 
   return (

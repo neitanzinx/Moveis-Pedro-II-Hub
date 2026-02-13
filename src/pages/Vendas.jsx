@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck, ClipboardList, Info, CalendarX, Settings, ArrowRightLeft, Unlock } from "lucide-react";
+import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, AlertTriangle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck, ClipboardList, Info, CalendarX, Settings, ArrowRightLeft, Unlock } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -929,12 +929,25 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
                     </Badge>
                 );
             } else {
-                badges.push(
-                    <Badge key="ent_pendente" className="bg-amber-100 text-amber-700 border border-amber-200 gap-1 w-fit">
-                        <Truck className="w-3 h-3" />
-                        Entrega: {dataEntrega || 'A Agendar'}
-                    </Badge>
-                );
+                const hojeIso = new Date().toLocaleDateString('en-CA');
+                const dataEntregaIso = entrega.data_agendada ? entrega.data_agendada.split('T')[0] : null;
+                const isAtrasada = dataEntregaIso && dataEntregaIso < hojeIso;
+
+                if (isAtrasada) {
+                    badges.push(
+                        <Badge key="ent_atrasada" className="bg-red-100 text-red-700 border border-red-200 gap-1 w-fit">
+                            <AlertTriangle className="w-3 h-3" />
+                            Atrasada: {dataEntrega}
+                        </Badge>
+                    );
+                } else {
+                    badges.push(
+                        <Badge key="ent_pendente" className="bg-amber-100 text-amber-700 border border-amber-200 gap-1 w-fit">
+                            <Truck className="w-3 h-3" />
+                            Entrega: {dataEntrega || 'A Agendar'}
+                        </Badge>
+                    );
+                }
             }
         }
     }
