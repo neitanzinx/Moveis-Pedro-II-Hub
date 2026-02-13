@@ -43,39 +43,15 @@ process.on('unhandledRejection', (reason, promise) => {
     // 🛡️ Tratamento específico para o erro de "Browser already running" (Sessão travada)
     if (msg.includes('browser is already running') || msg.includes('EBUSY') || msg.includes('EPERM')) {
         console.warn('⚠️ BLOQUEIO DE SESSÃO DETECTADO (Unhandled Rejection):', msg);
-        console.log('🔄 Iniciando protocolo de recuperação de emergência...');
-
-        try {
-            if (typeof whatsapp !== 'undefined' && typeof currentClientId !== 'undefined') {
-                // Forçar rotação de ID
-                currentClientId = `client-v2-${Date.now()}`;
-                console.log(`🆔 Novo ID gerado na emergência: ${currentClientId}`);
-
-                // Reiniciar
-                whatsapp.isInitializing = false;
-                setTimeout(() => whatsapp.initialize(), 2500);
-            } else {
-                console.error('❌ Não foi possível acessar o objeto whatsapp para recuperação. Reiniciando processo...');
-                process.exit(1);
-            }
-        } catch (e) {
-            console.error('❌ Erro fatal na recuperação:', e);
-            process.exit(1);
-        }
+        whatsapp.reconnect('session_locked_unhandled');
         return;
     }
 
     // Auth timeout é esperado quando a sessão WhatsApp expira — não é crítico
-    // Auth timeout é esperado quando a sessão WhatsApp expira — não é crítico
-    if (msg.includes('auth timeout') ||
-        msg.includes('Navigation timeout') ||
-        msg.includes('Protocol error') ||
-        msg.includes('LifecycleWatcher disposed') ||
-        msg.includes('Target closed')
-    ) {
+    if (msg.includes('auth timeout') || msg.includes('Navigation timeout') || msg.includes('Protocol error') ||
+        msg.includes('LifecycleWatcher disposed') || msg.includes('Target closed')) {
         console.warn('⚠️ WhatsApp auth/retry warning (não crítico):', msg);
-        // Tentar reconexão suave se possível
-        try { if (typeof whatsapp !== 'undefined') whatsapp.reconnect(`unhandled: ${msg}`); } catch (e) { }
+        whatsapp.reconnect(`unhandled: ${msg.substring(0, 30)}`);
     } else {
         console.error('🔥 CRITICAL ERROR (Unhandled Rejection):', reason);
     }
@@ -261,7 +237,6 @@ attachClientEvents(client);
 
 // --- WhatsApp Manager ---
 const whatsapp = {
-    isReconnecting: false,
     isInitializing: false,
     reconnectAttempts: 0,
     maxReconnectAttempts: 5,
@@ -286,11 +261,9 @@ const whatsapp = {
         const isWindows = process.platform === "win32";
 
         if (isWindows) {
-            // WINDOWS: Usar taskkill reforçado
-            try { execSync('taskkill /F /IM chrome.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { /* ok */ }
-            try { execSync('taskkill /F /IM chromium.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { /* ok */ }
+            try { execSync('taskkill /F /IM chrome.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { }
+            try { execSync('taskkill /F /IM chromium.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { }
         } else {
-            // LINUX/MAC: Usar killall/pkill
             const killCmds = [
                 'killall -9 google-chrome-stable',
                 'killall -9 chrome',
@@ -299,251 +272,110 @@ const whatsapp = {
                 'pkill -9 -f "chrome-linux64/chrome"'
             ];
             for (const cmd of killCmds) {
-                try { execSync(`${cmd} 2>/dev/null`, { stdio: 'ignore' }); } catch (e) { /* ok */ }
+                try { execSync(`${cmd} 2>/dev/null`, { stdio: 'ignore' }); } catch (e) { }
             }
         }
 
-        // 3) Esperar 
         try {
             const sleepCmd = isWindows ? 'timeout /t 2 /nobreak >NUL' : 'sleep 2';
             execSync(sleepCmd, { stdio: 'ignore' });
-        } catch (e) { /* ok */ }
+        } catch (e) { }
 
-        // 4) Limpar lock files / Sessão (usando os.tmpdir para consistência)
         const basePath = path.join(process.cwd(), '.wwebjs_auth');
         const sessionDir = path.join(basePath, `session-${currentClientId}`);
 
-        // 🚀 AGGRESSIVE CLEAN: Deletar arquivo de trava E SE NECESSÁRIO A SESSÃO INTEIRA
-        const lockFiles = ['SingletonLock', 'Lock', 'SingletonCookie'];
-        let sessionCorrupted = false;
-
-        lockFiles.forEach(f => {
-            const lockPath = path.join(sessionDir, f);
-            try {
-                if (fs.existsSync(lockPath)) {
-                    console.log(`🧹 [CLEAN] Arquivo de trava detectado: ${f}`);
-                    sessionCorrupted = true;
-                }
-            } catch (e) { /* ignore */ }
-        });
-
-        // Se encontrou travas, pode ser melhor limpar a sessão inteira para garantir (Opcional: Pode ser configurado via ENV)
-        if (sessionCorrupted || deleteSession) {
-            console.log(`🧹 [CLEAN] Sessão corrompida ou solicitação de limpeza excecutada. Removendo: ${sessionDir}`);
-            removeFolder(sessionDir);
-        } else {
-            // Tenta remover apenas os locks se não for deletar tudo (backup strategy)
-            lockFiles.forEach(f => {
-                const lockPath = path.join(sessionDir, f);
-                try { if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath); } catch (e) { }
-            });
-        }
-
-        const removeFolder = (dir) => {
-            let deleted = false;
-            for (let i = 0; i < 3; i++) { // Reduzido para 3 tentativas
-                try {
-                    if (fs.existsSync(dir)) {
-                        fs.rmSync(dir, { recursive: true, force: true });
-                    }
-                    deleted = true;
-                    break;
-                } catch (e) {
-                    console.warn(`⏳ [CLEAN] Tentativa ${i + 1}/3 falhou (${e.message}).`);
-                    try { execSync(isWindows ? 'timeout /t 1 /nobreak >NUL' : 'sleep 1', { stdio: 'ignore' }); } catch (s) { }
-                }
-            }
-            return deleted;
-        };
-
         if (deleteSession) {
-            console.log(`🧹 [CLEAN] Tentando remover pasta: ${sessionDir}`);
-            if (removeFolder(sessionDir)) {
-                console.log('🧹 [CLEAN] Pasta de sessão REMOVIDA (QR será necessário)');
-            } else {
-                console.error('❌ [CLEAN] Falha ao remover pasta de sessão. Ignorando...');
-                // Não retorna erro fatal, pois vamos criar nova ID se falhar o init
-            }
-        } else {
-            // Modo suave: remover apenas locks
-            if (fs.existsSync(sessionDir)) {
-                const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
-                lockFiles.forEach(f => {
-                    try { fs.rmSync(path.join(sessionDir, f), { force: true }); } catch (e) { }
-                });
-                console.log('🧹 [CLEAN] Lock files verificados (sessão preservada)');
-            }
+            console.log(`🧹 [CLEAN] Removendo pasta da sessão: ${sessionDir}`);
+            try { if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) { }
+        } else if (fs.existsSync(sessionDir)) {
+            const lockFiles = ['SingletonLock', 'Lock', 'SingletonCookie', 'SingletonSocket'];
+            lockFiles.forEach(f => {
+                try { fs.rmSync(path.join(sessionDir, f), { force: true }); } catch (e) { }
+            });
+            console.log('🧹 [CLEAN] Lock files verificados');
         }
 
         console.log('✅ [CLEAN] Limpeza concluída');
     },
 
-    // 🔄 Cria novo Client e registra os event handlers
-    recreateClient() {
-        console.log(`🔄 [CLIENT] Criando novo Client (${currentClientId})...`);
-        client = createWhatsAppClient(currentClientId);
-        attachClientEvents(client);
-        return client;
-    },
-
-    // 🚀 Inicialização — fire-and-forget com timeout safety
-    async initialize() {
+    // 🚀 ÚNICA FUNÇÃO DE INICIALIZAÇÃO
+    async initialize(options = { deleteSession: false, rotateId: false }) {
         if (this.isInitializing) {
-            console.log('⏳ [INIT] Já em andamento.');
+            console.log('⏳ [INIT] Já em andamento, ignorando chamada duplicada.');
             return false;
         }
+
         this.isInitializing = true;
-        this.startedAt = Date.now();
-
-        // Limpeza inicial
-        this.cleanChrome(false);
-        this.recreateClient();
-
-        connectionStatus = 'initializing';
-
-        console.log('📱 [INIT] Iniciando WhatsApp...');
-
-        // Fire-and-forget: client.initialize() roda em background
-        // Os EVENTOS (qr, ready, authenticated) vão atualizar o status
-        client.initialize().then(() => {
-            console.log('✅ [INIT] client.initialize() resolveu com sucesso');
-            this.isInitializing = false;
-            this.startWatchdog();
-        }).catch(async (err) => {
-            console.error('❌ [INIT] client.initialize() falhou:', err.message);
-
-            // Destruir client atual
-            try { await client.destroy(); } catch (e) { /* ok */ }
-
-            // ⚠️ ESTRATÉGIA ANTI-LOCK: Se o erro for de "browser already running", trocamos o ID da sessão!
-            if (err.message && (err.message.includes('browser is already running') || err.message.includes('EBUSY') || err.message.includes('EPERM'))) {
-                console.warn('⚠️ DETECTADO BLOQUEIO DE SESSÃO! Checkmate: Criando nova ID de sessão para contornar o lock.');
-
-                // Rotacionar ID
-                currentClientId = `client-v2-${Date.now()}`;
-                console.log(`🆔 Nova Session ID: ${currentClientId}`);
-
-                // Forçar recreação com novo ID
-                this.isInitializing = false; // Reset para permitir nova chamada
-                // Pequeno delay para OS processar
-                setTimeout(() => this.initialize(), 2000);
-                return;
-            }
-
-            if (connectionStatus === 'initializing') {
-                connectionStatus = 'disconnected';
-                this.disconnectedSince = Date.now();
-            }
-
-            this.isInitializing = false;
-
-            // Retry automático padrão (apenas se não foi resolvido pelo estratégia acima)
-            if (this.reconnectAttempts < 2) {
-                console.log('🔄 [INIT] Retry padrão em 10s...');
-                setTimeout(() => {
-                    this.reconnectAttempts++;
-                    this.initialize();
-                }, 10000);
-            }
-        });
-
-        // Safety timeout
-        setTimeout(() => {
-            if (connectionStatus === 'initializing') {
-                console.warn('⚠️ [INIT] Safety timeout: 2min sem resposta.');
-                connectionStatus = 'disconnected';
-                this.isInitializing = false;
-            }
-        }, 120000);
-
-        return true;
-    },
-
-    // 🔄 Reconexão robusta com backoff exponencial
-    async reconnect(reason = 'unknown') {
-        if (this.isReconnecting || this.isInitializing) {
-            console.log(`⏳ [RECONNECT] Bloqueado (init=${this.isInitializing}, reconn=${this.isReconnecting})`);
-            return;
-        }
-
-        this.isReconnecting = true;
-
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error(`⛔ [RECONNECT] Máximo de ${this.maxReconnectAttempts} tentativas.`);
-            connectionStatus = 'disconnected';
-            this.isReconnecting = false;
-            return;
-        }
-
-        this.reconnectAttempts++;
-        this.reconnectCount++;
-        const delay = this.getBackoffDelay();
-
-        console.log(`🔄 [RECONNECT] #${this.reconnectAttempts} (${reason}) em ${delay / 1000}s...`);
-        await new Promise(r => setTimeout(r, delay));
-
-        this.cleanChrome(false);
-        this.recreateClient();
+        this.startedAt = this.startedAt || Date.now();
         connectionStatus = 'initializing';
 
         try {
+            console.log(`📱 [INIT] Iniciando WhatsApp (Session: ${currentClientId})...`);
+
+            // 1. Destruir client antigo se existir
+            if (client) {
+                console.log('🔄 [INIT] Destruindo client antigo...');
+                try { await client.destroy(); } catch (e) { }
+                client = null;
+            }
+
+            // 2. Rotacionar ID se necessário (Emergency Checkmate)
+            if (options.rotateId) {
+                currentClientId = `client-v2-${Date.now()}`;
+                console.log(`🆔 [INIT] Novo Session ID gerado: ${currentClientId}`);
+            }
+
+            // 3. Limpeza de processos e locks
+            this.cleanChrome(options.deleteSession);
+
+            // 4. Criar e preparar novo client
+            client = createWhatsAppClient(currentClientId);
+            attachClientEvents(client);
+
+            // 5. Lançar inicialização
             await client.initialize();
-            console.log('✅ [RECONNECT] Sucesso!');
+            console.log('✅ [INIT] client.initialize() concluído.');
+
             this.reconnectAttempts = 0;
-            this.disconnectedSince = null;
-            this.isReconnecting = false;
-        } catch (e) {
-            console.error(`❌ [RECONNECT] Falha:`, e.message);
-            try { await client.destroy(); } catch (e2) { /* ok */ }
+            this.isInitializing = false;
+            this.startWatchdog();
+            return true;
 
-            if (connectionStatus === 'initializing') {
-                connectionStatus = 'disconnected';
+        } catch (err) {
+            console.error('❌ [INIT] Erro fatal:', err.message);
+            this.isInitializing = false;
+
+            // Se o erro for de trava de arquivo, tenta novamente rotacionando o ID
+            if (err.message.includes('browser is already running') || err.message.includes('EBUSY')) {
+                console.warn('⚠️ [INIT] Sessão travada. Tentando escape com novo ID...');
+                return setTimeout(() => this.initialize({ rotateId: true }), 3000);
             }
-            this.isReconnecting = false;
 
+            // Retry com backoff
             if (this.reconnectAttempts < this.maxReconnectAttempts) {
-                this.reconnect('retry');
+                this.reconnectAttempts++;
+                const delay = this.getBackoffDelay();
+                console.log(`🔄 [INIT] Falha. Tentativa #${this.reconnectAttempts} em ${delay / 1000}s...`);
+                setTimeout(() => this.initialize(), delay);
+            } else {
+                connectionStatus = 'disconnected';
+                this.disconnectedSince = Date.now();
             }
+            return false;
         }
     },
 
-    // 🔧 Reconexão manual forçada (via /whatsapp/reconnect)
-    async forceReconnect() {
-        if (this.isInitializing) {
-            return { blocked: true, reason: 'Inicialização em andamento' };
-        }
+    // 🔄 Reconexão (Unificada)
+    async reconnect(reason = 'unknown') {
+        console.log(`🔄 [RECONNECT] Solicitado por: ${reason}`);
+        return this.initialize({ deleteSession: false });
+    },
 
-        console.log('🔧 [FORCE] Reconexão manual...');
+    // 🔧 Reconexão manual (Pela interface)
+    async forceReconnect(deleteSession = false) {
+        console.log(`🔧 [FORCE] Reconexão manual acionada (Nuclear: ${deleteSession})`);
         this.reconnectAttempts = 0;
-        this.isReconnecting = false;
-        this.watchdogFailures = 0;
-        this.isInitializing = true;
-
-        try { await client.destroy(); } catch (e) { /* ok */ }
-        this.cleanChrome(true); // Nuclear na reconexão manual
-        this.recreateClient();
-
-        connectionStatus = 'initializing';
-        currentQR = null;
-        connectionInfo = null;
-
-        // Fire-and-forget (eventos vão atualizar o status)
-        client.initialize().then(() => {
-            console.log('✅ [FORCE] Sucesso!');
-            this.disconnectedSince = null;
-            this.isInitializing = false;
-        }).catch((e) => {
-            console.error('❌ [FORCE] Falha:', e);
-            this.startWatchdog();
-            if (connectionStatus === 'initializing') {
-                connectionStatus = 'disconnected';
-            }
-            this.disconnectedSince = Date.now();
-            this.isInitializing = false;
-        });
-
-        // Retorna imediato — frontend vai pollar status
-        return { blocked: false, success: true, message: 'Inicialização disparada' };
+        return this.initialize({ deleteSession: deleteSession });
     },
 
     // 🫀 Watchdog
@@ -554,25 +386,18 @@ const whatsapp = {
         const MAX_FAILURES = 3;
 
         this.watchdogInterval = setInterval(async () => {
-            if (this.isReconnecting || this.isInitializing || connectionStatus === 'initializing' || connectionStatus === 'waiting_qr') {
-                return;
-            }
+            if (this.isInitializing || connectionStatus === 'initializing' || connectionStatus === 'waiting_qr') return;
 
             try {
                 const state = await Promise.race([
-                    client.getState(),
+                    client?.getState(),
                     new Promise((_, reject) => setTimeout(() => reject(new Error('watchdog timeout')), 15000))
                 ]);
 
                 if (state === 'CONNECTED') {
                     this.watchdogFailures = 0;
                     this.lastHeartbeat = new Date().toISOString();
-                    if (connectionStatus !== 'connected') {
-                        connectionStatus = 'connected';
-                        this.disconnectedSince = null;
-                    }
                 } else {
-                    console.warn(`⚠️ [Watchdog] Estado: ${state}`);
                     this.watchdogFailures++;
                 }
             } catch (e) {
@@ -580,23 +405,16 @@ const whatsapp = {
                 console.warn(`⚠️ [Watchdog] Falha #${this.watchdogFailures}: ${e.message}`);
             }
 
-            if (this.watchdogFailures >= MAX_FAILURES && !this.isReconnecting) {
-                console.error(`🚨 [Watchdog] ${MAX_FAILURES} falhas! Reconectando...`);
+            if (this.watchdogFailures >= MAX_FAILURES) {
+                console.error(`🚨 [Watchdog] ${MAX_FAILURES} falhas! Reiniciando...`);
                 this.watchdogFailures = 0;
-                connectionStatus = 'disconnected';
-                this.disconnectedSince = this.disconnectedSince || Date.now();
-                this.reconnect('watchdog');
+                this.reconnect('watchdog_failures');
             }
         }, WATCHDOG_INTERVAL);
-
-        console.log('🫀 Watchdog iniciado (a cada 5 min)');
     },
 
     stopWatchdog() {
-        if (this.watchdogInterval) {
-            clearInterval(this.watchdogInterval);
-            console.log('🛑 Watchdog parado');
-        }
+        if (this.watchdogInterval) clearInterval(this.watchdogInterval);
     },
 
     getHealthData() {
@@ -831,17 +649,30 @@ app.post('/whatsapp/ai-settings', async (req, res) => {
 
 // --- ROTA PARA FORÇAR RECONEXÃO ---
 app.post('/whatsapp/reconnect', async (req, res) => {
-    // Se init já está rodando, informar imediatamente
-    if (whatsapp.isInitializing) {
-        return res.status(409).json({
-            success: false,
-            message: 'Inicialização já em andamento. Aguarde.'
+    // Se já estiver conectado, não faz sentido reiniciar tudo
+    if (connectionStatus === 'connected') {
+        return res.json({
+            success: true,
+            message: 'O robô já está conectado e operante.',
+            state: 'connected'
         });
     }
+
+    // Se init já está rodando, informar amigavelmente (evita erro 409 no front)
+    if (whatsapp.isInitializing) {
+        return res.json({
+            success: true,
+            message: 'A inicialização já está em andamento. Por favor, aguarde alguns segundos.',
+            state: 'initializing'
+        });
+    }
+
     // Responde imediatamente — o reconnect roda em background
-    res.json({ success: true, message: 'Reconexão iniciada em background' });
+    res.json({ success: true, message: 'Protocolo de reconexão iniciado.' });
+
     // Executa em background (não bloqueia a response)
-    whatsapp.forceReconnect().catch(e => {
+    // Mudamos para cleanSession=false para tentar reaproveitar a sessão antes de apagar tudo
+    whatsapp.forceReconnect(false).catch(e => {
         console.error('❌ Erro na reconexão forçada:', e.message);
     });
 });
