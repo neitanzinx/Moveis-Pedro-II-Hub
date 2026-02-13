@@ -113,8 +113,8 @@ function createWhatsAppClient(clientId = "client-v2") {
     const isWindows = process.platform === "win32";
 
     // USAR PASTA LOCAL EM PRODUÇÃO (Para persistir via Docker Volumes)
-    // Local: ./.wwebjs_auth
-    const basePath = isWindows ? path.join(process.cwd(), '.wwebjs_auth') : '/app/.wwebjs_auth';
+    // Local: ./.wwebjs_auth (Relativo ao WORKDIR /usr/src/app)
+    const basePath = path.join(process.cwd(), '.wwebjs_auth');
 
     // Cria diretório base se não existir
     try {
@@ -125,16 +125,7 @@ function createWhatsAppClient(clientId = "client-v2") {
 
     const puppeteer = require('puppeteer');
 
-    // Localizar executável do Chrome (Docker vs Local)
-    let executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-    if (!isWindows && !executablePath) {
-        if (fs.existsSync('/usr/bin/google-chrome-stable')) executablePath = '/usr/bin/google-chrome-stable';
-        else if (fs.existsSync('/usr/bin/google-chrome')) executablePath = '/usr/bin/google-chrome';
-        else if (fs.existsSync('/usr/bin/chromium')) executablePath = '/usr/bin/chromium';
-    }
-
     console.log(`🔧 [FACTORY] Client ID: ${clientId} | Path: ${sessionPath}`);
-    if (executablePath) console.log(`🚀 [FACTORY] Usando Chrome em: ${executablePath}`);
 
     return new Client({
         authStrategy: new LocalAuth({
@@ -143,39 +134,8 @@ function createWhatsAppClient(clientId = "client-v2") {
         }),
         authTimeoutMs: 60000,
         puppeteer: {
-            headless: "new", // Usa o novo modo headless do Chrome (mais estável)
-            executablePath: executablePath || puppeteer.executablePath(),
-            protocolTimeout: 360000, // Timeout bem longo para VPS lenta
-            dumpio: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage', // CRUCIAL para Docker
-                '--disable-gpu',
-                '--disable-extensions',
-                '--disable-component-extensions-with-background-pages',
-                '--disable-default-apps',
-                '--mute-audio',
-                '--no-default-browser-check',
-                '--autoplay-policy=user-gesture-required',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-notifications',
-                '--disable-popup-blocking',
-                '--disable-print-preview',
-                '--disable-prompt-on-repost',
-                '--disable-renderer-backgrounding',
-                '--disable-speech-api',
-                // Flags de estabilidade
-                '--disable-features=IsolateOrigins,site-per-process',
-                '--disable-site-isolation-trials',
-                '--ignore-certificate-errors',
-                '--ignore-ssl-errors'
-            ],
-            timeout: 180000,
-            handleSIGINT: false,
-            handleSIGTERM: false,
-            handleSIGHUP: false
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         },
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     });
@@ -345,7 +305,7 @@ const whatsapp = {
         } catch (e) { /* ok */ }
 
         // 4) Limpar lock files / Sessão (usando os.tmpdir para consistência)
-        const basePath = isWindows ? path.join(process.cwd(), '.wwebjs_auth') : '/app/.wwebjs_auth';
+        const basePath = path.join(process.cwd(), '.wwebjs_auth');
         const sessionDir = path.join(basePath, `session-${currentClientId}`);
 
         // 🚀 AGGRESSIVE CLEAN: Deletar arquivo de trava E SE NECESSÁRIO A SESSÃO INTEIRA

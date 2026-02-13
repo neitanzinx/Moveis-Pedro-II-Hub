@@ -14,7 +14,8 @@ services:
       - .wwebjs_cache:/usr/src/app/.wwebjs_cache # Persistir cache
     # Healthcheck para garantir que o container está saudável
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/status"]
-      interval: 1m30s
-      timeout: 10s
-      retries: 3
+      test: [ "CMD", "curl", "-f", "http://localhost:3001/status" ]
+      interval: 2m
+      timeout: 15s
+      retries: 5
+      start_period: 3m
