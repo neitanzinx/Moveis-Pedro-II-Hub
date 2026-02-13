@@ -22,8 +22,21 @@ export default function MapaFrota({ caminhoes = [] }) {
         return `Há ${Math.floor(diffMin / 60)}h`;
     };
 
-    const caminhoesEmTransito = caminhoes.filter(c => c.status_rota === 'Em Trânsito');
-    const caminhoesParados = caminhoes.filter(c => c.status_rota !== 'Em Trânsito');
+    const agora = new Date();
+    const LIMITE_ATIVO_MS = 12 * 60 * 60 * 1000; // 12 horas
+
+    const caminhoesAtivosRecentemente = caminhoes.filter(c => {
+        if (!c.ultima_atualizacao) return false;
+        const ultima = new Date(c.ultima_atualizacao);
+        return (agora - ultima) < LIMITE_ATIVO_MS;
+    });
+
+    const caminhoesEmTransito = caminhoesAtivosRecentemente.filter(c => c.status_rota === 'Em Trânsito');
+    const caminhoesParados = caminhoes.filter(c => {
+        const isEmTransito = c.status_rota === 'Em Trânsito';
+        const isRecente = c.ultima_atualizacao && (agora - new Date(c.ultima_atualizacao)) < LIMITE_ATIVO_MS;
+        return !isEmTransito || !isRecente;
+    });
 
     const getMapsEmbedUrl = (lat, lng) => {
         return `https://maps.google.com/maps?q=${lat},${lng}&t=m&z=15&output=embed`;
@@ -181,8 +194,8 @@ export default function MapaFrota({ caminhoes = [] }) {
                                 <div
                                     key={caminhao.id}
                                     className={`rounded-xl border overflow-hidden ${emTransito
-                                            ? 'bg-green-50 border-green-200'
-                                            : 'bg-gray-50 border-gray-200'
+                                        ? 'bg-green-50 border-green-200'
+                                        : 'bg-gray-50 border-gray-200'
                                         }`}
                                 >
                                     <div className="p-3">

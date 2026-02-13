@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck, ClipboardList, Info, CalendarX, Settings, ArrowRightLeft } from "lucide-react";
+import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck, ClipboardList, Info, CalendarX, Settings, ArrowRightLeft, Unlock } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -29,6 +29,24 @@ export default function Vendas() {
     const [nfeModalOpen, setNfeModalOpen] = useState(false);
     const [vendaParaNfe, setVendaParaNfe] = useState(null);
     const [clienteParaNfe, setClienteParaNfe] = useState(null);
+
+    const liberarEntregaMutation = useMutation({
+        mutationFn: (id) => base44.entities.Entrega.update(id, {
+            status: 'Pendente',
+            data_agendada: null,
+            turno: null,
+            observacoes: "Entrega liberada pelo vendedor/cliente."
+        }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['entregas'] });
+            toast.success("Entrega liberada! O pedido voltou para a triagem da logística.");
+        },
+        onError: () => {
+            toast.error("Erro ao liberar entrega.");
+        }
+    });
+
+    // Filtros e Ordenação
     // Estados para reagendamento
     const [modalReagendamento, setModalReagendamento] = useState(null); // { vendaId, entregaId, dataAgendada, turno }
     const [motivoReagendamento, setMotivoReagendamento] = useState("");
@@ -510,6 +528,36 @@ export default function Vendas() {
                                                                     title="Solicitar Reagendamento (Cliente não pode receber)"
                                                                 >
                                                                     <CalendarX className="w-4 h-4 text-red-500" />
+                                                                </Button>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    })()}
+
+                                                    {/* Botão de Liberar Entrega (Vendedor libera se estiver aguardando) */}
+                                                    {(() => {
+                                                        const entregaAguardando = (entregas || []).find(e =>
+                                                            e.numero_pedido === venda.numero_pedido &&
+                                                            e.status === 'Aguardando Liberação'
+                                                        );
+
+                                                        // Apenas o vendedor da venda ou admin pode liberar
+                                                        const podeLiberar = user?.cargo === 'Administrador' || venda.responsavel_id === user?.id;
+
+                                                        if (entregaAguardando && podeLiberar) {
+                                                            return (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={() => {
+                                                                        if (confirm(`Liberar entrega do pedido #${venda.numero_pedido}? Ele voltará para a Triagem da logística.`)) {
+                                                                            liberarEntregaMutation.mutate(entregaAguardando.id);
+                                                                        }
+                                                                    }}
+                                                                    disabled={liberarEntregaMutation.isPending}
+                                                                    title="Liberar para Entrega"
+                                                                >
+                                                                    <Unlock className="w-4 h-4 text-amber-600" />
                                                                 </Button>
                                                             );
                                                         }

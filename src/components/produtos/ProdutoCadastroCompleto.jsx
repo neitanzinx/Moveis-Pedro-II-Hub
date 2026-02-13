@@ -47,7 +47,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
-import { CATEGORIAS, AMBIENTES, MATERIAIS, TIPOS_ENTREGA } from '@/constants/productConstants';
+import { CATEGORIAS, AMBIENTES, MATERIAIS, TIPOS_ENTREGA, CAMPOS_ESTOQUE_LOJA } from '@/constants/productConstants';
 import {
     normalizeProductName,
     normalizeColor,
@@ -108,9 +108,10 @@ const INITIAL_FORM_DATA = {
     cor_hex: '',
     // Estoque
     estoque_cd: '',
-    estoque_loja_centro: '',
-    estoque_loja_carangola: '',
-    estoque_loja_ponte_branca: '',
+    estoque_mostruario_centro: '',
+    estoque_mostruario_mega_store: '',
+    estoque_mostruario_ponte_branca: '',
+    estoque_mostruario_futura: '',
     quantidade_estoque: '', // Será a soma
     estoque_minimo: '5',
     estoque_ideal: '10',
@@ -170,9 +171,10 @@ export default function ProdutoCadastroCompleto({
                 preco_venda: produto.preco_venda?.toString() || '',
                 // Estoque
                 estoque_cd: produto.estoque_cd?.toString() || '',
-                estoque_loja_centro: produto.estoque_loja_centro?.toString() || '',
-                estoque_loja_carangola: produto.estoque_loja_carangola?.toString() || '',
-                estoque_loja_ponte_branca: produto.estoque_loja_ponte_branca?.toString() || '',
+                estoque_mostruario_centro: produto.estoque_mostruario_centro?.toString() || '',
+                estoque_mostruario_mega_store: produto.estoque_mostruario_mega_store?.toString() || '',
+                estoque_mostruario_ponte_branca: produto.estoque_mostruario_ponte_branca?.toString() || '',
+                estoque_mostruario_futura: produto.estoque_mostruario_futura?.toString() || '',
                 quantidade_estoque: produto.quantidade_estoque?.toString() || '',
                 estoque_minimo: produto.estoque_minimo?.toString() || '5',
                 largura: produto.largura?.toString() || '',
@@ -345,10 +347,11 @@ export default function ProdutoCadastroCompleto({
 
         // Calcula estoque total das lojas
         let estoqueCd = parseInt(formData.estoque_cd) || 0;
-        let estoqueCentro = parseInt(formData.estoque_loja_centro) || 0;
-        let estoqueCarangola = parseInt(formData.estoque_loja_carangola) || 0;
-        let estoquePonteBranca = parseInt(formData.estoque_loja_ponte_branca) || 0;
-        let estoqueTotal = estoqueCd + estoqueCentro + estoqueCarangola + estoquePonteBranca;
+        let estoqueCentro = parseInt(formData.estoque_mostruario_centro) || 0;
+        let estoquePonteBranca = parseInt(formData.estoque_mostruario_ponte_branca) || 0;
+        let estoqueMega = parseInt(formData.estoque_mostruario_mega_store) || 0;
+        let estoqueFutura = parseInt(formData.estoque_mostruario_futura) || 0;
+        let estoqueTotal = estoqueCd + estoqueCentro + estoquePonteBranca + estoqueMega + estoqueFutura;
 
         let precoVenda = parseFloat(formData.preco_venda) || 0;
         let precoCusto = parseFloat(formData.preco_custo) || 0;
@@ -385,9 +388,10 @@ export default function ProdutoCadastroCompleto({
             preco_venda: precoVenda,
             quantidade_estoque: estoqueTotal,
             estoque_cd: estoqueCd,
-            estoque_loja_centro: estoqueCentro,
-            estoque_loja_carangola: estoqueCarangola,
-            estoque_loja_ponte_branca: estoquePonteBranca,
+            estoque_mostruario_centro: estoqueCentro,
+            estoque_mostruario_ponte_branca: estoquePonteBranca,
+            estoque_mostruario_mega_store: estoqueMega,
+            estoque_mostruario_futura: estoqueFutura,
             estoque_minimo: parseInt(formData.estoque_minimo) || 5,
             estoque_ideal: parseInt(formData.estoque_ideal) || 10,
             cor: formData.cor || null,
@@ -854,9 +858,10 @@ export default function ProdutoCadastroCompleto({
                                                     <Badge variant="outline" className="bg-green-50">
                                                         Total: {
                                                             (parseInt(formData.estoque_cd) || 0) +
-                                                            (parseInt(formData.estoque_loja_centro) || 0) +
-                                                            (parseInt(formData.estoque_loja_carangola) || 0) +
-                                                            (parseInt(formData.estoque_loja_ponte_branca) || 0)
+                                                            (parseInt(formData.estoque_mostruario_centro) || 0) +
+                                                            (parseInt(formData.estoque_mostruario_ponte_branca) || 0) +
+                                                            (parseInt(formData.estoque_mostruario_mega_store) || 0) +
+                                                            (parseInt(formData.estoque_mostruario_futura) || 0)
                                                         }
                                                     </Badge>
                                                 </div>
@@ -871,33 +876,29 @@ export default function ProdutoCadastroCompleto({
                                                             placeholder="0"
                                                         />
                                                     </div>
-                                                    <div>
-                                                        <Label className="text-xs text-gray-500">Loja Centro</Label>
-                                                        <Input
-                                                            type="number"
-                                                            value={formData.estoque_loja_centro}
-                                                            onChange={(e) => handleChange('estoque_loja_centro', e.target.value)}
-                                                            placeholder="0"
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <Label className="text-xs text-gray-500">Loja Carangola</Label>
-                                                        <Input
-                                                            type="number"
-                                                            value={formData.estoque_loja_carangola}
-                                                            onChange={(e) => handleChange('estoque_loja_carangola', e.target.value)}
-                                                            placeholder="0"
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <Label className="text-xs text-gray-500">Loja Ponte Branca</Label>
-                                                        <Input
-                                                            type="number"
-                                                            value={formData.estoque_loja_ponte_branca}
-                                                            onChange={(e) => handleChange('estoque_loja_ponte_branca', e.target.value)}
-                                                            placeholder="0"
-                                                        />
-                                                    </div>
+
+                                                    {(lojas || []).map(loja => {
+                                                        const nomeNorm = loja.nome.toLowerCase();
+                                                        let field = null;
+                                                        if (nomeNorm.includes('centro')) field = 'estoque_mostruario_centro';
+                                                        else if (nomeNorm.includes('ponte branca') || nomeNorm.includes('ponte_branca')) field = 'estoque_mostruario_ponte_branca';
+                                                        else if (nomeNorm.includes('mega')) field = 'estoque_mostruario_mega_store';
+                                                        else if (nomeNorm.includes('futura')) field = 'estoque_mostruario_futura';
+
+                                                        if (!field) return null;
+
+                                                        return (
+                                                            <div key={loja.id}>
+                                                                <Label className="text-xs text-gray-500">{loja.nome}</Label>
+                                                                <Input
+                                                                    type="number"
+                                                                    value={formData[field]}
+                                                                    onChange={(e) => handleChange(field, e.target.value)}
+                                                                    placeholder="0"
+                                                                />
+                                                            </div>
+                                                        );
+                                                    })}
                                                 </div>
 
                                                 <div className="grid grid-cols-2 gap-3 pt-2">

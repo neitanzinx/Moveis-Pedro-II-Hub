@@ -197,7 +197,7 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
       </div>
 
       <div class="footer">
-        <div class="footer-text"><strong>Móveis Pedro II</strong> - Este documento não possui valor fiscal</div>
+        <div class="footer-text"><strong>Móveis Pedro II</strong></div>
         <div class="footer-text" style="margin-top:3px;font-size:8px;color:#999;">Emitido em ${new Date().toLocaleString('pt-BR')}</div>
       </div>
     </body>
