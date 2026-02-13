@@ -91,9 +91,9 @@ app.use(express.json({ limit: '10mb' }));
 // 🏗️ SERVE FRONTEND (Monolith Mode)
 // Serves static files from the React build folder
 // Works both locally (../dist) and in Docker (/app/dist)
-const distPath = process.env.NODE_ENV === 'production'
-    ? path.join(__dirname, 'dist')  // Docker: /app/dist
-    : path.join(__dirname, '../dist'); // Local: robo.../dist -> root/dist
+const distPath = fs.existsSync(path.join(__dirname, 'dist'))
+    ? path.join(__dirname, 'dist')
+    : path.join(__dirname, '../dist');
 app.use(express.static(distPath));
 
 // const genAI = new GoogleGenerativeAI(GEMINI_KEY); // Movido para dentro da rota
@@ -1664,11 +1664,10 @@ app.use((req, res, next) => {
         return next();
     }
     const indexPath = path.join(distPath, 'index.html');
-    const fs = require('fs');
     if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
     } else {
-        next(); // Fallback to error handler or 404
+        next();
     }
 });
 
