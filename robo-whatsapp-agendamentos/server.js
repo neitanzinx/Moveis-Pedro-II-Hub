@@ -84,7 +84,7 @@ app.use(express.static(distPath));
 // após destroy(). O Puppeteer interno mantém referências ao browser antigo.
 // 🏭 FACTORY: Cria Client NOVO a cada tentativa.
 // 🏭 FACTORY: Cria Client NOVO a cada tentativa.
-function createWhatsAppClient(clientId = "client-v2") {
+function createWhatsAppClient(clientId = "client-main") {
     // 🛡️ Caminhos absolutos e adaptativos (Windows/Linux)
     const isWindows = process.platform === "win32";
 
@@ -130,7 +130,7 @@ let connectionInfo = null;
 
 // --- Client WhatsApp (LET porque precisa ser recriado) ---
 // Estado global para guardar o ID atual (permite rotação em caso de erro)
-let currentClientId = "client-v5"; // Bump para v5 (Fresh Start)
+let currentClientId = "client-main";
 let client = createWhatsAppClient(currentClientId);
 
 // 🔗 Registrar event handlers no client atual
@@ -321,7 +321,7 @@ const whatsapp = {
 
             // 2. Rotacionar ID se necessário (Emergency Checkmate)
             if (options.rotateId) {
-                currentClientId = `client-v2-${Date.now()}`;
+                currentClientId = "client-main";
                 console.log(`🆔 [INIT] Novo Session ID gerado: ${currentClientId}`);
             }
 
