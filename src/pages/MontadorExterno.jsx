@@ -31,6 +31,7 @@ export default function MontadorExterno() {
     // Filtro GLOBAL para montagens (se precisar)
     const { user } = useAuth();
     const [montador, setMontador] = useState(null);
+    const [montadorPendente, setMontadorPendente] = useState(null);
     const [activeTab, setActiveTab] = useState("disponiveis");
     const [selectedMontagem, setSelectedMontagem] = useState(null);
     const [agendamentoModal, setAgendamentoModal] = useState(false);
@@ -96,7 +97,7 @@ export default function MontadorExterno() {
             const todas = await base44.entities.MontagemItem.list('-data_agendada');
             // Admin vê todas terceirizadas, montador vê só as dele
             if (user?.cargo === 'Administrador' && !montador) {
-                return todas.filter(m => m.tipo_montagem === 'terceirizada');
+                return todas.filter(m => m.tipo_montagem === 'terceirizada' && m.montador_id === user?.id);
             }
             return todas.filter(m => m.montador_id === montador?.id);
         },
@@ -239,11 +240,11 @@ export default function MontadorExterno() {
                 id: montagem.id,
                 data: {
                     status: 'pendente',
-                    montador_id: null,
-                    montador_nome: null,
-                    montador_telefone: null,
-                    data_agendada: null,
-                    horario_agendado: null,
+                    montador_id: '',
+                    montador_nome: '',
+                    montador_telefone: '',
+                    data_agendada: '',
+                    horario_agendado: '',
                     cancelado_por: montador?.nome || 'Montador',
                     cancelado_em: new Date().toISOString()
                 }

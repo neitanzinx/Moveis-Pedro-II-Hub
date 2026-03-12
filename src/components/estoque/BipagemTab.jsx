@@ -37,7 +37,7 @@ const playSound = (type) => {
     }
 };
 
-export default function EstoqueBipagem() {
+export default function BipagemTab() {
     const { user } = useAuth();
     const [scannedItems, setScannedItems] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -149,7 +149,7 @@ export default function EstoqueBipagem() {
     useScanListener(handleScan);
 
     return (
-        <div className="p-6 h-screen flex flex-col bg-slate-50">
+        <div className="flex flex-col">
             <h1 className="text-3xl font-bold mb-6 flex items-center gap-2 text-slate-800">
                 <Package className="h-8 w-8 text-primary" />
                 Bipagem de Estoque

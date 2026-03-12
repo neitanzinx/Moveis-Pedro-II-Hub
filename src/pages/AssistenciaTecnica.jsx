@@ -264,7 +264,8 @@ export default function AssistenciaTecnica() {
                     <Button
                         variant="outline"
                         onClick={() => {
-                            const link = `${window.location.origin}/assistencia/auto`;
+                            const origin = window.location.hostname === 'localhost' ? 'http://191.101.234.247' : window.location.origin;
+                            const link = `${origin}/assistencia/auto`;
                             navigator.clipboard.writeText(link);
                             toast.success("Link copiado para a área de transferência!");
                         }}

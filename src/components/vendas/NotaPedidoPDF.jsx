@@ -52,9 +52,10 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
     `${cliente.endereco}, ${cliente.numero || 's/n'}${cliente.complemento ? ` - ${cliente.complemento}` : ''}, ${cliente.bairro || ''}, ${cliente.cidade || ''} - ${cliente.estado || ''}` :
     'Endereço não cadastrado';
 
-  const prazoEntrega = venda.prazo_entrega === "15 dias" ? "15 dias úteis" :
-    venda.prazo_entrega === "45 dias" ? "45 dias úteis" :
-      venda.prazo_entrega === "Retirado na loja" ? "Retirada na loja" : venda.prazo_entrega;
+  const prazoEntrega = venda.prazo_entrega === "Retirado na loja" ? "Retirada na loja" :
+    venda.prazo_entrega === "15 dias" ? "15 dias úteis" :
+      venda.prazo_entrega === "45 dias" ? "45 dias úteis" :
+        (venda.prazo_entrega || '-');
 
   const nomeVendedor = vendedor || venda.responsavel_nome || '-';
 
@@ -165,7 +166,6 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
         </div>
         <div class="resumo-box">
           <div class="resumo-titulo">Valores</div>
-          ${venda.desconto > 0 ? `<div class="total-linha"><span>Desconto:</span><span style="color:#dc2626;">- R$ ${venda.desconto?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>` : ''}
           <div class="total-linha total-final"><span>TOTAL:</span><span>R$ ${venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>
         </div>
       </div>

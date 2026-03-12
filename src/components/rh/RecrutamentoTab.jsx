@@ -233,7 +233,7 @@ export default function RecrutamentoTab() {
                                         <div className="flex items-start justify-between mb-2">
                                             <div>
                                                 <p className="font-semibold" style={{ color: '#07593f' }}>{vaga.titulo}</p>
-                                                <p className="text-sm text-gray-500">{vaga.cargo} • {vaga.setor}</p>
+                                                <p className="text-sm text-gray-500">{vaga.cargo}</p>
                                             </div>
                                             <Badge style={getStatusBadgeStyle(vaga.status)}>{vaga.status}</Badge>
                                         </div>
@@ -417,7 +417,6 @@ function VagaModal({ vaga, onClose }) {
     const [formData, setFormData] = useState({
         titulo: vaga?.titulo || "",
         cargo: vaga?.cargo || "",
-        setor: vaga?.setor || "",
         quantidade_vagas: vaga?.quantidade_vagas || 1,
         status: vaga?.status || "Aberta",
         descricao: vaga?.descricao || "",
@@ -491,12 +490,6 @@ function VagaModal({ vaga, onClose }) {
                             />
                         </div>
                         <div>
-                            <Label>Setor</Label>
-                            <Input
-                                value={formData.setor}
-                                onChange={(e) => setFormData(prev => ({ ...prev, setor: e.target.value }))}
-                                placeholder="Ex: Vendas"
-                            />
                         </div>
                         <div>
                             <Label>Quantidade de Vagas</Label>

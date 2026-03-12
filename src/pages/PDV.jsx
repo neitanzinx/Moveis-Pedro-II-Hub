@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
+import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSidebar } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/useAuth";
@@ -12,11 +13,13 @@ import PainelPagamento from "../components/pdv/PainelPagamento";
 import { abrirNotaPedidoPDF, enviarWhatsApp, gerarNotaPedidoBase64, prepararNotaPedidoPDF, preencherEImprimirPDF } from "../components/vendas/NotaPedidoPDF";
 import { processarFidelidadeCompra } from "@/utils/fidelidadeEngine";
 import { ZAP_API_URL } from "@/utils/zapApiUrl";
+import { whatsappService } from "@/services/whatsappService";
+import ProdutoQuickEditModal from "@/components/produtos/ProdutoQuickEditModal";
 
 // Icons
 import {
   Calendar, Store, Truck, ArrowLeft, ArrowRight, ShoppingCart,
-  User, CreditCard, Check, Package, WifiOff, RefreshCw, Wifi
+  User, CreditCard, Check, Package, WifiOff, RefreshCw, Wifi, X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -25,6 +28,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
+import { adicionarDias } from "@/utils/dateUtils";
+
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -133,6 +138,24 @@ const criarLancamentosVenda = async (vendaData, taxas, vendaId) => {
       });
     }
 
+    // 2.b Lançamento de Acréscimo/Arredondamento (se desconto for negativo)
+    if (vendaData.desconto < 0) {
+      await base44.entities.LancamentoFinanceiro.create({
+        descricao: `Arredondamento Venda #${vendaData.numero_pedido}`,
+        valor: Math.abs(vendaData.desconto),
+        tipo: 'receita',
+        data_vencimento: hoje,
+        data_lancamento: hoje,
+        pago: vendaData.status === 'Pago',
+        categoria_nome: 'Vendas',
+        forma_pagamento: vendaData.pagamentos?.[0]?.forma_pagamento || 'Diversos',
+        status: vendaData.status === 'Pago' ? 'Pago' : 'Pendente',
+        observacao: 'Acréscimo de arredondamento no PDV',
+        venda_id: vendaId,
+        numero_pedido: vendaData.numero_pedido
+      });
+    }
+
     // 3. Lançamentos de Taxas de Cartão (para cada pagamento)
     for (const pagamento of vendaData.pagamentos || []) {
       const taxa = taxas.find(t => {
@@ -176,6 +199,27 @@ const criarLancamentosVenda = async (vendaData, taxas, vendaId) => {
   }
 };
 
+// Componente de checkbox personalizado para Restrições
+const RestricaoCheckbox = ({ checked, onCheckedChange, label }) => (
+  <div
+    className="flex items-center space-x-2 cursor-pointer select-none group"
+    onClick={() => onCheckedChange(!checked)}
+  >
+    <div className={`
+      w-5 h-5 rounded flex items-center justify-center border transition-all shrink-0
+      ${checked
+        ? 'bg-green-600 border-green-600 text-white'
+        : 'bg-white border-gray-300 text-gray-400 group-hover:border-red-400 group-hover:text-red-400'
+      }
+    `}>
+      {checked ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+    </div>
+    <span className="text-sm font-medium leading-none text-gray-700 dark:text-gray-300">
+      {label}
+    </span>
+  </div>
+);
+
 export default function PDV() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -189,6 +233,57 @@ export default function PDV() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [vendasPendentes, setVendasPendentes] = useState([]);
   const [syncing, setSyncing] = useState(false);
+  const [prazosConfig, setPrazosConfig] = useState([]);
+
+
+  useEffect(() => {
+    carregarVendasPendentes();
+    carregarPrazos();
+  }, []);
+
+  // --- Realtime para Solicitação de Preços ---
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('pdv-solicitacoes-preco')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'solicitacoes_preco',
+          filter: `vendedor_id=eq.${user.id}`
+        },
+        (payload) => {
+          const { new: novaSolicitacao } = payload;
+
+          if (novaSolicitacao.status === 'aprovado' || novaSolicitacao.status === 'rejeitado') {
+            setItens(prevItens => {
+              const newItens = [...prevItens];
+              const index = newItens.findIndex(item => item.solicitacao_preco_id === novaSolicitacao.id);
+
+              if (index !== -1) {
+                if (novaSolicitacao.status === 'aprovado') {
+                  newItens[index].preco_unitario = Number(novaSolicitacao.preco_sugerido);
+                  newItens[index].subtotal = Number(novaSolicitacao.preco_sugerido) * (newItens[index].quantidade || 1);
+                  toast.success(`Preço aprovado para ${newItens[index].produto_nome}!`);
+                } else if (novaSolicitacao.status === 'rejeitado') {
+                  toast.error(`Preço sugerido para ${newItens[index].produto_nome} foi rejeitado.`);
+                }
+                newItens[index].status_solicitacao_preco = novaSolicitacao.status;
+              }
+              return newItens;
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
 
   useEffect(() => {
     const handleStatusChange = () => {
@@ -199,9 +294,6 @@ export default function PDV() {
 
     window.addEventListener('online', handleStatusChange);
     window.addEventListener('offline', handleStatusChange);
-
-    // Checagem inicial
-    carregarVendasPendentes();
 
     return () => {
       window.removeEventListener('online', handleStatusChange);
@@ -214,9 +306,53 @@ export default function PDV() {
     setVendasPendentes(pendentes);
   };
 
+  const carregarPrazos = async () => {
+    try {
+      const { data, error } = await supabase.from('prazos_entrega').select('*');
+      if (error) throw error;
+      setPrazosConfig(data || []);
+    } catch (err) {
+      console.error('Erro ao carregar prazos:', err);
+    }
+  };
+
+
   // Carregar estado inicial
   const getInitialState = () => {
     try {
+      // 1. Tentar pegar estado de conversão de orçamento
+      const orcamentoSaved = sessionStorage.getItem('moveispedroii_pdv_state');
+      if (orcamentoSaved) {
+        const parsed = JSON.parse(orcamentoSaved);
+        // NÃO remover aqui — o componente pode re-montar (auth re-check)
+        // A remoção será feita no useEffect após montagem estável
+
+        return {
+          etapa: 1, // Começa na primeira etapa para conferir itens
+          clienteSelecionado: null, // Será buscado pelo ID logo em seguida através do useEffect
+          itens: parsed.itens || [],
+          pagamentos: parsed.pagamentos || [],
+          configVenda: {
+            data: new Date().toISOString().split('T')[0],
+            loja: parsed.loja || "Centro",
+            prazo: ""
+          },
+          desconto: parseFloat(parsed.desconto) || 0,
+          observacoes: parsed.observacoes || "",
+          pagamentoEntrega: {
+            ativo: (parseFloat(parsed.valor_frete) > 0),
+            valor: parseFloat(parsed.valor_frete) || 0,
+            forma: ""
+          },
+          cidade: parsed.cidade || "",
+          bairro: parsed.bairro || "",
+          endereco: parsed.endereco || "",
+          aguardandoLiberacao: false,
+          _cliente_id_pendente: parsed.cliente_id // Guardar para buscar o objeto cliente completo
+        };
+      }
+
+      // 2. Tentar pegar estado normal do PDV abandonado
       const saved = sessionStorage.getItem(PDV_STATE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
@@ -236,14 +372,20 @@ export default function PDV() {
           aguardandoLiberacao: parsed.aguardandoLiberacao || false
         };
       }
-    } catch (e) { }
+    } catch (e) {
+      console.error("Erro ao ler state", e);
+    }
     return null;
   };
 
   const initialState = getInitialState();
 
   // --- ESTADOS DO PDV ---
-  const [etapa, setEtapa] = useState(initialState?.etapa || 1);
+  const [etapa, setEtapa] = useState((() => {
+    // Força etapa 1 se vier de orçamento
+    if (initialState?._cliente_id_pendente) return 1;
+    return initialState?.etapa || 1;
+  })());
   const [clienteSelecionado, setClienteSelecionado] = useState(initialState?.clienteSelecionado || null);
   const [itens, setItens] = useState(initialState?.itens || []);
   const [pagamentos, setPagamentos] = useState(initialState?.pagamentos || []);
@@ -262,8 +404,130 @@ export default function PDV() {
   const [savingOrcamento, setSavingOrcamento] = useState(false);
   const [cupomAplicado, setCupomAplicado] = useState(null);
   const [tokenGerencial, setTokenGerencial] = useState(null);
+  const [editingProdutoPDV, setEditingProdutoPDV] = useState(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+  // Flag para bloquear o auto-save enquanto dados do orçamento estão sendo carregados
+  const isLoadingOrcamentoRef = useRef(false);
+
+  // === DETECÇÃO DE ORÇAMENTO NO SESSIONSTORAGE ===
+  // Este useEffect resolve o problema de SPA: quando o PDV já está montado
+  // e o usuário navega de Orçamentos->PDV, o getInitialState não re-executa.
+  // Por isso verificamos o sessionStorage a cada vez que o componente ganha foco.
+  const carregarOrcamentoDoSessionStorage = async () => {
+    const orcamentoSaved = sessionStorage.getItem('moveispedroii_pdv_state');
+    if (!orcamentoSaved) return;
+
+    // Bloquear auto-save para não sobrescrever com estado vazio
+    isLoadingOrcamentoRef.current = true;
+
+    try {
+      const parsed = JSON.parse(orcamentoSaved);
+      sessionStorage.removeItem('moveispedroii_pdv_state');
+
+      console.log("📦 Carregando orçamento no PDV:", parsed);
+
+      // Definir todos os estados de uma vez
+      setItens(parsed.itens || []);
+      setPagamentos(parsed.pagamentos || []);
+      setDesconto(parseFloat(parsed.desconto) || 0);
+      setObservacoes(parsed.observacoes || "");
+      setEtapa(1);
+      if (parsed.loja) {
+        setConfigVenda(prev => ({ ...prev, loja: parsed.loja }));
+      }
+      setPagamentoEntrega({
+        ativo: (parseFloat(parsed.valor_frete) > 0),
+        valor: parseFloat(parsed.valor_frete) || 0,
+        forma: ""
+      });
+      setAguardandoLiberacao(false);
+      setCupomAplicado(null);
+      setTokenGerencial(null);
+
+      // Buscar o cliente completo pelo ID
+      if (parsed.cliente_id) {
+        try {
+          const clienteList = await base44.entities.Cliente.list();
+          const clienteObj = clienteList.find(c => c.id === parsed.cliente_id);
+          if (clienteObj) {
+            const clienteFinal = {
+              ...clienteObj,
+              cidade: parsed.cidade || clienteObj.cidade,
+              bairro: parsed.bairro || clienteObj.bairro,
+              endereco: parsed.endereco || clienteObj.endereco
+            };
+            setClienteSelecionado(clienteFinal);
+          }
+        } catch (e) {
+          console.error("Erro ao carregar cliente do orçamento:", e);
+        }
+      }
+
+      toast.success("Orçamento carregado no PDV!");
+    } catch (e) {
+      console.error("Erro ao parsear orçamento do sessionStorage:", e);
+    } finally {
+      // Liberar auto-save após um tick para os estados terem sido aplicados
+      setTimeout(() => { isLoadingOrcamentoRef.current = false; }, 500);
+    }
+  };
+
+  // Roda na montagem E quando o componente recebe sinal de orçamento
+  useEffect(() => {
+    // Limpar o sessionStorage de orçamento após montagem estável
+    // (evita que o double-mount do auth consuma e perca os dados)
+    const cleanupTimer = setTimeout(() => {
+      sessionStorage.removeItem('moveispedroii_pdv_state');
+    }, 1000);
+
+    carregarOrcamentoDoSessionStorage();
+
+    const handleFocus = () => carregarOrcamentoDoSessionStorage();
+    window.addEventListener('focus', handleFocus);
+
+    // Evento customizado disparado por Orcamentos.jsx/OrcamentoCard.jsx
+    const handleOrcamentoEvent = () => {
+      // Pequeno delay para garantir que o sessionStorage já foi escrito
+      setTimeout(() => carregarOrcamentoDoSessionStorage(), 100);
+    };
+    window.addEventListener('orcamento-para-pdv', handleOrcamentoEvent);
+
+    // Também verifica quando a aba/visibilidade muda
+    const handleVisibility = () => {
+      if (!document.hidden) carregarOrcamentoDoSessionStorage();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearTimeout(cleanupTimer);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('orcamento-para-pdv', handleOrcamentoEvent);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
+
+  // Busca o cliente completo caso tenha vindo apenas o ID do orçamento (montagem inicial)
+  useEffect(() => {
+    if (initialState?._cliente_id_pendente) {
+      const carregarClienteOrcamento = async () => {
+        try {
+          const clienteList = await base44.entities.Cliente.list();
+          const clienteObj = clienteList.find(c => c.id === initialState._cliente_id_pendente);
+          if (clienteObj) {
+            setClienteSelecionado(clienteObj);
+          }
+        } catch (e) {
+          console.error("Erro ao carregar cliente do orçamento: ", e);
+        }
+      };
+      carregarClienteOrcamento();
+    }
+  }, []);
 
   useEffect(() => {
+    // Não salvar se estamos no meio do carregamento de um orçamento (race condition)
+    if (isLoadingOrcamentoRef.current) return;
     const state = { etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao };
     sessionStorage.setItem(PDV_STATE_KEY, JSON.stringify(state));
   }, [etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao]);
@@ -273,6 +537,57 @@ export default function PDV() {
       setConfigVenda(prev => ({ ...prev, loja: user.loja || "Centro" }));
     }
   }, [user]);
+
+  // --- REALTIME UPDATES: PRODUTOS ---
+  useEffect(() => {
+    // Só conecta se estiver online
+    if (!isOnline) return;
+
+    console.log("🔌 Conectando ao Realtime de Produtos...");
+
+    const channel = supabase
+      .channel('pdv-produtos-changes')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'produtos' },
+        (payload) => {
+          const newProduto = payload.new;
+          console.log("🔄 Produto atualizado em realtime:", newProduto.nome);
+
+          // 1. Atualiza o cache da lista de produtos (para a busca encontrar o preço novo)
+          queryClient.invalidateQueries({ queryKey: ['produtos'] });
+
+          // 2. Atualiza os itens que já estão no carrinho
+          setItens(prevItens => {
+            const hasItem = prevItens.some(i => i.produto_id == newProduto.id); // Loose equality for ID
+            if (!hasItem) return prevItens;
+
+            return prevItens.map(item => {
+              if (item.produto_id == newProduto.id) {
+                const novoPreco = parseFloat(newProduto.preco_venda);
+
+                // Só notifica/atualiza se o preço realmente mudou
+                if (item.preco_unitario !== novoPreco) {
+                  toast.info(`Preço atualizado: ${newProduto.nome} agora é R$ ${novoPreco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
+
+                  return {
+                    ...item,
+                    preco_unitario: novoPreco,
+                    subtotal: item.quantidade * novoPreco
+                  };
+                }
+              }
+              return item;
+            });
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isOnline, queryClient]);
 
   const { data: produtos = [] } = useQuery({
     queryKey: ['produtos'],
@@ -290,10 +605,16 @@ export default function PDV() {
     enabled: isOnline
   });
 
-  // Buscar configuração de taxas
   const { data: taxasFinanceiras = [] } = useQuery({
     queryKey: ['configuracao_taxas'],
     queryFn: () => base44.entities.ConfiguracaoTaxa.list(),
+    enabled: isOnline
+  });
+
+  // Buscar fornecedores (para validação de encomendas)
+  const { data: fornecedores = [] } = useQuery({
+    queryKey: ['fornecedores'],
+    queryFn: () => base44.entities.Fornecedor.list(),
     enabled: isOnline
   });
 
@@ -387,18 +708,143 @@ export default function PDV() {
         quantidade: 1,
         preco_unitario: produto.preco_venda,
         subtotal: produto.preco_venda,
-        // Default to 'retira' for showroom items, otherwise respect product default or 'montado'
-        // Se for "nao_requer_montagem", inicia como "sem_montagem" (apenas entrega)
-        tipo_montagem: (produto.origem === 'mostruario')
-          ? 'retira'
-          : (produto.tipo_entrega_padrao === 'nao_requer_montagem' ? 'sem_montagem' : (produto.tipo_entrega_padrao || 'montado')),
+        fotos: produto.fotos || [], // Add fotos
+        tipo_entrega: null, // null | 'entrega' | 'retira'
+        tipo_montagem: null, // null | 'montado' | 'montagem_cliente'
         tipo_entrega_padrao: produto.tipo_entrega_padrao, // Salvar para usar no carrinho
+        tipo_montagem_padrao: produto.tipo_montagem_padrao || null,
+        tipo_montagem_padrao_por: produto.tipo_montagem_padrao_por || null,
+        tipo_montagem_padrao_em: produto.tipo_montagem_padrao_em || null,
+        tipo_montagem_padrao_via: produto.tipo_montagem_padrao_via || null,
         origem: produto.origem, // Store origin used for delivery flagging
         // Preserve metadata for provisional products
         is_solicitacao: produto.is_solicitacao,
         solicitacao_id: produto.solicitacao_id,
-        detalhes_solicitacao: produto.detalhes_solicitacao
+        detalhes_solicitacao: produto.detalhes_solicitacao,
+        // Encomenda flag
+        is_encomenda: produto.is_encomenda || false,
+        fornecedor_nome: produto.fornecedor_nome
       }];
+    });
+  };
+
+  const handleVincularImagem = async (index, imageUrl) => {
+    try {
+      const item = itens[index];
+      const produtoId = item.produto_id || item.id;
+
+      // Update in database
+      await base44.entities.Produto.update(produtoId, {
+        fotos: [imageUrl]
+      });
+
+      // Update in cart immediately
+      setItens(prev => {
+        const newItens = [...prev];
+        newItens[index].fotos = [imageUrl];
+        return newItens;
+      });
+
+      // Update react query cache for the product search
+      queryClient.invalidateQueries(['produtos']);
+
+      return true;
+    } catch (error) {
+      console.error('Erro ao vincular imagem:', error);
+      throw error;
+    }
+  };
+
+  const handleEditProdutoPDV = (item) => {
+    // Buscar o produto real da lista para ter todos os metadados (categoria, dimensões, etc)
+    const produtoCompleto = produtos.find(p => p.id === item.produto_id);
+    if (!produtoCompleto) {
+      toast.error("Não foi possível encontrar os dados completos do produto.");
+      return;
+    }
+    setEditingProdutoPDV(produtoCompleto);
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveEditProdutoPDV = async (updatedData) => {
+    try {
+      // 1. Determine what changed for the Audit Log (before applying the update)
+      const changes = {};
+      Object.keys(updatedData).forEach(key => {
+        // Ignorar o array "variacoes" se for muito complexo ou faça stringify
+        if (JSON.stringify(updatedData[key]) !== JSON.stringify(editingProdutoPDV[key])) {
+          changes[key] = {
+            before: editingProdutoPDV[key],
+            after: updatedData[key]
+          };
+        }
+      });
+
+      // 2. Update the product in the database
+      await base44.entities.Produto.update(editingProdutoPDV.id, updatedData);
+
+      // 3. Register Audit Log if there were changes
+      if (Object.keys(changes).length > 0 && user) {
+        try {
+          await base44.entities.AuditLog.create({
+            user_email: user.email,
+            user_name: user.full_name || user.nome,
+            user_cargo: user.cargo,
+            action: 'UPDATE',
+            entity_type: 'Produto',
+            entity_id: editingProdutoPDV.id,
+            entity_description: `Produto Atualizado via PDV (ID: ${editingProdutoPDV.id}) - ${updatedData.nome || editingProdutoPDV.nome}`,
+            changes: changes,
+            timestamp: new Date().toISOString()
+          });
+        } catch (logErr) {
+          console.error("Failed to write audit log:", logErr);
+        }
+      }
+
+      // 4. Update cart items if the edited product is already in the cart
+      setItens(prevItens =>
+        prevItens.map(item => {
+          if (item.produto_id === editingProdutoPDV.id) {
+            return {
+              ...item,
+              produto_nome: `${updatedData.nome || item.produto_nome}${updatedData.modelo_referencia ? ' ' + updatedData.modelo_referencia : ''}`,
+              preco_unitario: updatedData.preco_venda || item.preco_unitario
+            };
+          }
+          return item;
+        })
+      );
+
+      // 5. Invalidate queries and close modal
+      queryClient.invalidateQueries({ queryKey: ['produtos'] });
+      setIsEditModalOpen(false);
+      setEditingProdutoPDV(null);
+      toast.success("Produto atualizado com sucesso!");
+    } catch (error) {
+      console.error("Error saving product from PDV:", error);
+      toast.error("Erro ao atualizar o produto: " + error.message);
+    }
+  };
+
+  const handleToggleEntrega = (index, tipo) => {
+    setItens(prev => {
+      const newItens = [...prev];
+      newItens[index].tipo_entrega = tipo;
+      // Se mudar para 'retira', limpa a seleção de montagem
+      if (tipo === 'retira') {
+        newItens[index].tipo_montagem = null;
+      }
+      // Se mudar para 'entrega'
+      if (tipo === 'entrega') {
+        if (newItens[index].tipo_entrega_padrao === 'nao_requer_montagem') {
+          newItens[index].tipo_montagem = null; // não precisa de montagem
+        } else if (newItens[index].tipo_montagem_padrao) {
+          // Preenche com o padrão se existir
+          newItens[index].tipo_montagem = newItens[index].tipo_montagem_padrao;
+        }
+      }
+      return newItens;
     });
   };
 
@@ -414,19 +860,153 @@ export default function PDV() {
     setItens(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleSetMontagemPadrao = async (index, produtoId, tipoMontagem) => {
+    try {
+      const now = new Date().toISOString();
+      const payload = {
+        tipo_montagem_padrao: tipoMontagem,
+        tipo_montagem_padrao_por: user?.full_name || 'Usuário Desconhecido',
+        tipo_montagem_padrao_em: now,
+        tipo_montagem_padrao_via: 'PDV'
+      };
+
+      // 1. Atualizar no banco de dados
+      const { error } = await supabase
+        .from('produtos')
+        .update(payload)
+        .eq('id', produtoId);
+
+      if (error) throw error;
+
+      // 2. Atualizar o item no carrinho atual para que o botão desapareça
+      setItens(prev => {
+        const newItens = [...prev];
+        newItens[index].tipo_montagem_padrao = tipoMontagem;
+        newItens[index].tipo_montagem_padrao_por = payload.tipo_montagem_padrao_por;
+        newItens[index].tipo_montagem_padrao_em = payload.tipo_montagem_padrao_em;
+        newItens[index].tipo_montagem_padrao_via = payload.tipo_montagem_padrao_via;
+        return newItens;
+      });
+
+      // 3. Atualizar o cache de produtos para próximas adições
+      queryClient.setQueryData(['produtos'], (oldData) => {
+        if (!oldData) return oldData;
+        return oldData.map(p =>
+          p.id === produtoId ? { ...p, ...payload } : p
+        );
+      });
+
+      toast.success(`Definido como padrão com sucesso!`);
+    } catch (err) {
+      console.error('Erro ao salvar padrão de montagem:', err);
+      toast.error('Erro ao salvar preferência. Tente novamente.');
+    }
+  };
+
+  const handleProporPreco = async (index, valorSugerido) => {
+    try {
+      const item = itens[index];
+      const produtoId = item.produto_id || item.id;
+
+      const payload = {
+        vendedor_id: user.id,
+        vendedor_nome: user.full_name,
+        loja: user.loja,
+        produto_id: produtoId,
+        produto_nome: item.produto_nome,
+        preco_sugerido: valorSugerido,
+        status: 'pendente'
+      };
+
+      const solicitacao = await base44.entities.SolicitacaoPreco.create(payload);
+
+      setItens(prev => {
+        const newItens = [...prev];
+        newItens[index].solicitacao_preco_id = solicitacao.id;
+        newItens[index].status_solicitacao_preco = 'pendente';
+        return newItens;
+      });
+
+      toast.success('Solicitação de preço enviada!', {
+        description: 'Aguardando aprovação do gerente.'
+      });
+
+    } catch (err) {
+      console.error('Erro ao solicitar preço:', err);
+      toast.error('Erro ao enviar solicitação de preço.');
+      throw err;
+    }
+  };
+
   const subtotal = itens.reduce((acc, item) => acc + item.subtotal, 0);
   const total = Math.max(0, subtotal - desconto);
   const totalPago = pagamentos.reduce((acc, p) => acc + p.valor, 0);
   const restante = Math.max(0, total - totalPago);
 
+  // Helper: obter o tipo_montagem final para uso downstream
+  const getTipoMontagemFinal = (item) => {
+    if (item.tipo_entrega === 'retira') return 'retira';
+    if (item.tipo_entrega === 'entrega') {
+      if (item.tipo_entrega_padrao === 'nao_requer_montagem') return 'sem_montagem';
+      return item.tipo_montagem; // 'montado' | 'montagem_cliente' | 'sem_montagem'
+    }
+    return null;
+  };
+
   const podeAvancar = () => {
-    if (etapa === 1) return itens.length > 0;
-    if (etapa === 2) return clienteSelecionado && configVenda.prazo;
-    return true;
+    return getMotivoBloqueioBotao() === null;
+  };
+  const getMotivoBloqueioBotao = () => {
+    if (etapa === 1) {
+      if (itens.length === 0) return 'Adicione produtos ao carrinho';
+      const semEntrega = itens.filter(i => !i.tipo_entrega);
+      if (semEntrega.length > 0) return `${semEntrega.length} item(ns) sem tipo de entrega`;
+      const semPreco = itens.filter(i => !i.preco_unitario || i.preco_unitario <= 0);
+      if (semPreco.length > 0) return `${semPreco.length} item(ns) com preço inválido`;
+      const precoPendente = itens.filter(i => i.status_solicitacao_preco === 'pendente');
+      if (precoPendente.length > 0) return `${precoPendente.length} item(ns) com preço pendente`;
+      const semMontagem = itens.filter(i =>
+        i.tipo_entrega === 'entrega' &&
+        i.tipo_entrega_padrao !== 'nao_requer_montagem' &&
+        !i.tipo_montagem
+      );
+      if (semMontagem.length > 0) return `${semMontagem.length} item(ns) sem tipo de montagem`;
+    }
+    if (etapa === 2) {
+      if (!clienteSelecionado) return 'Selecione um cliente';
+      if (!configVenda.prazo) return 'Defina o prazo de entrega';
+    }
+    return null;
   };
 
   const avancarEtapa = () => {
-    if (etapa === 1 && itens.length === 0) return toast.warning("Adicione pelo menos um produto");
+    if (etapa === 1) {
+      if (itens.length === 0) return toast.warning("Adicione pelo menos um produto");
+
+      const itensSemEntrega = itens.filter(i => !i.tipo_entrega);
+      if (itensSemEntrega.length > 0) {
+        return toast.warning("Escolha o tipo de entrega para todos os itens");
+      }
+
+      const itensSemMontagem = itens.filter(i =>
+        i.tipo_entrega === 'entrega' &&
+        i.tipo_entrega_padrao !== 'nao_requer_montagem' &&
+        !i.tipo_montagem
+      );
+      if (itensSemMontagem.length > 0) {
+        return toast.warning("Escolha o tipo de montagem para os itens com entrega");
+      }
+
+      const itensSemPreco = itens.filter(i => !i.preco_unitario || i.preco_unitario <= 0);
+      if (itensSemPreco.length > 0) {
+        return toast.error(`Existem ${itensSemPreco.length} produto(s) com preço inválido (R$ 0 ou indefinido). Solicite a revisão do preço a um supervisor .`);
+      }
+
+      const itensComSolicitacaoPendente = itens.filter(i => i.status_solicitacao_preco === 'pendente');
+      if (itensComSolicitacaoPendente.length > 0) {
+        return toast.error(`Existem ${itensComSolicitacaoPendente.length} produto(s) com solicitação de preço pendente. Aguarde a aprovação ou ajuste o preço.`);
+      }
+    }
     if (etapa === 2) {
       if (!clienteSelecionado) return toast.warning("Selecione um cliente");
       if (!configVenda.prazo) return toast.warning("Selecione o prazo de entrega");
@@ -458,6 +1038,13 @@ export default function PDV() {
       setLoading(false);
       return toast.warning("Adicione produtos");
     }
+
+    const itensSemPrecoFinal = itens.filter(i => !i.preco_unitario || i.preco_unitario <= 0);
+    if (itensSemPrecoFinal.length > 0) {
+      isProcessingRef.current = false;
+      setLoading(false);
+      return toast.error("A venda contém itens com preço inválido (R$ 0 ou indefinido). Solicite a revisão do preço a um supervisor .");
+    }
     if (!configVenda.prazo) {
       isProcessingRef.current = false;
       setLoading(false);
@@ -476,14 +1063,15 @@ export default function PDV() {
       }
     }
 
-    // --- NOVA VALIDAÇÃO DE ENDEREÇO OBRIGATÓRIO ---
-    // Se NÃO for retirada na loja, o cliente precisa ter endereço
-    if (configVenda.prazo !== "Retirado na loja") {
+    // --- VALIDAÇÃO DE ENDEREÇO OBRIGATÓRIO ---
+    // Se algum item requer entrega, o cliente precisa ter endereço
+    const temEntrega = itens.some(i => i.tipo_entrega === 'entrega');
+    if (temEntrega) {
       const enderecoCompleto = construirEnderecoEntrega(clienteSelecionado);
       if (!enderecoCompleto || enderecoCompleto === "Endereço a definir") {
         isProcessingRef.current = false;
         setLoading(false);
-        return toast.error("Endereço obrigatório para entrega. Cadastre o endereço do cliente ou selecione 'Retirado na loja'.");
+        return toast.error("Endereço obrigatório para entrega. Cadastre o endereço do cliente.");
       }
     }
 
@@ -508,9 +1096,20 @@ export default function PDV() {
       }
     }
 
+    // Garantir que pedidos online comecem a partir de 10000
+    if (isOnline && lastNum < 10000) {
+      lastNum = 9999; // Assim o próximo (lastNum + 1) será 10000
+    }
+
     let novoNumero = isOnline
       ? String(lastNum + 1).padStart(5, '0')
       : `O-${Math.floor(Date.now() / 1000).toString().slice(-4)}`;
+
+    const formaPagamentoEntregaStr = pagamentoEntrega.ativo
+      ? (pagamentoEntrega.forma === "Cartão de Crédito" || pagamentoEntrega.forma?.includes("Crédito")
+        ? `${pagamentoEntrega.forma} (${pagamentoEntrega.parcelas || 1}x)`
+        : pagamentoEntrega.forma || "")
+      : "";
 
     const vendaData = {
       numero_pedido: novoNumero,
@@ -529,7 +1128,7 @@ export default function PDV() {
       valor_restante: restante,
       pagamento_na_entrega: pagamentoEntrega.ativo,
       valor_pagamento_entrega: pagamentoEntrega.ativo ? pagamentoEntrega.valor : 0,
-      forma_pagamento_entrega: pagamentoEntrega.ativo ? pagamentoEntrega.forma : "",
+      forma_pagamento_entrega: formaPagamentoEntregaStr,
       prazo_entrega: configVenda.prazo,
       status: restante <= 0 ? "Pago" : "Pagamento Pendente",
       observacoes: observacoes,
@@ -557,91 +1156,102 @@ export default function PDV() {
 
       for (const item of itens) {
         const prod = produtos.find(p => p.id === item.produto_id);
-        if (prod) {
+        if (prod && !item.is_encomenda) {
           await base44.entities.Produto.update(prod.id, {
             quantidade_estoque: prod.quantidade_estoque - item.quantidade
           });
         }
       }
 
-      if (configVenda.prazo !== "Retirado na loja") {
-        const dias = configVenda.prazo === "15 dias" ? 15 : 45;
-        const limite = new Date();
-        limite.setDate(limite.getDate() + dias);
-        const enderecoCompleto = construirEnderecoEntrega(clienteSelecionado);
-        const itensParaMontagemInterna = itens
-          .filter(i => i.tipo_montagem === 'montado')
-          .map(i => ({
-            produto_nome: i.produto_nome,
-            quantidade: i.quantidade,
-            montado: false
-          }));
-
-        const entregaCriada = await base44.entities.Entrega.create({
-          venda_id: vendaCriada.id,
-          numero_pedido: novoNumero,
-          cliente_nome: clienteSelecionado.nome_completo,
-          cliente_telefone: clienteSelecionado.telefone,
-          endereco_entrega: enderecoCompleto,
-          data_limite: limite.toISOString().split('T')[0],
-          status: aguardandoLiberacao ? "Aguardando Liberação" : "Pendente",
-          itens_montagem_interna: itensParaMontagemInterna,
-          item_mostruario: itens.some(i => i.origem === 'mostruario'), // Flag if any item is showroom
-          pagamento_na_entrega: pagamentoEntrega.ativo,
-          valor_a_receber: pagamentoEntrega.ativo ? pagamentoEntrega.valor : 0,
-          forma_pagamento_entrega: pagamentoEntrega.ativo ? pagamentoEntrega.forma : null,
-          preferencias_entrega: preferenciasEntrega // Salva as preferências
-        });
-
-        // Criar itens de montagem conforme o tipo selecionado
-        for (const item of itens) {
-          if (item.tipo_montagem === 'montagem_cliente') {
-            // Requer Montagem Externa (Terceirizada)
-            await base44.entities.MontagemItem.create({
-              entrega_id: entregaCriada.id,
-              venda_id: vendaCriada.id,
-              produto_id: item.produto_id,
-              produto_nome: item.produto_nome,
-              quantidade: item.quantidade,
-              tipo_montagem: 'terceirizada', // Manter compatibilidade com MontadorExterno
-              status: 'pendente',
-              cliente_nome: clienteSelecionado.nome_completo,
-              cliente_telefone: clienteSelecionado.telefone,
-              endereco: enderecoCompleto,
-              numero_pedido: novoNumero
-            });
-          } else if (item.tipo_montagem === 'montado') {
-            // Montagem Interna
-            await base44.entities.MontagemItem.create({
-              entrega_id: entregaCriada.id,
-              venda_id: vendaCriada.id,
-              produto_id: item.produto_id,
-              produto_nome: item.produto_nome,
-              quantidade: item.quantidade,
-              tipo_montagem: 'interna',
-              status: 'pendente',
-              cliente_nome: clienteSelecionado.nome_completo,
-              cliente_telefone: clienteSelecionado.telefone,
-              endereco: enderecoCompleto,
-              numero_pedido: novoNumero
-            });
-          }
-          // Se for 'retira' ou 'sem_montagem', não cria montagem
+      // Criar solicitações de encomenda para itens por encomenda
+      const itensEncomenda = itens.filter(i => i.is_encomenda);
+      for (const item of itensEncomenda) {
+        try {
+          await base44.entities.SolicitacaoEncomenda.create({
+            venda_id: vendaCriada.id,
+            produto_id: item.produto_id,
+            produto_nome: item.produto_nome,
+            fornecedor_nome: item.fornecedor_nome || '',
+            quantidade: item.quantidade,
+            cliente_nome: clienteSelecionado.nome_completo,
+            numero_pedido: novoNumero,
+            status: 'pendente'
+          });
+        } catch (encErr) {
+          console.error('Erro ao criar solicitação de encomenda:', encErr);
         }
-      } else {
-        // Cliente Retira na Loja - Criar registro para arquivo
-        await base44.entities.Entrega.create({
-          venda_id: vendaCriada.id,
-          numero_pedido: novoNumero,
-          cliente_nome: clienteSelecionado.nome_completo,
-          cliente_telefone: clienteSelecionado.telefone,
-          endereco_entrega: `Retirado na loja: ${configVenda.loja}`,
-          tipo_entrega: 'Retirada',
-          status: 'Retirado',
-          data_realizada: new Date().toISOString(),
-          data_limite: new Date().toISOString().split('T')[0],
-          observacoes_entrega: `Cliente retirou na loja ${configVenda.loja}`
-        });
+      }
+      if (itensEncomenda.length > 0) {
+        toast.info(`📦 ${itensEncomenda.length} item(ns) enviado(s) como encomenda ao Setor de Compras`);
+      }
+
+      // Calcular prazo de entrega com base na configuração
+      const prazoSelecionado = prazosConfig.find(p => p.titulo === configVenda.prazo);
+      const dias = prazoSelecionado ? prazoSelecionado.quantidade_dias : 15;
+      const tipoDias = prazoSelecionado ? prazoSelecionado.tipo_dias : 'uteis';
+      const limite = adicionarDias(configVenda.data, dias, tipoDias);
+
+      const enderecoCompleto = temEntrega ? construirEnderecoEntrega(clienteSelecionado) : `Retirado na loja: ${configVenda.loja}`;
+      const todosRetiram = itens.every(i => i.tipo_entrega === 'retira');
+
+      const itensParaMontagemInterna = itens
+        .filter(i => getTipoMontagemFinal(i) === 'montado')
+        .map(i => ({
+          produto_nome: i.produto_nome,
+          quantidade: i.quantidade,
+          montado: false
+        }));
+
+      const entregaCriada = await base44.entities.Entrega.create({
+        venda_id: vendaCriada.id,
+        numero_pedido: novoNumero,
+        cliente_nome: clienteSelecionado.nome_completo,
+        cliente_telefone: clienteSelecionado.telefone,
+        endereco_entrega: enderecoCompleto,
+        data_limite: todosRetiram ? new Date().toISOString().split('T')[0] : limite.toISOString().split('T')[0],
+        status: todosRetiram ? 'Retirado' : (aguardandoLiberacao ? "Aguardando Liberação" : "Pendente"),
+        tipo_entrega: todosRetiram ? 'Retirada' : undefined,
+        itens_montagem_interna: itensParaMontagemInterna,
+        item_mostruario: itens.some(i => i.origem === 'mostruario'),
+        pagamento_na_entrega: pagamentoEntrega.ativo,
+        valor_a_receber: pagamentoEntrega.ativo ? pagamentoEntrega.valor : 0,
+        forma_pagamento_entrega: pagamentoEntrega.ativo ? formaPagamentoEntregaStr : null,
+        preferencias_entrega: preferenciasEntrega
+      });
+
+      // Criar itens de montagem conforme o tipo selecionado
+      for (const item of itens) {
+        const tipoFinal = getTipoMontagemFinal(item);
+        if (tipoFinal === 'montagem_cliente') {
+          await base44.entities.MontagemItem.create({
+            entrega_id: entregaCriada.id,
+            venda_id: vendaCriada.id,
+            produto_id: item.produto_id,
+            produto_nome: item.produto_nome,
+            quantidade: item.quantidade,
+            tipo_montagem: 'terceirizada',
+            status: 'pendente',
+            cliente_nome: clienteSelecionado.nome_completo,
+            cliente_telefone: clienteSelecionado.telefone,
+            endereco: enderecoCompleto,
+            numero_pedido: novoNumero
+          });
+        } else if (tipoFinal === 'montado') {
+          await base44.entities.MontagemItem.create({
+            entrega_id: entregaCriada.id,
+            venda_id: vendaCriada.id,
+            produto_id: item.produto_id,
+            produto_nome: item.produto_nome,
+            quantidade: item.quantidade,
+            tipo_montagem: 'interna',
+            status: 'pendente',
+            cliente_nome: clienteSelecionado.nome_completo,
+            cliente_telefone: clienteSelecionado.telefone,
+            endereco: enderecoCompleto,
+            numero_pedido: novoNumero
+          });
+        }
+        // Se for 'retira' ou 'sem_montagem', não cria montagem
       }
 
 
@@ -725,7 +1335,7 @@ export default function PDV() {
 
       // 5. ENVIO WHATSAPP EM "BACKGROUND" (Delay para não competir com renderização do print)
       if (zapTelefone) {
-        toast.info("Processando envio do comprovante pelo WhatsApp...");
+        toast.info("Emissão concluída. Tentando enviar comprovante pelo WhatsApp...");
 
         setTimeout(async () => {
           try {
@@ -755,33 +1365,15 @@ export default function PDV() {
               console.error('Erro na geração do PDF background:', pdfErr);
             }
 
-            // Envia para o Bot
-            console.log(`📤 Enviando para bot: ${ZAP_API_URL}`);
-            fetch(`${ZAP_API_URL}/mensagem-pos-venda`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                telefone: zapTelefone,
-                nome: zapNome,
-                pedido: zapPedido,
-                prazo: zapPrazo,
-                produtos: listaProdutos,
-                pdf_base64: pdfBase64
-              })
-            })
-              .then(async (response) => {
-                const data = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                  console.error(`❌ Bot respondeu com erro:`, data);
-                  toast.error("Erro ao enviar WhatsApp.");
-                } else {
-                  console.log("✅ WhatsApp enviado:", data);
-                  toast.success("Comprovante enviado ao cliente!");
-                }
-              })
-              .catch(err => {
-                console.error("❌ Erro conexão bot:", err);
-              });
+            // Envia para o Bot (com fallback offline automático)
+            await whatsappService.sendSaleConfirmation({
+              telefone: zapTelefone,
+              nome: zapNome,
+              pedido: zapPedido,
+              prazo: zapPrazo,
+              produtos: listaProdutos,
+              pdf_base64: pdfBase64
+            });
 
           } catch (bgErr) {
             console.error("Erro fatal no processo de background:", bgErr);
@@ -802,7 +1394,7 @@ export default function PDV() {
     }
   };
 
-  const handleOrcamento = async () => {
+  const handleOrcamento = async (diasValidade = 30) => {
     if (!clienteSelecionado) return toast.warning("Selecione um cliente");
     if (!isOnline) return toast.warning("Orçamentos só podem ser salvos online.");
 
@@ -812,7 +1404,7 @@ export default function PDV() {
       await criarOrcamentoMutation.mutateAsync({
         numero_orcamento: numero,
         data_orcamento: configVenda.data,
-        validade: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        validade: new Date(Date.now() + diasValidade * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         loja: configVenda.loja,
         cliente_id: clienteSelecionado.id,
         cliente_nome: clienteSelecionado.nome_completo,
@@ -820,6 +1412,11 @@ export default function PDV() {
         itens,
         valor_total: total,
         desconto,
+        pagamentos,
+        cidade: clienteSelecionado.cidade || "",
+        bairro: clienteSelecionado.bairro || "",
+        endereco: clienteSelecionado.endereco || "",
+        valor_frete: pagamentoEntrega.ativo ? pagamentoEntrega.valor : 0,
         status: "Pendente",
         observacoes
       });
@@ -944,7 +1541,7 @@ export default function PDV() {
                   <ShoppingCart className="w-4 h-4 text-green-600" />
                   Adicionar Produtos
                 </h2>
-                <BuscaProdutoAvancada produtos={produtos} onSelectProduto={(p) => handleSelectProduto(p.is_solicitacao ? p : p.id)} user={user} />
+                <BuscaProdutoAvancada produtos={produtos} fornecedores={fornecedores} onSelectProduto={(p) => handleSelectProduto(p.is_solicitacao || p.is_encomenda ? p : p.id)} onEditProduto={handleEditProdutoPDV} user={user} />
               </div>
               <div className="bg-white dark:bg-neutral-900 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-neutral-800">
                 <div className="flex items-center justify-between mb-3">
@@ -954,7 +1551,16 @@ export default function PDV() {
                     <p className="text-lg font-bold text-green-700">R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                   </div>
                 </div>
-                <CarrinhoVenda itens={itens} onRemoveItem={handleRemoveItem} onToggleMontagem={handleToggleMontagem} />
+                <CarrinhoVenda
+                  itens={itens}
+                  onRemoveItem={handleRemoveItem}
+                  onToggleEntrega={handleToggleEntrega}
+                  onToggleMontagem={handleToggleMontagem}
+                  onSetMontagemPadrao={handleSetMontagemPadrao}
+                  onProporPreco={handleProporPreco}
+                  onVincularImagem={handleVincularImagem}
+                  onEditProduto={handleEditProdutoPDV}
+                />
               </div>
             </div>
           )}
@@ -998,13 +1604,22 @@ export default function PDV() {
                     <Label className="text-xs mb-1.5 block font-medium">
                       Prazo de Entrega <span className="text-red-500">*</span>
                     </Label>
-                    <Select value={configVenda.prazo} onValueChange={v => setConfigVenda({ ...configVenda, prazo: v })}>
+                    <Select
+                      value={configVenda.prazo}
+                      onValueChange={v => setConfigVenda({ ...configVenda, prazo: v })}
+                    >
                       <SelectTrigger className={`h-10 text-sm ${!configVenda.prazo ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/20' : ''}`}>
                         <SelectValue placeholder="Selecione..." />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="15 dias">15 dias úteis</SelectItem>
-                        <SelectItem value="45 dias">45 dias úteis</SelectItem>
+                        {prazosConfig.map(p => {
+                          const label = `${p.quantidade_dias} dias ${p.tipo_dias === 'uteis' ? 'úteis' : 'corridos'}`;
+                          return (
+                            <SelectItem key={p.id} value={label}>
+                              {label}
+                            </SelectItem>
+                          );
+                        })}
                         <SelectItem value="Retirado na loja">Retirado na loja</SelectItem>
                       </SelectContent>
                     </Select>
@@ -1021,7 +1636,7 @@ export default function PDV() {
                     />
                     <Label htmlFor="aguardar-liberacao" className="text-sm cursor-pointer text-blue-800 dark:text-blue-300">
                       <strong>Aguardar Liberação</strong>
-                      <p className="text-[10px] opacity-70">Marque se o cliente pediu para segurar a entrega (ex: obra)</p>
+                      <p className="text-xs opacity-70">Marque se o cliente pediu para segurar a entrega (ex: obra)</p>
                     </Label>
                   </div>
                   {aguardandoLiberacao && <Badge className="bg-blue-500">Ativado</Badge>}
@@ -1059,25 +1674,23 @@ export default function PDV() {
                     <div className="grid gap-4 py-4">
                       <div className="space-y-3">
                         <Label>Dias da Semana Permitidos</Label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((dia, idx) => (
-                            <div key={idx} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`dia-${idx}`}
-                                checked={preferenciasEntrega.dias.includes(idx + 1)} // 1=Seg, 6=Sab
-                                onCheckedChange={(checked) => {
-                                  setPreferenciasEntrega(prev => ({
-                                    ...prev,
-                                    dias: checked
-                                      ? [...prev.dias, idx + 1]
-                                      : prev.dias.filter(d => d !== idx + 1)
-                                  }));
-                                }}
-                              />
-                              <label htmlFor={`dia-${idx}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
-                                {dia}
-                              </label>
-                            </div>
+                        <div className="grid grid-cols-4 gap-2">
+                          {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((dia, idx) => (
+                            <RestricaoCheckbox
+                              key={idx}
+                              label={dia}
+                              checked={preferenciasEntrega.dias.includes(idx)} // 0=Dom, 1=Seg, ..., 6=Sab
+
+                              onCheckedChange={(checked) => {
+                                setPreferenciasEntrega(prev => ({
+                                  ...prev,
+                                  dias: checked
+                                    ? [...prev.dias, idx]
+                                    : prev.dias.filter(d => d !== idx)
+                                }));
+
+                              }}
+                            />
                           ))}
                         </div>
                       </div>
@@ -1085,24 +1698,20 @@ export default function PDV() {
                       <div className="space-y-3">
                         <Label>Turnos Permitidos</Label>
                         <div className="grid grid-cols-2 gap-2">
-                          {['Manhã', 'Tarde', 'Comercial'].map((turno) => (
-                            <div key={turno} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`turno-${turno}`}
-                                checked={preferenciasEntrega.turnos.includes(turno)}
-                                onCheckedChange={(checked) => {
-                                  setPreferenciasEntrega(prev => ({
-                                    ...prev,
-                                    turnos: checked
-                                      ? [...prev.turnos, turno]
-                                      : prev.turnos.filter(t => t !== turno)
-                                  }));
-                                }}
-                              />
-                              <label htmlFor={`turno-${turno}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
-                                {turno}
-                              </label>
-                            </div>
+                          {['Manhã', 'Tarde'].map((turno) => (
+                            <RestricaoCheckbox
+                              key={turno}
+                              label={turno}
+                              checked={preferenciasEntrega.turnos.includes(turno)}
+                              onCheckedChange={(checked) => {
+                                setPreferenciasEntrega(prev => ({
+                                  ...prev,
+                                  turnos: checked
+                                    ? [...prev.turnos, turno]
+                                    : prev.turnos.filter(t => t !== turno)
+                                }));
+                              }}
+                            />
                           ))}
                         </div>
                       </div>
@@ -1179,17 +1788,34 @@ export default function PDV() {
             <p className="font-bold text-base text-green-700">R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
           </div>
           {etapa < 3 && (
-            <Button
-              onClick={avancarEtapa}
-              disabled={!podeAvancar()}
-              className="gap-1.5 bg-green-600 hover:bg-green-700 h-10 px-6"
-            >
-              Avançar
-              <ArrowRight className="w-4 h-4" />
-            </Button>
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                onClick={avancarEtapa}
+                disabled={!podeAvancar()}
+                className="gap-1.5 bg-green-600 hover:bg-green-700 h-10 px-6"
+              >
+                Avançar
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+              {!podeAvancar() && getMotivoBloqueioBotao() && (
+                <span className="text-sm text-red-500 font-medium animate-pulse">
+                  {getMotivoBloqueioBotao()}
+                </span>
+              )}
+            </div>
           )}
         </div>
       </footer>
+
+      {/* Modal de Edição Rápida */}
+      {isEditModalOpen && editingProdutoPDV && (
+        <ProdutoQuickEditModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          produto={editingProdutoPDV}
+          onSave={handleSaveEditProdutoPDV}
+        />
+      )}
     </div>
   );
 }

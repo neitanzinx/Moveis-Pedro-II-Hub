@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual do Sistema - Móveis Pedro II Hub</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --primary: #07593f;
+            --primary-light: #0a6b4d;
+            --secondary: #f38a4c;
+            --bg: #f8fafc;
+            --text: #1e293b;
+            --sidebar-bg: #ffffff;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        .container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar Styling */
+        .sidebar {
+            width: 280px;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border);
+            padding: 2rem 1.5rem;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        .logo-area {
+            margin-bottom: 2.5rem;
+            text-align: center;
+        }
+
+        .logo-area h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 0.75rem 1rem;
+            color: #64748b;
+            text-decoration: none;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .nav-item:hover {
+            background: #f1f5f9;
+            color: var(--primary);
+        }
+
+        .nav-item.active {
+            background: #07593f10;
+            color: var(--primary);
+            border-left: 4px solid var(--primary);
+        }
+
+        /* Main Content Styling */
+        .content {
+            flex: 1;
+            padding: 3rem 4rem;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        header {
+            margin-bottom: 3rem;
+        }
+
+        header h2 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 0.5rem;
+        }
+
+        header p {
+            color: #64748b;
+            font-size: 1.1rem;
+        }
+
+        section {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 2.5rem;
+            margin-bottom: 3rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            border: 1px solid var(--border);
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .icon-box {
+            width: 48px;
+            height: 48px;
+            background: #07593f15;
+            color: var(--primary);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        h3 {
+            font-size: 1.5rem;
+            color: #0f172a;
+            font-weight: 700;
+        }
+
+        .guide-grid {
+            display: grid;
+            grid-template-cols: 1fr;
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .step {
+            background: #f1f5f9;
+            padding: 1.5rem;
+            border-radius: 12px;
+            border-left: 4px solid var(--secondary);
+        }
+
+        .step-num {
+            font-weight: 700;
+            color: var(--secondary);
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+
+        .step h4 {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .tips {
+            background: #07593f08;
+            border: 1px dashed var(--primary);
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-top: 2rem;
+        }
+
+        .tips h5 {
+            color: var(--primary);
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        @media print {
+            .sidebar {
+                display: none;
+            }
+
+            .content {
+                padding: 0;
+                margin: 0;
+                max-width: 100%;
+            }
+
+            body {
+                background: white;
+            }
+
+            section {
+                box-shadow: none;
+                border: 1px solid #eee;
+                break-inside: avoid;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: relative;
+                border-right: none;
+                border-bottom: 1px solid var(--border);
+            }
+
+            .content {
+                padding: 2rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <aside class="sidebar">
+            <div class="logo-area">
+                <h1>Móveis Pedro II</h1>
+                <p style="font-size: 0.75rem; color: #94a3b8;">Central de Operações Hub</p>
+            </div>
+            <nav>
+                <a href="#dashboard" class="nav-item"><i data-lucide="layout-dashboard"></i> Dashboard</a>
+                <a href="#vendas" class="nav-item"><i data-lucide="shopping-cart"></i> Vendas</a>
+                <a href="#pdv" class="nav-item"><i data-lucide="monitor"></i> PDV / Frente de Caixa</a>
+                <a href="#estoque" class="nav-item"><i data-lucide="package"></i> Estoque</a>
+                <a href="#logistica" class="nav-item"><i data-lucide="truck"></i> Logística</a>
+                <a href="#financeiro" class="nav-item"><i data-lucide="dollar-sign"></i> Financeiro</a>
+                <a href="#rh" class="nav-item"><i data-lucide="users"></i> RH / Pessoas</a>
+                <a href="#nfe" class="nav-item"><i data-lucide="file-text"></i> Nota Fiscal (NFe)</a>
+                <a href="#entregador" class="nav-item"><i data-lucide="smartphone"></i> App do Entregador</a>
+                <a href="#relatorios" class="nav-item"><i data-lucide="bar-chart-3"></i> Relatórios</a>
+                <a href="#config" class="nav-item"><i data-lucide="settings"></i> Configurações</a>
+            </nav>
+        </aside>
+
+        <main class="content">
+            <header>
+                <h2>Manual de Instruções</h2>
+                <p>Guia completo setor por setor para utilização do sistema Móveis Pedro II Hub.</p>
+            </header>
+
+            <!-- Dashboard -->
+            <section id="dashboard">
+                <div class="section-header">
+                    <div class="icon-box"><i data-lucide="layout-dashboard"></i></div>
+                    <h3>Dashboard (Painel de Controle)</h3>
+                </div>
+                <p>O Dashboard é a sua visão geral do desempenho. Ele centraliza os principais indicadores de desempenho
+                    (KPIs).</p>
+                <div class="guide-grid">
+                    <div class="step">
+                        <span class="step-num">01</span>
+                        <h4>Acompanhamento de Metas</h4>
+                        <p>Visualize o faturamento total, ticket médio e novos clientes em tempo real. Os cartões de
+                            estatísticas mostram tendências comparativas com o período anterior.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">02</span>
+                        <h4>Gráficos de Evolução</h4>
+                        <p>O gráfico de área "Minha Evolução" permite identificar picos de vendas e sazonalidade durante
+                            o mês ou semestre.</p>
+                    </div>
+                </div>
+                <div class="tips">
+                    <h5><i data-lucide="zap"></i> Dica Ninja</h5>
+                    <p>Use o seletor de período no topo da página para analisar dados específicos de 7, 30 ou 90 dias.
+                    </p>
+                </div>
+            </section>
+
+            <!-- Vendas -->
+            <section id="vendas">
+                <div class="section-header">
+                    <div class="icon-box"><i data-lucide="shopping-cart"></i></div>
+                    <h3>Gestão de Vendas</h3>
+                </div>
+                <p>Gerencie todo o ciclo de vida dos pedidos, desde a criação até o pós-venda.</p>
+                <div class="guide-grid">
+                    <div class="step">
+                        <span class="step-num">01</span>
+                        <h4>Listagem e Filtros</h4>
+                        <p>Busque pedidos por número ou nome do cliente. Utilize o filtro de status para focar em vendas
+                            pendentes ou canceladas.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">02</span>
+                        <h4>Ações Rápidas</h4>
+                        <p>Na coluna de ações, você pode imprimir a Nota de Pedido em PDF, emitir NFe (para pedidos
+                            pagos) ou cancelar a venda, o que devolve automaticamente os itens ao estoque.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- PDV -->
+            <section id="pdv">
+                <div class="section-header">
+                    <div class="icon-box"><i data-lucide="monitor"></i></div>
+                    <h3>PDV (Frente de Caixa)</h3>
+                </div>
+                <p>Otimizado para agilidade no atendimento presencial.</p>
+                <div class="guide-grid">
+                    <div class="step">
+                        <span class="step-num">01</span>
+                        <h4>Seleção de Itens</h4>
+                        <p>Use a busca rápida para adicionar produtos ao carrinho. O sistema diferencia automaticamente
+                            itens de "Mostruário" (que geralmente são carregados na hora).</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">02</span>
+                        <h4>Fluxo de Pagamento</h4>
+                        <p>Informe a forma de pagamento (Dinheiro, Cartão, Pix). O sistema permite múltiplos pagamentos
+                            na mesma venda e gera lançamentos automáticos no financeiro.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">03</span>
+                        <h4>Modo Offline</h4>
+                        <p>Se a internet cair, o PDV continua funcionando! As vendas são salvas localmente e
+                            sincronizadas assim que a conexão retornar.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Estoque -->
+            <section id="estoque">
+                <div class="section-header">
+                    <div class="icon-box"><i data-lucide="package"></i></div>
+                    <h3>Controle de Estoque</h3>
+                </div>
+                <p>Garanta a acuracidade dos seus produtos e movimentações.</p>
+                <div class="guide-grid">
+                    <div class="step">
+                        <span class="step-num">01</span>
+                        <h4>Cadastro de Produtos</h4>
+                        <p>Mantenha fotos, dimensões e custos atualizados. O Markup automático ajuda a sugerir o preço
+                            de venda ideal.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">02</span>
+                        <h4>Transferências</h4>
+                        <p>Mova produtos entre o depósito central e as lojas. O processo exige confirmação de
+                            recebimento para evitar perdas.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">03</span>
+                        <h4>Inventário</h4>
+                        <p>Realize contagens periódicas para ajustar o sistema ao estoque físico através do módulo de
+                            Inventário.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Logística -->
+            <section id="logistica">
+                <div class="section-header">
+                    <div class="icon-box"><i data-lucide="truck"></i></div>
+                    <h3>Logística e Entregas</h3>
+                </div>
+                <p>O coração da operação de entrega e montagem.</p>
+                <div class="guide-grid">
+                    <div class="step">
+                        <span class="step-num">01</span>
+                        <h4>Planejamento de Rotas</h4>
+                        <p>No Kanban de Logística, arraste os pedidos pendentes para os dias de entrega. O sistema
+                            alerta sobre restrições de horário do cliente.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">02</span>
+                        <h4>Montagem Interna</h4>
+                        <p>Produtos que exigem montagem prévia no depósito são listados na aba "Montagem", permitindo o
+                            controle de produtividade dos montadores internos.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">03</span>
+                        <h4>Rastreamento</h4>
+                        <p>Acompanhe a frota em tempo real no mapa e verifique o status de cada rota (Em trânsito,
+                            Concluída, etc.).</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Financeiro -->
+            <section id="financeiro">
+                <div class="section-header">
+                    <div class="icon-box"><i data-lucide="dollar-sign"></i></div>
+                    <h3>Departamentos Financeiro</h3>
+                </div>
+                <p>Controle total sobre o fluxo de caixa, entradas e saídas.</p>
+                <div class="guide-grid">
+                    <div class="step">
+                        <span class="step-num">01</span>
+                        <h4>Lançamentos</h4>
+                        <p>Todas as vendas geram receitas automáticas. Despesas manuais (aluguel, luz, etc.) devem ser
+                            lançadas para um saldo real.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">02</span>
+                        <h4>Contas Recorrentes</h4>
+                        <p>Configure despesas que se repetem mensalmente para que o sistema as gere automaticamente.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- RH -->
+            <section id="rh">
+                <div class="section-header">
+                    <div class="icon-box"><i data-lucide="users"></i></div>
+                    <h3>Recursos Humanos (RH)</h3>
+                </div>
+                <p>Gestão completa da equipe e documentos.</p>
+                <div class="guide-grid">
+                    <div class="step">
+                        <span class="step-num">01</span>
+                        <h4>Folha de Pagamento</h4>
+                        <p>Gere e controle os pagamentos mensais, incluindo comissões calculadas automaticamente a
+                            partir das vendas.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">02</span>
+                        <h4>Férias e Licenças</h4>
+                        <p>Solicite e aprove períodos de descanso diretamente pelo portal. O calendário de RH mostra
+                            quem está ausente em cada período.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- NFe -->
+            <section id="nfe">
+                <div class="section-header">
+                    <div class="icon-box"><i data-lucide="file-text"></i></div>
+                    <h3>Nota Fiscal Eletrônica (NF-e)</h3>
+                </div>
+                <div class="guide-grid">
+                    <div class="step">
+                        <span class="step-num">01</span>
+                        <h4>Emissão Automática</h4>
+                        <p>Selecione uma venda paga e clique em "Emitir NFe". O sistema valida os dados do cliente e
+                            envia para a SEFAZ via Nuvem Fiscal.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">02</span>
+                        <h4>Download de XML/DANFE</h4>
+                        <p>Após a autorização, baixe o PDF da nota ou o arquivo XML para fins contábeis.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- App do Entregador -->
+            <section id="entregador">
+                <div class="section-header">
+                    <div class="icon-box"><i data-lucide="smartphone"></i></div>
+                    <h3>App do Entregador</h3>
+                </div>
+                <p>Interface simplificada para a equipe de campo.</p>
+                <div class="guide-grid">
+                    <div class="step">
+                        <span class="step-num">01</span>
+                        <h4>Minhas Rotas</h4>
+                        <p>O entregador visualiza a lista de entregas do dia, com endereços clicáveis que abrem
+                            diretamente no Google Maps ou Waze.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">02</span>
+                        <h4>Baixa de Entrega</h4>
+                        <p>Ao finalizar o serviço, o entregador tira uma foto do canhoto ou do produto montado e anexa
+                            ao pedido, atualizando o status para "Entregue" no Hub central.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Relatórios -->
+            <section id="relatorios">
+                <div class="section-header">
+                    <div class="icon-box"><i data-lucide="bar-chart-3"></i></div>
+                    <h3>Relatórios Estratégicos</h3>
+                </div>
+                <p>Extraia dados precisos para tomada de decisão.</p>
+                <div class="guide-grid">
+                    <div class="step">
+                        <span class="step-num">01</span>
+                        <h4>Comissões</h4>
+                        <p>Relatório detalhado por vendedor, calculando o percentual sobre vendas faturadas e
+                            descontando devoluções.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">02</span>
+                        <h4>Vendas por Produto</h4>
+                        <p>Identifique quais itens giram mais rápido e quais estão parados no estoque (Curva ABC).</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Configurações -->
+            <section id="config">
+                <div class="section-header">
+                    <div class="icon-box"><i data-lucide="settings"></i></div>
+                    <h3>Configurações do Sistema</h3>
+                </div>
+                <p>Personalize o sistema para a sua regra de negócio.</p>
+                <div class="guide-grid">
+                    <div class="step">
+                        <span class="step-num">01</span>
+                        <h4>Integrações</h4>
+                        <p>Configure as chaves de API para WhatsApp, Stone, PagSeguro e Nuvem Fiscal.</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">02</span>
+                        <h4>Segurança e Auditoria</h4>
+                        <p>Administradores podem ver o "Log de Auditoria", que registra cada ação importante realizada
+                            por qualquer funcionário no sistema.</p>
+                    </div>
+                </div>
+            </section>
+
+            <footer
+                style="margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border); text-align: center; color: #94a3b8; font-size: 0.875rem;">
+                <p>&copy; 2026 Móveis Pedro II - Sistema Hub de Operações. Reservado para uso interno.</p>
+            </footer>
+        </main>
+    </div>
+    <script>
+        lucide.createIcons();
+
+        // Simples navegação ativa
+        window.addEventListener('scroll', () => {
+            let current = "";
+            const sections = document.querySelectorAll("section");
+            sections.forEach((section) => {
+                const sectionTop = section.offsetTop;
+                if (pageYOffset >= sectionTop - 100) {
+                    current = section.getAttribute("id");
+                }
+            });
+
+            document.querySelectorAll(".nav-item").forEach((item) => {
+                item.classList.remove("active");
+                if (item.getAttribute("href").includes(current)) {
+                    item.classList.add("active");
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>

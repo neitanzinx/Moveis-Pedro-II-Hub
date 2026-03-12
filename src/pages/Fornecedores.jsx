@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Plus, Search, Edit, Trash2, Package, AlertTriangle, Merge, Building2, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import BulkPriceUpdateModal from "@/components/compras/BulkPriceUpdateModal";
@@ -29,6 +30,14 @@ export default function Fornecedores() {
 
   const deleteMutation = useMutation({
     mutationFn: (id) => base44.entities.Fornecedor.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['fornecedores'] });
+    },
+  });
+
+  const toggleEncomendaMutation = useMutation({
+    mutationFn: ({ id, encomendas_habilitadas }) =>
+      base44.entities.Fornecedor.update(id, { encomendas_habilitadas }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['fornecedores'] });
     },
@@ -176,10 +185,14 @@ export default function Fornecedores() {
   };
   ;
 
-  const filteredFornecedores = (fornecedores || []).filter(f =>
-    f.nome_empresa?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    f.cnpj?.includes(searchTerm)
-  );
+  const filteredFornecedores = useMemo(() => {
+    return (fornecedores || [])
+      .filter(f =>
+        f.nome_empresa?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        f.cnpj?.includes(searchTerm)
+      )
+      .sort((a, b) => (a.nome_empresa || "").localeCompare(b.nome_empresa || ""));
+  }, [fornecedores, searchTerm]);
 
   return (
     <div className="space-y-6">
@@ -338,6 +351,21 @@ export default function Fornecedores() {
                   {fornecedor.contato && (
                     <p><strong>Contato:</strong> {fornecedor.contato}</p>
                   )}
+                </div>
+
+                {/* Encomenda Toggle */}
+                <div className="flex items-center justify-between py-2 px-3 mb-3 rounded-lg bg-gray-50 dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700">
+                  <div className="flex items-center gap-2">
+                    <Package className="w-4 h-4 text-orange-500" />
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Encomendas</span>
+                  </div>
+                  <Switch
+                    checked={fornecedor.encomendas_habilitadas !== false}
+                    onCheckedChange={(checked) => {
+                      toggleEncomendaMutation.mutate({ id: fornecedor.id, encomendas_habilitadas: checked });
+                      toast.success(checked ? `Encomendas habilitadas para ${fornecedor.nome_empresa}` : `Encomendas desabilitadas para ${fornecedor.nome_empresa}`);
+                    }}
+                  />
                 </div>
                 <div className="flex gap-2">
                   <Button

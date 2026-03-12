@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { CAMPOS_ESTOQUE_LOJA, LOJAS_MOSTRUARIO } from "@/constants/productConstants";
+import { obterCampoEstoqueDaLoja } from "@/constants/productConstants";
 import InventarioContagem from "./InventarioContagem";
 import CargaInicialEstoque from "./CargaInicialEstoque";
 
@@ -28,19 +28,28 @@ export default function InventarioTab({ user }) {
     queryFn: () => base44.entities.Produto.list(),
   });
 
+  const { data: lojas = [] } = useQuery({
+    queryKey: ['lojas'],
+    queryFn: () => base44.entities.Loja.list(),
+  });
+
   const aprovarMutation = useMutation({
     mutationFn: async ({ inventario }) => {
-      const targetField = inventario.loja_id
-        ? CAMPOS_ESTOQUE_LOJA[inventario.loja_id]
-        : null;
+      const lojaInventario = lojas.find(l => l.id === inventario.loja_id);
+      const targetField = obterCampoEstoqueDaLoja(lojaInventario || inventario.loja_id);
 
       for (const item of inventario.itens_contados) {
         if (item.diferenca !== 0) {
           const produto = produtos.find(p => p.id === item.produto_id);
           if (produto && targetField) {
             const currentValues = {};
-            // Collect all store fields
-            Object.values(CAMPOS_ESTOQUE_LOJA).forEach(field => {
+
+            // Collect all stock fields dynamically based on active stores 
+            // plus the target field if it's new
+            const activeStoreFields = new Set(lojas.filter(l => l.ativa).map(l => obterCampoEstoqueDaLoja(l)));
+            activeStoreFields.add(targetField); // Ensure current target is included
+
+            activeStoreFields.forEach(field => {
               currentValues[field] = produto[field] || 0;
             });
 

@@ -2,15 +2,16 @@ import React, { useState, useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Package, Tag, Warehouse, Filter, Palette, Layers, Ruler } from "lucide-react";
+import { Search, Package, Tag, Warehouse, Filter, Palette, Layers, Ruler, ImageIcon, Edit2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
+import { toast } from "sonner";
 import SolicitacaoCadastroModal from "./SolicitacaoCadastroModal";
 import { getColorHex } from "../produtos/FurnitureColorPicker";
 
 export default function BuscaProdutoAvancada(props) {
-  const { produtos, onSelectProduto } = props;
+  const { produtos, onSelectProduto, onEditProduto, fornecedores = [] } = props;
   const [searchTerm, setSearchTerm] = useState("");
   const [showResults, setShowResults] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -48,7 +49,25 @@ export default function BuscaProdutoAvancada(props) {
   };
 
   const handleSelectProduto = (produto) => {
-    onSelectProduto(produto);
+    const qtdDisponivel = (produto.quantidade_estoque || 0) - (produto.quantidade_reservada || 0);
+
+    // Se estoque zerado, verificar se fornecedor permite encomenda
+    if (qtdDisponivel <= 0) {
+      const fornecedor = fornecedores.find(f =>
+        f.nome_empresa?.toLowerCase().trim() === produto.fornecedor_nome?.toLowerCase().trim()
+      );
+
+      if (fornecedor && fornecedor.encomendas_habilitadas === false) {
+        toast.error(`Encomendas bloqueadas para o fornecedor ${fornecedor.nome_empresa}. Produto sem estoque.`);
+        return;
+      }
+
+      // Marcar como encomenda
+      onSelectProduto({ ...produto, is_encomenda: true });
+      toast.info(`📦 ${produto.nome} adicionado como ENCOMENDA (estoque zerado)`);
+    } else {
+      onSelectProduto(produto);
+    }
     setSearchTerm("");
     setShowResults(false);
     setSelectedIndex(0);
@@ -141,10 +160,20 @@ export default function BuscaProdutoAvancada(props) {
                       className={`w-full text-left px-4 py-2.5 flex flex-col gap-1 border-b border-gray-100 dark:border-neutral-800 transition-colors ${isSelected ? 'bg-green-50 dark:bg-green-900/30' : 'hover:bg-gray-50 dark:hover:bg-neutral-800'
                         }`}
                     >
-                      {/* Linha principal: Nome + Modelo + Preço */}
-                      <div className="flex items-center justify-between w-full">
+                      {/* Linha principal: Imagem + Nome + Modelo + Preço */}
+                      <div className="flex items-center justify-between w-full gap-3">
+                        {/* Imagem do Produto Produto (Cascata) */}
+                        <div className="w-10 h-10 shrink-0 border rounded overflow-hidden bg-gray-50 flex items-center justify-center">
+                          {produto.fotos?.[0] ? (
+                            <img src={produto.fotos[0]} alt={produto.nome} className="w-full h-full object-cover" />
+                          ) : (
+                            <ImageIcon className="w-5 h-5 text-gray-300" />
+                          )}
+                        </div>
+
                         <span className="flex-1 text-sm font-medium text-gray-800 dark:text-white truncate">
-                          {produto.nome}{produto.modelo_referencia ? ` ${produto.modelo_referencia}` : ''}
+                          <span className="text-xs text-gray-400 mr-2">#{produto.id}</span>
+                          {produto.nome}{produto.modelo_referencia ? ` - ${produto.modelo_referencia}` : ''}
                         </span>
                         <span className="text-sm font-bold text-green-700 dark:text-green-400 ml-2">
                           R$ {produto.preco_venda?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -154,34 +183,38 @@ export default function BuscaProdutoAvancada(props) {
                       {/* Linha de detalhes: Variações + Categoria + Estoque */}
                       <div className="flex items-center flex-wrap gap-1.5 w-full">
                         {/* Cor */}
-                        {produto.cor && (() => {
-                          const colors = produto.cor.split('/').map(c => c.trim());
-                          const isDual = colors.length > 1;
-                          const hex1 = getColorHex(colors[0]);
-                          const hex2 = isDual ? getColorHex(colors[1]) : null;
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-50 border border-gray-200 text-gray-700 font-medium flex items-center gap-1.5" title="Cor">
+                          {produto.cor ? (() => {
+                            const colors = produto.cor.split('/').map(c => c.trim());
+                            const isDual = colors.length > 1;
+                            const hex1 = getColorHex(colors[0]);
+                            const hex2 = isDual ? getColorHex(colors[1]) : null;
 
-                          return (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-50 border border-gray-200 text-gray-700 font-medium flex items-center gap-1.5">
-                              <div
-                                className="w-3 h-3 rounded-full border border-gray-300 shadow-sm"
-                                style={{ background: isDual ? `linear-gradient(135deg, ${hex1} 50%, ${hex2} 50%)` : hex1 }}
-                              />
-                              {produto.cor}
-                            </span>
-                          );
-                        })()}
+                            return (
+                              <>
+                                <div
+                                  className="w-3 h-3 rounded-full border border-gray-300 shadow-sm"
+                                  style={{ background: isDual ? `linear-gradient(135deg, ${hex1} 50%, ${hex2} 50%)` : hex1 }}
+                                />
+                                {produto.cor}
+                              </>
+                            );
+                          })() : <span className="text-gray-400">Cor: N/A</span>}
+                        </span>
+
                         {/* Material/Tecido */}
-                        {produto.material && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium flex items-center">
-                            <Layers className="w-3 h-3 mr-1" /> {produto.material}
-                          </span>
-                        )}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium flex items-center" title="Material">
+                          <Layers className="w-3 h-3 mr-1" /> {produto.material || 'Mat: N/A'}
+                        </span>
+
                         {/* Dimensões - Montadas a partir dos campos separados */}
-                        {(produto.largura || produto.altura) && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium flex items-center">
-                            <Ruler className="w-3 h-3 mr-1" /> {produto.largura || '?'}×{produto.altura || '?'}{produto.profundidade ? `×${produto.profundidade}` : ''} cm
-                          </span>
-                        )}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium flex items-center" title="Dimensões">
+                          <Ruler className="w-3 h-3 mr-1" />
+                          {(produto.largura || produto.altura || produto.profundidade)
+                            ? `${produto.largura || '?'}x${produto.altura || '?'}${produto.profundidade ? `x${produto.profundidade}` : ''} cm`
+                            : 'Dim: N/A'
+                          }
+                        </span>
                         {/* Fornecedor */}
                         {produto.fornecedor_nome && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-neutral-600">
@@ -194,24 +227,30 @@ export default function BuscaProdutoAvancada(props) {
                         </span>
                         {/* Estoque */}
                         <span className={`text-[10px] font-medium ml-auto ${qtd <= 0 ? 'text-red-500' : qtd <= 5 ? 'text-orange-500' : 'text-green-600'}`}>
-                          {qtd}un
+                          {qtd <= 0 ? (
+                            <span className="flex items-center gap-1">
+                              <span className="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-semibold">📦 Encomenda</span>
+                            </span>
+                          ) : `${qtd}un`}
                         </span>
 
-                        {/* Botão de Solicitar Variação (Visible on Hover essentially, or always small) */}
-                        <div className="ml-2" onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 rounded-full hover:bg-green-100 text-green-600"
-                            title="Solicitar nova variação deste produto"
-                            onClick={() => {
-                              setSolicitationParentProduct(produto);
-                              setIsModalOpen(true);
-                            }}
-                          >
-                            <Plus className="w-3 h-3" />
-                          </Button>
-                        </div>
+                        {/* Botão Editar Produto */}
+                        {onEditProduto && (
+                          <div className="ml-1" onClick={(e) => e.stopPropagation()}>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 rounded-full hover:bg-blue-100 text-blue-600"
+                              title="Editar Produto"
+                              onClick={() => {
+                                onEditProduto(produto);
+                              }}
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        )}
+
                       </div>
                     </button>
                   );

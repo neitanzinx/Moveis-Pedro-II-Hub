@@ -40,7 +40,7 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
     valor_restante: 0,
     comissao_calculada: 0,
     porcentagem_comissao: 0,
-    prazo_entrega: "15 dias",
+    prazo_entrega: "15 dias úteis",
     status: "Pagamento Pendente",
     desconto: 0,
     observacoes: "",
@@ -62,7 +62,7 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
 
   // Estado para adicionar novo pagamento
   const [novoPagamento, setNovoPagamento] = useState({
-    forma_pagamento: "Dinheiro",
+    forma_pagamento: "",
     valor: 0,
     parcelas: 1
   });
@@ -126,7 +126,7 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
         valor_restante: 0,
         comissao_calculada: 0,
         porcentagem_comissao: 0,
-        prazo_entrega: "15 dias",
+        prazo_entrega: "15 dias úteis",
         status: "Pagamento Pendente",
         desconto: 0,
         observacoes: "",
@@ -215,6 +215,7 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
     const novoItem = {
       produto_id: produto.id,
       produto_nome: produto.nome,
+      produto_categoria: produto.categoria || "Geral",
       quantidade: quantidade,
       preco_unitario: produto.preco_venda,
       subtotal: subtotal
@@ -242,6 +243,11 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
       return;
     }
 
+    if (!novoPagamento.forma_pagamento) {
+      toast.warning("Selecione uma forma de pagamento");
+      return;
+    }
+
     const totalPago = formData.pagamentos.reduce((sum, p) => sum + p.valor, 0);
     const novoTotal = totalPago + novoPagamento.valor;
 
@@ -256,7 +262,7 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
     });
 
     setNovoPagamento({
-      forma_pagamento: "Dinheiro",
+      forma_pagamento: "",
       valor: 0,
       parcelas: 1
     });
@@ -600,7 +606,8 @@ _Móveis Pedro II - ${vendaData.loja}_`;
 
       // Criar entrega automaticamente se não for retirada
       if (formData.prazo_entrega !== "Retirado na loja") {
-        const dias = formData.prazo_entrega === "15 dias" ? 15 : 45;
+        const diasStr = formData.prazo_entrega.match(/\d+/);
+        const dias = diasStr ? parseInt(diasStr[0]) : 15;
         const limite = new Date();
         limite.setDate(limite.getDate() + dias);
 
@@ -923,7 +930,7 @@ _Móveis Pedro II - ${vendaData.loja}_`;
                         onValueChange={(value) => setNovoPagamento({ ...novoPagamento, forma_pagamento: value })}
                       >
                         <SelectTrigger>
-                          <SelectValue />
+                          <SelectValue placeholder="Selecione" />
                         </SelectTrigger>
                         <SelectContent>
                           {formasPagamento.map(forma => (

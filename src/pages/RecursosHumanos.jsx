@@ -20,7 +20,7 @@ import FeriasLicencasTab from "@/components/rh/FeriasLicencasTab";
 import RecrutamentoTab from "@/components/rh/RecrutamentoTab";
 import FolhaPagamentoTab from "@/components/rh/FolhaPagamentoTab";
 import AvaliacoesTab from "@/components/rh/AvaliacoesTab";
-import ComunicadosTab from "@/components/rh/ComunicadosTab";
+
 import DocumentosTab from "@/components/rh/DocumentosTab";
 
 // Quick Action Button Component
@@ -463,12 +463,7 @@ export default function RecursosHumanos() {
                   onClick={() => setActiveTab("avaliacoes")}
                   color="#8b5cf6"
                 />
-                <QuickAction
-                  icon={Megaphone}
-                  label="Novo Comunicado"
-                  onClick={() => setActiveTab("comunicados")}
-                  color="#f38a4c"
-                />
+
               </div>
             </CardContent>
           </Card>
@@ -537,11 +532,7 @@ export default function RecursosHumanos() {
                     <Badge className="absolute -top-1 -right-1 w-5 h-5 p-0 flex items-center justify-center text-xs bg-blue-500">{metrics.avaliacoesPendentes}</Badge>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="comunicados" className="flex-1 min-w-[120px] py-2.5 px-3 text-xs md:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                  <Megaphone className="w-4 h-4 mr-1.5" />
-                  <span className="hidden sm:inline">Comunicados</span>
-                  <span className="sm:hidden">Com.</span>
-                </TabsTrigger>
+
                 <TabsTrigger value="documentos" className="flex-1 min-w-[120px] py-2.5 px-3 text-xs md:text-sm data-[state=active]:bg-white data-[state=active]:shadow-sm">
                   <FolderOpen className="w-4 h-4 mr-1.5" />
                   <span className="hidden sm:inline">Documentos</span>
@@ -572,9 +563,7 @@ export default function RecursosHumanos() {
             <AvaliacoesTab />
           </TabsContent>
 
-          <TabsContent value="comunicados" className="mt-0">
-            <ComunicadosTab />
-          </TabsContent>
+
 
           <TabsContent value="documentos" className="mt-0">
             <DocumentosTab />

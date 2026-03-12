@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Pencil, Trash2, AlertTriangle } from "lucide-react";
 
 export default function ProdutoListItem({ produto, onEdit, onDelete }) {
-  const isEstoqueBaixo = produto.quantidade_estoque <= (produto.estoque_minimo || 5);
+  const isEstoqueBaixo = produto.estoque_minimo > 0 && produto.quantidade_estoque <= produto.estoque_minimo;
 
   return (
-    <div 
+    <div
       className="flex items-center gap-4 p-4 rounded-xl hover:shadow-md transition-all border bg-white"
       style={{ borderColor: '#E5E0D8' }}
     >
@@ -19,7 +19,7 @@ export default function ProdutoListItem({ produto, onEdit, onDelete }) {
           e.target.src = 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=200';
         }}
       />
-      
+
       <div className="flex-1 min-w-0">
         <div className="flex items-start gap-2 mb-2">
           <h3 className="font-bold text-lg" style={{ color: 'var(--charcoal)' }}>

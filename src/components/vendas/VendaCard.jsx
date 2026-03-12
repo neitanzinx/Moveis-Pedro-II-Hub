@@ -35,7 +35,76 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
       const { resolveStockField } = await import("@/utils/stockUtils");
       const campoLoja = resolveStockField(venda.loja);
 
-      // Devolver produtos ao estoque
+      // 1. Atualizar status da venda para Cancelado
+      await base44.entities.Venda.update(venda.id, { status: 'Cancelado' });
+
+      // 2. Cancelar lançamentos financeiros vinculados
+      try {
+        const lancamentos = await base44.entities.LancamentoFinanceiro.list();
+        const lancamentosVenda = lancamentos.filter(l =>
+          l.venda_id === venda.id || l.numero_pedido === venda.numero_pedido
+        );
+        for (const lanc of lancamentosVenda) {
+          await base44.entities.LancamentoFinanceiro.update(lanc.id, {
+            status: 'Cancelado',
+            observacao: (lanc.observacao || '') + ' [VENDA CANCELADA]'
+          });
+        }
+      } catch (err) {
+        console.error('Erro ao cancelar lançamentos:', err);
+      }
+
+      // 3. Cancelar entregas vinculadas
+      try {
+        const entregas = await base44.entities.Entrega.list();
+        const entregasVenda = entregas.filter(e =>
+          e.venda_id === venda.id || e.numero_pedido === venda.numero_pedido
+        );
+        for (const entrega of entregasVenda) {
+          if (entrega.status !== 'Cancelado') {
+            await base44.entities.Entrega.update(entrega.id, {
+              status: 'Cancelado',
+              observacoes: (entrega.observacoes || '') + ' [VENDA CANCELADA]'
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao cancelar entregas:', err);
+      }
+
+      // 4. Cancelar montagens vinculadas (internas e externas)
+      try {
+        const montagens = await base44.entities.MontagemItem.list();
+        const montagensVenda = montagens.filter(m => m.venda_id === venda.id);
+        for (const montagem of montagensVenda) {
+          if (montagem.status !== 'cancelada') {
+            await base44.entities.MontagemItem.update(montagem.id, {
+              status: 'cancelada',
+              observacoes: (montagem.observacoes || '') + ' [VENDA CANCELADA]'
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao cancelar montagens:', err);
+      }
+
+      // 5. Cancelar assistências técnicas vinculadas
+      try {
+        const assistencias = await base44.entities.AssistenciaTecnica.list();
+        const assistenciasVenda = assistencias.filter(a => a.venda_id === venda.id);
+        for (const assistencia of assistenciasVenda) {
+          if (assistencia.status !== 'Cancelada') {
+            await base44.entities.AssistenciaTecnica.update(assistencia.id, {
+              status: 'Cancelada',
+              observacoes: (assistencia.observacoes || '') + ' [VENDA CANCELADA]'
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao cancelar assistências:', err);
+      }
+
+      // 6. Devolver produtos ao estoque
       for (const item of venda.itens) {
         const produtos = await base44.entities.Produto.list();
         const produto = produtos.find(p => p.id === item.produto_id);
@@ -54,13 +123,14 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
           await base44.entities.Produto.update(produto.id, updates);
         }
       }
-
-      // Deletar a venda
-      await base44.entities.Venda.delete(venda.id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vendas'] });
       queryClient.invalidateQueries({ queryKey: ['produtos'] });
+      queryClient.invalidateQueries({ queryKey: ['entregas'] });
+      queryClient.invalidateQueries({ queryKey: ['montagens'] });
+      queryClient.invalidateQueries({ queryKey: ['assistencias'] });
+      queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
       setShowCancelDialog(false);
     },
   });
@@ -454,6 +524,10 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
               <ul className="list-disc list-inside mt-2 space-y-1">
                 <li>Os produtos serão devolvidos ao estoque</li>
                 <li>As reservas serão liberadas</li>
+                <li>Entregas vinculadas serão canceladas</li>
+                <li>Montagens (internas e externas) serão canceladas</li>
+                <li>Assistências técnicas serão canceladas</li>
+                <li>Lançamentos financeiros serão cancelados</li>
                 <li>Esta ação não pode ser desfeita</li>
               </ul>
               <p className="mt-3 font-semibold" style={{ color: '#f38a4c' }}>

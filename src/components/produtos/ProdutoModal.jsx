@@ -50,7 +50,7 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
     preco_venda: "",
     preco_custo: "",
     quantidade_estoque: "",
-    estoque_minimo: "5",
+    estoque_minimo: "",
     tipo_entrega_padrao: "desmontado",
     ativo: true,
   });
@@ -92,7 +92,7 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
         preco_venda: produto.preco_venda || "",
         preco_custo: produto.preco_custo || "",
         quantidade_estoque: produto.quantidade_estoque || "",
-        estoque_minimo: produto.estoque_minimo || "5",
+        estoque_minimo: produto.estoque_minimo?.toString() || "",
         tipo_entrega_padrao: produto.tipo_entrega_padrao || "desmontado",
         ativo: produto.ativo !== false,
       });
@@ -106,7 +106,7 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
         preco_venda: "",
         preco_custo: "",
         quantidade_estoque: "",
-        estoque_minimo: "5",
+        estoque_minimo: "",
         tipo_entrega_padrao: "desmontado",
         ativo: true,
       });
@@ -171,7 +171,7 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
       preco_venda: parseFloat(formData.preco_venda),
       preco_custo: formData.preco_custo ? parseFloat(formData.preco_custo) : undefined,
       quantidade_estoque: parseInt(formData.quantidade_estoque),
-      estoque_minimo: parseInt(formData.estoque_minimo) || 5,
+      estoque_minimo: formData.estoque_minimo ? parseInt(formData.estoque_minimo) : 0,
       fotos: formData.foto_url ? [formData.foto_url] : [],
     };
 

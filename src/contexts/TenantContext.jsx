@@ -45,6 +45,28 @@ export function TenantProvider({ children, organizationId }) {
         loadTenantData();
     }, [organizationId]);
 
+    // Atualiza o favicon e o título dinamicamente
+    useEffect(() => {
+        if (organization) {
+            document.title = organization.name || "Móveis Pedro II";
+
+            // Remove favicons antigos se existirem para evitar duplicidade
+            const existingLinks = document.querySelectorAll("link[rel~='icon']");
+            existingLinks.forEach(link => link.remove());
+
+            // Cria o novo favicon do tenant com bypass de cache longo
+            const logoUrl = organization.logo_url
+                ? `${organization.logo_url}?v=${new Date().getTime()}`
+                : `https://stgatkuwnouzwczkpphs.supabase.co/storage/v1/object/public/publico/mp2logo.png?v=${new Date().getTime()}`;
+
+            const link = document.createElement('link');
+            link.rel = 'icon';
+            link.type = 'image/png';
+            link.href = logoUrl;
+            document.getElementsByTagName('head')[0].appendChild(link);
+        }
+    }, [organization]);
+
     const loadTenantData = async () => {
         try {
             setLoading(true);

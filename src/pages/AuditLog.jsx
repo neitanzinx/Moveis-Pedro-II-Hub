@@ -40,7 +40,7 @@ export default function AuditLogPage() {
 
   const { data: rawLogs = [], isLoading, isError } = useQuery({
     queryKey: ['audit-logs'],
-    queryFn: () => base44.entities.AuditLog.list('-created_at', 200),
+    queryFn: () => base44.entities.AuditLog.list('-timestamp', 200),
     refetchInterval: 10000,
     retry: 1 // Limit retries to avoid spamming on error
   });

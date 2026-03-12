@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { formatarCPF, formatarTelefone } from "@/utils/formatters";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -386,7 +387,7 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                 </div>
                 <div>
                   <Label>CPF</Label>
-                  <Input value={novoCliente.cpf} onChange={e => setNovoCliente({ ...novoCliente, cpf: e.target.value })} placeholder="000.000.000-00" />
+                  <Input value={novoCliente.cpf} onChange={e => { const formatted = formatarCPF(e.target.value); setNovoCliente({ ...novoCliente, cpf: formatted }); }} placeholder="000.000.000-00" maxLength={14} />
                 </div>
                 <div>
                   <Label>Data de Nascimento</Label>
@@ -398,15 +399,15 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                 </div>
                 <div>
                   <Label>Celular (WhatsApp) *</Label>
-                  <Input value={novoCliente.telefone} onChange={e => setNovoCliente({ ...novoCliente, telefone: e.target.value })} placeholder="(00) 00000-0000" />
+                  <Input value={novoCliente.telefone} onChange={e => { const formatted = formatarTelefone(e.target.value); setNovoCliente({ ...novoCliente, telefone: formatted }); }} placeholder="(00) 00000-0000" maxLength={15} />
                 </div>
                 <div>
                   <Label>Celular Secundário</Label>
-                  <Input value={novoCliente.telefone_secundario} onChange={e => setNovoCliente({ ...novoCliente, telefone_secundario: e.target.value })} placeholder="(00) 00000-0000" />
+                  <Input value={novoCliente.telefone_secundario} onChange={e => { const formatted = formatarTelefone(e.target.value); setNovoCliente({ ...novoCliente, telefone_secundario: formatted }); }} placeholder="(00) 00000-0000" maxLength={15} />
                 </div>
                 <div>
                   <Label>Telefone Fixo</Label>
-                  <Input value={novoCliente.telefone_fixo} onChange={e => setNovoCliente({ ...novoCliente, telefone_fixo: e.target.value })} placeholder="(00) 0000-0000" />
+                  <Input value={novoCliente.telefone_fixo} onChange={e => { const formatted = formatarTelefone(e.target.value); setNovoCliente({ ...novoCliente, telefone_fixo: formatted }); }} placeholder="(00) 0000-0000" maxLength={14} />
                 </div>
               </div>
 

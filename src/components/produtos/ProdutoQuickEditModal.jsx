@@ -11,36 +11,27 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
 import {
     Package,
     Save,
     Loader2,
-    Palette,
-    Ruler,
-    DollarSign,
     Warehouse,
-    Edit2,
-    Trash2,
-    Plus,
-    X,
+    ImageIcon,
+    Ruler,
+    FileText,
     ChevronDown,
-    ChevronUp
+    ChevronUp,
+    ShieldCheck,
 } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
-import { getColorHex } from './FurnitureColorPicker';
 import { CATEGORIAS, AMBIENTES } from '@/constants/productConstants';
 
 export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave }) {
     const [formData, setFormData] = useState({});
-    const [variacoes, setVariacoes] = useState([]);
     const [saving, setSaving] = useState(false);
-    const [expandedVariation, setExpandedVariation] = useState(null);
-    const [editingVariation, setEditingVariation] = useState(null);
 
     const { user, isGerente } = useAuth();
     const isGerencial = isGerente?.() || user?.cargo === 'Gerente Geral' || user?.cargo === 'Administrador';
@@ -53,27 +44,44 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                 ambiente: produto.ambiente || '',
                 fornecedor_nome: produto.fornecedor_nome || '',
                 modelo_referencia: produto.modelo_referencia || '',
+                descricao: produto.descricao || '',
+                material: produto.material || '',
+                largura: produto.largura || '',
+                altura: produto.altura || '',
+                profundidade: produto.profundidade || '',
+                // Fiscal
+                ncm: produto.ncm || '',
+                cest: produto.cest || '',
+                cfop: produto.cfop || '',
+                origem_mercadoria: produto.origem_mercadoria || '0',
+                // Preços
                 preco_venda: produto.preco_venda || 0,
                 preco_custo: produto.preco_custo || 0,
                 markup_aplicado: produto.markup_aplicado || 0,
+                // Estoque
                 quantidade_estoque: produto.quantidade_estoque || 0,
                 estoque_cd: produto.estoque_cd || 0,
                 estoque_mostruario_mega_store: produto.estoque_mostruario_mega_store || 0,
                 estoque_mostruario_centro: produto.estoque_mostruario_centro || 0,
                 estoque_mostruario_ponte_branca: produto.estoque_mostruario_ponte_branca || 0,
-                ativo: produto.ativo !== false,
+                estoque_mostruario_futura: produto.estoque_mostruario_futura || 0,
+                estoque_minimo: produto.estoque_minimo || 0,
+                estoque_ideal: produto.estoque_ideal || 0,
             });
-            setVariacoes(produto.variacoes || []);
         }
     }, [produto]);
 
     const handleSave = async () => {
         setSaving(true);
         try {
-            const updatedData = {
-                ...formData,
-                variacoes: variacoes,
-            };
+            const getVal = (v) => parseInt(v) || 0;
+            const estoqueTotal = getVal(formData.estoque_cd) +
+                getVal(formData.estoque_mostruario_mega_store) +
+                getVal(formData.estoque_mostruario_centro) +
+                getVal(formData.estoque_mostruario_ponte_branca) +
+                getVal(formData.estoque_mostruario_futura);
+
+            const updatedData = { ...formData, quantidade_estoque: estoqueTotal };
             await onSave(updatedData);
             toast.success('Produto atualizado com sucesso!');
             onClose();
@@ -83,60 +91,6 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
             setSaving(false);
         }
     };
-
-    const handleVariationChange = (index, field, value) => {
-        const updated = [...variacoes];
-        updated[index] = { ...updated[index], [field]: value };
-        setVariacoes(updated);
-    };
-
-    const handleDeleteVariation = (index) => {
-        const updated = variacoes.filter((_, i) => i !== index);
-        setVariacoes(updated);
-    };
-
-    // Gerar SKU para variação
-    // Formato: PRODSKU-COR-NN (ex: ALT-POR-0010-MEL-01)
-    const generateVariationSKU = (cor, index) => {
-        const prodSku = produto?.codigo_barras || 'PRD-000';
-        const corPart = (cor || 'VAR').substring(0, 3).toUpperCase().replace(/[^A-Z]/g, '') || 'VAR';
-        const numPart = String(index + 1).padStart(2, '0');
-        return `${prodSku}-${corPart}-${numPart}`;
-    };
-
-    const handleAddVariation = () => {
-        const newIndex = variacoes.length;
-        setVariacoes([
-            ...variacoes,
-            {
-                sku: generateVariationSKU('', newIndex),
-                cor: '',
-                tamanho: '',
-                largura: null,
-                altura: null,
-                profundidade: null,
-                preco_custo: formData.preco_custo || 0,
-                preco_venda: formData.preco_venda || 0,
-                estoque_cd: 0,
-                estoque_mostruario_mega_store: 0,
-                estoque_mostruario_centro: 0,
-                estoque_mostruario_ponte_branca: 0,
-            }
-        ]);
-        setExpandedVariation(variacoes.length);
-    };
-
-    const formatCurrency = (value) => {
-        return new Intl.NumberFormat('pt-BR', {
-            style: 'currency',
-            currency: 'BRL'
-        }).format(value || 0);
-    };
-
-    const totalEstoque = variacoes.reduce((sum, v) => {
-        return sum + (v.estoque_cd || 0) + (v.estoque_mostruario_mega_store || 0) +
-            (v.estoque_mostruario_centro || 0) + (v.estoque_mostruario_ponte_branca || 0);
-    }, 0) || formData.quantidade_estoque || 0;
 
     if (!produto) return null;
 
@@ -150,19 +104,29 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                     </DialogTitle>
                 </DialogHeader>
 
-                <Tabs defaultValue="info" className="mt-4">
-                    <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="info">Informações Gerais</TabsTrigger>
-                        <TabsTrigger value="variacoes" className="flex items-center gap-1">
-                            <Palette className="w-4 h-4" />
-                            Variações ({variacoes.length})
-                        </TabsTrigger>
-                    </TabsList>
+                <div className="space-y-4 mt-4">
+                    {/* Produto Info + Imagem */}
+                    <div className="flex flex-col md:flex-row gap-6">
+                        {/* Imagem (Adicionado a pedido do usuário) */}
+                        <div className="w-full md:w-1/3 flex flex-col items-center">
+                            <div className="w-48 h-48 border rounded-lg overflow-hidden bg-gray-50 flex items-center justify-center shadow-sm">
+                                {produto.fotos?.[0] ? (
+                                    <img src={produto.fotos[0]} alt={formData.nome} className="w-full h-full object-cover" />
+                                ) : (
+                                    <div className="text-gray-300 flex flex-col items-center">
+                                        <ImageIcon className="w-12 h-12 mb-2" />
+                                        <span className="text-sm">Sem Imagem</span>
+                                    </div>
+                                )}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2 text-center px-4">
+                                A imagem principal do produto é gerenciada na Central de Imagens.
+                            </p>
+                        </div>
 
-                    {/* Tab: Informações Gerais */}
-                    <TabsContent value="info" className="space-y-4 mt-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
+                        {/* Campos Principais */}
+                        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2 md:col-span-2">
                                 <Label>Nome do Produto</Label>
                                 <Input
                                     value={formData.nome}
@@ -177,6 +141,15 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                                     value={formData.fornecedor_nome}
                                     onChange={e => setFormData({ ...formData, fornecedor_nome: e.target.value })}
                                     placeholder="Nome do fornecedor"
+                                />
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>Modelo / Referência</Label>
+                                <Input
+                                    value={formData.modelo_referencia}
+                                    onChange={e => setFormData({ ...formData, modelo_referencia: e.target.value })}
+                                    placeholder="Modelo ou referência"
                                 />
                             </div>
 
@@ -214,320 +187,244 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                                     </SelectContent>
                                 </Select>
                             </div>
-
-                            <div className="space-y-2">
-                                <Label>Modelo / Referência</Label>
-                                <Input
-                                    value={formData.modelo_referencia}
-                                    onChange={e => setFormData({ ...formData, modelo_referencia: e.target.value })}
-                                    placeholder="Modelo ou referência"
-                                />
-                            </div>
-
-                            <div className="space-y-2">
-                                <Label>Preço de Venda</Label>
-                                <Input
-                                    type="number"
-                                    step="0.01"
-                                    value={formData.preco_venda}
-                                    onChange={e => setFormData({ ...formData, preco_venda: parseFloat(e.target.value) || 0 })}
-                                />
-                            </div>
-
-                            {isGerencial && (
-                                <>
-                                    <div className="space-y-2">
-                                        <Label>Preço de Custo</Label>
-                                        <Input
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.preco_custo}
-                                            onChange={e => setFormData({ ...formData, preco_custo: parseFloat(e.target.value) || 0 })}
-                                        />
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <Label>Markup (%)</Label>
-                                        <Input
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.markup_aplicado}
-                                            onChange={e => setFormData({ ...formData, markup_aplicado: parseFloat(e.target.value) || 0 })}
-                                        />
-                                    </div>
-                                </>
-                            )}
                         </div>
+                    </div>
 
-                        {/* Resumo de Estoque */}
-                        <Card className="bg-gray-50">
+                    {/* Descrição */}
+                    <div className="space-y-2">
+                        <Label className="flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-gray-500" />
+                            Descrição do Produto
+                        </Label>
+                        <Textarea
+                            value={formData.descricao}
+                            onChange={e => setFormData({ ...formData, descricao: e.target.value })}
+                            placeholder="Descrição completa do produto..."
+                            rows={4}
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Características Técnicas */}
+                        <Card className="bg-white border-gray-100">
                             <CardHeader className="pb-2">
                                 <CardTitle className="text-sm flex items-center gap-2">
-                                    <Warehouse className="w-4 h-4" />
-                                    Resumo de Estoque
+                                    <Ruler className="w-4 h-4 text-purple-600" />
+                                    Características Técnicas
                                 </CardTitle>
                             </CardHeader>
-                            <CardContent>
-                                <div className="grid grid-cols-3 md:grid-cols-5 gap-2 text-center">
-                                    <div>
-                                        <p className="text-xs text-gray-500">CD</p>
-                                        <p className="font-bold">{formData.estoque_cd || 0}</p>
+                            <CardContent className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label>Material</Label>
+                                    <Input
+                                        value={formData.material}
+                                        onChange={e => setFormData({ ...formData, material: e.target.value })}
+                                        placeholder="Ex: MDF, Madeira Maciça, Tecido..."
+                                    />
+                                </div>
+                                <div className="grid grid-cols-3 gap-3">
+                                    <div className="space-y-2">
+                                        <Label className="text-xs">Largura (cm)</Label>
+                                        <Input
+                                            type="number"
+                                            value={formData.largura}
+                                            onChange={e => setFormData({ ...formData, largura: e.target.value })}
+                                        />
                                     </div>
-                                    <div>
-                                        <p className="text-xs text-gray-500">Mega Store</p>
-                                        <p className="font-bold">{formData.estoque_mostruario_mega_store || 0}</p>
+                                    <div className="space-y-2">
+                                        <Label className="text-xs">Altura (cm)</Label>
+                                        <Input
+                                            type="number"
+                                            value={formData.altura}
+                                            onChange={e => setFormData({ ...formData, altura: e.target.value })}
+                                        />
                                     </div>
-                                    <div>
-                                        <p className="text-xs text-gray-500">Centro</p>
-                                        <p className="font-bold">{formData.estoque_mostruario_centro || 0}</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-gray-500">Ponte Branca</p>
-                                        <p className="font-bold">{formData.estoque_mostruario_ponte_branca || 0}</p>
-                                    </div>
-                                    <div className="bg-green-100 rounded p-1">
-                                        <p className="text-xs text-green-600">TOTAL</p>
-                                        <p className="font-bold text-green-700">{totalEstoque}</p>
+                                    <div className="space-y-2">
+                                        <Label className="text-xs">Profundidade (cm)</Label>
+                                        <Input
+                                            type="number"
+                                            value={formData.profundidade}
+                                            onChange={e => setFormData({ ...formData, profundidade: e.target.value })}
+                                        />
                                     </div>
                                 </div>
                             </CardContent>
                         </Card>
-                    </TabsContent>
 
-                    {/* Tab: Variações */}
-                    <TabsContent value="variacoes" className="mt-4">
-                        <div className="space-y-3">
-                            {variacoes.length === 0 ? (
-                                <div className="text-center py-8 text-gray-500">
-                                    <Palette className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-                                    <p>Nenhuma variação cadastrada</p>
-                                    <Button
-                                        variant="outline"
-                                        className="mt-4"
-                                        onClick={handleAddVariation}
-                                    >
-                                        <Plus className="w-4 h-4 mr-2" />
-                                        Adicionar Variação
-                                    </Button>
+                        {/* Dados Fiscais */}
+                        <Card className="bg-white border-gray-100">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-sm flex items-center gap-2">
+                                    <ShieldCheck className="w-4 h-4 text-orange-600" />
+                                    Dados Fiscais
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-2">
+                                        <Label className="text-xs">NCM</Label>
+                                        <Input
+                                            value={formData.ncm}
+                                            onChange={e => setFormData({ ...formData, ncm: e.target.value })}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label className="text-xs">CEST</Label>
+                                        <Input
+                                            value={formData.cest}
+                                            onChange={e => setFormData({ ...formData, cest: e.target.value })}
+                                        />
+                                    </div>
                                 </div>
-                            ) : (
-                                <>
-                                    {variacoes.map((variacao, index) => {
-                                        const varEstoque = (variacao.estoque_cd || 0) +
-                                            (variacao.estoque_mostruario_mega_store || 0) +
-                                            (variacao.estoque_mostruario_centro || 0) +
-                                            (variacao.estoque_mostruario_ponte_branca || 0);
-                                        const isExpanded = expandedVariation === index;
-                                        const colorHex = getColorHex(variacao.cor);
+                                <div className="space-y-2">
+                                    <Label className="text-xs">CFOP Padrão</Label>
+                                    <Input
+                                        value={formData.cfop}
+                                        onChange={e => setFormData({ ...formData, cfop: e.target.value })}
+                                    />
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
 
-                                        return (
-                                            <Card key={index} className="overflow-hidden">
-                                                {/* Header da Variação */}
-                                                <div
-                                                    className="flex items-center justify-between p-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
-                                                    onClick={() => setExpandedVariation(isExpanded ? null : index)}
-                                                >
-                                                    <div className="flex items-center gap-3">
-                                                        <div
-                                                            className="w-8 h-8 rounded-lg border-2 shadow-sm"
-                                                            style={{ backgroundColor: colorHex || '#ccc' }}
-                                                        />
-                                                        <div>
-                                                            <div className="flex items-center gap-2">
-                                                                <p className="font-medium">
-                                                                    {variacao.cor || 'Sem cor'}
-                                                                    {variacao.tamanho && <span className="text-gray-500 ml-1">({variacao.tamanho})</span>}
-                                                                </p>
-                                                                <Badge variant="outline" className="text-xs font-mono bg-blue-50 text-blue-600 border-blue-200">
-                                                                    {variacao.sku || `VAR-${String(index + 1).padStart(2, '0')}`}
-                                                                </Badge>
-                                                            </div>
-                                                            <p className="text-xs text-gray-500">
-                                                                {[variacao.largura, variacao.altura, variacao.profundidade]
-                                                                    .filter(d => d)
-                                                                    .join(' × ')} cm
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex items-center gap-4">
-                                                        {isGerencial && (
-                                                            <div className="text-right text-sm">
-                                                                <p className="text-gray-500">Custo: {formatCurrency(variacao.preco_custo)}</p>
-                                                            </div>
-                                                        )}
-                                                        <div className="text-right">
-                                                            <p className="font-bold text-green-600">{formatCurrency(variacao.preco_venda)}</p>
-                                                            <p className="text-xs text-gray-500">Est: {varEstoque}</p>
-                                                        </div>
-                                                        <Button variant="ghost" size="icon">
-                                                            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                                        </Button>
-                                                    </div>
-                                                </div>
+                    {/* Preços - Só Gerencial vê Markup/Custo */}
+                    <Card className="bg-white border-green-100">
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-sm">Valores</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="font-bold text-green-700">Preço de Venda (R$)</Label>
+                                    <Input
+                                        type="number"
+                                        step="0.01"
+                                        className="border-green-300 bg-green-50 font-medium"
+                                        value={formData.preco_venda || 0}
+                                        onChange={e => setFormData({ ...formData, preco_venda: parseFloat(e.target.value) || 0 })}
+                                    />
+                                </div>
 
-                                                {/* Detalhes Expandidos */}
-                                                {isExpanded && (
-                                                    <CardContent className="p-4 border-t">
-                                                        {/* SKU da Variação */}
-                                                        <div className="mb-4 p-2 bg-blue-50 rounded-lg border border-blue-200">
-                                                            <div className="flex items-center justify-between">
-                                                                <div className="flex items-center gap-2">
-                                                                    <Badge variant="outline" className="bg-white text-blue-700 border-blue-300 font-mono">
-                                                                        {variacao.sku || generateVariationSKU(variacao.cor, index)}
-                                                                    </Badge>
-                                                                    <span className="text-xs text-blue-600">SKU da Variação</span>
-                                                                </div>
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    className="h-6 text-xs text-blue-600"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        const newSku = generateVariationSKU(variacao.cor, index);
-                                                                        handleVariationChange(index, 'sku', newSku);
-                                                                    }}
-                                                                >
-                                                                    Gerar SKU
-                                                                </Button>
-                                                            </div>
-                                                        </div>
+                                {isGerencial && (
+                                    <>
+                                        <div className="space-y-2">
+                                            <Label>Preço de Custo (R$)</Label>
+                                            <Input
+                                                type="number"
+                                                step="0.01"
+                                                value={formData.preco_custo || 0}
+                                                onChange={e => setFormData({ ...formData, preco_custo: parseFloat(e.target.value) || 0 })}
+                                            />
+                                        </div>
 
-                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                            <div className="space-y-2">
-                                                                <Label className="text-xs">Cor</Label>
-                                                                <Input
-                                                                    value={variacao.cor || ''}
-                                                                    onChange={e => handleVariationChange(index, 'cor', e.target.value)}
-                                                                    placeholder="Cor"
-                                                                />
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <Label className="text-xs">Tamanho</Label>
-                                                                <Input
-                                                                    value={variacao.tamanho || ''}
-                                                                    onChange={e => handleVariationChange(index, 'tamanho', e.target.value)}
-                                                                    placeholder="Tamanho"
-                                                                />
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <Label className="text-xs">Preço Venda</Label>
-                                                                <Input
-                                                                    type="number"
-                                                                    step="0.01"
-                                                                    value={variacao.preco_venda || 0}
-                                                                    onChange={e => handleVariationChange(index, 'preco_venda', parseFloat(e.target.value) || 0)}
-                                                                />
-                                                            </div>
-                                                            {isGerencial && (
-                                                                <div className="space-y-2">
-                                                                    <Label className="text-xs">Preço Custo</Label>
-                                                                    <Input
-                                                                        type="number"
-                                                                        step="0.01"
-                                                                        value={variacao.preco_custo || 0}
-                                                                        onChange={e => handleVariationChange(index, 'preco_custo', parseFloat(e.target.value) || 0)}
-                                                                    />
-                                                                </div>
-                                                            )}
-                                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Markup (%)</Label>
+                                            <Input
+                                                type="number"
+                                                step="0.01"
+                                                value={formData.markup_aplicado || 0}
+                                                onChange={e => setFormData({ ...formData, markup_aplicado: parseFloat(e.target.value) || 0 })}
+                                            />
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </CardContent>
+                    </Card>
 
-                                                        <Separator className="my-4" />
+                    {/* Estoque Editável Indepentente de Variações */}
+                    <Card className="bg-gray-50 border-gray-200">
+                        <CardHeader className="pb-2">
+                            <div className="flex items-center justify-between">
+                                <CardTitle className="text-sm flex items-center gap-2">
+                                    <Warehouse className="w-4 h-4 text-blue-600" />
+                                    Gestão de Estoque
+                                </CardTitle>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2">
+                                        <Label className="text-[10px] uppercase text-gray-400">Min</Label>
+                                        <Input
+                                            type="number"
+                                            className="h-6 w-16 text-xs"
+                                            value={formData.estoque_minimo || 0}
+                                            onChange={e => setFormData({ ...formData, estoque_minimo: parseInt(e.target.value) || 0 })}
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <Label className="text-[10px] uppercase text-gray-400">Ideal</Label>
+                                        <Input
+                                            type="number"
+                                            className="h-6 w-16 text-xs"
+                                            value={formData.estoque_ideal || 0}
+                                            onChange={e => setFormData({ ...formData, estoque_ideal: parseInt(e.target.value) || 0 })}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                                <div className="space-y-2 col-span-2 md:col-span-3 lg:col-span-2">
+                                    <Label className="font-bold cursor-help text-xs" title="Quantidade total de estoque (Soma de todas as lojas e CD)">Estoque Total</Label>
+                                    <div className="h-8 flex items-center px-3 bg-blue-50 border border-blue-100 rounded-md text-blue-700 font-bold">
+                                        {(parseInt(formData.estoque_cd) || 0) +
+                                            (parseInt(formData.estoque_mostruario_mega_store) || 0) +
+                                            (parseInt(formData.estoque_mostruario_centro) || 0) +
+                                            (parseInt(formData.estoque_mostruario_ponte_branca) || 0) +
+                                            (parseInt(formData.estoque_mostruario_futura) || 0)
+                                        }
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-[10px] text-gray-500 uppercase">Estoque CD</Label>
+                                    <Input
+                                        type="number"
+                                        className="h-8"
+                                        value={formData.estoque_cd || 0}
+                                        onChange={e => setFormData({ ...formData, estoque_cd: parseInt(e.target.value) || 0 })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-[10px] text-gray-500 uppercase">Mega Store</Label>
+                                    <Input
+                                        type="number"
+                                        className="h-8"
+                                        value={formData.estoque_mostruario_mega_store || 0}
+                                        onChange={e => setFormData({ ...formData, estoque_mostruario_mega_store: parseInt(e.target.value) || 0 })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-[10px] text-gray-500 uppercase">Centro</Label>
+                                    <Input
+                                        type="number"
+                                        className="h-8"
+                                        value={formData.estoque_mostruario_centro || 0}
+                                        onChange={e => setFormData({ ...formData, estoque_mostruario_centro: parseInt(e.target.value) || 0 })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-[10px] text-gray-500 uppercase">Ponte Branca</Label>
+                                    <Input
+                                        type="number"
+                                        className="h-8"
+                                        value={formData.estoque_mostruario_ponte_branca || 0}
+                                        onChange={e => setFormData({ ...formData, estoque_mostruario_ponte_branca: parseInt(e.target.value) || 0 })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-[10px] text-gray-500 uppercase">Futura</Label>
+                                    <Input
+                                        type="number"
+                                        className="h-8"
+                                        value={formData.estoque_mostruario_futura || 0}
+                                        onChange={e => setFormData({ ...formData, estoque_mostruario_futura: parseInt(e.target.value) || 0 })}
+                                    />
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
 
-                                                        <div className="grid grid-cols-3 md:grid-cols-3 gap-4">
-                                                            <div className="space-y-2">
-                                                                <Label className="text-xs flex items-center gap-1">
-                                                                    <Ruler className="w-3 h-3" /> Largura (cm)
-                                                                </Label>
-                                                                <Input
-                                                                    type="number"
-                                                                    value={variacao.largura || ''}
-                                                                    onChange={e => handleVariationChange(index, 'largura', parseFloat(e.target.value) || null)}
-                                                                />
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <Label className="text-xs">Altura (cm)</Label>
-                                                                <Input
-                                                                    type="number"
-                                                                    value={variacao.altura || ''}
-                                                                    onChange={e => handleVariationChange(index, 'altura', parseFloat(e.target.value) || null)}
-                                                                />
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <Label className="text-xs">Profundidade (cm)</Label>
-                                                                <Input
-                                                                    type="number"
-                                                                    value={variacao.profundidade || ''}
-                                                                    onChange={e => handleVariationChange(index, 'profundidade', parseFloat(e.target.value) || null)}
-                                                                />
-                                                            </div>
-                                                        </div>
-
-                                                        <Separator className="my-4" />
-
-                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                            <div className="space-y-2">
-                                                                <Label className="text-xs">Est. CD</Label>
-                                                                <Input
-                                                                    type="number"
-                                                                    value={variacao.estoque_cd || 0}
-                                                                    onChange={e => handleVariationChange(index, 'estoque_cd', parseInt(e.target.value) || 0)}
-                                                                />
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <Label className="text-xs">Mega Store</Label>
-                                                                <Input
-                                                                    type="number"
-                                                                    value={variacao.estoque_mostruario_mega_store || 0}
-                                                                    onChange={e => handleVariationChange(index, 'estoque_mostruario_mega_store', parseInt(e.target.value) || 0)}
-                                                                />
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <Label className="text-xs">Centro</Label>
-                                                                <Input
-                                                                    type="number"
-                                                                    value={variacao.estoque_mostruario_centro || 0}
-                                                                    onChange={e => handleVariationChange(index, 'estoque_mostruario_centro', parseInt(e.target.value) || 0)}
-                                                                />
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <Label className="text-xs">Ponte Branca</Label>
-                                                                <Input
-                                                                    type="number"
-                                                                    value={variacao.estoque_mostruario_ponte_branca || 0}
-                                                                    onChange={e => handleVariationChange(index, 'estoque_mostruario_ponte_branca', parseInt(e.target.value) || 0)}
-                                                                />
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="mt-4 flex justify-end">
-                                                            <Button
-                                                                variant="destructive"
-                                                                size="sm"
-                                                                onClick={() => handleDeleteVariation(index)}
-                                                            >
-                                                                <Trash2 className="w-4 h-4 mr-1" />
-                                                                Excluir Variação
-                                                            </Button>
-                                                        </div>
-                                                    </CardContent>
-                                                )}
-                                            </Card>
-                                        );
-                                    })}
-
-                                    <Button
-                                        variant="outline"
-                                        className="w-full"
-                                        onClick={handleAddVariation}
-                                    >
-                                        <Plus className="w-4 h-4 mr-2" />
-                                        Adicionar Nova Variação
-                                    </Button>
-                                </>
-                            )}
-                        </div>
-                    </TabsContent>
-                </Tabs>
+                </div>
 
                 <DialogFooter className="mt-6">
                     <Button variant="outline" onClick={onClose}>

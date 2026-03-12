@@ -3,16 +3,18 @@ import { base44, supabase } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, MoreHorizontal, Trash2, Edit, ArrowRightLeft, Filter, Loader2, PackageOpen, Plus, AlertCircle, Palette } from "lucide-react";
+import { Search, MoreHorizontal, Trash2, Edit, ArrowRightLeft, Filter, Loader2, PackageOpen, Plus, AlertCircle, Palette, Ruler, Layers, Printer } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import ProdutoCadastroCompleto from "../produtos/ProdutoCadastroCompleto";
 import ProductQualityBadge from "../produtos/ProductQualityBadge";
+import { getColorHex } from "../produtos/FurnitureColorPicker";
 import MovimentacaoModal from "./MovimentacaoModal";
 import { useConfirm } from "@/hooks/useConfirm";
 import { toast } from "sonner";
+import GeradorEtiquetasModal from "./GeradorEtiquetasModal";
 
 export default function EstoqueTab({ user }) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -23,6 +25,8 @@ export default function EstoqueTab({ user }) {
   const [movingProduto, setMovingProduto] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+  const [isGeradorEtiquetasOpen, setIsGeradorEtiquetasOpen] = useState(false);
+  const [produtosParaEtiqueta, setProdutosParaEtiqueta] = useState([]);
 
   // Debounce search
   useEffect(() => {
@@ -182,13 +186,23 @@ export default function EstoqueTab({ user }) {
                 </Button>
               )}
               {canEdit && (
-                <Button
-                  onClick={() => { setEditingProduto(null); setIsModalOpen(true); }}
-                  className="bg-green-700 hover:bg-green-800"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Novo Produto
-                </Button>
+                <>
+                  <Button
+                    onClick={() => { setProdutosParaEtiqueta([]); setIsGeradorEtiquetasOpen(true); }}
+                    variant="outline"
+                    className="border-green-200 text-green-700 hover:bg-green-50"
+                  >
+                    <Printer className="w-4 h-4 mr-2" />
+                    Gerar Etiquetas
+                  </Button>
+                  <Button
+                    onClick={() => { setEditingProduto(null); setIsModalOpen(true); }}
+                    className="bg-green-700 hover:bg-green-800"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Novo Produto
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -298,6 +312,31 @@ export default function EstoqueTab({ user }) {
                               <Badge variant="outline" className="text-blue-600 border-blue-200">NFe</Badge>
                             )}
                           </div>
+
+                          {/* Detalhes do Produto (Dimensões, Material, Cor, Tamanho) */}
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 flex items-center" title="Dimensões (LxAxP)">
+                              <Ruler className="w-3 h-3 mr-1 opacity-50" />
+                              {(produto.largura || produto.altura || produto.profundidade)
+                                ? `${produto.largura || '?'}x${produto.altura || '?'}x${produto.profundidade || '?'}`
+                                : 'Dim: N/A'}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100 flex items-center" title="Material">
+                              <Layers className="w-3 h-3 mr-1 opacity-50" /> {produto.material || 'Mat: N/A'}
+                            </span>
+                            {produto.cor && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-50 text-gray-700 border border-gray-100 flex items-center gap-1" title="Cor">
+                                <div className="w-2 h-2 rounded-full border border-gray-300" style={{ background: getColorHex(produto.cor) }} />
+                                {produto.cor}
+                              </span>
+                            )}
+                            {produto.tamanho && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-50 text-gray-700 border border-gray-100 flex items-center gap-1" title="Tamanho">
+                                <Ruler className="w-3 h-3 mr-1 opacity-50" />
+                                {produto.tamanho}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </TableCell>
@@ -337,6 +376,9 @@ export default function EstoqueTab({ user }) {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => { setProdutosParaEtiqueta([produto]); setIsGeradorEtiquetasOpen(true); }}>
+                              <Printer className="mr-2 h-4 w-4" /> Imprimir Etiqueta
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => { setMovingProduto(produto); setIsMoveModalOpen(true); }}>
                               <ArrowRightLeft className="mr-2 h-4 w-4 text-blue-600" /> Movimentar
                             </DropdownMenuItem>
@@ -408,6 +450,13 @@ export default function EstoqueTab({ user }) {
         isOpen={isMoveModalOpen}
         onClose={() => setIsMoveModalOpen(false)}
         produto={movingProduto}
+      />
+
+      <GeradorEtiquetasModal
+        isOpen={isGeradorEtiquetasOpen}
+        onClose={() => setIsGeradorEtiquetasOpen(false)}
+        produtosPreSelecionados={produtosParaEtiqueta}
+        user={user}
       />
     </div>
   );

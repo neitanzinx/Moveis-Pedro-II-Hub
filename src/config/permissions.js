@@ -22,9 +22,9 @@ export const ROLE_RULES = {
       'view_dashboard', 'view_dashboard_gerente', 'view_vendas', 'manage_vendas', 'cancel_vendas',
       'view_estoque', 'view_clientes', 'manage_clientes',
       'view_entregas', 'manage_entregas', 'view_assistencia', 'manage_assistencia',
-      'view_financeiro', 'view_relatorios', 'view_rh', 'view_notas',
+      'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
-      'view_montagem', 'view_marketing', 'view_mostruario', 'view_saneamento'
+      'view_montagem', 'view_marketing', 'view_mostruario'
     ],
     scope: SCOPES.STORE
   },
@@ -33,9 +33,9 @@ export const ROLE_RULES = {
       'view_dashboard', 'view_dashboard_gerente', 'view_vendas', 'manage_vendas', 'cancel_vendas',
       'view_estoque', 'view_clientes', 'manage_clientes',
       'view_entregas', 'manage_entregas', 'view_assistencia', 'manage_assistencia',
-      'view_financeiro', 'view_relatorios', 'view_rh', 'view_notas',
+      'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
-      'view_montagem', 'view_marketing', 'view_mostruario', 'view_saneamento'
+      'view_montagem', 'view_marketing', 'view_mostruario'
     ],
     scope: SCOPES.ALL
   },
@@ -56,7 +56,7 @@ export const ROLE_RULES = {
   },
   'Financeiro': {
     can: [
-      'view_financeiro', 'manage_financeiro', 'view_notas', 'view_vendas',
+      'view_financeiro', 'manage_financeiro', 'view_vendas',
       'view_montagem', 'view_clientes'
     ],
     scope: SCOPES.ALL
@@ -77,6 +77,10 @@ export const ROLE_RULES = {
   },
   'RH': {
     can: ['view_rh', 'manage_rh'],
+    scope: SCOPES.ALL
+  },
+  'Montador': {
+    can: ['view_montagem', 'manage_montagem'],
     scope: SCOPES.ALL
   },
   'Entregador': {
@@ -103,15 +107,12 @@ export const MENU_ITEMS = [
 
   { title: "Produtos", url: "/admin/Produtos", icon: Tag, permission: 'view_produtos', section: "Operacional" },
   { title: "Estoque", url: "/admin/Estoque", icon: Warehouse, permission: 'view_estoque', section: "Operacional" },
-  { title: "Saneamento de Estoque", url: "/admin/Saneamento", icon: Target, permission: 'view_saneamento', section: "Operacional" },
   { title: "Mostruário", url: "/admin/Mostruario", icon: Tag, permission: 'view_mostruario', section: "Operacional" },
-  { title: "Bipagem Rápida", url: "/admin/EstoqueBipagem", icon: ScanBarcode, permission: 'view_estoque', section: "Operacional" },
   { title: "Logística", url: "/admin/LogisticaSemanal", icon: CalendarDays, permission: 'view_entregas', section: "Operacional" },
   { title: "Montagem", url: "/admin/Montagem", icon: Building2, permission: 'view_montagem', section: "Operacional", module: 'montagem' },
   { title: "Assistência Técnica", url: "/admin/AssistenciaTecnica", icon: Wrench, permission: 'view_assistencia', section: "Operacional", module: 'assistencia_tecnica' },
 
   { title: "Financeiro", url: "/admin/Financeiro", icon: DollarSign, permission: 'view_financeiro', section: "Gestão" },
-  { title: "Notas Fiscais", url: "/admin/NotasFiscais", icon: Receipt, permission: 'view_notas', section: "Gestão", module: 'nfe' },
   { title: "Comissões", url: "/admin/RelatorioComissoes", icon: DollarSign, permission: 'view_relatorios', section: "Gestão" },
   { title: "Marketing", url: "/admin/Marketing", icon: Tag, permission: 'view_marketing', section: "Gestão", module: 'marketing' },
   { title: "Relatórios", url: "/admin/RelatoriosAvancados", icon: BarChart3, permission: 'view_relatorios', section: "Gestão" },

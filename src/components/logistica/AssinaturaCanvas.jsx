@@ -49,16 +49,25 @@ export default function AssinaturaCanvas({ onSave, onCancel }) {
     const getCoords = (e) => {
         const canvas = canvasRef.current;
         const rect = canvas.getBoundingClientRect();
+        
+        // Fator de proporção: Tamanho interno (pixels reais) vs Tamanho na tela (CSS)
+        // Isso resolve o problema de 'drift' da caneta, especialmente no celular
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
 
-        if (e.touches) {
-            return {
-                x: e.touches[0].clientX - rect.left,
-                y: e.touches[0].clientY - rect.top
-            };
+        let clientX, clientY;
+
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
         }
+
         return {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
+            x: ((clientX - rect.left) * scaleX) / window.devicePixelRatio,
+            y: ((clientY - rect.top) * scaleY) / window.devicePixelRatio
         };
     };
 
@@ -119,15 +128,15 @@ export default function AssinaturaCanvas({ onSave, onCancel }) {
     };
 
     return (
-        <div className="space-y-4">
-            <div className="text-center mb-2">
+        <div className="flex flex-col h-full space-y-4">
+            <div className="text-center">
                 <p className="text-sm text-gray-500">Assine com o dedo na área abaixo</p>
             </div>
 
-            <div className="border-2 border-gray-300 rounded-xl overflow-hidden bg-white touch-none">
+            <div className="flex-1 min-h-[50vh] border-2 border-gray-300 rounded-xl overflow-hidden bg-white touch-none">
                 <canvas
                     ref={canvasRef}
-                    className="w-full h-[200px] cursor-crosshair"
+                    className="w-full h-full cursor-crosshair"
                     onMouseDown={startDrawing}
                     onMouseMove={draw}
                     onMouseUp={stopDrawing}
@@ -138,7 +147,7 @@ export default function AssinaturaCanvas({ onSave, onCancel }) {
                 />
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 mt-auto">
                 <Button
                     variant="outline"
                     onClick={limpar}

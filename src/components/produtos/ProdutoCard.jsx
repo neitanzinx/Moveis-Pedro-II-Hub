@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Pencil, Trash2, Package, AlertTriangle } from "lucide-react";
 
 export default function ProdutoCard({ produto, onEdit, onDelete }) {
-  const isEstoqueBaixo = produto.quantidade_estoque <= (produto.estoque_minimo || 5);
+  const isEstoqueBaixo = produto.estoque_minimo > 0 && produto.quantidade_estoque <= produto.estoque_minimo;
   const imagemPrincipal = produto.fotos?.[0] || 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400';
 
   return (
@@ -35,7 +35,7 @@ export default function ProdutoCard({ produto, onEdit, onDelete }) {
           </div>
         )}
       </div>
-      
+
       <CardContent className="p-4">
         <div className="mb-3">
           <h3 className="font-bold text-lg mb-1 line-clamp-1" style={{ color: 'var(--charcoal)' }}>

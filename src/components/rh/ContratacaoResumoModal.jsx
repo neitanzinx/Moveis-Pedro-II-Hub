@@ -8,6 +8,7 @@ import {
     User, Briefcase, DollarSign, Gift, Calendar, CreditCard,
     Phone, Mail, MapPin, CheckCircle2, Printer, X, KeyRound
 } from "lucide-react";
+import { gerarResumoEstimado } from "@/utils/calculosTrabalhistas";
 
 // Utility function to format currency
 const formatCurrency = (value) => {
@@ -57,26 +58,13 @@ function BenefitBadge({ label, value, active = true }) {
 export default function ContratacaoResumoModal({ colaborador, onClose, onGenerateAccess }) {
     if (!colaborador) return null;
 
-    // Calculate totals
-    const salarioBase = Number(colaborador.salario_base) || 0;
-    const valeTransporte = Number(colaborador.vale_transporte) || 0;
-    const valeAlimentacao = Number(colaborador.vale_alimentacao) || 0;
-    const valeRefeicao = Number(colaborador.vale_refeicao) || 0;
-    const planoSaude = Number(colaborador.plano_saude) || 0;
-    const planoOdontologico = Number(colaborador.plano_odontologico) || 0;
-    const bonusMensal = Number(colaborador.bonus_mensal) || 0;
-    const outrosBeneficios = Number(colaborador.outros_beneficios) || 0;
+    // Calculate totals using the centralized CLT engine
+    const resumo = gerarResumoEstimado(colaborador);
 
-    const totalBeneficios = valeTransporte + valeAlimentacao + valeRefeicao +
-        planoSaude + planoOdontologico + bonusMensal + outrosBeneficios;
-
+    const salarioBase = resumo.salario_base;
+    const totalBeneficios = resumo.beneficios_empresa;
     const totalBruto = salarioBase + totalBeneficios;
-
-    // Estimated deductions (simplified)
-    const estimativaINSS = salarioBase * 0.11; // ~11% average
-    const estimativaFGTS = salarioBase * 0.08; // 8%
-    const totalDescontos = estimativaINSS;
-    const totalLiquido = salarioBase - totalDescontos + totalBeneficios;
+    const totalLiquido = resumo.salario_liquido;
 
     const diaPagamento = colaborador.dia_pagamento || 5;
     const tipoPagamento = colaborador.tipo_pagamento || 'Mensal';
@@ -114,7 +102,7 @@ export default function ContratacaoResumoModal({ colaborador, onClose, onGenerat
                                 </div>
                                 <div>
                                     <DataRow label="Cargo" value={colaborador.cargo || '-'} />
-                                    <DataRow label="Setor" value={colaborador.setor || '-'} />
+
                                     <DataRow label="Tipo Contrato" value={colaborador.tipo_contrato || 'CLT'} />
                                     <DataRow label="Data Admissão" value={colaborador.data_admissao ? new Date(colaborador.data_admissao).toLocaleDateString('pt-BR') : '-'} />
                                 </div>
@@ -176,9 +164,27 @@ export default function ContratacaoResumoModal({ colaborador, onClose, onGenerat
                             </div>
 
                             <div className="p-3 bg-gray-100 rounded-lg mb-4">
-                                <p className="text-xs text-gray-600 mb-2">Estimativa de Descontos (CLT):</p>
-                                <DataRow label="INSS (~11%)" value={`- ${formatCurrency(estimativaINSS)}`} />
-                                <DataRow label="FGTS (8%)" value={formatCurrency(estimativaFGTS)} />
+                                <p className="text-xs text-gray-600 mb-2">Descontos e Encargos (CLT 2025):</p>
+                                <DataRow label={`INSS (${resumo.inss_faixa})`} value={`- ${formatCurrency(resumo.inss)}`} />
+                                {resumo.irrf > 0 && (
+                                    <DataRow label={`IRRF (${resumo.irrf_faixa})`} value={`- ${formatCurrency(resumo.irrf)}`} />
+                                )}
+                                {resumo.vale_transporte > 0 && (
+                                    <DataRow label="Desc. VT (6% CLT)" value={`- ${formatCurrency(resumo.vale_transporte)}`} />
+                                )}
+                                {resumo.adicional_noturno > 0 && (
+                                    <DataRow label="(+) Adic. Noturno" value={`+ ${formatCurrency(resumo.adicional_noturno)}`} />
+                                )}
+                                {resumo.insalubridade > 0 && (
+                                    <DataRow label="(+) Insalubridade" value={`+ ${formatCurrency(resumo.insalubridade)}`} />
+                                )}
+                                {resumo.periculosidade > 0 && (
+                                    <DataRow label="(+) Periculosidade" value={`+ ${formatCurrency(resumo.periculosidade)}`} />
+                                )}
+                                {resumo.salario_familia > 0 && (
+                                    <DataRow label="(+) Salário Família" value={`+ ${formatCurrency(resumo.salario_familia)}`} />
+                                )}
+                                <DataRow label="FGTS (8%)" value={formatCurrency(resumo.fgts)} />
                             </div>
 
                             <div className="p-4 rounded-xl" style={{ backgroundColor: '#07593f10' }}>

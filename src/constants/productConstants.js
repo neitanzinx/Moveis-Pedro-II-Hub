@@ -435,7 +435,7 @@ export function getMarkupPadraoPorGrupo(grupoId) {
 // LOJAS E MOSTRUÁRIOS
 // =====================================================
 
-// Lojas com mostruário
+// Lojas com mostruário (Mantido para fallback)
 export const LOJAS_MOSTRUARIO = [
     { id: "cd", nome: "CD (Centro de Distribuição)", tipo: "estoque" },
     { id: "mega_store", nome: "Mega Store", tipo: "mostruario" },
@@ -444,7 +444,11 @@ export const LOJAS_MOSTRUARIO = [
     { id: "futura", nome: "Futura", tipo: "mostruario" },
 ];
 
-// Mapeamento de campos de estoque por loja
+/**
+ * Mapeamento principal de ID da loja na constante hardcoded para o campo da tabela Produtos.
+ * O banco de dados (tabela produtos) possui 5 campos de estoque fixos no schema original.
+ * Para novas lojas não cobertas nestes 5, usamos o ID gerado ou um fallback estruturado.
+ */
 export const CAMPOS_ESTOQUE_LOJA = {
     cd: "estoque_cd",
     mega_store: "estoque_mostruario_mega_store",
@@ -452,6 +456,58 @@ export const CAMPOS_ESTOQUE_LOJA = {
     ponte_branca: "estoque_mostruario_ponte_branca",
     futura: "estoque_mostruario_futura",
 };
+
+/**
+ * Gera um identificador seguro (slug) baseado no nome.
+ */
+const slugify = (text) => {
+    return text.toString().toLowerCase()
+        .replace(/\s+/g, '_')           // Substitui espaços por underscores
+        .replace(/[^\w\-]+/g, '')       // Remove caracteres não-alfanuméricos
+        .replace(/\-\-+/g, '_')         // Substitui múltiplos - por _
+        .replace(/^-+/, '')             // Remove _ do começo
+        .replace(/-+$/, '');            // Remove _ do fim
+};
+
+/**
+ * Obtém o campo da tabela `produtos` referente ao estoque de uma Loja baseada em seu nome.
+ * Como o banco de dados das filiais foi populado dinamicamente com Nomes reais (e UUIDs no BD),
+ * este helper mapeia de volta para os 5 campos estáticos da tabela de Produtos, ou cria
+ * um campo dinâmico baseado no slug.
+ * 
+ * @param {Object|string} loja - O objeto da loja retornado do BD, ou o nome da loja.
+ * @returns {string} O nome do campo na tabela produtos (ex: 'estoque_cd', 'estoque_mostruario_centro')
+ */
+export function obterCampoEstoqueDaLoja(loja) {
+    if (!loja) return "estoque_cd";
+
+    // Se recebeu objeto, pega o nome, se não assume que recebeu string
+    const nome = typeof loja === 'object' ? loja.nome : loja;
+    if (!nome) return "estoque_cd";
+
+    const nomeLower = nome.toLowerCase();
+
+    // Mapeamento heurístico para as 5 lojas originais do sistema (e do banco)
+    if (nomeLower.includes("cd") || nomeLower.includes("centro de distribui")) {
+        return "estoque_cd";
+    }
+    if (nomeLower.includes("mega")) {
+        return "estoque_mostruario_mega_store";
+    }
+    if (nomeLower === "centro" || nomeLower.includes("loja centro") || nomeLower.includes("matriz")) {
+        return "estoque_mostruario_centro";
+    }
+    if (nomeLower.includes("ponte branca")) {
+        return "estoque_mostruario_ponte_branca";
+    }
+    if (nomeLower.includes("futura")) {
+        return "estoque_mostruario_futura";
+    }
+
+    // Para novas filiais cadastradas no GestaoLojas, criamos um fallback
+    // Isso requer alteração na tabela `produtos` futuramente ou migração
+    return `estoque_${slugify(nome)}`;
+}
 
 // =====================================================
 // TIPOS DE MONTAGEM

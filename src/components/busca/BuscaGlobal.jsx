@@ -77,12 +77,7 @@ export default function BuscaGlobal({ open, onClose }) {
     enabled: habilitarBusca && can('view_entregas')
   });
 
-  // Notas Fiscais (se existir entidade)
-  const { data: notasFiscais = [] } = useQuery({
-    queryKey: ['busca-notas'],
-    queryFn: () => [],
-    enabled: false // Ativar quando entidade existir
-  });
+
 
   // Filtrar resultados
   const filtrarResultados = (dados, tipo) => {

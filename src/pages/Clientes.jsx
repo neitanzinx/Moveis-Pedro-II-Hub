@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Search, MapPin, Phone, Mail, Trash2, Edit, User, AlertTriangle, Merge } from "lucide-react";
+import { Plus, Search, MapPin, Phone, Mail, Trash2, Edit, User, AlertTriangle, Merge, ShoppingBag } from "lucide-react";
 import ClienteModal from "../components/clientes/ClienteModal";
+import { ClienteCRMModal } from "../components/clientes/ClienteCRMModal";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 
@@ -29,12 +31,40 @@ export default function Clientes() {
   const [search, setSearch] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCliente, setEditingCliente] = useState(null);
+  const [isCRMModalOpen, setIsCRMModalOpen] = useState(false);
+  const [selectedCRMCliente, setSelectedCRMCliente] = useState(null);
   const [showDuplicatas, setShowDuplicatas] = useState(false);
   const [duplicatas, setDuplicatas] = useState([]);
+  const [pendingReturnUrl, setPendingReturnUrl] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
 
   const { data: clientes = [], isLoading } = useQuery({ queryKey: ['clientes'], queryFn: () => base44.entities.Cliente.list('-created_date') });
+
+  // Handle highlight param to auto-open edit modal
+  useEffect(() => {
+    const highlightId = searchParams.get('highlight');
+    const returnUrl = searchParams.get('returnUrl');
+
+    if (highlightId && clientes.length > 0 && !isLoading) {
+      const clienteToEdit = clientes.find(c => String(c.id) === String(highlightId));
+      if (clienteToEdit) {
+        setPendingReturnUrl(returnUrl ? decodeURIComponent(returnUrl) : null);
+        setEditingCliente(clienteToEdit);
+        setIsModalOpen(true);
+
+        // Remove params to avoid reopening on refresh
+        setSearchParams(params => {
+          const newParams = new URLSearchParams(params);
+          newParams.delete('highlight');
+          newParams.delete('returnUrl');
+          return newParams;
+        }, { replace: true });
+      }
+    }
+  }, [clientes, isLoading, searchParams, setSearchParams]);
 
   const deleteMutation = useMutation({
     mutationFn: (id) => base44.entities.Cliente.delete(id),
@@ -309,9 +339,14 @@ export default function Clientes() {
                 return (
                   <TableRow
                     key={cliente.id}
-                    className={
-                      isDuplicata ? "bg-yellow-50 dark:bg-yellow-900/10" : ""
-                    }
+                    className={`
+                      ${isDuplicata ? "bg-yellow-50 dark:bg-yellow-900/10" : ""}
+                      cursor-pointer hover:bg-muted/50 transition-colors
+                    `}
+                    onClick={() => {
+                      setSelectedCRMCliente(cliente);
+                      setIsCRMModalOpen(true);
+                    }}
                   >
                     <TableCell>
                       <div className="flex items-center gap-3">
@@ -402,7 +437,8 @@ export default function Clientes() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setEditingCliente(cliente);
                             setIsModalOpen(true);
                           }}
@@ -412,7 +448,20 @@ export default function Clientes() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={async () => {
+                          title="CRM & Histórico"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedCRMCliente(cliente);
+                            setIsCRMModalOpen(true);
+                          }}
+                        >
+                          <ShoppingBag className="w-4 h-4 text-amber-600" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={async (e) => {
+                            e.stopPropagation();
                             const confirmed = await confirm({
                               title: "Excluir Cliente",
                               message: "Tem certeza que deseja excluir este cliente?",
@@ -574,6 +623,10 @@ export default function Clientes() {
             queryClient.invalidateQueries({ queryKey: ['entregas'] }); // FORÇA UPDATE NO KANBAN
             setIsModalOpen(false);
             toast.success(editingCliente ? "Cliente atualizado!" : "Cliente cadastrado!");
+
+            if (pendingReturnUrl) {
+              navigate(pendingReturnUrl);
+            }
           } catch (error) {
             console.error("Erro ao salvar cliente:", error);
             toast.error(`Erro ao salvar: ${error.message || "Verifique os dados"}`);
@@ -581,6 +634,12 @@ export default function Clientes() {
         }}
         cliente={editingCliente}
         clientes={clientes}
+      />
+
+      <ClienteCRMModal
+        isOpen={isCRMModalOpen}
+        onClose={() => setIsCRMModalOpen(false)}
+        cliente={selectedCRMCliente}
       />
     </div>
   );

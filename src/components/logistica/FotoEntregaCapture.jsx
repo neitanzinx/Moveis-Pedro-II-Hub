@@ -60,11 +60,15 @@ export default function FotoEntregaCapture({
                 audio: false
             });
 
-            if (videoRef.current) {
-                videoRef.current.srcObject = mediaStream;
-                setStream(mediaStream);
-                setCameraAtiva(true);
-            }
+            setStream(mediaStream);
+            setCameraAtiva(true);
+
+            setTimeout(() => {
+                if (videoRef.current) {
+                    videoRef.current.srcObject = mediaStream;
+                    videoRef.current.play().catch(e => console.error("Error playing video:", e));
+                }
+            }, 100);
         } catch (err) {
             console.error("Erro ao acessar câmera:", err);
             setErro("Não foi possível acessar a câmera. Tente selecionar uma imagem da galeria.");
@@ -89,11 +93,32 @@ export default function FotoEntregaCapture({
         const canvas = canvasRef.current;
         const video = videoRef.current;
 
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        // Default to client dimensions or standard HD if intrinsic dimensions are not yet available
+        let width = video.videoWidth || video.clientWidth || 1280;
+        let height = video.videoHeight || video.clientHeight || 720;
+
+        // Maximum dimensions to prevent canvas memory/processing errors on mobile
+        const MAX_WIDTH = 1280;
+        const MAX_HEIGHT = 1280;
+
+        // Calculate aspect ratio and resize if necessary
+        if (width > height) {
+            if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+            }
+        } else {
+            if (height > MAX_HEIGHT) {
+                width *= MAX_HEIGHT / height;
+                height = MAX_HEIGHT;
+            }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
 
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
         // Adicionar marca d'água com data/hora
         const agora = new Date();
@@ -104,16 +129,26 @@ export default function FotoEntregaCapture({
         ctx.font = '14px Arial';
         ctx.fillText(`${dataHora} - Pedido #${numeroPedido || 'N/A'}`, 10, canvas.height - 10);
 
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        try {
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            if (dataUrl === "data:,") {
+                console.error("toDataURL returned empty data url. Canvas dimensions:", canvas.width, 'x', canvas.height);
+                toast.error("Erro ao processar imagem. Verifique permissões/memória.");
+                return;
+            }
 
-        setFotos(prev => [...prev, {
-            id: Date.now(),
-            dataUrl,
-            timestamp: agora.toISOString(),
-            tipo: fotos.length === 0 ? 'principal' : 'adicional'
-        }]);
+            setFotos(prev => [...prev, {
+                id: Date.now(),
+                dataUrl,
+                timestamp: agora.toISOString(),
+                tipo: fotos.length === 0 ? 'principal' : 'adicional'
+            }]);
 
-        toast.success(`Foto ${fotos.length + 1} capturada!`);
+            toast.success(`Foto ${fotos.length + 1} capturada!`);
+        } catch (e) {
+            console.error("Erro no toDataURL", e);
+            toast.error("Erro de memória ao processar a foto. Tente novamente.");
+        }
     };
 
     const selecionarArquivo = (e) => {
@@ -153,6 +188,11 @@ export default function FotoEntregaCapture({
         const fotosUploadadas = [];
 
         try {
+            // Se já sabemos que está offline, pula o upload pesado
+            if (!navigator.onLine) {
+                throw new Error("Sem conexão de rede (navigator.onLine = false)");
+            }
+
             for (let i = 0; i < fotos.length; i++) {
                 const foto = fotos[i];
 
@@ -190,7 +230,7 @@ export default function FotoEntregaCapture({
 
             pararCamera();
 
-            // Retornar dados para o componente pai
+            // Retornar dados com URLs públicas para o componente pai
             onComplete({
                 fotos: fotosUploadadas,
                 geolocalizacao,
@@ -198,8 +238,22 @@ export default function FotoEntregaCapture({
             });
 
         } catch (error) {
-            console.error('Erro ao fazer upload:', error);
-            toast.error('Erro ao enviar fotos. Tente novamente.');
+            console.error('Erro ao fazer upload ou detectado offline:', error);
+            toast.warning('Sem conexão para envio. Salvando a foto no aparelho para sincronizar depois...');
+
+            const fotosOffline = fotos.map(f => ({
+                dataUrl: f.dataUrl,
+                tipo: f.tipo,
+                timestamp: f.timestamp
+            }));
+
+            pararCamera();
+            onComplete({
+                fotos: fotosOffline,
+                isOffline: true,
+                geolocalizacao,
+                dataHoraEntrega: new Date().toISOString()
+            });
         } finally {
             setUploading(false);
         }

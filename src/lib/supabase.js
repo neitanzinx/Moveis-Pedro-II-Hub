@@ -79,7 +79,7 @@ const tableMap = {
     Candidato: 'candidatos',
     AvaliacaoDesempenho: 'avaliacoes_desempenho',
     DocumentoRH: 'documentos_rh',
-    ComunicadoRH: 'comunicados_rh',
+
     PontoEletronico: 'ponto_eletronico',
     TransferenciaEstoque: 'transferencias_estoque',
     Inventario: 'inventarios',
@@ -110,7 +110,10 @@ const tableMap = {
     PedidoMostruario: 'pedidos_mostruario',
     SolicitacaoCadastro: 'solicitacoes_cadastro_produto',
     PromocaoFornecedor: 'promocoes_fornecedor',
-    HistoricoPrecos: 'historico_precos'
+    HistoricoPrecos: 'historico_precos',
+    ContaPagarCompras: 'compras_contas_pagar',
+    SolicitacaoPreco: 'solicitacoes_preco',
+    SolicitacaoEncomenda: 'solicitacoes_encomenda'
 };
 
 // O Adaptador Mágico (Handler)
@@ -153,8 +156,8 @@ const createHandler = (tableName) => ({
                 fetchMore = false;
             }
 
-            // Safety break para evitar loop infinito em edge cases (ex: > 20k produtos)
-            if (allData.length >= 20000) fetchMore = false;
+            // Safety break para evitar loop infinito em edge cases (ex: > 100k produtos)
+            if (allData.length >= 100000) fetchMore = false;
         }
 
         return allData;
@@ -169,7 +172,8 @@ const createHandler = (tableName) => ({
         // Audit Log
         if (tableName !== 'audit_logs') {
             try {
-                const { data: { user } } = await supabase.auth.getUser();
+                const { data: { session } } = await supabase.auth.getSession();
+                const user = session?.user;
                 if (user) {
                     supabase.from('audit_logs').insert({
                         table_name: tableName,
@@ -207,7 +211,8 @@ const createHandler = (tableName) => ({
         // Audit Log
         if (tableName !== 'audit_logs') {
             try {
-                const { data: { user } } = await supabase.auth.getUser();
+                const { data: { session } } = await supabase.auth.getSession();
+                const user = session?.user;
                 if (user) {
                     supabase.from('audit_logs').insert({
                         table_name: tableName,
@@ -226,6 +231,44 @@ const createHandler = (tableName) => ({
         }
 
         return updated;
+    },
+    getById: async (id) => {
+        const { data, error } = await supabase.from(tableName).select('*').eq('id', id).single();
+        if (error) {
+            console.error(`Erro Supabase (GetById ${id} em ${tableName}):`, error);
+            throw error;
+        }
+        return data;
+    },
+    upsert: async (data, onConflict = 'id') => {
+        const { data: upserted, error } = await supabase.from(tableName).upsert(data, { onConflict }).select().single();
+        if (error) {
+            console.error(`Erro Supabase (Upsert em ${tableName}):`, error);
+            throw error;
+        }
+
+        // Audit Log
+        if (tableName !== 'audit_logs') {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                const user = session?.user;
+                if (user) {
+                    supabase.from('audit_logs').insert({
+                        table_name: tableName,
+                        action: 'UPSERT',
+                        record_id: upserted.id,
+                        new_data: upserted,
+                        user_id: user.id
+                    }).then(({ error: auditError }) => {
+                        if (auditError) console.error("Erro Audit Log (Upsert):", auditError);
+                    });
+                }
+            } catch (e) {
+                console.error("Erro ao registrar auditoria (Upsert):", e);
+            }
+        }
+
+        return upserted;
     },
     delete: async (id) => {
         // Fetch old data for audit
@@ -246,7 +289,8 @@ const createHandler = (tableName) => ({
         // Audit Log
         if (tableName !== 'audit_logs') {
             try {
-                const { data: { user } } = await supabase.auth.getUser();
+                const { data: { session } } = await supabase.auth.getSession();
+                const user = session?.user;
                 if (user) {
                     supabase.from('audit_logs').insert({
                         table_name: tableName,
@@ -331,58 +375,6 @@ const createHandler = (tableName) => ({
         }
         return { data, count };
     },
-
-    search: async ({ page = 1, limit = 100, filters = {}, search = '', orderBy = null }) => {
-        const from = (page - 1) * limit;
-        const to = from + limit - 1;
-
-        let query = supabase.from(tableName).select('*', { count: 'exact' });
-
-        // Aplicar filtros (match exato)
-        if (filters && typeof filters === 'object') {
-            Object.entries(filters).forEach(([key, value]) => {
-                if (value !== undefined && value !== null && value !== 'todas') {
-                    // Tratamento especial para booleanos convertidos em string
-                    if (value === 'true') value = true;
-                    if (value === 'false') value = false;
-                    query = query.eq(key, value);
-                }
-            });
-        }
-
-        // Aplicar busca textual
-        if (search) {
-            const searchLower = search.toLowerCase();
-
-            if (tableName === 'produtos') {
-                query = query.or(`nome.ilike.%${search}%,codigo_barras.ilike.%${search}%,categoria.ilike.%${search}%,modelo_referencia.ilike.%${search}%`);
-            } else if (tableName === 'clientes') {
-                query = query.or(`nome.ilike.%${search}%,cpf_cnpj.ilike.%${search}%,email.ilike.%${search}%`);
-            } else {
-                query = query.ilike('nome', `%${search}%`);
-            }
-        }
-
-        // Ordenação
-        if (orderBy && typeof orderBy === 'string') {
-            const isDesc = orderBy.startsWith('-');
-            const field = isDesc ? orderBy.substring(1) : orderBy;
-            const dbField = field === 'created_date' ? 'created_at' : field;
-            query = query.order(dbField, { ascending: !isDesc });
-        } else {
-            query = query.order('id', { ascending: true });
-        }
-
-        query = query.range(from, to);
-
-        const { data, count, error } = await query;
-
-        if (error) {
-            console.error(`Erro Supabase (Search ${tableName}):`, error);
-            throw error;
-        }
-        return { data, count };
-    },
     filter: async (filters, orderBy = null) => {
         let allData = [];
         let from = 0;
@@ -429,7 +421,7 @@ const createHandler = (tableName) => ({
                 fetchMore = false;
             }
             // Safety break
-            if (allData.length >= 20000) fetchMore = false;
+            if (allData.length >= 100000) fetchMore = false;
         }
 
         return allData;
@@ -452,7 +444,8 @@ export const base44 = {
     // Autenticação (Adaptado para Supabase Auth)
     auth: {
         me: async () => {
-            const { data: { user } } = await supabase.auth.getUser();
+            const { data: { session } } = await supabase.auth.getSession();
+            const user = session?.user;
             if (!user) return null;
             const { data: profile } = await supabase.from('public_users').select('*').eq('id', user.id).single();
             return { ...user, ...profile };
@@ -460,7 +453,8 @@ export const base44 = {
 
         // Atualizar dados do usuário logado
         updateMe: async (data) => {
-            const { data: { user } } = await supabase.auth.getUser();
+            const { data: { session } } = await supabase.auth.getSession();
+            const user = session?.user;
             if (!user) throw new Error('Usuário não autenticado');
             const { data: updated, error } = await supabase
                 .from('public_users')

@@ -41,7 +41,7 @@ export async function processarFidelidadeCompra(cliente, valorCompra, numeroPedi
             .from('fidelidade_config')
             .select('*')
             .eq('is_active', true)
-            .single();
+            .maybeSingle();
 
         if (configError || !config) {
             log('ℹ️ Fidelidade: Configuração não encontrada ou inativa');
@@ -181,7 +181,7 @@ export async function processarFidelidadeCadastro(cliente) {
             .from('fidelidade_config')
             .select('signup_bonus, is_active')
             .eq('is_active', true)
-            .single();
+            .maybeSingle();
 
         if (!config || !config.signup_bonus) {
             return { sucesso: false, coroasGanhas: 0 };

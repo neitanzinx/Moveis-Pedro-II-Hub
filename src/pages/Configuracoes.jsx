@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { useSearchParams } from "react-router-dom";
 import { Building2, DollarSign, Truck, FileText, Users, Shield, AlertCircle, Image, Store, Percent, Calculator, Package, UserCheck, ClipboardList, ChevronRight, CreditCard, Sparkles, Bot, MessageCircle, Key } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import ConfiguracaoComissoes from "../components/configuracoes/ConfiguracaoComissoes";
@@ -8,15 +9,14 @@ import ConfiguracaoLogo from "../components/configuracoes/ConfiguracaoLogo";
 import GestaoLojas from "../components/configuracoes/GestaoLojas";
 import ConfiguracaoTaxas from "../components/configuracoes/ConfiguracaoTaxas";
 import GestaoCargos from "../components/configuracoes/GestaoCargos";
-import ConfiguracaoNfe from "../components/configuracoes/ConfiguracaoNfe";
+import ConfiguracaoNfe from "../components/configuracoes/ConfiguracaoNfe"; // Mantido para o cadastro de empresas
 import ConfiguracaoPrecificacao from "../components/configuracoes/ConfiguracaoPrecificacao";
 import ConfiguracaoMarkup from "../components/configuracoes/ConfiguracaoMarkup";
 import AuditLogPage from "./AuditLog";
-import ConfiguracaoPagSeguro from "../components/configuracoes/ConfiguracaoPagSeguro";
 import ConfiguracaoWhatsAppBot from "../components/configuracoes/ConfiguracaoWhatsAppBot";
-import ConfiguracaoStone from "../components/configuracoes/ConfiguracaoStone";
-import ConfiguracaoIntegracoes from "../components/configuracoes/ConfiguracaoIntegracoes";
 import GestaoFuncionarios from "../components/configuracoes/GestaoFuncionarios";
+import ConfiguracaoPrazos from "../components/configuracoes/ConfiguracaoPrazos";
+
 
 const MENU_CONFIG = {
   empresa: {
@@ -24,7 +24,8 @@ const MENU_CONFIG = {
     icon: Building2,
     items: [
       { id: "logo", label: "Identidade Visual", icon: Image },
-      { id: "lojas", label: "Lojas", icon: Store },
+      { id: "lojas", label: "Filiais / Estoques", icon: Store },
+      { id: "fiscais", label: "Dados Fiscais (Empresas)", icon: FileText },
     ]
   },
   financeiro: {
@@ -37,40 +38,20 @@ const MENU_CONFIG = {
       { id: "markup", label: "Markup Automático", icon: Sparkles },
     ]
   },
-  pagamentos: {
-    label: "Pagamentos",
-    icon: CreditCard,
-    items: [
-      { id: "pagseguro", label: "PagSeguro / PagBank", icon: CreditCard },
-      { id: "stone", label: "Stone", icon: CreditCard },
-    ]
-  },
   operacao: {
     label: "Operação",
     icon: Truck,
     items: [
       { id: "frota", label: "Frota de Veículos", icon: Truck },
+      { id: "prazos", label: "Prazos de Entrega", icon: ClipboardList },
     ]
+
   },
   automacao: {
     label: "Automação",
     icon: Bot,
     items: [
       { id: "whatsapp", label: "WhatsApp Bot", icon: MessageCircle },
-    ]
-  },
-  integracoes: {
-    label: "Integrações",
-    icon: Key,
-    items: [
-      { id: "apis", label: "Chaves de API", icon: Key },
-    ]
-  },
-  nfe: {
-    label: "Nota Fiscal",
-    icon: FileText,
-    items: [
-      { id: "nfe", label: "Configurações NFe", icon: FileText },
     ]
   },
   equipe: {
@@ -92,8 +73,20 @@ const MENU_CONFIG = {
 
 export default function Configuracoes() {
   const { user, loading } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeCategory, setActiveCategory] = useState("empresa");
   const [activeItem, setActiveItem] = useState("logo");
+
+  // Auto-navigate to NF-e tab when URL has ?tab=nfe
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'nfe') {
+      setActiveCategory('nfe');
+      setActiveItem('nfe');
+      // Clean the URL param after applying
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams]);
 
   // Ao mudar categoria, seleciona o primeiro item
   const handleCategoryChange = (category) => {
@@ -125,7 +118,7 @@ export default function Configuracoes() {
     );
   }
 
-  const currentCategory = MENU_CONFIG[activeCategory];
+  const currentCategory = MENU_CONFIG[activeCategory] || MENU_CONFIG.empresa;
 
   // Renderiza o conteudo baseado na selecao
   const renderContent = () => {
@@ -138,13 +131,12 @@ export default function Configuracoes() {
       case "markup": return <ConfiguracaoMarkup />;
       case "frota": return <ConfiguracaoFrota />;
       case "whatsapp": return <ConfiguracaoWhatsAppBot />;
-      case "nfe": return <ConfiguracaoNfe />;
-      case "pagseguro": return <ConfiguracaoPagSeguro />;
-      case "stone": return <ConfiguracaoStone />;
-      case "apis": return <ConfiguracaoIntegracoes />;
+      case "fiscais": return <ConfiguracaoNfe />;
       case "funcionarios": return <GestaoFuncionarios currentUser={user} />;
       case "cargos": return <GestaoCargos />;
       case "auditoria": return <AuditLogPage />;
+      case "prazos": return <ConfiguracaoPrazos />;
+
       default: return null;
     }
   };

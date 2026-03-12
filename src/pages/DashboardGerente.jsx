@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,13 +10,16 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/useAuth";
 import SolicitacoesCadastroWidget from "@/components/dashboard/SolicitacoesCadastroWidget";
 import ControleMontadoresWidget from "@/components/dashboard/ControleMontadoresWidget";
 import ProdutoModal from "@/components/produtos/ProdutoModal";
+import AcoesVendedoresWidget from "@/components/dashboard/AcoesVendedoresWidget";
 import { toast } from "sonner";
+import { formatarMoeda } from "@/utils/formatters";
 import {
     DollarSign,
     ShoppingCart,
@@ -58,6 +62,8 @@ import {
 import {
     AreaChart,
     Area,
+    LineChart,
+    Line,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -81,9 +87,11 @@ export default function DashboardGerente() {
     const [editingMeta, setEditingMeta] = useState(null);
     const [novaMetaValor, setNovaMetaValor] = useState('');
     const [metaVendedorSelecionado, setMetaVendedorSelecionado] = useState(null);
+    const [periodoGrafico, setPeriodoGrafico] = useState('mes'); // 5, 7, 14, 30, 60, 2y
 
     // Estados para tokens gerenciais (v2 - simplificado)
     const [tokenModalOpen, setTokenModalOpen] = useState(false);
+    const [mostrarExpirados, setMostrarExpirados] = useState(false);
     const [novoToken, setNovoToken] = useState({
         tipoToken: 'SINGLE_USE', // 'SINGLE_USE' ou 'SUPERVISOR_MODE'
         permissao: 'DESCONTO', // 'DESCONTO', 'CANCELAMENTO', 'ALTERACAO_PRECO', 'SUPER_CAIXA'
@@ -95,8 +103,15 @@ export default function DashboardGerente() {
     const [copiado, setCopiado] = useState(null);
     const [tokenHistoricoOpen, setTokenHistoricoOpen] = useState(false);
 
+    // States for Price Approval Modal
+    const [priceModalOpen, setPriceModalOpen] = useState(false);
+    const [selectedPriceRequest, setSelectedPriceRequest] = useState(null);
+    const [newPrice, setNewPrice] = useState('');
+
     // Estados para dashboard tabs e pesquisa
     const [abaDashboard, setAbaDashboard] = useState('visao-geral');
+    const [tipoComparativo, setTipoComparativo] = useState('mes'); // 'mes' ou 'ano'
+    const [vendedorChartMode, setVendedorChartMode] = useState({}); // { nomeVendedor: 'evolucao' | 'comparativo' }
     const [buscaPedido, setBuscaPedido] = useState('');
     const [buscaEntrega, setBuscaEntrega] = useState('');
     const [pedidoSelecionado, setPedidoSelecionado] = useState(null);
@@ -119,6 +134,7 @@ export default function DashboardGerente() {
     // Estado para modal de pendências
     const [pendenciasModalOpen, setPendenciasModalOpen] = useState(false);
 
+
     // Estados para Giro de Estoque
     const [giroFiltro, setGiroFiltro] = useState(60); // dias sem venda
 
@@ -137,6 +153,26 @@ export default function DashboardGerente() {
         queryFn: () => base44.entities.Venda.list('-data_venda'),
         enabled: !!user
     });
+
+    // Assinatura em tempo real para Vendas
+    React.useEffect(() => {
+        if (!user) return;
+
+        const channel = supabase
+            .channel('dashboard-gerente-vendas')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'vendas' },
+                () => {
+                    refetchVendas();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [user, refetchVendas]);
 
     const { data: entregas = [], isLoading: loadingEntregas } = useQuery({
         queryKey: ['entregas-gerente'],
@@ -182,6 +218,33 @@ export default function DashboardGerente() {
         queryFn: () => base44.entities.AssistenciaTecnica.list(),
         enabled: !!user
     });
+
+    // Query para solicitações de preço (novo)
+    const { data: solicitacoesPreco = [], refetch: refetchSolicitacoesPreco } = useQuery({
+        queryKey: ['solicitacoes-preco-gerente'],
+        queryFn: () => base44.entities.SolicitacaoPreco.list('-data_solicitacao'),
+        enabled: !!user
+    });
+
+    // Assinatura em tempo real para Solicitações de Preço
+    React.useEffect(() => {
+        if (!user) return;
+
+        const channel = supabase
+            .channel('dashboard-gerente-solicitacoes-preco')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'solicitacoes_preco' },
+                () => {
+                    refetchSolicitacoesPreco();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [user, refetchSolicitacoesPreco]);
 
     // Mutation para salvar metas
     const saveMeta = useMutation({
@@ -350,6 +413,14 @@ export default function DashboardGerente() {
         return user?.loja || lojas[0] || '';
     }, [isGerenteGeral, lojaFiltro, user?.loja, lojas]);
 
+    const getSolicitacoesPrecoPendentes = useMemo(() => {
+        return solicitacoesPreco.filter(s => {
+            const isPendente = s.status === 'pendente';
+            const daLojaAtiva = lojaAtiva === 'todas' || s.loja === lojaAtiva;
+            return isPendente && daLojaAtiva;
+        });
+    }, [solicitacoesPreco, lojaAtiva]);
+
     // Criar novo token (v2 - simplificado)
     const handleCriarToken = async () => {
         const codigo = gerarCodigoToken();
@@ -380,6 +451,42 @@ export default function DashboardGerente() {
         }
     };
 
+    // Mutation para responder solicitação de preço
+    const responderSolicitacaoPreco = useMutation({
+        mutationFn: async ({ id, status, precoValido, produtoId }) => {
+            const promessas = [
+                base44.entities.SolicitacaoPreco.update(id, {
+                    status,
+                    gerente_id: user.id,
+                    data_resposta: new Date().toISOString()
+                })
+            ];
+
+            // Atualiza automaticamente o preço de venda master do produto
+            if (precoValido !== undefined && produtoId) {
+                promessas.push(
+                    supabase
+                        .from('produtos')
+                        .update({ preco_venda: precoValido, updated_at: new Date().toISOString() })
+                        .eq('id', produtoId)
+                );
+                // Invalidate future products list 
+                queryClient.invalidateQueries(['produtos']);
+            }
+
+            return Promise.all(promessas);
+        },
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries(['solicitacoes-preco-gerente']);
+            const acao = variables.status === 'aprovado' ? 'aprovada' : 'rejeitada';
+            toast.success(`Solicitação de preço ${acao}!`);
+        },
+        onError: (err) => {
+            console.error('Erro ao responder solicitação:', err);
+            toast.error('Erro ao processar a solicitação de preço.');
+        }
+    });
+
     // Tokens filtrados por loja
     const tokensFiltrados = useMemo(() => {
         return tokens.filter(t => {
@@ -394,6 +501,14 @@ export default function DashboardGerente() {
         if (t.max_usos && t.usos_realizados >= t.max_usos) return false;
         return true;
     });
+
+    const tokensExibidos = useMemo(() => {
+        return tokensFiltrados.filter(t => {
+            const expirado = t.expira_em && new Date(t.expira_em) < new Date();
+            if (mostrarExpirados) return true;
+            return !expirado;
+        });
+    }, [tokensFiltrados, mostrarExpirados]);
 
     // lojaAtiva moved earlier in the file (before handleCriarToken and tokensFiltrados)
 
@@ -461,7 +576,7 @@ export default function DashboardGerente() {
         const hoje = new Date();
         const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
 
-        // Totais com ajuste de devoluções
+        // Helper para cálculo líquido (centralizado)
         const calcularTotalLiquido = (vendasArr) => {
             return vendasArr.reduce((sum, v) => {
                 const assistencia = assistencias.find(a =>
@@ -538,13 +653,28 @@ export default function DashboardGerente() {
             return d >= mesAnoPassado && d <= fimMesAnoPassado;
         });
 
-        const totalAnoPassado = vendasAnoPassado.reduce((sum, v) => sum + (v.valor_total || 0), 0);
+        // Usar a mesma lógica de cálculo líquido para consistência
+        const calcularTotalLiquido = (vendasArr) => {
+            return vendasArr.reduce((sum, v) => {
+                const assistencia = assistencias.find(a =>
+                    a.numero_pedido === v.numero_pedido &&
+                    a.status === 'Concluída' &&
+                    (a.tipo === 'Devolução' || a.tipo === 'Troca')
+                );
+                return sum + (v.valor_total || 0) - (assistencia?.valor_devolvido || 0);
+            }, 0);
+        };
+
+        const totalAnoPassado = calcularTotalLiquido(vendasAnoPassado);
         const variacao = totalAnoPassado > 0
             ? ((kpis.totalMes - totalAnoPassado) / totalAnoPassado) * 100
             : 0;
 
-        return { totalAnoPassado, variacao };
-    }, [vendas, lojaAtiva, kpis.totalMes]);
+        const nomeMesAnoPassado = mesAnoPassado.toLocaleDateString('pt-BR', { month: 'short' });
+        const labelStr = `${nomeMesAnoPassado.charAt(0).toUpperCase() + nomeMesAnoPassado.slice(1)}/${hoje.getFullYear() - 1}`;
+
+        return { totalAnoPassado, variacao, label: labelStr };
+    }, [vendas, lojaAtiva, kpis.totalMes, assistencias]);
 
     // Comparativo MoM (Month over Month)
     const comparativoMoM = useMemo(() => {
@@ -560,13 +690,24 @@ export default function DashboardGerente() {
             return d >= mesAnterior && d <= fimMesAnterior;
         });
 
-        const totalMesAnterior = vendasMesAnterior.reduce((sum, v) => sum + (v.valor_total || 0), 0);
+        const calcularTotalLiquido = (vendasArr) => {
+            return vendasArr.reduce((sum, v) => {
+                const assistencia = assistencias.find(a =>
+                    a.numero_pedido === v.numero_pedido &&
+                    a.status === 'Concluída' &&
+                    (a.tipo === 'Devolução' || a.tipo === 'Troca')
+                );
+                return sum + (v.valor_total || 0) - (assistencia?.valor_devolvido || 0);
+            }, 0);
+        };
+
+        const totalMesAnterior = calcularTotalLiquido(vendasMesAnterior);
         const variacao = totalMesAnterior > 0
             ? ((kpis.totalMes - totalMesAnterior) / totalMesAnterior) * 100
             : 0;
 
         return { totalMesAnterior, variacao };
-    }, [vendas, lojaAtiva, kpis.totalMes]);
+    }, [vendas, lojaAtiva, kpis.totalMes, assistencias]);
 
     // Comissões a pagar por vendedor
     const comissoesPorVendedor = useMemo(() => {
@@ -843,18 +984,29 @@ export default function DashboardGerente() {
         });
     }, [statusEntregas, buscaEntrega, vendas]);
 
-    // Ranking de vendedores
+    // Ranking de vendedores expandido com gráfico e metas
     const rankingVendedores = useMemo(() => {
         const agrupado = {};
         const hoje = new Date();
         const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
+
+        const mesAnterior = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+        const fimMesAnterior = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
+
+        const vendasMesAnterior = vendas.filter(v => {
+            if (v.status === 'Cancelada') return false;
+            if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
+            if (!v.data_venda) return false;
+            const d = new Date(v.data_venda);
+            return d >= mesAnterior && d <= fimMesAnterior;
+        });
 
         vendasMes.forEach(v => {
             const vendedorId = v.responsavel_id;
             let vendedorNome = v.responsavel_nome || v.vendedor_nome || 'Não informado';
 
             // Tentar resolver nome pelo ID se possível
-            if (vendedorId) {
+            if (vendedorId && users) {
                 const userEncontrado = users.find(u => u.id === vendedorId);
                 if (userEncontrado && userEncontrado.full_name) {
                     vendedorNome = userEncontrado.full_name;
@@ -866,31 +1018,87 @@ export default function DashboardGerente() {
                     nome: vendedorNome,
                     id: vendedorId,
                     total: 0,
-                    qtd: 0
+                    qtd: 0,
+                    vendasDetalhadas: []
                 };
             }
             agrupado[vendedorNome].total += v.valor_total || 0;
             agrupado[vendedorNome].qtd++;
+            agrupado[vendedorNome].vendasDetalhadas.push(v);
         });
 
-        // Adicionar metas individuais
+        // Adicionar metas individuais e gráfico
         return Object.values(agrupado)
             .map(vendedor => {
                 const metaVendedor = metas.find(m =>
                     m.mes === mesAtual &&
                     m.vendedor_id === vendedor.id
                 );
+
+                // Variacao MoM
+                const vendasAnt = vendasMesAnterior.filter(v => v.responsavel_id === vendedor.id || v.responsavel_nome === vendedor.nome || v.vendedor_nome === vendedor.nome);
+                const totalAnt = vendasAnt.reduce((sum, v) => sum + (v.valor_total || 0), 0);
+                const variacaoMoM = totalAnt > 0 ? ((vendedor.total - totalAnt) / totalAnt) * 100 : 0;
+
+                // Gerar grafico diario (deste mes apenas)
+                const graficoMap = {};
+                for (let d = new Date(hoje.getFullYear(), hoje.getMonth(), 1); d <= hoje; d.setDate(d.getDate() + 1)) {
+                    const dia = d.toISOString().split('T')[0];
+                    const diaNum = d.getDate();
+                    graficoMap[dia] = { dia, diaNum, total: 0, label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) };
+                }
+
+                vendedor.vendasDetalhadas.forEach(v => {
+                    const dia = v.data_venda.split('T')[0];
+                    if (graficoMap[dia]) {
+                        graficoMap[dia].total += v.valor_total || 0;
+                    }
+                });
+
+                const dadosGrafico = Object.values(graficoMap);
+
+                // Gerar grafico diário do mês anterior (para comparativo MoM)
+                const graficoMapAnt = {};
+                const diasMesAnterior = fimMesAnterior.getDate();
+                for (let d = 1; d <= diasMesAnterior; d++) {
+                    graficoMapAnt[d] = 0;
+                }
+                vendasAnt.forEach(v => {
+                    if (v.data_venda) {
+                        const dAnt = new Date(v.data_venda).getDate();
+                        if (graficoMapAnt[dAnt] !== undefined) {
+                            graficoMapAnt[dAnt] += v.valor_total || 0;
+                        }
+                    }
+                });
+
+                // Combinar dados para comparativo (dia a dia)
+                const dadosComparativoVendedor = dadosGrafico.map(item => ({
+                    ...item,
+                    totalMesAnterior: graficoMapAnt[item.diaNum] || 0
+                }));
+
+                // Meta diária
+                const metaValor = metaVendedor?.meta_valor || 0;
+                const diasNoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
+                const metaDiaria = metaValor > 0 ? metaValor / diasNoMes : 0;
+
                 return {
                     ...vendedor,
-                    meta: metaVendedor?.meta_valor || 0,
-                    progresso: metaVendedor?.meta_valor > 0
-                        ? (vendedor.total / metaVendedor.meta_valor) * 100
-                        : 0
+                    meta: metaValor,
+                    metaDiaria,
+                    progresso: metaValor > 0
+                        ? (vendedor.total / metaValor) * 100
+                        : 0,
+                    totalMesAnterior: totalAnt,
+                    variacaoMoM,
+                    dadosGrafico,
+                    dadosComparativoVendedor
                 };
             })
             .sort((a, b) => b.total - a.total)
-            .slice(0, 5);
-    }, [vendasMes, metas]);
+            .slice(0, 5); // Traz os top 5
+    }, [vendasMes, metas, vendas, lojaAtiva, users]);
 
     // Lista de todos os vendedores da loja (para dropdown de metas)
     const vendedoresLoja = useMemo(() => {
@@ -932,23 +1140,74 @@ export default function DashboardGerente() {
             .sort((a, b) => a.nome.localeCompare(b.nome));
     }, [users, lojaAtiva, vendasMes, metas]);
 
-    // Dados para gráfico de evolução diária
+    // Dados para gráfico de evolução
     const dadosGrafico = useMemo(() => {
         const hoje = new Date();
-        const primeiroDia = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
         const agrupado = {};
+        let dataInicio;
+        let pAgrupamento = 'dia'; // 'dia' ou 'mes'
 
-        // Inicializar todos os dias do mês
-        for (let d = new Date(primeiroDia); d <= hoje; d.setDate(d.getDate() + 1)) {
-            const dia = d.toISOString().split('T')[0];
-            agrupado[dia] = { dia, total: 0, acumulado: 0 };
+        // Definir data de início e agrupamento
+        switch (periodoGrafico) {
+            case '5':
+                dataInicio = new Date(hoje);
+                dataInicio.setDate(hoje.getDate() - 4);
+                break;
+            case '7':
+                dataInicio = new Date(hoje);
+                dataInicio.setDate(hoje.getDate() - 6);
+                break;
+            case '14':
+                dataInicio = new Date(hoje);
+                dataInicio.setDate(hoje.getDate() - 13);
+                break;
+            case 'mes':
+                dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+                break;
+            case '60':
+                dataInicio = new Date(hoje);
+                dataInicio.setDate(hoje.getDate() - 59);
+                break;
+            case '2y':
+                dataInicio = new Date(hoje.getFullYear() - 2, hoje.getMonth(), 1);
+                pAgrupamento = 'mes';
+                break;
+            default:
+                dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
         }
 
-        // Preencher com vendas
-        vendasMes.forEach(v => {
-            const dia = v.data_venda?.split('T')[0];
-            if (dia && agrupado[dia]) {
-                agrupado[dia].total += v.valor_total || 0;
+        dataInicio.setHours(0, 0, 0, 0);
+
+        // Inicializar agrupamento
+        if (pAgrupamento === 'dia') {
+            for (let d = new Date(dataInicio); d <= hoje; d.setDate(d.getDate() + 1)) {
+                const dia = d.toISOString().split('T')[0];
+                agrupado[dia] = { dia, total: 0, label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) };
+            }
+        } else {
+            // Grupar por mês (2 anos)
+            for (let d = new Date(dataInicio); d <= hoje; d.setMonth(d.getMonth() + 1)) {
+                const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                const label = d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+                agrupado[mes] = { mes, total: 0, label: label.charAt(0).toUpperCase() + label.slice(1) };
+            }
+        }
+
+        // Preencher com vendas (filtrando por loja e status)
+        vendas.forEach(v => {
+            if (v.status === 'Cancelada') return;
+            if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return;
+            if (!v.data_venda) return;
+
+            const dVal = new Date(v.data_venda);
+            if (dVal < dataInicio || dVal > hoje) return;
+
+            const chave = pAgrupamento === 'dia'
+                ? v.data_venda.split('T')[0]
+                : `${dVal.getFullYear()}-${String(dVal.getMonth() + 1).padStart(2, '0')}`;
+
+            if (agrupado[chave]) {
+                agrupado[chave].total += v.valor_total || 0;
             }
         });
 
@@ -959,10 +1218,103 @@ export default function DashboardGerente() {
             return {
                 ...d,
                 acumulado,
-                diaFormatado: new Date(d.dia).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+                diaFormatado: d.label
             };
         });
-    }, [vendasMes]);
+    }, [vendas, periodoGrafico, lojaAtiva]);
+
+    // Dados para gráfico comparativo (Este Mês vs Mês Anterior)
+    const dadosComparativoMeses = useMemo(() => {
+        const hoje = new Date();
+        const diasNoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
+
+        const mesAtualStr = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+        const mesAnterior = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+        const mesAnteriorStr = `${mesAnterior.getFullYear()}-${String(mesAnterior.getMonth() + 1).padStart(2, '0')}`;
+
+        const dados = [];
+
+        // Helper para cálculo líquido (centralizado)
+        const calcularTotalLiquido = (vendasArr) => {
+            return vendasArr.reduce((sum, v) => {
+                const assistencia = assistencias.find(a =>
+                    a.numero_pedido === v.numero_pedido &&
+                    a.status === 'Concluída' &&
+                    (a.tipo === 'Devolução' || a.tipo === 'Troca')
+                );
+                return sum + (v.valor_total || 0) - (assistencia?.valor_devolvido || 0);
+            }, 0);
+        };
+
+        for (let i = 1; i <= diasNoMes; i++) {
+            const diaStr = String(i).padStart(2, '0');
+
+            // Vendas do dia específico este mês
+            const vendasDiaAtual = vendas.filter(v =>
+                v.status !== 'Cancelada' &&
+                (lojaAtiva === 'todas' || v.loja === lojaAtiva) &&
+                v.data_venda?.startsWith(`${mesAtualStr}-${diaStr}`)
+            );
+
+            // Vendas do mesmo dia no mês anterior
+            const vendasDiaAnterior = vendas.filter(v =>
+                v.status !== 'Cancelada' &&
+                (lojaAtiva === 'todas' || v.loja === lojaAtiva) &&
+                v.data_venda?.startsWith(`${mesAnteriorStr}-${diaStr}`)
+            );
+
+            dados.push({
+                dia: i,
+                label: `Dia ${i}`,
+                esteMes: calcularTotalLiquido(vendasDiaAtual),
+                mesAnterior: calcularTotalLiquido(vendasDiaAnterior)
+            });
+        }
+
+        return dados;
+    }, [vendas, lojaAtiva, assistencias]);
+
+    // Dados para gráfico comparativo (Este Ano vs Ano Anterior)
+    const dadosComparativoAnual = useMemo(() => {
+        const hoje = new Date();
+        const anoAtual = hoje.getFullYear();
+        const anoPassado = anoAtual - 1;
+        const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+        const calcularTotalLiquido = (vendasArr) => {
+            return vendasArr.reduce((sum, v) => {
+                const assistencia = assistencias.find(a =>
+                    a.numero_pedido === v.numero_pedido &&
+                    a.status === 'Concluída' &&
+                    (a.tipo === 'Devolução' || a.tipo === 'Troca')
+                );
+                return sum + (v.valor_total || 0) - (assistencia?.valor_devolvido || 0);
+            }, 0);
+        };
+
+        return meses.map((nome, index) => {
+            const mesStr = String(index + 1).padStart(2, '0');
+
+            const vendasEsteAno = vendas.filter(v =>
+                v.status !== 'Cancelada' &&
+                (lojaAtiva === 'todas' || v.loja === lojaAtiva) &&
+                v.data_venda?.startsWith(`${anoAtual}-${mesStr}`)
+            );
+
+            const vendasAnoPassado = vendas.filter(v =>
+                v.status !== 'Cancelada' &&
+                (lojaAtiva === 'todas' || v.loja === lojaAtiva) &&
+                v.data_venda?.startsWith(`${anoPassado}-${mesStr}`)
+            );
+
+            return {
+                mes: nome,
+                index,
+                esteAno: calcularTotalLiquido(vendasEsteAno),
+                anoAnterior: calcularTotalLiquido(vendasAnoPassado)
+            };
+        });
+    }, [vendas, lojaAtiva, assistencias]);
 
     // Meta diária projetada
     const metaDiaria = useMemo(() => {
@@ -1561,110 +1913,269 @@ export default function DashboardGerente() {
                         </Dialog>
                     </CardHeader>
                     <CardContent className="p-6">
-                        <div className="flex flex-col lg:flex-row gap-8">
-                            {/* Área do Gráfico */}
-                            <div className="flex-1 min-w-0">
-                                <h3 className="text-sm font-medium text-gray-500 mb-4">Evolução de Vendas Diária</h3>
-                                <div className="h-[300px] w-full">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <AreaChart data={dadosGrafico}>
-                                            <defs>
-                                                <linearGradient id="colorAcumulado" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.8} />
-                                                    <stop offset="95%" stopColor="#4f46e5" stopOpacity={0.1} />
-                                                </linearGradient>
-                                            </defs>
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                            <XAxis
-                                                dataKey="diaFormatado"
-                                                tick={{ fontSize: 11, fill: '#6b7280' }}
-                                                axisLine={false}
-                                                tickLine={false}
-                                                dy={10}
-                                            />
-                                            <YAxis
-                                                tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
-                                                tick={{ fontSize: 11, fill: '#6b7280' }}
-                                                axisLine={false}
-                                                tickLine={false}
-                                            />
-                                            <Tooltip
-                                                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                                cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }}
-                                                formatter={(value) => [formatarMoeda(value), '']}
-                                                labelFormatter={(label) => `Dia: ${label}`}
-                                            />
-                                            {kpis.metaValor > 0 && (
-                                                <ReferenceLine
-                                                    y={kpis.metaValor}
-                                                    stroke="#ef4444"
-                                                    strokeDasharray="5 5"
-                                                    label={{ value: 'Meta', position: 'right', fill: '#ef4444', fontSize: 11 }}
-                                                />
-                                            )}
-                                            <Area
-                                                type="monotone"
-                                                dataKey="acumulado"
-                                                stroke="#4f46e5"
-                                                strokeWidth={2}
-                                                fillOpacity={1}
-                                                fill="url(#colorAcumulado)"
-                                                name="Acumulado"
-                                            />
-                                        </AreaChart>
-                                    </ResponsiveContainer>
+                        {/* Linha 1: Evolução de Vendas (Largura Total) */}
+                        <div className="w-full mb-8">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                                <h3 className="text-sm font-medium text-gray-500">Evolução de Vendas</h3>
+                                <div className="flex flex-wrap items-center gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+                                    {[
+                                        { id: '5', label: '5D' },
+                                        { id: '7', label: '7D' },
+                                        { id: '14', label: '14D' },
+                                        { id: 'mes', label: '30D' },
+                                        { id: '60', label: '60D' },
+                                        { id: '2y', label: '2 ANOS' }
+                                    ].map((p) => (
+                                        <button
+                                            key={p.id}
+                                            onClick={() => setPeriodoGrafico(p.id)}
+                                            className={`px-3 py-1 text-[10px] font-semibold rounded-md transition-all ${periodoGrafico === p.id
+                                                ? 'bg-white dark:bg-gray-700 text-indigo-600 shadow-sm'
+                                                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                                }`}
+                                        >
+                                            {p.label}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
+                            <div className="h-[300px] w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={dadosGrafico}>
+                                        <defs>
+                                            <linearGradient id="colorAcumulado" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.8} />
+                                                <stop offset="95%" stopColor="#4f46e5" stopOpacity={0.1} />
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                        <XAxis
+                                            dataKey="diaFormatado"
+                                            tick={{ fontSize: 11, fill: '#6b7280' }}
+                                            axisLine={false}
+                                            tickLine={false}
+                                            dy={10}
+                                        />
+                                        <YAxis
+                                            tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
+                                            tick={{ fontSize: 11, fill: '#6b7280' }}
+                                            axisLine={false}
+                                            tickLine={false}
+                                        />
+                                        <Tooltip
+                                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                            cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }}
+                                            formatter={(value) => [formatarMoeda(value), '']}
+                                            labelFormatter={(label) => `Data: ${label}`}
+                                        />
+                                        {kpis.metaValor > 0 && (
+                                            <ReferenceLine
+                                                y={kpis.metaValor}
+                                                stroke="#ef4444"
+                                                strokeDasharray="5 5"
+                                                label={{ value: 'Meta', position: 'right', fill: '#ef4444', fontSize: 11 }}
+                                            />
+                                        )}
+                                        <Area
+                                            type="monotone"
+                                            dataKey="acumulado"
+                                            stroke="#4f46e5"
+                                            strokeWidth={2}
+                                            fillOpacity={1}
+                                            fill="url(#colorAcumulado)"
+                                            name="Acumulado"
+                                        />
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
 
-                            {/* Área de Métricas (Sidebar) */}
-                            <div className="lg:w-1/4 flex flex-col gap-4 border-t lg:border-t-0 lg:border-l border-gray-100 dark:border-gray-800 pt-6 lg:pt-0 lg:pl-6">
-                                <h3 className="text-sm font-medium text-gray-500 mb-2">Comparativos</h3>
+                        {/* Linha 2: Comparativos (Gráfico + Cards) */}
+                        <div className="flex flex-col lg:flex-row gap-8 pt-8 border-t border-gray-100 dark:border-gray-800">
+                            {/* Gráficos Comparativos com Toggle */}
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-sm font-medium text-gray-500">
+                                        {tipoComparativo === 'mes' ? 'Comparativo: Este Mês vs Mês Anterior' : 'Comparativo: Este Ano vs Ano Anterior'}
+                                    </h3>
 
-                                <div className="space-y-4">
-                                    {/* YoY */}
-                                    <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 transition-colors">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <span className="text-xs font-medium text-gray-500 uppercase">YoY (Ano Anterior)</span>
-                                            <Badge variant="outline" className="text-[10px] font-normal">Jan/{new Date().getFullYear() - 1}</Badge>
+                                    <div className="flex items-center gap-4">
+                                        {/* Toggle Mes/Ano */}
+                                        <div className="flex bg-gray-100 p-1 rounded-lg">
+                                            <button
+                                                onClick={() => setTipoComparativo('mes')}
+                                                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${tipoComparativo === 'mes' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
+                                            >
+                                                Mensal
+                                            </button>
+                                            <button
+                                                onClick={() => setTipoComparativo('ano')}
+                                                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${tipoComparativo === 'ano' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
+                                            >
+                                                Anual
+                                            </button>
                                         </div>
-                                        <div className="flex items-end justify-between">
-                                            <div>
-                                                <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                                                    {comparativoYoY.variacao >= 0 ? '+' : ''}{Math.abs(comparativoYoY.variacao).toFixed(1)}%
-                                                </p>
-                                                <p className="text-xs text-gray-500 mt-1">vs {formatarMoeda(comparativoYoY.totalAnoPassado)}</p>
+
+                                        {/* Legenda Dinâmica */}
+                                        <div className="flex items-center gap-4 border-l pl-4 border-gray-200">
+                                            <div className="flex items-center gap-2">
+                                                <div className={`w-3 h-3 rounded-full ${tipoComparativo === 'mes' ? 'bg-indigo-600' : 'bg-emerald-600'}`} />
+                                                <span className="text-[10px] font-medium text-gray-500 uppercase">
+                                                    {tipoComparativo === 'mes' ? 'ESTE MÊS' : 'ESTE ANO'}
+                                                </span>
                                             </div>
-                                            <div className={`p-2 rounded-lg ${comparativoYoY.variacao >= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
-                                                {comparativoYoY.variacao >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 rounded-full border-2 border-gray-400 border-dashed" />
+                                                <span className="text-[10px] font-medium text-gray-500 uppercase">
+                                                    {tipoComparativo === 'mes' ? 'MÊS ANTERIOR' : 'ANO ANTERIOR'}
+                                                </span>
                                             </div>
                                         </div>
                                     </div>
+                                </div>
 
-                                    {/* MoM */}
-                                    <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 transition-colors">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <span className="text-xs font-medium text-gray-500 uppercase">MoM (Mês Anterior)</span>
-                                            <Badge variant="outline" className="text-[10px] font-normal">Mês Anterior</Badge>
-                                        </div>
-                                        <div className="flex items-end justify-between">
+                                <div className="h-[200px] w-full">
+                                    {tipoComparativo === 'mes' ? (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <LineChart data={dadosComparativoMeses}>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                                <XAxis
+                                                    dataKey="dia"
+                                                    tick={{ fontSize: 10, fill: '#9ca3af' }}
+                                                    axisLine={false}
+                                                    tickLine={false}
+                                                />
+                                                <YAxis
+                                                    tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
+                                                    tick={{ fontSize: 10, fill: '#9ca3af' }}
+                                                    axisLine={false}
+                                                    tickLine={false}
+                                                />
+                                                <Tooltip
+                                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                                    formatter={(value) => [formatarMoeda(value), '']}
+                                                    labelFormatter={(label) => `Dia ${label}`}
+                                                />
+                                                <Line
+                                                    type="monotone"
+                                                    dataKey="esteMes"
+                                                    stroke="#4f46e5"
+                                                    strokeWidth={3}
+                                                    dot={{ r: 0 }}
+                                                    activeDot={{ r: 4 }}
+                                                    name="Este Mês"
+                                                />
+                                                <Line
+                                                    type="monotone"
+                                                    dataKey="mesAnterior"
+                                                    stroke="#9ca3af"
+                                                    strokeWidth={2}
+                                                    strokeDasharray="5 5"
+                                                    dot={{ r: 0 }}
+                                                    activeDot={{ r: 4 }}
+                                                    name="Mês Anterior"
+                                                />
+                                            </LineChart>
+                                        </ResponsiveContainer>
+                                    ) : (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <LineChart data={dadosComparativoAnual}>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                                <XAxis
+                                                    dataKey="mes"
+                                                    tick={{ fontSize: 10, fill: '#9ca3af' }}
+                                                    axisLine={false}
+                                                    tickLine={false}
+                                                />
+                                                <YAxis
+                                                    tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
+                                                    tick={{ fontSize: 10, fill: '#9ca3af' }}
+                                                    axisLine={false}
+                                                    tickLine={false}
+                                                />
+                                                <Tooltip
+                                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                                    formatter={(value) => [formatarMoeda(value), '']}
+                                                    labelFormatter={(label) => `Mês: ${label}`}
+                                                />
+                                                <Line
+                                                    type="monotone"
+                                                    dataKey="esteAno"
+                                                    stroke="#10b981"
+                                                    strokeWidth={3}
+                                                    dot={{ r: 0 }}
+                                                    activeDot={{ r: 4 }}
+                                                    name="Este Ano"
+                                                />
+                                                <Line
+                                                    type="monotone"
+                                                    dataKey="anoAnterior"
+                                                    stroke="#9ca3af"
+                                                    strokeWidth={2}
+                                                    strokeDasharray="5 5"
+                                                    dot={{ r: 0 }}
+                                                    activeDot={{ r: 4 }}
+                                                    name="Ano Anterior"
+                                                />
+                                            </LineChart>
+                                        </ResponsiveContainer>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Área de Métricas (Insights Rápidos) */}
+                            <div className="lg:w-1/4 flex flex-col lg:border-l border-gray-100 dark:border-gray-800 lg:pl-6">
+                                <div className="flex items-center justify-between mb-6">
+                                    <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                        <TrendingUp className="w-4 h-4 text-emerald-600" />
+                                        Comparativos
+                                    </h3>
+                                    <Badge variant="secondary" className="text-[10px] font-semibold bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">STATUS ATUAL</Badge>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-4 flex-grow">
+                                    {/* MoM Card */}
+                                    <div className="group relative p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-md transition-all duration-300">
+                                        <div className="flex items-start justify-between mb-3">
                                             <div>
-                                                <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                                                    {comparativoMoM.variacao >= 0 ? '+' : ''}{Math.abs(comparativoMoM.variacao).toFixed(1)}%
-                                                </p>
-                                                <p className="text-xs text-gray-500 mt-1">vs {formatarMoeda(comparativoMoM.totalMesAnterior)}</p>
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Mês contra Mês</span>
+                                                <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 mt-0.5">MoM Performance</h4>
                                             </div>
-                                            <div className={`p-2 rounded-lg ${comparativoMoM.variacao >= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+                                            <Badge variant="outline" className="text-[9px] font-medium border-gray-200 text-gray-500">Mês Anterior</Badge>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex flex-col">
+                                                <span className={`text-2xl font-black ${comparativoMoM.variacao >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                    {comparativoMoM.variacao >= 0 ? '+' : ''}{comparativoMoM.variacao.toFixed(1)}%
+                                                </span>
+                                                <span className="text-[10px] text-gray-400 font-medium mt-0.5">Anterior: {formatarMoeda(comparativoMoM.totalMesAnterior)}</span>
+                                            </div>
+                                            <div className={`p-2.5 rounded-xl ${comparativoMoM.variacao >= 0 ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20' : 'bg-red-50 text-red-600 dark:bg-red-900/20'}`}>
                                                 {comparativoMoM.variacao >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* Projeção / Meta Diária */}
-                                    <div className="pt-4 mt-2 border-t border-dashed border-gray-200 dark:border-gray-700">
-                                        <p className="text-xs text-gray-500 mb-1">Meta Diária Necessária</p>
-                                        <p className="text-lg font-semibold text-gray-700 dark:text-gray-300">
-                                            {formatarMoeda(metaDiaria)}
-                                        </p>
+                                    {/* YoY Card */}
+                                    <div className="group relative p-4 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-md transition-all duration-300">
+                                        <div className="flex items-start justify-between mb-3">
+                                            <div>
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ano contra Ano</span>
+                                                <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 mt-0.5">YoY Performance</h4>
+                                            </div>
+                                            <Badge variant="outline" className="text-[9px] font-medium border-gray-200 text-gray-500">{comparativoYoY.label}</Badge>
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex flex-col">
+                                                <span className={`text-2xl font-black ${comparativoYoY.variacao >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                    {comparativoYoY.variacao >= 0 ? '+' : ''}{comparativoYoY.variacao.toFixed(1)}%
+                                                </span>
+                                                <span className="text-[10px] text-gray-400 font-medium mt-0.5">Anterior: {formatarMoeda(comparativoYoY.totalAnoPassado)}</span>
+                                            </div>
+                                            <div className={`p-2.5 rounded-xl ${comparativoYoY.variacao >= 0 ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20' : 'bg-red-50 text-red-600 dark:bg-red-900/20'}`}>
+                                                {comparativoYoY.variacao >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1673,7 +2184,7 @@ export default function DashboardGerente() {
                 </Card>
             </div>
 
-            {/* Seção 2: Comissões e Ranking */}
+            {/* Seção 2: Comissões (mantida) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Comissões a Pagar */}
                 <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20">
@@ -1688,15 +2199,15 @@ export default function DashboardGerente() {
                     </CardHeader>
                     <CardContent>
                         {comissoesPorVendedor.length > 0 ? (
-                            <div className="space-y-3 max-h-[250px] overflow-y-auto">
+                            <div className="space-y-3 max-h-[250px] overflow-y-auto pr-2">
                                 {comissoesPorVendedor.map((v, i) => (
-                                    <div key={v.id || v.nome} className="flex items-center justify-between p-2 bg-white dark:bg-neutral-800 rounded-lg shadow-sm">
+                                    <div key={v.id || v.nome} className="flex items-center justify-between p-2 bg-white dark:bg-neutral-800 rounded-lg shadow-sm border border-transparent hover:border-amber-200 transition-colors">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center text-sm font-bold text-amber-700">
+                                            <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center text-sm font-bold text-amber-700 shadow-sm">
                                                 {i + 1}
                                             </div>
                                             <div>
-                                                <p className="font-medium text-sm">{v.nome}</p>
+                                                <p className="font-medium text-sm text-gray-800 dark:text-gray-200">{v.nome}</p>
                                                 <p className="text-xs text-gray-500">{v.vendas} vendas</p>
                                             </div>
                                         </div>
@@ -1712,52 +2223,195 @@ export default function DashboardGerente() {
                         )}
                     </CardContent>
                 </Card>
+                {/* Coluna vazia para não esticar as comissões excessivamente se deixadas neste grid */}
+                <div className="hidden lg:block"></div>
+            </div>
 
-                {/* Ranking de Vendedores */}
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="text-lg flex items-center gap-2">
-                            <Award className="w-5 h-5 text-yellow-500" />
-                            Top Vendedores
-                        </CardTitle>
+            {/* Nova Seção: Top Vendedores Expandido */}
+            <div className="mt-6">
+                <Card className="overflow-hidden shadow-sm border border-gray-100 dark:border-gray-800">
+                    <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-4">
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-xl font-bold flex items-center gap-2">
+                                <Award className="w-6 h-6 text-yellow-500 fill-yellow-500/20" />
+                                Top Vendedores (Mês Atual)
+                            </CardTitle>
+                            <Badge variant="outline" className="text-gray-500 bg-white dark:bg-gray-900">
+                                Top {rankingVendedores.length}
+                            </Badge>
+                        </div>
                     </CardHeader>
-                    <CardContent className="p-0">
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead className="w-10">#</TableHead>
-                                    <TableHead>Vendedor</TableHead>
-                                    <TableHead className="text-right">Total</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {rankingVendedores.length > 0 ? rankingVendedores.map((v, i) => (
-                                    <TableRow key={v.nome}>
-                                        <TableCell className="font-medium">
-                                            {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
-                                        </TableCell>
-                                        <TableCell>
-                                            <div>
-                                                <p className="font-medium text-sm">{v.nome}</p>
-                                                <p className="text-xs text-gray-500">{v.qtd} vendas</p>
+                    <CardContent className="p-6">
+                        <div className="space-y-4">
+                            {rankingVendedores.length > 0 ? rankingVendedores.map((v, i) => (
+                                <div key={v.nome} className="group flex flex-col md:flex-row items-center justify-between p-4 bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-md hover:border-yellow-200/60 dark:hover:border-yellow-900/40 transition-all duration-300 gap-6">
+
+                                    {/* 1. Perfil do Vendedor */}
+                                    <div className="flex items-center gap-4 w-full md:w-[250px] shrink-0">
+                                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-inner ${i === 0 ? 'bg-gradient-to-br from-yellow-100 to-amber-200 text-amber-700 border-2 border-yellow-300' :
+                                            i === 1 ? 'bg-gradient-to-br from-gray-100 to-gray-300 text-gray-700 border-2 border-gray-400' :
+                                                i === 2 ? 'bg-gradient-to-br from-orange-100 to-orange-300 text-orange-800 border-2 border-orange-400' :
+                                                    'bg-gray-50 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300'
+                                            }`}>
+                                            {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : <span className="text-xl font-bold">#{i + 1}</span>}
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-gray-900 dark:text-white text-lg tracking-tight group-hover:text-yellow-600 dark:group-hover:text-yellow-500 transition-colors">{v.nome}</p>
+                                            <div className="flex items-center gap-1.5 mt-0.5">
+                                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                                    {v.qtd} vendas
+                                                </Badge>
                                             </div>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <p className="font-bold text-green-600 text-sm">{formatarMoeda(v.total)}</p>
-                                            {v.meta > 0 && (
-                                                <p className="text-xs text-gray-500">{v.progresso.toFixed(0)}% meta</p>
+                                        </div>
+                                    </div>
+
+                                    {/* 2. Gráfico de Evolução / Comparativo */}
+                                    <div className="w-full md:flex-grow min-w-[250px] flex flex-col gap-1">
+                                        {/* Toggle do gráfico */}
+                                        <div className="flex items-center gap-1 justify-end">
+                                            <button
+                                                onClick={() => setVendedorChartMode(prev => ({ ...prev, [v.nome]: 'evolucao' }))}
+                                                className={`px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all ${(vendedorChartMode[v.nome] || 'evolucao') === 'evolucao'
+                                                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400'
+                                                    : 'text-gray-400 hover:text-gray-600'
+                                                    }`}
+                                            >
+                                                Evolução
+                                            </button>
+                                            <button
+                                                onClick={() => setVendedorChartMode(prev => ({ ...prev, [v.nome]: 'comparativo' }))}
+                                                className={`px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all ${vendedorChartMode[v.nome] === 'comparativo'
+                                                    ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400'
+                                                    : 'text-gray-400 hover:text-gray-600'
+                                                    }`}
+                                            >
+                                                MoM
+                                            </button>
+                                        </div>
+                                        <div className="h-24">
+                                            {v.dadosGrafico && v.dadosGrafico.length > 0 ? (
+                                                (vendedorChartMode[v.nome] || 'evolucao') === 'evolucao' ? (
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <AreaChart data={v.dadosGrafico} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                                                            <defs>
+                                                                <linearGradient id={`colorVendasTop${i}`} x1="0" y1="0" x2="0" y2="1">
+                                                                    <stop offset="5%" stopColor={i === 0 ? "#EAB308" : "#3B82F6"} stopOpacity={0.4} />
+                                                                    <stop offset="95%" stopColor={i === 0 ? "#EAB308" : "#3B82F6"} stopOpacity={0} />
+                                                                </linearGradient>
+                                                            </defs>
+                                                            <XAxis dataKey="dia" hide />
+                                                            <Tooltip
+                                                                contentStyle={{ borderRadius: '12px', fontSize: '11px', padding: '6px 10px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                                                formatter={(value) => [formatarMoeda(value), 'Total']}
+                                                                labelFormatter={(label) => {
+                                                                    if (typeof label !== 'string') return `Dia ${label}`;
+                                                                    return `Dia ${label.split('-')[2] || label}`;
+                                                                }}
+                                                                cursor={{ stroke: '#9CA3AF', strokeWidth: 1, strokeDasharray: '4 4' }}
+                                                            />
+                                                            {v.metaDiaria > 0 && (
+                                                                <ReferenceLine
+                                                                    y={v.metaDiaria}
+                                                                    stroke="#EF4444"
+                                                                    strokeWidth={1.5}
+                                                                    strokeDasharray="6 3"
+                                                                    label={{ value: `Meta: ${formatarMoeda(v.metaDiaria)}/dia`, position: 'insideTopRight', fill: '#EF4444', fontSize: 9, fontWeight: 600 }}
+                                                                />
+                                                            )}
+                                                            <Area
+                                                                type="monotone"
+                                                                dataKey="total"
+                                                                stroke={i === 0 ? "#EAB308" : "#3B82F6"}
+                                                                strokeWidth={2.5}
+                                                                fillOpacity={1}
+                                                                fill={`url(#colorVendasTop${i})`}
+                                                                isAnimationActive={true}
+                                                            />
+                                                        </AreaChart>
+                                                    </ResponsiveContainer>
+                                                ) : (
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <LineChart data={v.dadosComparativoVendedor} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                                                            <XAxis dataKey="dia" hide />
+                                                            <Tooltip
+                                                                contentStyle={{ borderRadius: '12px', fontSize: '11px', padding: '6px 10px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                                                formatter={(value, name) => [formatarMoeda(value), name === 'total' ? 'Mês Atual' : 'Mês Anterior']}
+                                                                labelFormatter={(label) => {
+                                                                    if (typeof label !== 'string') return `Dia ${label}`;
+                                                                    return `Dia ${label.split('-')[2] || label}`;
+                                                                }}
+                                                                cursor={{ stroke: '#9CA3AF', strokeWidth: 1, strokeDasharray: '4 4' }}
+                                                            />
+                                                            {v.metaDiaria > 0 && (
+                                                                <ReferenceLine
+                                                                    y={v.metaDiaria}
+                                                                    stroke="#EF4444"
+                                                                    strokeWidth={1.5}
+                                                                    strokeDasharray="6 3"
+                                                                    label={{ value: `Meta`, position: 'insideTopRight', fill: '#EF4444', fontSize: 9, fontWeight: 600 }}
+                                                                />
+                                                            )}
+                                                            <Line type="monotone" dataKey="total" stroke={i === 0 ? '#EAB308' : '#3B82F6'} strokeWidth={2.5} dot={false} name="Mês Atual" />
+                                                            <Line type="monotone" dataKey="totalMesAnterior" stroke="#9CA3AF" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Mês Anterior" />
+                                                        </LineChart>
+                                                    </ResponsiveContainer>
+                                                )
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">
+                                                    Gráfico indisponível
+                                                </div>
                                             )}
-                                        </TableCell>
-                                    </TableRow>
-                                )) : (
-                                    <TableRow>
-                                        <TableCell colSpan={3} className="text-center text-gray-500 py-8">
-                                            Nenhuma venda no período
-                                        </TableCell>
-                                    </TableRow>
-                                )}
-                            </TableBody>
-                        </Table>
+                                        </div>
+                                    </div>
+
+                                    {/* 3. Métricas e Metas */}
+                                    <div className="flex items-center gap-8 w-full md:w-auto shrink-0 justify-end">
+
+                                        {/* Total e MoM */}
+                                        <div className="flex flex-col items-end min-w-[120px]">
+                                            <span className="text-xl font-bold text-gray-900 dark:text-white">{formatarMoeda(v.total)}</span>
+                                            <div className={`flex items-center gap-1.5 mt-0.5 text-xs font-semibold px-2 py-0.5 rounded-full ${v.variacaoMoM >= 0 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30' : 'bg-red-50 text-red-700 dark:bg-red-900/30'}`}>
+                                                {v.variacaoMoM >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                                                <span>{v.variacaoMoM >= 0 ? '+' : ''}{v.variacaoMoM.toFixed(1)}% MoM</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Progresso da Meta */}
+                                        <div className="w-[140px] flex flex-col gap-1.5 opacity-90 group-hover:opacity-100 transition-opacity">
+                                            {v.meta > 0 ? (
+                                                <>
+                                                    <div className="flex justify-between items-end text-xs font-medium">
+                                                        <span className="text-gray-500 flex items-center gap-1"><Target className="w-3 h-3" /> Meta</span>
+                                                        <span className={v.progresso >= 100 ? 'text-green-600 font-bold' : 'text-gray-700 dark:text-gray-300'}>
+                                                            {v.progresso.toFixed(0)}%
+                                                        </span>
+                                                    </div>
+                                                    <Progress value={Math.min(v.progresso, 100)} className={`h-2 shadow-inner ${v.progresso >= 100 ? '[&>div]:bg-green-500' : ''}`} />
+                                                    <div className="text-[10px] text-gray-400 text-right font-medium">
+                                                        {formatarMoeda(v.meta)}
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <div className="h-full flex flex-col items-center justify-center border border-dashed border-gray-200 dark:border-gray-800 rounded-lg p-2 bg-gray-50/50 dark:bg-gray-900/50">
+                                                    <Target className="w-4 h-4 text-gray-400 mb-1" />
+                                                    <span className="text-[10px] text-gray-400 font-medium">Sem meta</span>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                    </div>
+
+                                </div>
+                            )) : (
+                                <div className="text-center py-16 text-gray-500">
+                                    <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                                        <Award className="w-8 h-8 opacity-40 text-gray-600" />
+                                    </div>
+                                    <p className="font-semibold text-gray-700 dark:text-gray-300 text-lg">Nenhuma venda encontrada</p>
+                                    <p className="text-sm mt-1">Os top vendedores aparecerão aqui.</p>
+                                </div>
+                            )}
+                        </div>
                     </CardContent>
                 </Card>
             </div>
@@ -2384,11 +3038,21 @@ export default function DashboardGerente() {
                                 {tokensAtivos.length} token{tokensAtivos.length !== 1 ? 's' : ''} ativo{tokensAtivos.length !== 1 ? 's' : ''}
                             </span>
                         </div>
+                        <div className="flex items-center gap-2 ml-auto">
+                            <Switch
+                                id="mostrar-expirados"
+                                checked={mostrarExpirados}
+                                onCheckedChange={setMostrarExpirados}
+                            />
+                            <Label htmlFor="mostrar-expirados" className="text-sm text-gray-600 cursor-pointer">
+                                Exibir tokens expirados
+                            </Label>
+                        </div>
                     </div>
 
-                    {tokensFiltrados.length > 0 ? (
+                    {tokensExibidos.length > 0 ? (
                         <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                            {tokensFiltrados.map(token => {
+                            {tokensExibidos.map(token => {
                                 const expirado = token.expira_em && new Date(token.expira_em) < new Date();
                                 const esgotado = token.max_usos && token.usos_realizados >= token.max_usos;
                                 const ativo = token.ativo && !expirado && !esgotado;
@@ -2492,15 +3156,156 @@ export default function DashboardGerente() {
                 </CardContent>
             </Card>
 
-            {/* Solicitações de Cadastro de Produto (PDV) - apenas para Gerente Geral/Admin */}
-            {isGerenteGeral && (
-                <SolicitacoesCadastroWidget />
-            )}
+            {/* Solicitações de Cadastro e Aprovação de Preços */}
+            <div className={`grid grid-cols-1 ${isGerenteGeral && getSolicitacoesPrecoPendentes.length > 0 ? 'xl:grid-cols-2' : ''} gap-6`}>
+                {isGerenteGeral && (
+                    <SolicitacoesCadastroWidget />
+                )}
+
+                {/* Tabela de Aprovação de Preços */}
+                {getSolicitacoesPrecoPendentes.length > 0 && (
+                    <Card className="border-orange-200 self-start">
+                        <CardHeader className="bg-orange-50 pb-4 border-b border-orange-100">
+                            <div className="flex items-center justify-between">
+                                <CardTitle className="text-orange-800 flex items-center gap-2">
+                                    <AlertCircle className="w-5 h-5" />
+                                    Aprovação de Preços ({getSolicitacoesPrecoPendentes.length})
+                                </CardTitle>
+                            </div>
+                            <p className="text-sm text-orange-600">Produtos sem preço aguardando sua autorização</p>
+                        </CardHeader>
+                        <CardContent className="p-0 overflow-x-auto">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow className="bg-orange-50/50">
+                                        <TableHead>Data</TableHead>
+                                        <TableHead>Vendedor</TableHead>
+                                        <TableHead>Produto</TableHead>
+                                        <TableHead className="text-right">Sugerido</TableHead>
+                                        <TableHead className="text-right">Ação</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {getSolicitacoesPrecoPendentes.map(s => (
+                                        <TableRow key={s.id} className="hover:bg-orange-50/30">
+                                            <TableCell className="text-sm whitespace-nowrap">
+                                                {new Date(s.data_solicitacao).toLocaleString('pt-BR')}
+                                            </TableCell>
+                                            <TableCell className="font-medium text-sm">
+                                                {s.vendedor_nome}
+                                                {lojaAtiva === 'todas' && (
+                                                    <div className="text-xs text-gray-400">{s.loja}</div>
+                                                )}
+                                            </TableCell>
+                                            <TableCell className="text-sm">{s.produto_nome}</TableCell>
+                                            <TableCell className="font-bold text-lg text-green-700 text-right">
+                                                R$ {Number(s.preco_sugerido).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <Button
+                                                        size="sm"
+                                                        className="bg-green-600 hover:bg-green-700"
+                                                        onClick={() => responderSolicitacaoPreco.mutate({ id: s.id, status: 'aprovado', precoValido: s.preco_sugerido, produtoId: s.produto_id })}
+                                                        disabled={responderSolicitacaoPreco.isPending}
+                                                    >
+                                                        Aprovar
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="border-amber-600 text-amber-600 hover:bg-amber-50"
+                                                        onClick={() => {
+                                                            setSelectedPriceRequest(s);
+                                                            setNewPrice(Number(s.preco_sugerido).toLocaleString('pt-BR', { minimumFractionDigits: 2 }));
+                                                            setPriceModalOpen(true);
+                                                        }}
+                                                        disabled={responderSolicitacaoPreco.isPending}
+                                                    >
+                                                        Editar e Aprovar
+                                                    </Button>
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </CardContent>
+                    </Card>
+                )}
+            </div>
+
+            {/* Ações de Vendedores - LOG DE AUDITORIA */}
+            <div className="mt-6">
+                <AcoesVendedoresWidget />
+            </div>
+
+            {/* Modal de Correção de Preço */}
+            <Dialog open={priceModalOpen} onOpenChange={setPriceModalOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Tratar Solicitação de Preço</DialogTitle>
+                        <DialogDescription>
+                            A sugestão de R$ {selectedPriceRequest ? Number(selectedPriceRequest.preco_sugerido).toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '0,00'} enviada do caixa para o produto <strong>{selectedPriceRequest?.produto_nome}</strong> não será aprovada.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label>Qual o preço correto deste produto?</Label>
+                            <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">R$</span>
+                                <Input
+                                    type="text"
+                                    className="pl-8"
+                                    placeholder="0,00"
+                                    value={newPrice}
+                                    onChange={(e) => {
+                                        // Allow only numbers and comma
+                                        const val = e.target.value.replace(/[^0-9,]/g, '');
+                                        setNewPrice(val);
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setPriceModalOpen(false)}>Cancelar</Button>
+                        <Button
+                            onClick={() => {
+                                if (!selectedPriceRequest) return;
+                                const precoLimpo = newPrice.replace(/\./g, '').replace(',', '.');
+                                const precoCerto = parseFloat(precoLimpo);
+                                if (isNaN(precoCerto) || precoCerto <= 0) {
+                                    toast.error("Preço inválido inserido.");
+                                    return;
+                                }
+                                responderSolicitacaoPreco.mutate({
+                                    id: selectedPriceRequest.id,
+                                    status: 'aprovado',
+                                    precoValido: precoCerto,
+                                    produtoId: selectedPriceRequest.produto_id
+                                }, {
+                                    onSuccess: () => {
+                                        setPriceModalOpen(false);
+                                        setSelectedPriceRequest(null);
+                                        setNewPrice('');
+                                    }
+                                });
+                            }}
+                            disabled={responderSolicitacaoPreco.isPending}
+                        >
+                            Confirmar Novo Preço e Aprovar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Controle de Montadores Externos - apenas para Gerente Geral/Admin */}
-            {isGerenteGeral && (
-                <ControleMontadoresWidget />
-            )}
+            {
+                isGerenteGeral && (
+                    <ControleMontadoresWidget />
+                )
+            }
 
 
             {/* Modal para Marcar Mostruário */}

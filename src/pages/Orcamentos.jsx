@@ -6,9 +6,12 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Filter, FileText, Trash2, Edit, Loader2 } from "lucide-react";
+import { Plus, Search, Filter, FileText, Trash2, Edit, Loader2, ArrowRight } from "lucide-react";
 import OrcamentoModal from "../components/orcamentos/OrcamentoModal";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useNavigate } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { toast } from "sonner";
 
 export default function Orcamentos() {
     const [searchTerm, setSearchTerm] = useState("");
@@ -17,7 +20,53 @@ export default function Orcamentos() {
     const [editingOrcamento, setEditingOrcamento] = useState(null);
     const queryClient = useQueryClient();
     const confirm = useConfirm();
+    const navigate = useNavigate();
 
+    const checkExpirado = (orcamento) => {
+        if (!orcamento.validade) return false;
+        try {
+            const hoje = new Date();
+            hoje.setHours(0, 0, 0, 0);
+            const dataString = String(orcamento.validade).split('T')[0].replace(/-/g, '/');
+            const dataValidade = new Date(dataString);
+            dataValidade.setHours(0, 0, 0, 0);
+            return hoje.getTime() > dataValidade.getTime();
+        } catch (e) {
+            return false;
+        }
+    };
+
+    const handleConverterVenda = async (orcamento) => {
+        try {
+            const orcamentoFull = await base44.entities.Orcamento.getById(orcamento.id);
+            const pdvState = {
+                cliente_id: orcamentoFull.cliente_id,
+                itens: (orcamentoFull.itens || []).map(item => ({
+                    ...item,
+                    preco_sugerido: item.preco_sugerido || item.preco_unitario,
+                    tipo_entrega: item.tipo_entrega || null,
+                    is_encomenda: item.is_encomenda || false,
+                    tipo_montagem_padrao: item.tipo_montagem_padrao || null
+                })),
+                desconto: parseFloat(orcamentoFull.desconto) || 0,
+                pagamentos: orcamentoFull.pagamentos || [],
+                observacoes: orcamentoFull.observacoes || `Convertido do orçamento #${orcamentoFull.numero_orcamento}`,
+                loja: orcamentoFull.loja || "",
+                cidade: orcamentoFull.cidade || "",
+                bairro: orcamentoFull.bairro || "",
+                endereco: orcamentoFull.endereco || "",
+                valor_frete: parseFloat(orcamentoFull.valor_frete) || 0
+            };
+            sessionStorage.setItem('moveispedroii_pdv_state', JSON.stringify(pdvState));
+            // Disparar evento customizado para o PDV detectar (SPA)
+            window.dispatchEvent(new Event('orcamento-para-pdv'));
+            navigate(createPageUrl("PDV"));
+            toast.success("Orçamento transferido para o PDV!");
+        } catch (err) {
+            console.error(err);
+            toast.error("Erro ao carregar orçamento para o PDV.");
+        }
+    };
     const { data: orcamentos = [], isLoading } = useQuery({
         queryKey: ['orcamentos'],
         queryFn: () => base44.entities.Orcamento.list('-created_date'),
@@ -124,10 +173,10 @@ export default function Orcamentos() {
                                     <TableCell><StatusBadge status={orc.status} /></TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex justify-end gap-2">
-                                            <Button variant="ghost" size="icon" onClick={() => { setEditingOrcamento(orc); setIsModalOpen(true); }}>
+                                            <Button variant="ghost" size="icon" onClick={() => { setEditingOrcamento(orc); setIsModalOpen(true); }} title="Editar">
                                                 <Edit className="w-4 h-4 text-blue-600" />
                                             </Button>
-                                            <Button variant="ghost" size="icon" onClick={async () => {
+                                            <Button variant="ghost" size="icon" title="Excluir" onClick={async () => {
                                                 const confirmed = await confirm({
                                                     title: "Excluir Orçamento",
                                                     message: "Tem certeza que deseja excluir este orçamento?",
@@ -138,6 +187,16 @@ export default function Orcamentos() {
                                             }}>
                                                 <Trash2 className="w-4 h-4 text-red-600" />
                                             </Button>
+                                            {orc.status === 'Pendente' && !checkExpirado(orc) && (
+                                                <Button
+                                                    size="sm"
+                                                    onClick={() => handleConverterVenda(orc)}
+                                                    className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-3 text-xs gap-1"
+                                                >
+                                                    <ArrowRight className="w-3.5 h-3.5" />
+                                                    Venda
+                                                </Button>
+                                            )}
                                         </div>
                                     </TableCell>
                                 </TableRow>

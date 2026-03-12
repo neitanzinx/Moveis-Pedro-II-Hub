@@ -2,12 +2,13 @@ import React from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Pencil, Trash2, FileText, Calendar, ArrowRight } from "lucide-react";
+import { Pencil, Trash2, Calendar, ArrowRight } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { base44 } from "@/api/base44Client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 const statusColors = {
   "Pendente": { bg: "#FEF3C7", text: "#92400E", border: "#FCD34D" },
@@ -21,68 +22,60 @@ export default function OrcamentoCard({ orcamento, onEdit, onDelete }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const createVendaMutation = useMutation({
-    mutationFn: async (orcamentoData) => {
-      const numeroPedido = Math.floor(10000 + Math.random() * 90000).toString();
-      
-      const vendaData = {
-        numero_pedido: numeroPedido,
-        orcamento_id: orcamentoData.id,
-        data_venda: new Date().toISOString().split('T')[0],
-        loja: orcamentoData.loja,
-        cliente_id: orcamentoData.cliente_id,
-        cliente_nome: orcamentoData.cliente_nome,
-        cliente_telefone: orcamentoData.cliente_telefone,
-        itens: orcamentoData.itens,
-        valor_total: orcamentoData.valor_total,
-        forma_pagamento: "Dinheiro",
-        tipo_parcelamento: "À vista",
-        numero_parcelas: 1,
-        prazo_entrega: "15 dias",
-        status: "Pendente Pagamento",
-        desconto: orcamentoData.desconto,
-        observacoes: `Convertido do orçamento #${orcamentoData.numero_orcamento}`,
+  const handleConverterVenda = async () => {
+    try {
+      const orcamentoFull = await base44.entities.Orcamento.getById(orcamento.id);
+
+      const pdvState = {
+        cliente_id: orcamentoFull.cliente_id,
+        itens: (orcamentoFull.itens || []).map(item => ({
+          ...item,
+          preco_sugerido: item.preco_sugerido || item.preco_unitario,
+          tipo_entrega: item.tipo_entrega || null,
+          is_encomenda: item.is_encomenda || false,
+          tipo_montagem_padrao: item.tipo_montagem_padrao || null
+        })),
+        desconto: parseFloat(orcamentoFull.desconto) || 0,
+        pagamentos: orcamentoFull.pagamentos || [],
+        observacoes: orcamentoFull.observacoes || `Convertido do orçamento #${orcamentoFull.numero_orcamento}`,
+        loja: orcamentoFull.loja || "",
+        cidade: orcamentoFull.cidade || "",
+        bairro: orcamentoFull.bairro || "",
+        endereco: orcamentoFull.endereco || "",
+        valor_frete: parseFloat(orcamentoFull.valor_frete) || 0
       };
 
-      const venda = await base44.entities.Venda.create(vendaData);
-      
-      await base44.entities.Orcamento.update(orcamentoData.id, {
-        ...orcamentoData,
-        status: 'Convertido',
-        venda_id: venda.id
-      });
-
-      // Reservar estoque
-      for (const item of orcamentoData.itens) {
-        const produto = await base44.entities.Produto.list().then(produtos => 
-          produtos.find(p => p.id === item.produto_id)
-        );
-        if (produto) {
-          await base44.entities.Produto.update(produto.id, {
-            ...produto,
-            quantidade_reservada: (produto.quantidade_reservada || 0) + item.quantidade
-          });
-        }
-      }
-
-      return venda;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['orcamentos'] });
-      queryClient.invalidateQueries({ queryKey: ['vendas'] });
-      queryClient.invalidateQueries({ queryKey: ['produtos'] });
-      navigate(createPageUrl("Vendas"));
-    },
-  });
-
-  const handleConverterVenda = () => {
-    if (confirm('Deseja converter este orçamento em venda? O estoque será reservado.')) {
-      createVendaMutation.mutate(orcamento);
+      sessionStorage.setItem('moveispedroii_pdv_state', JSON.stringify(pdvState));
+      // Disparar evento customizado para o PDV detectar (SPA)
+      window.dispatchEvent(new Event('orcamento-para-pdv'));
+      navigate(createPageUrl("PDV"));
+      toast.success("Orçamento transferido para o PDV!");
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao carregar orçamento para o PDV.");
     }
   };
 
-  const validadeExpirada = new Date(orcamento.validade) < new Date();
+  let validadeExpirada = false;
+  if (orcamento.validade) {
+    try {
+      // Pega data local de hoje zerando as horas
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
 
+      // Interpreta a string ISO (e.g. 2026-03-31 ou 2026-03-31T00:00:00Z)
+      // Substituímos os hifens por barras e pegamos só a parte da data 
+      // para forçar o JS a usar o fuso local sem subtrair horas
+      const dataString = orcamento.validade.split('T')[0].replace(/-/g, '/');
+      const dataValidade = new Date(dataString);
+      dataValidade.setHours(0, 0, 0, 0);
+
+      // Expira somente se o DIA de hoje for MAIOR que o dia de validade
+      validadeExpirada = hoje.getTime() > dataValidade.getTime();
+    } catch (e) {
+      console.error("Erro processando data de validade:", e);
+    }
+  }
   return (
     <Card className="hover:shadow-xl transition-all duration-300 border-0">
       <CardContent className="p-6">
@@ -92,7 +85,7 @@ export default function OrcamentoCard({ orcamento, onEdit, onDelete }) {
               <h3 className="font-bold text-xl" style={{ color: '#07593f' }}>
                 Orçamento #{orcamento.numero_orcamento}
               </h3>
-              <Badge 
+              <Badge
                 style={{
                   backgroundColor: statusColors[orcamento.status]?.bg,
                   color: statusColors[orcamento.status]?.text,
@@ -156,12 +149,11 @@ export default function OrcamentoCard({ orcamento, onEdit, onDelete }) {
             <Button
               size="sm"
               onClick={handleConverterVenda}
-              disabled={createVendaMutation.isPending}
               style={{ backgroundColor: '#07593f' }}
               className="flex-1"
             >
               <ArrowRight className="w-4 h-4 mr-1" />
-              {createVendaMutation.isPending ? 'Convertendo...' : 'Converter em Venda'}
+              Converter em Venda
             </Button>
           )}
           <Button

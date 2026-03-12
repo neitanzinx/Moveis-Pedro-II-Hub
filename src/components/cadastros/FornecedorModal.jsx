@@ -32,7 +32,8 @@ export default function FornecedorModal({
         endereco: "",
         contato: "",
         observacoes: "",
-        ativo: true
+        ativo: true,
+        encomendas_habilitadas: true
     });
     const [novoCnpj, setNovoCnpj] = useState("");
 
@@ -49,7 +50,8 @@ export default function FornecedorModal({
                 endereco: "",
                 contato: "",
                 observacoes: "",
-                ativo: true
+                ativo: true,
+                encomendas_habilitadas: true
             });
         }
     }, [fornecedor, open]);
@@ -241,6 +243,22 @@ export default function FornecedorModal({
                             <Label htmlFor="ativo" className="cursor-pointer">
                                 Fornecedor Ativo
                             </Label>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                            <input
+                                type="checkbox"
+                                id="encomendas_habilitadas"
+                                checked={formData.encomendas_habilitadas !== false}
+                                onChange={(e) => setFormData({ ...formData, encomendas_habilitadas: e.target.checked })}
+                                className="rounded"
+                            />
+                            <Label htmlFor="encomendas_habilitadas" className="cursor-pointer">
+                                Encomendas Habilitadas
+                            </Label>
+                            <span className="text-xs text-gray-400">
+                                (permite venda por encomenda quando estoque zerado)
+                            </span>
                         </div>
                     </div>
 

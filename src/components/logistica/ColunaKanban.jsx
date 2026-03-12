@@ -97,7 +97,7 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
         for (const entrega of paraEnviar) {
           try {
             await base44.entities.Entrega.update(entrega.id, {
-              status_confirmacao: 'Aguardando Resposta',
+              status_confirmacao: 'Notificada',
               whatsapp_enviado: true,
               data_notificacao: entrega.data_agendada?.split('T')[0],
               turno_notificacao: entrega.turno,

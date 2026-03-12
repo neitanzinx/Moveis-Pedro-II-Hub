@@ -30,8 +30,7 @@ INSERT INTO configuracao_taxa (forma_pagamento, descricao, tipo_taxa, valor, ati
   ('Boleto', 'Boleto bancário', 'fixo', 3.50, true, 0, 'porcentagem'),
   ('Crediário', 'Crediário próprio', 'porcentagem', 0, true, 0, 'porcentagem'),
   ('Financiamento', 'Financiamento bancário', 'porcentagem', 0, true, 0, 'porcentagem'),
-  ('Transferência', 'Transferência bancária', 'porcentagem', 0, true, 0, 'porcentagem'),
-  ('Link de Pagamento', 'Link de pagamento online', 'porcentagem', 3, true, 0, 'porcentagem')
+  ('Transferência', 'Transferência bancária', 'porcentagem', 0, true, 0, 'porcentagem')
 ON CONFLICT (forma_pagamento) DO NOTHING;
 
 -- Habilitar RLS

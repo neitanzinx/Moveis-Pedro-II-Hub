@@ -13,12 +13,7 @@ import {
     Filter, Package, Loader2, Warehouse
 } from "lucide-react";
 import { toast } from "sonner";
-import { LOJAS_MOSTRUARIO, CAMPOS_ESTOQUE_LOJA } from "@/constants/productConstants";
-
-function getLojaDisplayName(lojaId) {
-    const loja = LOJAS_MOSTRUARIO.find(l => l.id === lojaId);
-    return loja ? loja.nome : lojaId;
-}
+import { obterCampoEstoqueDaLoja } from "@/constants/productConstants";
 
 export default function CargaInicialEstoque({ onVoltar }) {
     const queryClient = useQueryClient();
@@ -41,8 +36,25 @@ export default function CargaInicialEstoque({ onVoltar }) {
         queryFn: () => base44.entities.Produto.list(),
     });
 
+    const { data: lojasData = [], isLoading: loadingLojas } = useQuery({
+        queryKey: ['lojas'],
+        queryFn: () => base44.entities.Loja.list('nome'),
+    });
+
+    const lojasAtivas = useMemo(() => lojasData.filter(l => l.ativa), [lojasData]);
+
+    const getLojaDisplayName = (id) => {
+        const loja = lojasData.find(l => l.id === id);
+        return loja ? loja.nome : id;
+    };
+
+    const getLojaField = (id) => {
+        const loja = lojasData.find(l => l.id === id);
+        return obterCampoEstoqueDaLoja(loja);
+    };
+
     // --- Derived data ---
-    const campoEstoque = CAMPOS_ESTOQUE_LOJA[lojaId] || "estoque_cd";
+    const campoEstoque = getLojaField(lojaId);
 
     const categorias = useMemo(() => {
         const cats = [...new Set(produtos.map(p => p.categoria).filter(Boolean))].sort();
@@ -183,7 +195,7 @@ export default function CargaInicialEstoque({ onVoltar }) {
     // Pre-fill with existing stock values when selecting a store
     const handleSelectLoja = (id) => {
         setLojaId(id);
-        const campo = CAMPOS_ESTOQUE_LOJA[id];
+        const campo = getLojaField(id);
         if (campo && produtos.length > 0) {
             const existing = {};
             produtos.forEach(p => {
@@ -224,8 +236,18 @@ export default function CargaInicialEstoque({ onVoltar }) {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl">
-                    {LOJAS_MOSTRUARIO.map(loja => {
-                        const field = CAMPOS_ESTOQUE_LOJA[loja.id];
+                    {loadingLojas ? (
+                        <div className="col-span-full text-center py-8 text-gray-500">
+                            <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+                            Carregando lojas...
+                        </div>
+                    ) : lojasAtivas.length === 0 ? (
+                        <div className="col-span-full text-center py-8 text-gray-500 bg-white border rounded-lg">
+                            <p>Nenhuma loja ativa cadastrada.</p>
+                            <p className="text-sm mt-1">Acesse as Configurações para adicionar lojas.</p>
+                        </div>
+                    ) : lojasAtivas.map(loja => {
+                        const field = obterCampoEstoqueDaLoja(loja);
                         const qtdComEstoque = produtos.filter(p => (p[field] || 0) > 0).length;
                         return (
                             <Card
@@ -237,9 +259,9 @@ export default function CargaInicialEstoque({ onVoltar }) {
                                 <CardContent className="p-6 text-center">
                                     <div
                                         className="w-14 h-14 rounded-full mx-auto mb-3 flex items-center justify-center"
-                                        style={{ backgroundColor: loja.tipo === 'estoque' ? '#D1FAE5' : '#DBEAFE' }}
+                                        style={{ backgroundColor: '#D1FAE5' }}
                                     >
-                                        <Warehouse className="w-7 h-7" style={{ color: loja.tipo === 'estoque' ? '#065F46' : '#1E40AF' }} />
+                                        <Warehouse className="w-7 h-7" style={{ color: '#065F46' }} />
                                     </div>
                                     <h3 className="font-bold text-lg mb-1" style={{ color: '#07593f' }}>{loja.nome}</h3>
                                     <p className="text-sm" style={{ color: '#8B8B8B' }}>

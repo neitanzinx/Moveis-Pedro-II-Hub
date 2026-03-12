@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { calcularFolhaCompleta } from "@/utils/calculosTrabalhistas";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -79,6 +80,7 @@ export default function FolhaPagamentoTab() {
     const totalLiquido = folhasPeriodo.reduce((sum, f) => sum + (Number(f.salario_liquido) || 0), 0);
     const totalInss = folhasPeriodo.reduce((sum, f) => sum + (Number(f.inss) || 0), 0);
     const totalFgts = folhasPeriodo.reduce((sum, f) => sum + (Number(f.fgts) || 0), 0);
+    const totalVT = folhasPeriodo.reduce((sum, f) => sum + (Number(f.vale_transporte) || 0), 0);
     const folhasPagas = folhasPeriodo.filter(f => f.status === 'Pago').length;
     const folhasPendentes = folhasPeriodo.filter(f => f.status === 'Gerado').length;
 
@@ -95,16 +97,6 @@ export default function FolhaPagamentoTab() {
         }
     };
 
-    // Simple INSS calculation (simplified)
-    const calcularINSS = (salario) => {
-        if (salario <= 1412.00) return salario * 0.075;
-        if (salario <= 2666.68) return salario * 0.09;
-        if (salario <= 4000.03) return salario * 0.12;
-        return salario * 0.14;
-    };
-
-    // Simple FGTS calculation (8%)
-    const calcularFGTS = (salario) => salario * 0.08;
 
     const gerarFolhaMes = async () => {
         setGerando(true);
@@ -126,25 +118,28 @@ export default function FolhaPagamentoTab() {
             }
 
             for (const colab of colaboradoresParaGerar) {
-                const salarioBruto = Number(colab.salario_base) || 0;
-                const inss = calcularINSS(salarioBruto);
-                const fgts = calcularFGTS(salarioBruto);
-                const salarioLiquido = salarioBruto - inss;
+                const resultado = calcularFolhaCompleta(colab);
 
                 await base44.entities.FolhaPagamento.create({
                     colaborador_id: colab.id,
                     colaborador_nome: colab.nome_completo,
                     mes_referencia: mesReferencia,
                     ano_referencia: anoReferencia,
-                    salario_bruto: salarioBruto,
-                    inss: inss,
-                    irrf: 0, // Simplified - no IRRF calculation
-                    fgts: fgts,
-                    vale_transporte: 0,
+                    salario_bruto: resultado.salario_bruto,
+                    inss: resultado.inss,
+                    irrf: resultado.irrf,
+                    fgts: resultado.fgts,
+                    vale_transporte: resultado.vale_transporte,
+                    adicional_noturno: resultado.adicional_noturno,
+                    insalubridade: resultado.insalubridade,
+                    periculosidade: resultado.periculosidade,
+                    salario_familia: resultado.salario_familia,
+                    horas_extras: 0,
+                    valor_horas_extras: 0,
                     vale_refeicao: 0,
                     outros_descontos: 0,
                     outros_beneficios: 0,
-                    salario_liquido: salarioLiquido,
+                    salario_liquido: resultado.salario_liquido,
                     status: 'Gerado',
                 });
             }
@@ -198,11 +193,11 @@ export default function FolhaPagamentoTab() {
     };
 
     const exportarCSV = () => {
-        let csv = "Colaborador,Salário Bruto,INSS,FGTS,Salário Líquido,Status\n";
+        let csv = "Colaborador,Salário Bruto,INSS,Desc. VT,FGTS,Salário Líquido,Status\n";
         folhasPeriodo.forEach(f => {
-            csv += `"${f.colaborador_nome}",${f.salario_bruto},${f.inss},${f.fgts},${f.salario_liquido},${f.status}\n`;
+            csv += `"${f.colaborador_nome}",${f.salario_bruto},${f.inss},${f.vale_transporte || 0},${f.fgts},${f.salario_liquido},${f.status}\n`;
         });
-        csv += `\nTOTAIS,${totalBruto.toFixed(2)},${totalInss.toFixed(2)},${totalFgts.toFixed(2)},${totalLiquido.toFixed(2)},`;
+        csv += `\nTOTAIS,${totalBruto.toFixed(2)},${totalInss.toFixed(2)},${totalVT.toFixed(2)},${totalFgts.toFixed(2)},${totalLiquido.toFixed(2)},`;
 
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = window.URL.createObjectURL(blob);
@@ -372,6 +367,7 @@ export default function FolhaPagamentoTab() {
                                         <th className="text-left py-3 px-2 text-sm font-medium text-gray-500">Colaborador</th>
                                         <th className="text-right py-3 px-2 text-sm font-medium text-gray-500">Bruto</th>
                                         <th className="text-right py-3 px-2 text-sm font-medium text-gray-500">INSS</th>
+                                        <th className="text-right py-3 px-2 text-sm font-medium text-gray-500">Desc. VT</th>
                                         <th className="text-right py-3 px-2 text-sm font-medium text-gray-500">FGTS</th>
                                         <th className="text-right py-3 px-2 text-sm font-medium text-gray-500">Líquido</th>
                                         <th className="text-center py-3 px-2 text-sm font-medium text-gray-500">Status</th>
@@ -389,6 +385,9 @@ export default function FolhaPagamentoTab() {
                                             </td>
                                             <td className="text-right py-3 px-2 text-red-600">
                                                 - R$ {Number(folha.inss).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </td>
+                                            <td className="text-right py-3 px-2 text-red-600">
+                                                {Number(folha.vale_transporte) > 0 ? `- R$ ${Number(folha.vale_transporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '-'}
                                             </td>
                                             <td className="text-right py-3 px-2 text-orange-600">
                                                 R$ {Number(folha.fgts).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -433,6 +432,9 @@ export default function FolhaPagamentoTab() {
                                         <td className="text-right py-3 px-2 text-red-600">
                                             - R$ {totalInss.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </td>
+                                        <td className="text-right py-3 px-2 text-red-600">
+                                            {totalVT > 0 ? `- R$ ${totalVT.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '-'}
+                                        </td>
                                         <td className="text-right py-3 px-2 text-orange-600">
                                             R$ {totalFgts.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </td>
@@ -474,17 +476,21 @@ export default function FolhaPagamentoTab() {
                                 A folha será gerada automaticamente com:
                             </p>
                             <ul className="text-sm text-gray-500 space-y-1">
-                                <li>• Salário bruto conforme cadastro</li>
-                                <li>• Cálculo automático de INSS</li>
-                                <li>• Cálculo automático de FGTS (8%)</li>
-                                <li>• Salário líquido = Bruto - INSS</li>
+                                <li>• Salário bruto = Base + Adicionais CLT ativos</li>
+                                <li>• INSS progressivo (tabela 2025 com faixas reais)</li>
+                                <li>• IRRF automático (com dedução por dependentes)</li>
+                                <li>• FGTS (8%) — encargo da empresa</li>
+                                <li>• Desconto VT = menor entre 6% do salário e valor do VT</li>
+                                <li>• Adicionais: Noturno, Insalubridade, Periculosidade</li>
+                                <li>• Salário Família (quando aplicável)</li>
+                                <li>• Líquido = Bruto - INSS - IRRF - VT + Sal. Família</li>
                             </ul>
                         </div>
 
                         <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
                             <p className="text-sm text-amber-800">
-                                <strong>Nota:</strong> Os cálculos são simplificados. Para cálculos precisos de IRRF e outros descontos,
-                                edite cada folha individualmente ou utilize um sistema contábilidade especializado.
+                                <strong>Motor CLT 2025:</strong> Os cálculos seguem as tabelas oficiais de INSS e IRRF de 2025.
+                                Para ajustes manuais, edite cada folha individualmente.
                             </p>
                         </div>
                     </div>
@@ -576,15 +582,21 @@ function FolhaDetalhesModal({ folha, onClose }) {
         try {
             const salarioBruto = Number(formData.salario_bruto) || 0;
             const inss = Number(formData.inss) || 0;
+            const irrf = Number(formData.irrf) || 0;
+            const descontoVT = Number(formData.vale_transporte) || 0;
             const outrosDescontos = Number(formData.outros_descontos) || 0;
-            const salarioLiquido = salarioBruto - inss - outrosDescontos;
+            const salarioFamilia = Number(formData.salario_familia) || 0;
+            const salarioLiquido = salarioBruto - inss - irrf - descontoVT - outrosDescontos + salarioFamilia;
 
             await base44.entities.FolhaPagamento.update(folha.id, {
                 ...formData,
                 salario_bruto: salarioBruto,
                 inss: inss,
+                irrf: irrf,
                 fgts: Number(formData.fgts) || 0,
+                vale_transporte: descontoVT,
                 outros_descontos: outrosDescontos,
+                salario_familia: salarioFamilia,
                 salario_liquido: salarioLiquido,
             });
             queryClient.invalidateQueries(['folhas_pagamento']);
@@ -665,14 +677,50 @@ function FolhaDetalhesModal({ folha, onClose }) {
                                 <span className="text-gray-600">Salário Bruto</span>
                                 <span className="font-medium">R$ {Number(folha.salario_bruto).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                             </div>
+                            {Number(folha.adicional_noturno) > 0 && (
+                                <div className="flex justify-between py-2 border-b text-indigo-600" style={{ borderColor: '#E5E0D8' }}>
+                                    <span>(+) Adic. Noturno</span>
+                                    <span>Incluso no bruto: R$ {Number(folha.adicional_noturno).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                </div>
+                            )}
+                            {Number(folha.insalubridade) > 0 && (
+                                <div className="flex justify-between py-2 border-b text-amber-600" style={{ borderColor: '#E5E0D8' }}>
+                                    <span>(+) Insalubridade</span>
+                                    <span>Incluso no bruto: R$ {Number(folha.insalubridade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                </div>
+                            )}
+                            {Number(folha.periculosidade) > 0 && (
+                                <div className="flex justify-between py-2 border-b text-red-500" style={{ borderColor: '#E5E0D8' }}>
+                                    <span>(+) Periculosidade</span>
+                                    <span>Incluso no bruto: R$ {Number(folha.periculosidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                </div>
+                            )}
                             <div className="flex justify-between py-2 border-b text-red-600" style={{ borderColor: '#E5E0D8' }}>
                                 <span>INSS</span>
                                 <span>- R$ {Number(folha.inss).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                             </div>
+                            {Number(folha.irrf) > 0 && (
+                                <div className="flex justify-between py-2 border-b text-red-600" style={{ borderColor: '#E5E0D8' }}>
+                                    <span>IRRF</span>
+                                    <span>- R$ {Number(folha.irrf).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                </div>
+                            )}
+                            {Number(folha.vale_transporte) > 0 && (
+                                <div className="flex justify-between py-2 border-b text-red-600" style={{ borderColor: '#E5E0D8' }}>
+                                    <span>Desc. Vale Transporte (6% CLT)</span>
+                                    <span>- R$ {Number(folha.vale_transporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                </div>
+                            )}
                             {Number(folha.outros_descontos) > 0 && (
                                 <div className="flex justify-between py-2 border-b text-red-600" style={{ borderColor: '#E5E0D8' }}>
                                     <span>Outros Descontos</span>
                                     <span>- R$ {Number(folha.outros_descontos).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                </div>
+                            )}
+                            {Number(folha.salario_familia) > 0 && (
+                                <div className="flex justify-between py-2 border-b text-green-600" style={{ borderColor: '#E5E0D8' }}>
+                                    <span>(+) Salário Família</span>
+                                    <span>+ R$ {Number(folha.salario_familia).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                 </div>
                             )}
                             <div className="flex justify-between py-2 border-b text-orange-600" style={{ borderColor: '#E5E0D8' }}>

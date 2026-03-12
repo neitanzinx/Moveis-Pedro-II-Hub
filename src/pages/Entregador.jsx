@@ -18,6 +18,48 @@ import { Input } from "@/components/ui/input";
 import { whatsappService } from "@/services/whatsappService";
 import { toast } from "sonner";
 
+// Custom Hook para persistência agressiva do checklist
+function useChecklistCache(caminhaoId, dataSelecionada) {
+    const [itensConferidos, setItensConferidos] = useState(new Set());
+    const cacheKey = `checklist_cache_${dataSelecionada}_${caminhaoId}`;
+
+    // Carregar do localStorage ao iniciar ou mudar chave
+    useEffect(() => {
+        if (!caminhaoId || !dataSelecionada) return;
+        const saved = localStorage.getItem(cacheKey);
+        if (saved) {
+            try {
+                setItensConferidos(new Set(JSON.parse(saved)));
+            } catch (e) {
+                console.error("Erro ao fazer parse do checklist_cache:", e);
+            }
+        } else {
+            setItensConferidos(new Set());
+        }
+    }, [cacheKey]);
+
+    // Função para atualizar e salvar imediatamente
+    const toggleItem = (itemId) => {
+        setItensConferidos(prev => {
+            const next = new Set(prev);
+            if (next.has(itemId)) {
+                next.delete(itemId);
+            } else {
+                next.add(itemId);
+            }
+            localStorage.setItem(cacheKey, JSON.stringify(Array.from(next)));
+            return next;
+        });
+    };
+
+    const clearCache = () => {
+        localStorage.removeItem(cacheKey);
+        setItensConferidos(new Set());
+    };
+
+    return { itensConferidos, toggleItem, clearCache, setItensConferidos };
+}
+
 export default function Entregador() {
     const [user, setUser] = useState(null);
     const [etapa, setEtapa] = useState('selecao'); // 'selecao' | 'rota'
@@ -48,9 +90,6 @@ export default function Entregador() {
     const [linkCopiado, setLinkCopiado] = useState(false);
     const [numeroAlternativo, setNumeroAlternativo] = useState("");
 
-    // Estado para rastrear clientes já notificados
-    const [clientesNotificados, setClientesNotificados] = useState(new Set());
-
     // Estado para modal de confirmação de pagamento simplificado
     const [modalConfirmaPagamento, setModalConfirmaPagamento] = useState(null);
     const [pagamentoStatus, setPagamentoStatus] = useState('pago'); // 'pago' | 'pendente'
@@ -59,16 +98,46 @@ export default function Entregador() {
     // Estado para checklist de carregamento
     const [modalChecklist, setModalChecklist] = useState(false);
     const [itensChecklist, setItensChecklist] = useState([]);
-    const [itensConferidos, setItensConferidos] = useState(new Set());
+
+    // Substituindo state local pelo UseChecklistCache
+    const {
+        itensConferidos,
+        toggleItem: toggleItemConferido,
+        clearCache: clearChecklistCache,
+        setItensConferidos: _setItensConferidos
+    } = useChecklistCache(caminhaoSelecionado, dataSelecionada);
 
     const queryClient = useQueryClient();
     const confirm = useConfirm();
 
     useEffect(() => {
         base44.auth.me().then(setUser).catch(console.error);
+
+        // Tentar sincronizar fila offline
+        const attemptSync = async () => {
+            if (navigator.onLine) {
+                try {
+                    const { syncOfflineDeliveries } = await import('@/utils/deliveryOfflineQueue');
+                    const didSync = await syncOfflineDeliveries();
+                    if (didSync) {
+                        toast.success("Sincronização de entregas offline concluída!");
+                        queryClient.invalidateQueries({ queryKey: ['entregas-dia'] });
+                        queryClient.invalidateQueries({ queryKey: ['entregas'] });
+                    }
+                } catch (e) {
+                    console.error("Erro no background sync:", e);
+                }
+            }
+        };
+
+        attemptSync();
+        window.addEventListener('online', attemptSync);
+
         return () => {
             if (gpsInterval.current) clearInterval(gpsInterval.current);
+            window.removeEventListener('online', attemptSync);
         };
+        // eslint-disable-next-line
     }, []);
 
     // Lista de caminhões
@@ -84,7 +153,6 @@ export default function Entregador() {
             const todas = await base44.entities.Entrega.list('-ordem_rota');
             return todas.filter(e =>
                 e.data_agendada?.startsWith(dataSelecionada) &&
-                e.status !== 'Entregue' &&
                 e.status !== 'Cancelada'
             );
         },
@@ -112,15 +180,45 @@ export default function Entregador() {
         'Comercial': todasEntregas.filter(e => !e.turno || e.turno === 'Comercial')
     };
 
-    // Entregas da rota selecionada
+    // Estado para congelar a ordem da rota (Fix #5)
+    const [ordemCongelada, setOrdemCongelada] = useState([]);
+
+    useEffect(() => {
+        if (rotaIniciada && todasEntregas.length > 0) {
+            const rotaAtualIds = todasEntregas.filter(e => {
+                const matchTurno = turnoSelecionado ? (e.turno === turnoSelecionado || (!e.turno && turnoSelecionado === 'Comercial')) : true;
+                const matchCaminhao = caminhaoSelecionado ? (e.caminhao_id === caminhaoSelecionado || !e.caminhao_id) : true;
+                return matchTurno && matchCaminhao;
+            }).sort((a, b) => (a.ordem_rota || 99) - (b.ordem_rota || 99)).map(e => e.id);
+
+            setOrdemCongelada(prev => {
+                if (prev.length === 0) return rotaAtualIds;
+                // Adiciona novas entregas que chegaram no BD depois
+                const novos = rotaAtualIds.filter(id => !prev.includes(id));
+                if (novos.length > 0) return [...prev, ...novos];
+                return prev;
+            });
+        }
+    }, [rotaIniciada, todasEntregas, turnoSelecionado, caminhaoSelecionado]);
+
+    // Entregas da rota selecionada com ordem congelada
     const entregasRota = todasEntregas.filter(e => {
         const matchTurno = turnoSelecionado ? (e.turno === turnoSelecionado || (!e.turno && turnoSelecionado === 'Comercial')) : true;
         const matchCaminhao = caminhaoSelecionado ? (e.caminhao_id === caminhaoSelecionado || !e.caminhao_id) : true;
         return matchTurno && matchCaminhao;
-    }).sort((a, b) => (a.ordem_rota || 99) - (b.ordem_rota || 99));
+    }).sort((a, b) => {
+        if (ordemCongelada.length > 0) {
+            const idxA = ordemCongelada.indexOf(a.id);
+            const idxB = ordemCongelada.indexOf(b.id);
+            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+            if (idxA !== -1) return -1;
+            if (idxB !== -1) return 1;
+        }
+        return (a.ordem_rota || 99) - (b.ordem_rota || 99);
+    });
 
-    // Pedidos com pagamento na entrega
-    const pedidosAReceber = entregasRota.filter(e => e.pagamento_na_entrega || e.valor_a_receber > 0);
+    // Pedidos com pagamento na entrega pendente
+    const pedidosAReceber = entregasRota.filter(e => e.status !== 'Entregue' && (e.pagamento_na_entrega || e.valor_a_receber > 0));
 
     const updateEntrega = useMutation({
         mutationFn: ({ id, data }) => base44.entities.Entrega.update(id, data),
@@ -142,49 +240,61 @@ export default function Entregador() {
         }
     });
 
-    // RECUPERAR ESTADO AO INICIAR
+    // RECUPERAR ESTADO AO INICIAR (Fonte de Verdade: Banco de Dados)
     useEffect(() => {
-        try {
-            const savedRota = localStorage.getItem('rota_estado');
-            if (savedRota) {
-                const parsed = JSON.parse(savedRota);
-                // Só recupera se for do mesmo dia
-                const hoje = new Date().toISOString().split('T')[0];
-                if (parsed.dataSelecionada === hoje) {
-                    // Restaurar estados
-                    if (parsed.caminhaoSelecionado) setCaminhaoSelecionado(parsed.caminhaoSelecionado);
-                    if (parsed.turnoSelecionado) setTurnoSelecionado(parsed.turnoSelecionado);
+        const restaurarSessaoAPartirDoBanco = async () => {
+            if (!user) return;
+            try {
+                // Consultamos o banco para ver se há um caminhão 'Em Trânsito' atrelado a este motorista.
+                const { data: caminhaoAtivo, error } = await supabase
+                    .from('caminhoes')
+                    .select('id, turno_atual, motorista_atual_nome')
+                    .eq('status_rota', 'Em Trânsito')
+                    .eq('motorista_atual_nome', user?.full_name)
+                    .single();
 
-                    if (parsed.rotaIniciada) {
-                        setRotaIniciada(true);
-                        setEtapa('rota');
-                        // Reativar GPS
-                        iniciarRastreamento();
-                    }
-                    toast.success("Sessão restaurada!");
-                } else {
-                    // Limpar estado antigo se for de outro dia
-                    localStorage.removeItem('rota_estado');
+                if (caminhaoAtivo) {
+                    setCaminhaoSelecionado(caminhaoAtivo.id);
+                    setTurnoSelecionado(caminhaoAtivo.turno_atual || 'Comercial');
+                    setRotaIniciada(true);
+                    setEtapa('rota');
+                    toast.success("Rota recuperada do servidor!");
                 }
+            } catch (error) {
+                // Pode não achar, o que é esperado se não houver rota iniciada
+                console.log("Nenhuma rota ativa no banco para este usuário.", error.message);
             }
-        } catch (e) {
-            console.error("Erro ao restaurar sessão:", e);
-        }
-    }, []);
+        };
 
-    // SALVAR ESTADO
+        restaurarSessaoAPartirDoBanco();
+    }, [user?.full_name]);
+
+    // GARANTIR RASTREAMENTO CONDICIONAL SEGURO (React Lifecycle) E RECUPERACAO DE ESBOSSO
     useEffect(() => {
-        if (caminhaoSelecionado && turnoSelecionado) {
-            const estado = {
-                caminhaoSelecionado,
-                turnoSelecionado,
-                rotaIniciada,
-                dataSelecionada,
-                timestamp: Date.now()
-            };
-            localStorage.setItem('rota_estado', JSON.stringify(estado));
+        if (rotaIniciada && caminhaoSelecionado) {
+            iniciarRastreamento();
+
+            // Tentar recuperar um rascunho de assinatura inacabado
+            try {
+                const draft = sessionStorage.getItem('rascunho_entrega');
+                if (draft) {
+                    const parsed = JSON.parse(draft);
+                    if (parsed && parsed.id) {
+                        setModalFotoEntrega(parsed);
+                        toast.info("Rascunho da sua última assinatura foi recuperado.");
+                    }
+                }
+            } catch (e) { }
         }
-    }, [caminhaoSelecionado, turnoSelecionado, rotaIniciada, dataSelecionada]);
+        return () => {
+            if (gpsInterval.current) {
+                clearInterval(gpsInterval.current);
+                gpsInterval.current = null;
+            }
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [rotaIniciada, caminhaoSelecionado]);
+
     const iniciarRastreamento = () => {
         if (!navigator.geolocation) {
             toast.error("GPS não suportado neste dispositivo.");
@@ -275,7 +385,8 @@ export default function Entregador() {
                                 produto: item.nome || item.produto_nome,
                                 quantidade: item.quantidade || 1,
                                 cor: item.cor,
-                                codigo: item.codigo_barras || item.sku
+                                codigo: item.codigo_barras || item.sku,
+                                detalhes: item.detalhes || item.descricao || item.observacao
                             });
                         });
                     }
@@ -291,7 +402,7 @@ export default function Entregador() {
             }
 
             setItensChecklist(itens);
-            setItensConferidos(new Set());
+            // setItensConferidos(new Set()); Removido para respeitar o cache que foi montado pelo hook
             setModalChecklist(true);
         } catch (error) {
             console.error('Erro ao preparar checklist:', error);
@@ -351,6 +462,10 @@ export default function Entregador() {
             setRotaIniciada(true);
             setEtapa('rota');
             iniciarRastreamento();
+
+            // Item 3: Cache do checklist deletado/limpo apenas quando iniciarReta for sucesso (200 OK do DB implícito pelos updates acima)
+            clearChecklistCache();
+
             toast.success("Rota iniciada! GPS ativo.");
         } catch (e) {
             toast.error("Erro ao iniciar rota.");
@@ -382,7 +497,7 @@ export default function Entregador() {
         try {
             // Usar IP da VPS se estiver em localhost, senão usa a origin atual
             const origin = window.location.hostname === 'localhost' ? 'http://191.101.234.247' : window.location.origin;
-            const linkRastreio = `${origin}/rastreio/${entrega.id}`;
+            const linkRastreio = `${origin}/rastreio/${entrega.numero_pedido}`;
             const telefone = entrega.cliente_telefone;
             console.log('Telefone:', telefone, 'Link:', linkRastreio);
 
@@ -408,8 +523,14 @@ export default function Entregador() {
             console.log('Mensagem enviada?', sent);
 
             if (sent) {
-                // Marcar cliente como notificado
-                setClientesNotificados(prev => new Set([...prev, entrega.id]));
+                // Marcar cliente como notificado no banco usando updateEntrega
+                await updateEntrega.mutateAsync({
+                    id: entrega.id,
+                    data: {
+                        whatsapp_enviado: true,
+                        data_notificacao: new Date().toISOString()
+                    }
+                });
                 toast.success("Cliente avisado e link de rastreio enviado!");
             } else {
                 toast.error("Erro ao enviar mensagem.");
@@ -422,6 +543,18 @@ export default function Entregador() {
         }
     };
 
+    const primeiraPendenteId = entregasRota.find(e => e.status !== 'Entregue')?.id;
+    
+    // Efeito para automatizar o envio de "Próxima parada"
+    useEffect(() => {
+        if (rotaIniciada && primeiraPendenteId) {
+            const proximaEntrega = entregasRota.find(e => e.id === primeiraPendenteId);
+            if (proximaEntrega && !proximaEntrega.whatsapp_enviado && !enviando) {
+                avisarProximo(proximaEntrega);
+            }
+        }
+    }, [rotaIniciada, primeiraPendenteId, entregasRota, enviando]);
+
     // Iniciar processo de finalizar entrega (abre assinatura)
     const iniciarFinalizacao = (entrega) => {
         setModalAssinatura(entrega);
@@ -432,8 +565,12 @@ export default function Entregador() {
         const entrega = modalAssinatura;
         setModalAssinatura(null);
 
+        const rascunho = { ...entrega, assinatura_url: assinaturaDataUrl };
+        // NOVO: Salvar rascunho na sessionStorage para não perder se fechar o app/recarregar
+        sessionStorage.setItem('rascunho_entrega', JSON.stringify(rascunho));
+
         // NOVO: Sempre pedir foto dos móveis após assinatura
-        setModalFotoEntrega({ ...entrega, assinatura_url: assinaturaDataUrl });
+        setModalFotoEntrega(rascunho);
     };
 
     // NOVO: Salvar fotos dos móveis e verificar se precisa de comprovante de pagamento
@@ -476,6 +613,9 @@ export default function Entregador() {
 
             // NOVO: Adicionar fotos da entrega
             if (entrega.fotos_entrega) {
+                // Se offline, isso terá as base64. O componente de envio lerá os base64 e enviará pra storage.
+                // Mas para o updateData final, não teremos as urls prontas ainda. 
+                // A queue sincronizer cuidará disso.
                 updateData.fotos_entrega = entrega.fotos_entrega;
                 updateData.foto_entrega_url = entrega.fotos_entrega[0]?.url || null;
             }
@@ -494,16 +634,36 @@ export default function Entregador() {
                 updateData.comprovante_pagamento_url = comprovanteUrl;
             }
 
-            // 🚀 AUTOMAÇÃO: Chamar o robô de WhatsApp para concluir e avisar o próximo
-            try {
-                await whatsappService.notifyDeliveryCompletion(entrega.id, updateData);
-            } catch (zapErr) {
-                console.error("Falha ao chamar automação do robô, tentando fallback direto no banco...");
-                await updateEntrega.mutateAsync({ id: entrega.id, data: updateData });
-            }
+            // SE DETECTADO OFFLINE OU COM FALTAS DE UPLOAD, SALVA NA FILA OFFLINE
+            if (entrega.isOffline || !navigator.onLine) {
+                const { saveDeliveryToOfflineQueue } = await import('@/utils/deliveryOfflineQueue');
+                await saveDeliveryToOfflineQueue(entrega.id, {
+                    updateData,
+                    fotosOfflineList: entrega.isOffline ? entrega.fotos_entrega : []
+                });
 
-            toast.success("Entrega finalizada! O próximo cliente será avisado em 5 min.");
-            refetch();
+                toast.success("Entrega salva offline! Será sincronizada quando houver internet.");
+                sessionStorage.removeItem('rascunho_entrega');
+
+                // Atualizar estado cacheado do React Query para UI responder imediato sem refetch
+                queryClient.setQueryData(['entregas-dia', dataSelecionada], (oldData) => {
+                    if (!oldData) return oldData;
+                    return oldData.map(e => e.id === entrega.id ? { ...e, status: 'Entregue' } : e);
+                });
+            } else {
+                // 🚀 AUTOMAÇÃO: Chamar o robô de WhatsApp para concluir e avisar o próximo
+                try {
+                    const ok = await whatsappService.notifyDeliveryCompletion(entrega.id, updateData);
+                    if (!ok) throw new Error("A API retornou erro HTTP (500/400)");
+                } catch (zapErr) {
+                    console.error("Falha ao chamar automação do robô, tentando fallback direto no banco...");
+                    await updateEntrega.mutateAsync({ id: entrega.id, data: updateData });
+                }
+
+                toast.success("Entrega finalizada!");
+                sessionStorage.removeItem('rascunho_entrega');
+                refetch();
+            }
         } catch (error) {
             toast.error("Erro ao finalizar entrega.");
             console.error(error);
@@ -714,87 +874,6 @@ export default function Entregador() {
     const isEntregador = user?.cargo === 'Entregador';
     const isPendente = user?.status_aprovacao === 'Pendente' && user?.cargo === 'Entregador';
 
-    // Se não está logado, redirecionar para login
-    if (!user) {
-        return (
-            <div className="flex flex-col h-screen items-center justify-center p-6 bg-gradient-to-br from-green-50 to-green-100">
-                <div className="bg-white rounded-2xl shadow-lg p-8 text-center max-w-sm">
-                    <img
-                        src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/690ce4cb64e20af6b4a46b6f/3474ff954_undefined-Imgur.png"
-                        alt="Móveis Pedro II"
-                        className="h-16 w-auto mx-auto mb-4"
-                    />
-                    <h2 className="text-xl font-bold text-gray-900 mb-2">Área do Entregador</h2>
-                    <p className="text-gray-600 mb-6">
-                        Faça login ou cadastre-se para acessar.
-                    </p>
-                    <Button
-                        className="w-full bg-green-600 hover:bg-green-700"
-                        onClick={() => window.location.href = '/'}
-                    >
-                        Ir para Login
-                    </Button>
-                </div>
-            </div>
-        );
-    }
-
-    // Tela de aguardando aprovação
-    if (isPendente) {
-        return (
-            <div className="flex flex-col h-screen items-center justify-center p-6 bg-gradient-to-br from-green-50 to-green-100">
-                <div className="bg-white rounded-2xl shadow-lg p-8 text-center max-w-sm">
-                    <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Radio className="w-10 h-10 text-green-500" />
-                    </div>
-                    <h2 className="text-xl font-bold text-gray-900 mb-2">Aguardando Aprovação</h2>
-                    <p className="text-gray-600 mb-4">
-                        Sua solicitação está sendo analisada pelo administrador.
-                    </p>
-                    <Button
-                        variant="outline"
-                        className="mt-4"
-                        onClick={() => {
-                            base44.auth.signOut();
-                            window.location.href = '/';
-                        }}
-                    >
-                        <LogOut className="w-4 h-4 mr-2" />
-                        Sair
-                    </Button>
-                </div>
-            </div>
-        );
-    }
-
-    // Usuário não é entregador nem admin - acesso negado
-    if (!isEntregador && !isAdmin) {
-        return (
-            <div className="flex flex-col h-screen items-center justify-center p-6 bg-gradient-to-br from-green-50 to-green-100">
-                <div className="bg-white rounded-2xl shadow-lg p-8 text-center max-w-sm">
-                    <AlertTriangle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                    <h2 className="text-xl font-bold text-gray-900 mb-2">Acesso Negado</h2>
-                    <p className="text-gray-600 mb-4">
-                        Você não possui permissão de Entregador.
-                    </p>
-                    <p className="text-sm text-gray-500 mb-6">
-                        Se você é entregador, faça um novo cadastro selecionando "Entregador" como cargo.
-                    </p>
-                    <Button
-                        variant="outline"
-                        onClick={() => {
-                            base44.auth.signOut();
-                            window.location.href = '/';
-                        }}
-                    >
-                        <LogOut className="w-4 h-4 mr-2" />
-                        Sair e Recadastrar
-                    </Button>
-                </div>
-            </div>
-        );
-    }
-
     // ===== TELA DE SELEÇÃO DE ROTA =====
     if (etapa === 'selecao') {
         return (
@@ -987,12 +1066,7 @@ export default function Entregador() {
                                 return (
                                     <div
                                         key={item.id}
-                                        onClick={() => {
-                                            const novo = new Set(itensConferidos);
-                                            if (conferido) novo.delete(item.id);
-                                            else novo.add(item.id);
-                                            setItensConferidos(novo);
-                                        }}
+                                        onClick={() => toggleItemConferido(item.id)}
                                         className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${conferido
                                             ? 'bg-green-50 border-green-400'
                                             : 'bg-white border-gray-200 hover:border-blue-300'
@@ -1004,13 +1078,19 @@ export default function Entregador() {
                                                 {conferido ? <Check className="w-4 h-4" /> : <span className="text-xs text-gray-500">{idx + 1}</span>}
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <p className="font-medium text-gray-900 truncate">{item.produto}</p>
-                                                <div className="flex flex-wrap gap-2 mt-1 text-xs text-gray-500">
-                                                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Ped #{item.pedido}</span>
-                                                    <span>Qtd: {item.quantidade}</span>
-                                                    {item.cor && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">{item.cor}</span>}
+                                                <p className="font-medium text-gray-900 leading-tight">{item.produto}</p>
+                                                <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-500">
+                                                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Ped #{item.pedido}</span>
+                                                    <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-medium">Qtd: {item.quantidade}</span>
+                                                    {item.cor && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">{item.cor}</span>}
+                                                    {item.codigo && <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">Cód: {item.codigo}</span>}
                                                 </div>
-                                                <p className="text-xs text-gray-400 mt-1 truncate">Cliente: {item.cliente}</p>
+                                                {item.detalhes && (
+                                                    <p className="text-xs text-gray-600 mt-2 bg-gray-50 p-2 rounded border border-gray-100 italic">
+                                                        {item.detalhes}
+                                                    </p>
+                                                )}
+                                                <p className="text-xs text-gray-500 mt-2 font-medium">Cliente: {item.cliente}</p>
                                             </div>
                                         </div>
                                     </div>
@@ -1054,7 +1134,6 @@ export default function Entregador() {
             </div >
         );
     }
-
     // ===== TELA DE EXECUÇÃO DA ROTA =====
     return (
         <div className="max-w-lg mx-auto p-4 space-y-4 pb-24 bg-gray-50 min-h-screen">
@@ -1087,126 +1166,115 @@ export default function Entregador() {
             <div className="space-y-3">
                 {entregasRota.map((entrega, index) => {
                     const temPagamento = entrega.pagamento_na_entrega || entrega.valor_a_receber > 0;
-                    const isProxima = index === 0 && entrega.status !== 'Entregue';
+                    const isProxima = entrega.id === primeiraPendenteId;
 
-                    return (
-                        <Card key={entrega.id} className={`border-0 shadow-sm ${isProxima ? 'ring-2 ring-blue-500' : ''} ${entrega.status === 'Entregue' ? 'opacity-50' : ''}`}>
-                            {isProxima && (
-                                <div className="bg-blue-600 text-white text-[10px] font-bold px-3 py-1 text-center">
-                                    PRÓXIMA PARADA
-                                </div>
-                            )}
-                            {entrega.status === 'Entregue' && (
-                                <div className="bg-green-600 text-white text-[10px] font-bold px-3 py-1 text-center">
-                                    ✓ ENTREGUE
-                                </div>
-                            )}
-
-                            {/* Badge de pagamento */}
-                            {temPagamento && entrega.status !== 'Entregue' && (
-                                <div className="bg-amber-500 text-white text-[10px] font-bold px-3 py-1 text-center flex items-center justify-center gap-1">
-                                    <DollarSign className="w-3 h-3" />
-                                    RECEBER: R$ {(entrega.valor_a_receber || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    {entrega.forma_pagamento_entrega && ` (${entrega.forma_pagamento_entrega})`}
-                                </div>
-                            )}
-
-                            <CardContent className="p-4">
-                                {/* Header */}
-                                <div className="flex justify-between items-center mb-2">
-                                    <Badge variant="outline" className="text-sm font-bold">#{index + 1}</Badge>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs text-gray-400">Pedido</span>
-                                        <span className="font-bold text-sm">#{entrega.numero_pedido}</span>
+                        return (
+                            <Card key={entrega.id} className={`border-0 shadow-sm ${isProxima ? 'ring-2 ring-blue-500' : ''} ${entrega.status === 'Entregue' ? 'opacity-50' : ''}`}>
+                                {isProxima && (
+                                    <div className="bg-blue-600 text-white text-[10px] font-bold px-3 py-1 text-center">
+                                        PRÓXIMA PARADA
                                     </div>
-                                </div>
-
-                                {/* Endereço em Destaque */}
-                                <div className="bg-gray-50 rounded-lg p-3 mb-3 border border-gray-100">
-                                    <div className="flex items-start gap-2">
-                                        <MapPin className="w-5 h-5 mt-0.5 text-red-500 flex-shrink-0" />
-                                        <div className="flex-1">
-                                            <p className="font-bold text-gray-800 leading-tight">{entrega.endereco_entrega}</p>
-                                            <a
-                                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(entrega.endereco_entrega || '')}`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-xs text-blue-600 hover:underline mt-1 inline-block"
-                                            >
-                                                Abrir no Maps →
-                                            </a>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Cliente */}
-                                <p className="text-sm text-gray-500 mb-3">
-                                    <span className="text-xs text-gray-400">Cliente:</span> {entrega.cliente_nome}
-                                </p>
-
-                                {/* Tentativas anteriores */}
-                                {entrega.tentativas > 0 && (
-                                    <div className="bg-red-50 border border-red-200 rounded p-2 mb-3 text-xs text-red-700">
-                                        ⚠️ Tentativa {entrega.tentativas + 1} - {entrega.observacoes_entrega}
+                                )}
+                                {entrega.status === 'Entregue' && (
+                                    <div className="bg-green-600 text-white text-[10px] font-bold px-3 py-1 text-center">
+                                        ✓ ENTREGUE
                                     </div>
                                 )}
 
-                                {entrega.status !== 'Entregue' && (
-                                    <div className="space-y-2">
-                                        {/* Botões principais */}
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <Button
-                                                variant={clientesNotificados.has(entrega.id) ? "default" : "outline"}
-                                                size="sm"
-                                                onClick={() => avisarProximo(entrega)}
-                                                disabled={enviando}
-                                                className={clientesNotificados.has(entrega.id) ? "bg-green-600 hover:bg-green-700" : ""}
-                                            >
-                                                {clientesNotificados.has(entrega.id) ? (
-                                                    <><Check className="w-4 h-4 mr-1" /> Avisado</>
-                                                ) : (
-                                                    <><Send className="w-4 h-4 mr-1" /> Avisar</>
-                                                )}
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                className="bg-green-600 hover:bg-green-700"
-                                                onClick={() => iniciarFinalizacao(entrega)}
-                                            >
-                                                <PenTool className="w-4 h-4 mr-1" /> Entregar
-                                            </Button>
+                                {/* Badge de pagamento */}
+                                {temPagamento && entrega.status !== 'Entregue' && (
+                                    <div className="bg-amber-500 text-white text-[10px] font-bold px-3 py-1 text-center flex items-center justify-center gap-1">
+                                        <DollarSign className="w-3 h-3" />
+                                        RECEBER: R$ {(entrega.valor_a_receber || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        {entrega.forma_pagamento_entrega && ` (${entrega.forma_pagamento_entrega})`}
+                                    </div>
+                                )}
+
+                                <CardContent className="p-4">
+                                    {/* Header */}
+                                    <div className="flex justify-between items-center mb-2">
+                                        <Badge variant="outline" className="text-sm font-bold">
+                                            #{ordemCongelada.length > 0 ? ordemCongelada.indexOf(entrega.id) + 1 : index + 1}
+                                        </Badge>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs text-gray-400">Pedido</span>
+                                            <span className="font-bold text-sm">#{entrega.numero_pedido}</span>
                                         </div>
+                                    </div>
 
-                                        {/* Botão de falha */}
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="w-full border-red-300 text-red-600 hover:bg-red-50"
-                                            onClick={() => iniciarFalhaEntrega(entrega)}
-                                        >
-                                            <X className="w-4 h-4 mr-1" /> Não consegui entregar
-                                        </Button>
+                                    {/* Endereço em Destaque */}
+                                    <div className="bg-gray-50 rounded-lg p-3 mb-3 border border-gray-100">
+                                        <div className="flex items-start gap-2">
+                                            <MapPin className="w-5 h-5 mt-0.5 text-red-500 flex-shrink-0" />
+                                            <div className="flex-1">
+                                                <p className="font-bold text-gray-800 leading-tight">{entrega.endereco_entrega}</p>
+                                                <a
+                                                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(entrega.endereco_entrega || '')}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-xs text-blue-600 hover:underline mt-1 inline-block"
+                                                >
+                                                    Abrir no Maps →
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
 
-                                        {/* Botão de confirmar pagamento (simplificado) */}
-                                        {temPagamento && (
+                                    {/* Cliente */}
+                                    <p className="text-sm text-gray-500 mb-3">
+                                        <span className="text-xs text-gray-400">Cliente:</span> {entrega.cliente_nome}
+                                    </p>
+
+                                    {/* Tentativas anteriores */}
+                                    {entrega.tentativas > 0 && (
+                                        <div className="bg-red-50 border border-red-200 rounded p-2 mb-3 text-xs text-red-700">
+                                            ⚠️ Tentativa {entrega.tentativas + 1} - {entrega.observacoes_entrega}
+                                        </div>
+                                    )}
+
+                                    {entrega.status !== 'Entregue' && (
+                                        <div className="space-y-2">
+                                            {/* Botões principais */}
+                                            <div className="grid grid-cols-1 gap-2">
+                                                <Button
+                                                    size="sm"
+                                                    className="bg-green-600 hover:bg-green-700"
+                                                    onClick={() => iniciarFinalizacao(entrega)}
+                                                >
+                                                    <PenTool className="w-4 h-4 mr-1" /> Entregar
+                                                </Button>
+                                            </div>
+
+                                            {/* Botão de falha */}
                                             <Button
                                                 variant="outline"
                                                 size="sm"
-                                                className="w-full border-amber-400 text-amber-700 hover:bg-amber-50"
-                                                onClick={() => {
-                                                    setModalConfirmaPagamento(entrega);
-                                                    setPagamentoStatus('pago');
-                                                    setMotivoPendente("");
-                                                }}
+                                                className="w-full border-red-300 text-red-600 hover:bg-red-50"
+                                                onClick={() => iniciarFalhaEntrega(entrega)}
                                             >
-                                                <DollarSign className="w-4 h-4 mr-1" /> Confirmar Pagamento
+                                                <X className="w-4 h-4 mr-1" /> Não consegui entregar
                                             </Button>
-                                        )}
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-                    );
+
+                                            {/* Botão de confirmar pagamento (simplificado) */}
+                                            {temPagamento && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="w-full border-amber-400 text-amber-700 hover:bg-amber-50"
+                                                    onClick={() => {
+                                                        setModalConfirmaPagamento(entrega);
+                                                        setPagamentoStatus('pago');
+                                                        setMotivoPendente("");
+                                                    }}
+                                                >
+                                                    <DollarSign className="w-4 h-4 mr-1" /> Confirmar Pagamento
+                                                </Button>
+                                            )}
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        );
                 })}
 
                 {/* Assistências Técnicas */}
@@ -1300,15 +1368,15 @@ export default function Entregador() {
 
             {/* Modal de Assinatura */}
             <Dialog open={!!modalAssinatura} onOpenChange={() => setModalAssinatura(null)}>
-                <DialogContent className="max-w-md">
+                <DialogContent className="w-[95vw] max-w-lg h-[90vh] flex flex-col p-4">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <PenTool className="w-5 h-5" />
                             Assinatura do Cliente
                         </DialogTitle>
                     </DialogHeader>
-                    <div className="py-4">
-                        <p className="text-sm text-gray-500 mb-4 text-center">
+                    <div className="flex-1 flex flex-col py-2 min-h-0">
+                        <p className="text-sm text-gray-500 mb-2 text-center">
                             Peça ao cliente para assinar abaixo confirmando o recebimento
                         </p>
                         <AssinaturaCanvas
@@ -1691,10 +1759,11 @@ export default function Entregador() {
                                 className={`w-full ${pagamentoStatus === 'pago' ? 'bg-green-600 hover:bg-green-700' : 'bg-orange-600 hover:bg-orange-700'}`}
                                 onClick={async () => {
                                     try {
+                                        const hoje = new Date().toISOString();
                                         const updates = {
                                             pagamento_confirmado: pagamentoStatus === 'pago',
                                             pagamento_pendente_motivo: pagamentoStatus === 'pendente' ? motivoPendente : null,
-                                            data_pagamento_confirmado: new Date().toISOString()
+                                            data_pagamento_confirmado: hoje
                                         };
                                         await supabase.from('entregas').update(updates).eq('id', modalConfirmaPagamento.id);
 
@@ -1704,12 +1773,77 @@ export default function Entregador() {
                                                 pagamento_entrega_confirmado: pagamentoStatus === 'pago',
                                                 pagamento_entrega_observacao: pagamentoStatus === 'pendente' ? motivoPendente : null
                                             }).eq('id', modalConfirmaPagamento.venda_id);
+
+                                            // Processar lançamentos financeiros de "Pago"
+                                            if (pagamentoStatus === 'pago') {
+                                                // 1. Atualizar o lançamento de receita para "Pago"
+                                                const { data: lancamentosVenda } = await supabase
+                                                    .from('lancamentos_financeiros')
+                                                    .select('*')
+                                                    .eq('venda_id', modalConfirmaPagamento.venda_id)
+                                                    .eq('tipo', 'receita')
+                                                    .eq('status', 'Pendente');
+
+                                                if (lancamentosVenda && lancamentosVenda.length > 0) {
+                                                    for (const lancamento of lancamentosVenda) {
+                                                        await base44.entities.LancamentoFinanceiro.update(lancamento.id, {
+                                                            status: 'Pago',
+                                                            pago: true,
+                                                            data_pagamento: hoje.split('T')[0]
+                                                        });
+                                                    }
+                                                }
+
+                                                // 2. Criar lançamento de Taxa de Cartão se for cartão
+                                                const formaPag = modalConfirmaPagamento.forma_pagamento_entrega || '';
+                                                const isCartao = formaPag.toLowerCase().includes('cartão') || formaPag.toLowerCase().includes('crédito') || formaPag.toLowerCase().includes('débito');
+
+                                                if (isCartao) {
+                                                    const configTaxas = await base44.entities.ConfiguracaoTaxa.list();
+
+                                                    // Tentar achar a taxa correspondente
+                                                    const isCreditoParcelado = formaPag.toLowerCase().includes('crédito') && !formaPag.toLowerCase().includes('1x') && formaPag.match(/\d+x/i);
+
+                                                    const taxa = configTaxas.find(t => {
+                                                        if (isCreditoParcelado) return t.forma_pagamento === 'Crédito Parcelado';
+
+                                                        let nomeBusca = formaPag.toLowerCase().replace('cartão de ', '');
+                                                        nomeBusca = nomeBusca.split('(')[0].trim();
+                                                        return t.forma_pagamento.toLowerCase().includes(nomeBusca);
+                                                    });
+
+                                                    if (taxa && taxa.valor > 0) {
+                                                        const valorBase = modalConfirmaPagamento.valor_a_receber || 0;
+                                                        const valorTaxa = taxa.tipo_taxa === 'porcentagem'
+                                                            ? (valorBase * taxa.valor) / 100
+                                                            : taxa.valor;
+
+                                                        if (valorTaxa > 0) {
+                                                            await base44.entities.LancamentoFinanceiro.create({
+                                                                descricao: `Taxa ${formaPag} - Recebido na Entrega #${modalConfirmaPagamento.numero_pedido}`,
+                                                                valor: -valorTaxa,
+                                                                tipo: 'despesa',
+                                                                data_vencimento: hoje.split('T')[0],
+                                                                data_lancamento: hoje.split('T')[0],
+                                                                pago: true,
+                                                                categoria_nome: 'Taxas de Cartão',
+                                                                forma_pagamento: formaPag,
+                                                                status: 'Pago',
+                                                                observacao: `${taxa.valor}${taxa.tipo_taxa === 'porcentagem' ? '%' : ' R$'} sobre R$ ${valorBase.toFixed(2)}`,
+                                                                venda_id: modalConfirmaPagamento.venda_id,
+                                                                numero_pedido: modalConfirmaPagamento.numero_pedido
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         toast.success(pagamentoStatus === 'pago' ? 'Pagamento confirmado!' : 'Pendência registrada');
                                         setModalConfirmaPagamento(null);
                                         queryClient.invalidateQueries(['entregas']);
                                     } catch (e) {
+                                        console.error('Erro ao registrar pagamento:', e);
                                         toast.error('Erro ao registrar pagamento');
                                     }
                                 }}
@@ -1742,10 +1876,12 @@ export default function Entregador() {
                                 <div
                                     key={item.id}
                                     onClick={() => {
+                                        const conferido = itensConferidos.has(item.id);
                                         const novo = new Set(itensConferidos);
                                         if (conferido) novo.delete(item.id);
                                         else novo.add(item.id);
-                                        setItensConferidos(novo);
+                                        _setItensConferidos(novo);
+                                        localStorage.setItem(`checklist_cache_${dataSelecionada}_${caminhaoSelecionado}`, JSON.stringify(Array.from(novo)));
                                     }}
                                     className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${conferido
                                         ? 'bg-green-50 border-green-400'

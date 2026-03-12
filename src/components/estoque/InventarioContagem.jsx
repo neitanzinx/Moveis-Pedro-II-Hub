@@ -14,24 +14,7 @@ import {
     Filter, Package, AlertTriangle, Loader2, ChevronDown, ChevronUp
 } from "lucide-react";
 import { toast } from "sonner";
-import { LOJAS_MOSTRUARIO, CAMPOS_ESTOQUE_LOJA } from "@/constants/productConstants";
-
-// Get the stock field for a given store ID
-function getStockField(lojaId) {
-    return CAMPOS_ESTOQUE_LOJA[lojaId] || "estoque_cd";
-}
-
-// Get the stock value for a product in a specific store
-function getEstoquePorLoja(produto, lojaId) {
-    const field = getStockField(lojaId);
-    return produto[field] || 0;
-}
-
-// Display name for store
-function getLojaDisplayName(lojaId) {
-    const loja = LOJAS_MOSTRUARIO.find(l => l.id === lojaId);
-    return loja ? loja.nome : lojaId;
-}
+import { obterCampoEstoqueDaLoja } from "@/constants/productConstants";
 
 export default function InventarioContagem({ inventarioExistente, onVoltar, onSalvar, user }) {
     // --- State ---
@@ -60,6 +43,28 @@ export default function InventarioContagem({ inventarioExistente, onVoltar, onSa
         queryKey: ['produtos-inventario'],
         queryFn: () => base44.entities.Produto.list(),
     });
+
+    const { data: lojasData = [], isLoading: loadingLojas } = useQuery({
+        queryKey: ['lojas'],
+        queryFn: () => base44.entities.Loja.list('nome'),
+    });
+
+    const lojasAtivas = useMemo(() => lojasData.filter(l => l.ativa), [lojasData]);
+
+    const getLojaField = (id) => {
+        const loja = lojasData.find(l => l.id === id);
+        return obterCampoEstoqueDaLoja(loja || id);
+    };
+
+    const getLojaDisplayName = (id) => {
+        const loja = lojasData.find(l => l.id === id);
+        return loja ? loja.nome : id;
+    };
+
+    const getEstoquePorLoja = (produto, id) => {
+        const field = getLojaField(id);
+        return produto[field] || 0;
+    };
 
     // --- Initialize from existing inventory ---
     useEffect(() => {
@@ -232,8 +237,18 @@ export default function InventarioContagem({ inventarioExistente, onVoltar, onSa
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl">
-                    {LOJAS_MOSTRUARIO.map(loja => {
-                        const field = CAMPOS_ESTOQUE_LOJA[loja.id];
+                    {loadingLojas ? (
+                        <div className="col-span-full text-center py-8 text-gray-500">
+                            <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+                            Carregando lojas ativas...
+                        </div>
+                    ) : lojasAtivas.length === 0 ? (
+                        <div className="col-span-full text-center py-8 text-gray-500 bg-white border rounded-lg">
+                            <p>Nenhuma loja ativa cadastrada.</p>
+                            <p className="text-sm mt-1">Acesse as Configurações para adicionar lojas antes de iniciar um inventário.</p>
+                        </div>
+                    ) : lojasAtivas.map(loja => {
+                        const field = obterCampoEstoqueDaLoja(loja);
                         const qtdProdutos = produtos.filter(p => (p[field] || 0) > 0).length;
                         return (
                             <Card
@@ -245,16 +260,16 @@ export default function InventarioContagem({ inventarioExistente, onVoltar, onSa
                                 <CardContent className="p-6 text-center">
                                     <div
                                         className="w-14 h-14 rounded-full mx-auto mb-3 flex items-center justify-center"
-                                        style={{ backgroundColor: loja.tipo === 'estoque' ? '#D1FAE5' : '#DBEAFE' }}
+                                        style={{ backgroundColor: '#DBEAFE' }}
                                     >
-                                        <Package className="w-7 h-7" style={{ color: loja.tipo === 'estoque' ? '#065F46' : '#1E40AF' }} />
+                                        <Package className="w-7 h-7" style={{ color: '#1E40AF' }} />
                                     </div>
                                     <h3 className="font-bold text-lg mb-1" style={{ color: '#07593f' }}>{loja.nome}</h3>
                                     <p className="text-sm" style={{ color: '#8B8B8B' }}>
                                         {loadingProdutos ? '...' : `${qtdProdutos} produtos com estoque`}
                                     </p>
                                     <Badge className="mt-2" variant="secondary">
-                                        {loja.tipo === 'estoque' ? 'Depósito' : 'Mostruário'}
+                                        Unidade
                                     </Badge>
                                 </CardContent>
                             </Card>

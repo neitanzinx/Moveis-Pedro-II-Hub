@@ -13,7 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { AlertCircle, Loader2, Plus, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, vendas, produtos, isLoading }) {
@@ -32,6 +33,8 @@ export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, ven
   });
 
   const [vendaSelecionada, setVendaSelecionada] = useState(null);
+  const [entregue, setEntregue] = useState(false);
+  const [verificandoEntrega, setVerificandoEntrega] = useState(false);
   const [canApprove, setCanApprove] = useState(false);
 
   useEffect(() => {
@@ -48,6 +51,7 @@ export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, ven
       setFormData(devolucao);
       const venda = vendas.find(v => v.id === devolucao.venda_id);
       setVendaSelecionada(venda);
+      setEntregue(true);
     } else {
       setFormData({
         venda_id: "",
@@ -66,11 +70,30 @@ export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, ven
     }
   }, [devolucao, vendas, isOpen]);
 
-  const handleVendaChange = (vendaId) => {
+  const handleVendaChange = async (vendaId) => {
     const venda = vendas.find(v => v.id === vendaId);
     if (!venda) return;
 
     setVendaSelecionada(venda);
+    setVerificandoEntrega(true);
+    setEntregue(false);
+
+    try {
+      const { data: entregas, error } = await base44.supabase
+        .from('entregas')
+        .select('id')
+        .eq('venda_id', vendaId)
+        .eq('status', 'Entregue');
+
+      if (error) throw error;
+      setEntregue(entregas && entregas.length > 0);
+    } catch (err) {
+      console.error("Erro ao verificar entrega:", err);
+      setEntregue(true);
+    } finally {
+      setVerificandoEntrega(false);
+    }
+
     setFormData({
       ...formData,
       venda_id: vendaId,
@@ -132,7 +155,7 @@ export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, ven
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!formData.venda_id || formData.itens_devolvidos.length === 0) {
       alert("Selecione uma venda e adicione pelo menos um item");
       return;
@@ -219,10 +242,25 @@ export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, ven
 
             {vendaSelecionada && (
               <>
-                <Alert>
+                <Alert className={`border-2 ${entregue ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-300'}`}>
                   <AlertDescription>
-                    <strong>Cliente:</strong> {vendaSelecionada.cliente_nome} •
-                    <strong className="ml-2">Total da Venda:</strong> R$ {vendaSelecionada.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    <div className="flex flex-wrap gap-4 items-center">
+                      <div>
+                        <strong>Cliente:</strong> {vendaSelecionada.cliente_nome}
+                      </div>
+                      <div>
+                        <strong>Total da Venda:</strong> R$ {vendaSelecionada.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </div>
+                      <div>
+                        <strong>Status Entrega:</strong> {verificandoEntrega ? <Loader2 className="w-3 h-3 animate-spin inline ml-1" /> : (entregue ? <Badge className="bg-green-600 ml-1">Entregue</Badge> : <Badge variant="destructive" className="ml-1">Não Entregue</Badge>)}
+                      </div>
+                      {!entregue && !verificandoEntrega && (
+                        <div className="w-full mt-2 text-red-700 font-bold flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4" />
+                          Trocas/Devoluções só podem ser registradas após a entrega concluída.
+                        </div>
+                      )}
+                    </div>
                   </AlertDescription>
                 </Alert>
 
@@ -342,10 +380,10 @@ export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, ven
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar
             </Button>
-            
+
             {devolucao && canApprove && devolucao.status === 'Pendente' && (
               <>
-                <Button 
+                <Button
                   type="button"
                   onClick={handleReject}
                   variant="destructive"
@@ -353,7 +391,7 @@ export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, ven
                 >
                   Rejeitar
                 </Button>
-                <Button 
+                <Button
                   type="button"
                   onClick={handleApprove}
                   disabled={isLoading}
@@ -363,11 +401,11 @@ export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, ven
                 </Button>
               </>
             )}
-            
+
             {(!devolucao || devolucao.status === 'Pendente') && (
-              <Button 
-                type="submit" 
-                disabled={isLoading || !formData.venda_id || formData.itens_devolvidos.length === 0}
+              <Button
+                type="submit"
+                disabled={isLoading || !formData.venda_id || formData.itens_devolvidos.length === 0 || (!entregue && !devolucao)}
                 style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
               >
                 {isLoading ? (

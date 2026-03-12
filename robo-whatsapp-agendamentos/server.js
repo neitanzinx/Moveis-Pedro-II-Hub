@@ -8,7 +8,7 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const express = require('express');
 const cors = require('cors');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
@@ -27,8 +27,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const { setupEmployeeAuthRoutes } = require('./routes/authEmployee');
 
 const app = express();
-const port = process.env.PORT || 3001;
-
 // 🛡️ Bulletproof CORS: Allow ALL origins.
 app.use(cors());
 
@@ -43,15 +41,39 @@ process.on('unhandledRejection', (reason, promise) => {
     // 🛡️ Tratamento específico para o erro de "Browser already running" (Sessão travada)
     if (msg.includes('browser is already running') || msg.includes('EBUSY') || msg.includes('EPERM')) {
         console.warn('⚠️ BLOQUEIO DE SESSÃO DETECTADO (Unhandled Rejection):', msg);
-        whatsapp.reconnect('session_locked_unhandled');
+        console.log('🔄 Iniciando protocolo de recuperação de emergência...');
+
+        try {
+            if (typeof whatsapp !== 'undefined' && typeof currentClientId !== 'undefined') {
+                // Forçar rotação de ID
+                currentClientId = `client-v2-${Date.now()}`;
+                console.log(`🆔 Novo ID gerado na emergência: ${currentClientId}`);
+
+                // Reiniciar
+                whatsapp.isInitializing = false;
+                setTimeout(() => whatsapp.initialize(), 2500);
+            } else {
+                console.error('❌ Não foi possível acessar o objeto whatsapp para recuperação. Reiniciando processo...');
+                process.exit(1);
+            }
+        } catch (e) {
+            console.error('❌ Erro fatal na recuperação:', e);
+            process.exit(1);
+        }
         return;
     }
 
     // Auth timeout é esperado quando a sessão WhatsApp expira — não é crítico
-    if (msg.includes('auth timeout') || msg.includes('Navigation timeout') || msg.includes('Protocol error') ||
-        msg.includes('LifecycleWatcher disposed') || msg.includes('Target closed')) {
+    // Auth timeout é esperado quando a sessão WhatsApp expira — não é crítico
+    if (msg.includes('auth timeout') ||
+        msg.includes('Navigation timeout') ||
+        msg.includes('Protocol error') ||
+        msg.includes('LifecycleWatcher disposed') ||
+        msg.includes('Target closed')
+    ) {
         console.warn('⚠️ WhatsApp auth/retry warning (não crítico):', msg);
-        whatsapp.reconnect(`unhandled: ${msg.substring(0, 30)}`);
+        // Tentar reconexão suave se possível
+        try { if (typeof whatsapp !== 'undefined') whatsapp.reconnect(`unhandled: ${msg}`); } catch (e) { }
     } else {
         console.error('🔥 CRITICAL ERROR (Unhandled Rejection):', reason);
     }
@@ -84,7 +106,7 @@ app.use(express.static(distPath));
 // após destroy(). O Puppeteer interno mantém referências ao browser antigo.
 // 🏭 FACTORY: Cria Client NOVO a cada tentativa.
 // 🏭 FACTORY: Cria Client NOVO a cada tentativa.
-function createWhatsAppClient(clientId = "client-main") {
+function createWhatsAppClient(clientId = "client-v2") {
     // 🛡️ Caminhos absolutos e adaptativos (Windows/Linux)
     const isWindows = process.platform === "win32";
 
@@ -130,7 +152,7 @@ let connectionInfo = null;
 
 // --- Client WhatsApp (LET porque precisa ser recriado) ---
 // Estado global para guardar o ID atual (permite rotação em caso de erro)
-let currentClientId = "client-main";
+let currentClientId = "client-v5"; // Bump para v5 (Fresh Start)
 let client = createWhatsAppClient(currentClientId);
 
 // 🔗 Registrar event handlers no client atual
@@ -206,9 +228,13 @@ function attachClientEvents(c) {
                 platform: info?.platform || 'unknown'
             };
             console.log(`✅ Robô Logístico Online! Conectado como: ${connectionInfo.pushname}`);
+
+            // 🚀 Processar fila ao conectar!
+            setTimeout(() => processarFila(), 5000);
         } catch (e) {
             connectionInfo = null;
             console.log('✅ Robô Logístico Online!');
+            setTimeout(() => processarFila(), 5000);
         }
     });
 
@@ -237,6 +263,7 @@ attachClientEvents(client);
 
 // --- WhatsApp Manager ---
 const whatsapp = {
+    isReconnecting: false,
     isInitializing: false,
     reconnectAttempts: 0,
     maxReconnectAttempts: 5,
@@ -261,9 +288,11 @@ const whatsapp = {
         const isWindows = process.platform === "win32";
 
         if (isWindows) {
-            try { execSync('taskkill /F /IM chrome.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { }
-            try { execSync('taskkill /F /IM chromium.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { }
+            // WINDOWS: Usar taskkill reforçado
+            try { execSync('taskkill /F /IM chrome.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { /* ok */ }
+            try { execSync('taskkill /F /IM chromium.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { /* ok */ }
         } else {
+            // LINUX/MAC: Usar killall/pkill
             const killCmds = [
                 'killall -9 google-chrome-stable',
                 'killall -9 chrome',
@@ -272,110 +301,226 @@ const whatsapp = {
                 'pkill -9 -f "chrome-linux64/chrome"'
             ];
             for (const cmd of killCmds) {
-                try { execSync(`${cmd} 2>/dev/null`, { stdio: 'ignore' }); } catch (e) { }
+                try { execSync(`${cmd} 2>/dev/null`, { stdio: 'ignore' }); } catch (e) { /* ok */ }
             }
         }
 
+        // 3) Esperar 
         try {
             const sleepCmd = isWindows ? 'timeout /t 2 /nobreak >NUL' : 'sleep 2';
             execSync(sleepCmd, { stdio: 'ignore' });
-        } catch (e) { }
+        } catch (e) { /* ok */ }
 
+        // 4) Limpar lock files / Sessão (usando os.tmpdir para consistência)
         const basePath = path.join(process.cwd(), '.wwebjs_auth');
         const sessionDir = path.join(basePath, `session-${currentClientId}`);
 
+        const lockFiles = ['SingletonLock', 'Lock', 'SingletonCookie'];
+
+        const removeFolder = (dir) => {
+            let deleted = false;
+            for (let i = 0; i < 3; i++) { // Reduzido para 3 tentativas
+                try {
+                    if (fs.existsSync(dir)) {
+                        fs.rmSync(dir, { recursive: true, force: true });
+                    }
+                    deleted = true;
+                    break;
+                } catch (e) {
+                    console.warn(`⏳ [CLEAN] Tentativa ${i + 1}/3 falhou (${e.message}).`);
+                    try { execSync(isWindows ? 'timeout /t 1 /nobreak >NUL' : 'sleep 1', { stdio: 'ignore' }); } catch (s) { }
+                }
+            }
+            return deleted;
+        };
+
         if (deleteSession) {
-            console.log(`🧹 [CLEAN] Removendo pasta da sessão: ${sessionDir}`);
-            try { if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (e) { }
-        } else if (fs.existsSync(sessionDir)) {
-            const lockFiles = ['SingletonLock', 'Lock', 'SingletonCookie', 'SingletonSocket'];
+            console.log(`🧹 [CLEAN] Solicitação de limpeza executada. Removendo: ${sessionDir}`);
+            removeFolder(sessionDir);
+        } else {
+            // Remove apenas os locks se não for deletar a sessão (preserva autenticação!)
             lockFiles.forEach(f => {
-                try { fs.rmSync(path.join(sessionDir, f), { force: true }); } catch (e) { }
+                const lockPath = path.join(sessionDir, f);
+                try {
+                    if (fs.existsSync(lockPath)) {
+                        console.log(`🧹 [CLEAN] Removendo arquivo de trava isolado detectado: ${f}`);
+                        fs.unlinkSync(lockPath);
+                    }
+                } catch (e) { }
             });
-            console.log('🧹 [CLEAN] Lock files verificados');
         }
 
         console.log('✅ [CLEAN] Limpeza concluída');
     },
 
-    // 🚀 ÚNICA FUNÇÃO DE INICIALIZAÇÃO
-    async initialize(options = { deleteSession: false, rotateId: false }) {
+    // 🔄 Cria novo Client e registra os event handlers
+    recreateClient() {
+        console.log(`🔄 [CLIENT] Criando novo Client (${currentClientId})...`);
+        client = createWhatsAppClient(currentClientId);
+        attachClientEvents(client);
+        return client;
+    },
+
+    // 🚀 Inicialização — fire-and-forget com timeout safety
+    async initialize() {
         if (this.isInitializing) {
-            console.log('⏳ [INIT] Já em andamento, ignorando chamada duplicada.');
+            console.log('⏳ [INIT] Já em andamento.');
             return false;
         }
-
         this.isInitializing = true;
-        this.startedAt = this.startedAt || Date.now();
+        this.startedAt = Date.now();
+
+        // Limpeza inicial
+        this.cleanChrome(false);
+        this.recreateClient();
+
         connectionStatus = 'initializing';
 
-        try {
-            console.log(`📱 [INIT] Iniciando WhatsApp (Session: ${currentClientId})...`);
+        console.log('📱 [INIT] Iniciando WhatsApp...');
 
-            // 1. Destruir client antigo se existir
-            if (client) {
-                console.log('🔄 [INIT] Destruindo client antigo...');
-                try { await client.destroy(); } catch (e) { }
-                client = null;
-            }
-
-            // 2. Rotacionar ID se necessário (Emergency Checkmate)
-            if (options.rotateId) {
-                currentClientId = "client-main";
-                console.log(`🆔 [INIT] Novo Session ID gerado: ${currentClientId}`);
-            }
-
-            // 3. Limpeza de processos e locks
-            this.cleanChrome(options.deleteSession);
-
-            // 4. Criar e preparar novo client
-            client = createWhatsAppClient(currentClientId);
-            attachClientEvents(client);
-
-            // 5. Lançar inicialização
-            await client.initialize();
-            console.log('✅ [INIT] client.initialize() concluído.');
-
-            this.reconnectAttempts = 0;
+        // Fire-and-forget: client.initialize() roda em background
+        // Os EVENTOS (qr, ready, authenticated) vão atualizar o status
+        client.initialize().then(() => {
+            console.log('✅ [INIT] client.initialize() resolveu com sucesso');
             this.isInitializing = false;
             this.startWatchdog();
-            return true;
+        }).catch(async (err) => {
+            console.error('❌ [INIT] client.initialize() falhou:', err.message);
 
-        } catch (err) {
-            console.error('❌ [INIT] Erro fatal:', err.message);
-            this.isInitializing = false;
+            // Destruir client atual
+            try { await client.destroy(); } catch (e) { /* ok */ }
 
-            // Se o erro for de trava de arquivo, tenta novamente rotacionando o ID
-            if (err.message.includes('browser is already running') || err.message.includes('EBUSY')) {
-                console.warn('⚠️ [INIT] Sessão travada. Tentando escape com novo ID...');
-                return setTimeout(() => this.initialize({ rotateId: true }), 3000);
+            // ⚠️ ESTRATÉGIA ANTI-LOCK: Se o erro for de "browser already running", trocamos o ID da sessão!
+            if (err.message && (err.message.includes('browser is already running') || err.message.includes('EBUSY') || err.message.includes('EPERM'))) {
+                console.warn('⚠️ DETECTADO BLOQUEIO DE SESSÃO! Checkmate: Criando nova ID de sessão para contornar o lock.');
+
+                // Rotacionar ID
+                currentClientId = `client-v2-${Date.now()}`;
+                console.log(`🆔 Nova Session ID: ${currentClientId}`);
+
+                // Forçar recreação com novo ID
+                this.isInitializing = false; // Reset para permitir nova chamada
+                // Pequeno delay para OS processar
+                setTimeout(() => this.initialize(), 2000);
+                return;
             }
 
-            // Retry com backoff
-            if (this.reconnectAttempts < this.maxReconnectAttempts) {
-                this.reconnectAttempts++;
-                const delay = this.getBackoffDelay();
-                console.log(`🔄 [INIT] Falha. Tentativa #${this.reconnectAttempts} em ${delay / 1000}s...`);
-                setTimeout(() => this.initialize(), delay);
-            } else {
+            if (connectionStatus === 'initializing') {
                 connectionStatus = 'disconnected';
                 this.disconnectedSince = Date.now();
             }
-            return false;
+
+            this.isInitializing = false;
+
+            // Retry automático padrão (apenas se não foi resolvido pelo estratégia acima)
+            if (this.reconnectAttempts < 2) {
+                console.log('🔄 [INIT] Retry padrão em 10s...');
+                setTimeout(() => {
+                    this.reconnectAttempts++;
+                    this.initialize();
+                }, 10000);
+            }
+        });
+
+        // Safety timeout
+        setTimeout(() => {
+            if (connectionStatus === 'initializing') {
+                console.warn('⚠️ [INIT] Safety timeout: 2min sem resposta.');
+                connectionStatus = 'disconnected';
+                this.isInitializing = false;
+            }
+        }, 120000);
+
+        return true;
+    },
+
+    // 🔄 Reconexão robusta com backoff exponencial
+    async reconnect(reason = 'unknown') {
+        if (this.isReconnecting || this.isInitializing) {
+            console.log(`⏳ [RECONNECT] Bloqueado (init=${this.isInitializing}, reconn=${this.isReconnecting})`);
+            return;
+        }
+
+        this.isReconnecting = true;
+
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.error(`⛔ [RECONNECT] Máximo de ${this.maxReconnectAttempts} tentativas.`);
+            connectionStatus = 'disconnected';
+            this.isReconnecting = false;
+            return;
+        }
+
+        this.reconnectAttempts++;
+        this.reconnectCount++;
+        const delay = this.getBackoffDelay();
+
+        console.log(`🔄 [RECONNECT] #${this.reconnectAttempts} (${reason}) em ${delay / 1000}s...`);
+        await new Promise(r => setTimeout(r, delay));
+
+        this.cleanChrome(false);
+        this.recreateClient();
+        connectionStatus = 'initializing';
+
+        try {
+            await client.initialize();
+            console.log('✅ [RECONNECT] Sucesso!');
+            this.reconnectAttempts = 0;
+            this.disconnectedSince = null;
+            this.isReconnecting = false;
+        } catch (e) {
+            console.error(`❌ [RECONNECT] Falha:`, e.message);
+            try { await client.destroy(); } catch (e2) { /* ok */ }
+
+            if (connectionStatus === 'initializing') {
+                connectionStatus = 'disconnected';
+            }
+            this.isReconnecting = false;
+
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                this.reconnect('retry');
+            }
         }
     },
 
-    // 🔄 Reconexão (Unificada)
-    async reconnect(reason = 'unknown') {
-        console.log(`🔄 [RECONNECT] Solicitado por: ${reason}`);
-        return this.initialize({ deleteSession: false });
-    },
-
-    // 🔧 Reconexão manual (Pela interface)
+    // 🔧 Reconexão manual forçada (via /whatsapp/reconnect)
     async forceReconnect(deleteSession = false) {
-        console.log(`🔧 [FORCE] Reconexão manual acionada (Nuclear: ${deleteSession})`);
+        if (this.isInitializing) {
+            return { blocked: true, reason: 'Inicialização em andamento' };
+        }
+
+        console.log(`🔧 [FORCE] Reconexão manual... (deleteSession=${deleteSession})`);
         this.reconnectAttempts = 0;
-        return this.initialize({ deleteSession: deleteSession });
+        this.isReconnecting = false;
+        this.watchdogFailures = 0;
+        this.isInitializing = true;
+
+        try { await client.destroy(); } catch (e) { /* ok */ }
+
+        // Só faz a limpeza pesada se explicitamente solicitado
+        this.cleanChrome(deleteSession);
+        this.recreateClient();
+
+        connectionStatus = 'initializing';
+        currentQR = null;
+        connectionInfo = null;
+
+        // Fire-and-forget (eventos vão atualizar o status)
+        client.initialize().then(() => {
+            console.log('✅ [FORCE] Sucesso!');
+            this.disconnectedSince = null;
+            this.isInitializing = false;
+        }).catch((e) => {
+            console.error('❌ [FORCE] Falha:', e);
+            this.startWatchdog();
+            if (connectionStatus === 'initializing') {
+                connectionStatus = 'disconnected';
+            }
+            this.disconnectedSince = Date.now();
+            this.isInitializing = false;
+        });
+
+        // Retorna imediato — frontend vai pollar status
+        return { blocked: false, success: true, message: 'Inicialização disparada' };
     },
 
     // 🫀 Watchdog
@@ -386,18 +531,25 @@ const whatsapp = {
         const MAX_FAILURES = 3;
 
         this.watchdogInterval = setInterval(async () => {
-            if (this.isInitializing || connectionStatus === 'initializing' || connectionStatus === 'waiting_qr') return;
+            if (this.isReconnecting || this.isInitializing || connectionStatus === 'initializing' || connectionStatus === 'waiting_qr') {
+                return;
+            }
 
             try {
                 const state = await Promise.race([
-                    client?.getState(),
+                    client.getState(),
                     new Promise((_, reject) => setTimeout(() => reject(new Error('watchdog timeout')), 15000))
                 ]);
 
                 if (state === 'CONNECTED') {
                     this.watchdogFailures = 0;
                     this.lastHeartbeat = new Date().toISOString();
+                    if (connectionStatus !== 'connected') {
+                        connectionStatus = 'connected';
+                        this.disconnectedSince = null;
+                    }
                 } else {
+                    console.warn(`⚠️ [Watchdog] Estado: ${state}`);
                     this.watchdogFailures++;
                 }
             } catch (e) {
@@ -405,16 +557,23 @@ const whatsapp = {
                 console.warn(`⚠️ [Watchdog] Falha #${this.watchdogFailures}: ${e.message}`);
             }
 
-            if (this.watchdogFailures >= MAX_FAILURES) {
-                console.error(`🚨 [Watchdog] ${MAX_FAILURES} falhas! Reiniciando...`);
+            if (this.watchdogFailures >= MAX_FAILURES && !this.isReconnecting) {
+                console.error(`🚨 [Watchdog] ${MAX_FAILURES} falhas! Reconectando...`);
                 this.watchdogFailures = 0;
-                this.reconnect('watchdog_failures');
+                connectionStatus = 'disconnected';
+                this.disconnectedSince = this.disconnectedSince || Date.now();
+                this.reconnect('watchdog');
             }
         }, WATCHDOG_INTERVAL);
+
+        console.log('🫀 Watchdog iniciado (a cada 5 min)');
     },
 
     stopWatchdog() {
-        if (this.watchdogInterval) clearInterval(this.watchdogInterval);
+        if (this.watchdogInterval) {
+            clearInterval(this.watchdogInterval);
+            console.log('🛑 Watchdog parado');
+        }
     },
 
     getHealthData() {
@@ -452,6 +611,133 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 let filaEspera = {};
 let mapaEntregas = {};
 
+// =============================================================================
+// 📦 SISTEMA DE FILA DE MENSAGENS (PERSISTENTE)
+// =============================================================================
+
+/**
+ * Adiciona uma mensagem à fila de espera no Supabase
+ */
+async function adicionarAFila(phone, message, options = {}, venda_id = null) {
+    console.log(`📥 Adicionando mensagem para ${phone} à fila...`);
+    try {
+        const { error } = await supabase
+            .from('whatsapp_message_queue')
+            .insert({
+                phone,
+                message,
+                options,
+                venda_id,
+                status: 'pending',
+                created_at: new Date().toISOString()
+            });
+
+        if (error) {
+            console.error('❌ Erro ao inserir na fila do Supabase:', error.message);
+            return false;
+        }
+        console.log(`✅ Mensagem para ${phone} guardada na fila.`);
+        return true;
+    } catch (e) {
+        console.error('💥 Erro fatal ao adicionar à fila:', e.message);
+        return false;
+    }
+}
+
+/**
+ * Processa mensagens pendentes na fila
+ */
+async function processarFila() {
+    if (connectionStatus !== 'connected' || whatsapp.isInitializing || whatsapp.isReconnecting) {
+        return;
+    }
+
+    try {
+        // Buscar mensagens pendentes com menos de 5 tentativas
+        const { data: pendentes, error } = await supabase
+            .from('whatsapp_message_queue')
+            .select('*')
+            .eq('status', 'pending')
+            .lt('attempts', 5)
+            .order('created_at', { ascending: true })
+            .limit(10); // Processar em pequenos lotes
+
+        if (error) {
+            console.error('❌ Erro ao buscar fila:', error.message);
+            return;
+        }
+
+        if (!pendentes || pendentes.length === 0) return;
+
+        console.log(`🤖 Processando ${pendentes.length} mensagens da fila...`);
+
+        for (const item of pendentes) {
+            try {
+                // Incrementar tentativas antes de enviar (evita loop infinito se crashar)
+                await supabase
+                    .from('whatsapp_message_queue')
+                    .update({
+                        attempts: (item.attempts || 0) + 1,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', item.id);
+
+                let tel = item.phone.replace(/\D/g, '');
+                if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
+
+                // Tenta validar número primeiro
+                let chatId = `${tel}@c.us`;
+                try {
+                    const numberId = await client.getNumberId(tel);
+                    if (numberId) chatId = numberId._serialized;
+                } catch (vErr) { /* fallback para padrão */ }
+
+                console.log(`📤 Enviando mensagem da fila para ${chatId}...`);
+                await client.sendMessage(chatId, item.message, item.options || {});
+
+                // Marcar como enviado
+                await supabase
+                    .from('whatsapp_message_queue')
+                    .update({
+                        status: 'sent',
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', item.id);
+
+                console.log(`✅ Mensagem da fila enviada com sucesso para ${chatId}`);
+
+                // Pequeno delay entre mensagens da fila
+                await new Promise(r => setTimeout(r, 2000));
+            } catch (err) {
+                console.error(`❌ Falha ao processar item da fila (${item.id}):`, err.message);
+
+                // Se atingiu limite, marcar como falha definitiva
+                if ((item.attempts || 0) + 1 >= 5) {
+                    await supabase
+                        .from('whatsapp_message_queue')
+                        .update({
+                            status: 'failed',
+                            last_error: err.message,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', item.id);
+                } else {
+                    await supabase
+                        .from('whatsapp_message_queue')
+                        .update({
+                            last_error: err.message,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', item.id);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('💥 Erro no processador de fila:', e.message);
+    }
+}
+
+
 // 🔐 Registrar rotas de autenticação de funcionários
 setupEmployeeAuthRoutes(app, supabase, client);
 
@@ -466,12 +752,11 @@ function limparJSON(texto) {
 
 // 🛡️ Enviar mensagem com verificação de conexão
 async function enviarMensagemSegura(chatId, content, options = {}) {
-    let state;
-    try {
-        state = await client.getState();
-        console.log(`📡 Estado do WhatsApp: ${state}`);
-    } catch (stateError) {
-        console.error('❌ Erro ao verificar estado:', stateError.message);
+    // Se não estiver conectado, manda direto pra fila
+    if (connectionStatus !== 'connected') {
+        console.warn(`⚠️ WhatsApp desconectado. Enviando mensagem para ${chatId} para a fila.`);
+        await adicionarAFila(chatId, content, options, options.venda_id);
+        return { success: true, queued: true, message: "Mensagem guardada para envio posterior (WhatsApp offline)." };
     }
 
     try {
@@ -483,13 +768,15 @@ async function enviarMensagemSegura(chatId, content, options = {}) {
         console.error(`❌ Erro ao enviar mensagem:`, error.message);
 
         // 🚑 CORREÇÃO DE EMERGÊNCIA: Ignorar erro específico do whatsapp-web.js
-        // Esse erro acontece APÓS o envio, ao tentar montar a resposta.
         if (error.message && (error.message.includes('markedUnread') || error.message.includes("reading 'getChat'"))) {
             console.log('⚠️ Erro não crítico detectado (markedUnread/getChat) - Assumindo sucesso.');
             return { success: true, warning: error.message };
         }
 
-        throw error;
+        // Para outros erros (como conexão perdida no momento), tenta guardar na fila
+        console.log(`📥 Erro no envio. Guardando na fila para ${chatId}...`);
+        await adicionarAFila(chatId, content, options, options.venda_id);
+        return { success: true, queued: true, error: error.message };
     }
 }
 
@@ -540,8 +827,40 @@ app.post('/send-text', async (req, res) => {
     }
 });
 
+// --- ROTA DE ENVIO DE IMAGEM VIA URL ---
+app.post('/send-image-url', async (req, res) => {
+    const { phone, imageUrl, caption } = req.body;
+
+    if (!phone || !imageUrl) {
+        return res.status(400).json({ error: "phone e imageUrl são obrigatórios" });
+    }
+
+    let tel = phone.replace(/\D/g, '');
+    if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
+
+    try {
+        let chatId = `${tel}@c.us`;
+
+        if (client) {
+            const numberId = await client.getNumberId(tel);
+            if (numberId) chatId = numberId._serialized;
+        }
+
+        console.log(`🖼️ Preparando imagem para ${chatId}: ${imageUrl}`);
+
+        // Carregar media do URL
+        const media = await MessageMedia.fromUrl(imageUrl);
+
+        const result = await enviarMensagemSegura(chatId, media, { caption });
+        res.json(result);
+    } catch (e) {
+        console.error("Erro ao enviar imagem via URL:", e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // --- ROTA DE STATUS GERAL ---
-app.get('/status', (req, res) => res.json({ status: 'online' }));
+app.get('/status', (req, res) => res.json({ status: connectionStatus }));
 
 // --- ROTA DE HEALTH CHECK INTELIGENTE (para Docker) ---
 app.get('/whatsapp/health', (req, res) => {
@@ -777,9 +1096,7 @@ ${entrega.produtos || "Móveis diversos"}
 
 ⚠️ *Lembre-se:* É necessário que tenha alguém *maior de idade* no local para receber e conferir os itens.
 
-_O horário pode ter pequenas variações devido ao trânsito._
-
-Qualquer imprevisto, é só responder esta mensagem! 📱`;
+_O horário pode ter pequenas variações devido ao trânsito._`;
 
             const msgEnviada = await client.sendMessage(chatId, mensagem);
             console.log(`📤 Enviado para ${entrega.cliente_nome} (${chatId})`);
@@ -801,7 +1118,12 @@ app.post('/mensagem-pos-venda', async (req, res) => {
     // VALIDAÇÃO: Tentar enviar mesmo se o status interno estiver desincronizado
     // O helper enviarMensagemSegura fará a validação real
     if (connectionStatus !== 'connected') {
-        console.warn(`⚠️ Status interno mostra '${connectionStatus}', mas tentando enviar mensagem mesmo assim...`);
+        console.warn(`⚠️ Tentativa de envio de pós-venda falhou: WhatsApp não está conectado (status: ${connectionStatus})`);
+        return res.status(503).json({
+            error: "WhatsApp não está conectado",
+            status: connectionStatus,
+            message: "O robô de WhatsApp não está ativo ou não está pareado."
+        });
     }
 
     let tel = telefone.replace(/\D/g, '');
@@ -1400,7 +1722,11 @@ require('./cron-aniversarios');
 // === SISTEMA DE LEMBRETES DE MONTAGEM ===
 require('./cron-montagens');
 
-client.initialize();
+// --- PROCESSADOR PERIÓDICO DE FILA (A cada 2 minutos) ---
+setInterval(() => {
+    processarFila();
+}, 120000);
+
 // 🏗️ CATCH-ALL MIDDLEWARE MOVED TO END
 
 
@@ -1422,7 +1748,7 @@ app.post('/concluir-entrega', async (req, res) => {
         // 1. Marcar a atual como concluída no Supabase salvando os dados do front
         const updatePayload = {
             status: 'Concluída',
-            data_entrega: new Date().toISOString(),
+            data_realizada: new Date().toISOString(),
             ...(req.body.update_data || {}) // Inclui fotos, assinatura, geolocalização
         };
 
@@ -1430,7 +1756,7 @@ app.post('/concluir-entrega', async (req, res) => {
             .from('entregas')
             .update(updatePayload)
             .eq('id', id_concluida)
-            .select('veiculo_id, ordem_rota')
+            .select('caminhao_id, ordem_rota')
             .single();
 
         if (err1) throw err1;
@@ -1446,7 +1772,7 @@ app.post('/concluir-entrega', async (req, res) => {
                 const { data: proximaEntrega, error: err2 } = await supabase
                     .from('entregas')
                     .select('*')
-                    .eq('veiculo_id', entregaAtual.veiculo_id)
+                    .eq('caminhao_id', entregaAtual.caminhao_id)
                     .eq('status', 'Em rota') // Ou o status que você usa para pendentes na carga
                     .gt('ordem_rota', entregaAtual.ordem_rota)
                     .order('ordem_rota', { ascending: true })
@@ -1466,7 +1792,7 @@ app.post('/concluir-entrega', async (req, res) => {
 
                 // 5. Disparar o aviso via Rota 4 (Internamente)
                 const baseUrl = process.env.PUBLIC_URL || "https://moveispedroii.com.br";
-                const linkRastreio = `${baseUrl}/rastreio/${proximaEntrega.id}`;
+                const linkRastreio = `${baseUrl}/rastreio/${proximaEntrega.numero_pedido}`;
                 const tel = proximaEntrega.cliente_telefone.replace(/\D/g, '');
                 const chatId = (tel.length <= 11 ? '55' : '') + tel + '@c.us';
 

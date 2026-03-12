@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { base44, supabase } from "@/lib/supabase";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,18 +12,70 @@ import {
     PackageCheck,
     Check,
     AlertCircle,
-    Package
+    Package,
+    Truck
 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function RecebimentoPedido({ open, onClose, pedido }) {
     const queryClient = useQueryClient();
+    const [statusLocal, setStatusLocal] = useState(pedido?.status || '');
+    const [originalStatus, setOriginalStatus] = useState(pedido?.status || '');
+
+    useEffect(() => {
+        let isMounted = true;
+
+        if (open && pedido && (pedido.status === 'Confirmado')) {
+            const autoIniciarConferencia = async () => {
+                try {
+                    await base44.entities.PedidoCompra.update(pedido.id, { status: 'Em Conferência' });
+                    if (isMounted) {
+                        setStatusLocal('Em Conferência');
+                        queryClient.invalidateQueries({ queryKey: ['pedidos-compra'] });
+                        queryClient.invalidateQueries({ queryKey: ['pedidos-compra-kanban'] });
+                        queryClient.invalidateQueries({ queryKey: ['pedidos-compra-recebimento'] });
+                        queryClient.invalidateQueries({ queryKey: ['pedidos-em-conferencia-global'] });
+                        toast.success('Pedido em conferência. Setor de Compras notificado.');
+                    }
+                } catch (err) {
+                    console.error('Erro ao autodesignar Em Conferência:', err);
+                }
+            };
+            autoIniciarConferencia();
+        } else if (pedido) {
+            if (isMounted) {
+                setStatusLocal(pedido.status);
+                setOriginalStatus(pedido.status);
+            }
+        }
+
+        // Cleanup: Reverte o status se o componente for desmontado enquanto "Em Conferência" sem ter salvo
+        return () => {
+            isMounted = false;
+        };
+    }, [open, pedido?.id, pedido?.status, queryClient]);
+
+    const handleClose = async (isConfirming = false) => {
+        // If closing without confirming, and we auto-changed to 'Em Conferência', revert it
+        if (!isConfirming && statusLocal === 'Em Conferência' && originalStatus !== 'Em Conferência' && pedido) {
+            try {
+                await base44.entities.PedidoCompra.update(pedido.id, { status: originalStatus });
+                queryClient.invalidateQueries({ queryKey: ['pedidos-compra'] });
+                queryClient.invalidateQueries({ queryKey: ['pedidos-compra-kanban'] });
+                queryClient.invalidateQueries({ queryKey: ['pedidos-compra-recebimento'] });
+                queryClient.invalidateQueries({ queryKey: ['pedidos-em-conferencia-global'] });
+            } catch (err) {
+                console.error('Erro ao reverter status:', err);
+            }
+        }
+        onClose();
+    };
 
     // Estado para quantidades recebidas
     const [quantidadesRecebidas, setQuantidadesRecebidas] = useState(() => {
         const inicial = {};
         (pedido?.itens || []).forEach((item, index) => {
-            inicial[index] = item.quantidade_recebida || 0;
+            inicial[index] = 0; // Começa em 0 — o operador digita o que está recebendo AGORA
         });
         return inicial;
     });
@@ -33,18 +85,41 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
     // Mutation para atualizar pedido e estoque
     const receberPedido = useMutation({
         mutationFn: async () => {
-            // Preparar itens atualizados
+            // 1. Coletar IDs de produtos para busca em lote
+            const produtoIds = [...new Set(pedido.itens.map(i => i.produto_id).filter(Boolean))];
+            let produtosMap = {};
+
+            if (produtoIds.length > 0) {
+                const { data: produtosEncontrados, error: searchError } = await supabase
+                    .from('produtos')
+                    .select('*')
+                    .in('id', produtoIds);
+
+                if (searchError) throw searchError;
+
+                produtosEncontrados.forEach(p => {
+                    produtosMap[p.id] = p;
+                });
+            }
+
+            // 2. Preparar itens atualizados e atualizar estoque
             const itensAtualizados = (pedido.itens || []).map((item, index) => ({
                 ...item,
-                quantidade_recebida: (item.quantidade_recebida || 0) + (quantidadesRecebidas[index] || 0),
+                quantidade_rece_atual: (item.quantidade_recebida || 0) + (quantidadesRecebidas[index] || 0),
                 status: verificarStatusItem(item, quantidadesRecebidas[index])
             }));
 
+            // Sanitização final dos itens para salvar no pedido
+            const itensParaSalvar = itensAtualizados.map(i => {
+                const { quantidade_rece_atual, ...rest } = i;
+                return { ...rest, quantidade_recebida: i.quantidade_rece_atual };
+            });
+
             // Verificar status geral do pedido
-            const todoRecebido = itensAtualizados.every(
+            const todoRecebido = itensParaSalvar.every(
                 item => item.quantidade_recebida >= item.quantidade_pedida
             );
-            const algumRecebido = itensAtualizados.some(
+            const algumRecebido = itensParaSalvar.some(
                 item => item.quantidade_recebida > 0
             );
 
@@ -57,7 +132,7 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
 
             // Atualizar pedido
             await base44.entities.PedidoCompra.update(pedido.id, {
-                itens: itensAtualizados,
+                itens: itensParaSalvar,
                 status: novoStatus,
                 data_entrega_real: todoRecebido ? new Date().toISOString().split('T')[0] : null,
                 observacoes: pedido.observacoes
@@ -69,35 +144,32 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
             for (const [index, qtdRecebida] of Object.entries(quantidadesRecebidas)) {
                 if (qtdRecebida > 0) {
                     const item = pedido.itens[index];
-                    if (item.produto_id) {
-                        try {
-                            // Buscar produto atual usando o método get por ID
-                            const produtos = await base44.entities.Produto.list();
-                            const produto = produtos.find(p => String(p.id) === String(item.produto_id));
-                            if (produto) {
-                                const estoqueAtual = produto.quantidade_estoque || 0;
-                                const estoqueCdAtual = produto.estoque_cd || 0;
-                                await base44.entities.Produto.update(item.produto_id, {
-                                    quantidade_estoque: estoqueAtual + qtdRecebida,
-                                    estoque_cd: estoqueCdAtual + qtdRecebida
-                                });
+                    const produto = produtosMap[item.produto_id];
 
-                                // --- SINCRONIZAÇÃO COM ESTOQUE POR UNIDADE (estoque_loja) ---
-                                // Ao receber pedido de compra, garantimos que a unidade CD (padrão) receba o saldo.
+                    if (produto) {
+                        try {
+                            const estoqueAtual = produto.quantidade_estoque || 0;
+                            const estoqueCdAtual = produto.estoque_cd || 0;
+
+                            await base44.entities.Produto.update(item.produto_id, {
+                                quantidade_estoque: estoqueAtual + qtdRecebida,
+                                estoque_cd: estoqueCdAtual + qtdRecebida
+                            });
+
+                            // --- SINCRONIZAÇÃO COM ESTOQUE POR UNIDADE (estoque_loja) ---
+                            if (produto.codigo_barras) {
                                 try {
-                                    if (produto.codigo_barras) {
-                                        await supabase.from('estoque_loja').insert({
-                                            gtin: produto.codigo_barras,
-                                            tenant_id: 'CD',
-                                            quantidade: qtdRecebida
-                                        });
-                                    }
+                                    await supabase.from('estoque_loja').insert({
+                                        gtin: produto.codigo_barras,
+                                        tenant_id: 'CD',
+                                        quantidade: qtdRecebida
+                                    });
                                 } catch (syncErr) {
                                     console.warn('Erro ao sincronizar estoque por unidade:', syncErr);
                                 }
                             }
                         } catch (e) {
-                            console.error('Erro ao atualizar estoque:', e);
+                            console.error('Erro ao atualizar estoque do produto:', item.produto_id, e);
                         }
                     }
                 }
@@ -126,13 +198,16 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
         },
         onSuccess: ({ todoRecebido }) => {
             queryClient.invalidateQueries({ queryKey: ['pedidos-compra'] });
+            queryClient.invalidateQueries({ queryKey: ['pedidos-compra-kanban'] });
+            queryClient.invalidateQueries({ queryKey: ['pedidos-compra-recebimento'] });
             queryClient.invalidateQueries({ queryKey: ['produtos'] });
             queryClient.invalidateQueries({ queryKey: ['lancamentos'] });
+            queryClient.invalidateQueries({ queryKey: ['pedidos-em-conferencia-global'] });
             toast.success(todoRecebido
                 ? 'Pedido recebido completamente! Estoque atualizado.'
                 : 'Recebimento parcial registrado!'
             );
-            onClose();
+            handleClose(true); // Pass true to indicate we are confirming, so we don't revert status
         },
         onError: (error) => {
             toast.error('Erro ao registrar recebimento: ' + error.message);
@@ -174,7 +249,11 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
     const algumItemParaReceber = Object.values(quantidadesRecebidas).some(q => q > 0);
 
     return (
-        <Dialog open={open} onOpenChange={onClose}>
+        <Dialog open={open} onOpenChange={(isOpen) => {
+            if (!isOpen) {
+                handleClose(false);
+            }
+        }}>
             <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
@@ -191,7 +270,11 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
                                 <p className="text-sm text-gray-500">Fornecedor</p>
                                 <p className="font-medium">{pedido?.fornecedor_nome}</p>
                             </div>
-                            <Badge>{pedido?.status}</Badge>
+                            <div className="flex items-center gap-3">
+                                <Badge className={statusLocal === 'Em Conferência' ? 'bg-blue-500 hover:bg-blue-600 text-white outline-none border-transparent' : ''}>
+                                    {statusLocal}
+                                </Badge>
+                            </div>
                         </div>
                     </div>
 
@@ -309,7 +392,7 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
                             </p>
                         </div>
                         <div className="flex gap-3">
-                            <Button variant="outline" onClick={onClose}>
+                            <Button variant="outline" onClick={() => handleClose(false)}>
                                 Cancelar
                             </Button>
                             <Button

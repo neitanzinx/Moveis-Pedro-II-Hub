@@ -5,13 +5,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
-import { Receipt, CreditCard, Wallet, DollarSign, Plus, X, Loader2, Clock, Tag, Check, Percent, Truck, User, Package, Link2, QrCode, Copy, Download, MessageCircle, ExternalLink, Key, Ban, TrendingUp } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Receipt, CreditCard, Wallet, DollarSign, Plus, X, Loader2, Clock, Tag, Check, Percent, Truck, User, Package, Key, Ban, TrendingUp } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { base44, supabase } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-const formasPagamentoBase = ["Dinheiro", "Crédito", "Débito", "Pix", "AFESP", "Multicrédito", "Link de Pagamento"];
+const formasPagamentoBase = ["Dinheiro", "Crédito", "Débito", "Pix", "AFESP", "Multicrédito"];
 
 export default function PainelPagamento({
   valores,
@@ -37,10 +38,13 @@ export default function PainelPagamento({
   tokenGerencial,
   setTokenGerencial
 }) {
-  const [novoPagamento, setNovoPagamento] = useState({ forma: "Dinheiro", valor: "", parcelas: 1 });
+  const [novoPagamento, setNovoPagamento] = useState({ forma: "", valor: "", parcelas: 1 });
   const [cupomCodigo, setCupomCodigo] = useState("");
   const [aplicandoCupom, setAplicandoCupom] = useState(false);
   const [erroCupom, setErroCupom] = useState("");
+
+  const [modalOrcamentoOpen, setModalOrcamentoOpen] = useState(false);
+  const [validadeOrcamentoDias, setValidadeOrcamentoDias] = useState(30);
 
   // Estado para Token Gerencial
   const [tokenCodigo, setTokenCodigo] = useState("");
@@ -48,10 +52,6 @@ export default function PainelPagamento({
   const [erroToken, setErroToken] = useState("");
   const [descontoPercent, setDescontoPercent] = useState(0);
 
-  const [linkPagamentoData, setLinkPagamentoData] = useState(null);
-  const [gerandoLink, setGerandoLink] = useState(false);
-  const [linkCopiado, setLinkCopiado] = useState(false);
-  const [numeroAlternativo, setNumeroAlternativo] = useState("");
 
   // Buscar configurações de taxa/acréscimo
   const { data: configTaxas = [] } = useQuery({
@@ -89,12 +89,6 @@ export default function PainelPagamento({
     const valorAcrescimo = calcularAcrescimo(novoPagamento.forma, valorBase);
     const valorTotal = valorBase + valorAcrescimo;
 
-    // Se for Link de Pagamento, gerar o link primeiro
-    if (novoPagamento.forma === "Link de Pagamento") {
-      await gerarLinkPagamento(valorTotal);
-      return;
-    }
-
     onAddPagamento({
       forma_pagamento: novoPagamento.forma,
       valor: valorTotal,
@@ -102,129 +96,9 @@ export default function PainelPagamento({
       acrescimo: valorAcrescimo,
       parcelas: novoPagamento.parcelas
     });
-    setNovoPagamento({ forma: "Dinheiro", valor: "", parcelas: 1 });
+    setNovoPagamento({ forma: "", valor: "", parcelas: 1 });
   };
 
-  const gerarLinkPagamento = async (valor) => {
-    setGerandoLink(true);
-    try {
-      // Payload para Stone Payment Link
-      const payload = {
-        venda_id: null, // Será preenchido após criação da venda
-        valor: valor,
-        descricao: `PDV - Móveis Pedro II`,
-        cliente_nome: cliente?.nome_completo || "Cliente",
-        cliente_email: cliente?.email || null,
-        cliente_documento: cliente?.cpf || null,
-        payment_methods: ['pix', 'credit_card', 'boleto'],
-        max_installments: 12,
-        expires_in_days: 7
-      };
-
-      const { data, error } = await supabase.functions.invoke('stone-payment-link', {
-        body: payload
-      });
-
-      if (error) throw new Error(error.message);
-      if (data.error) throw new Error(data.error);
-
-      // Normalizar resposta da Stone
-      const normalizedData = {
-        link_pagamento: data.payment_url,
-        qr_code_url: data.qr_code || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(data.payment_url)}`,
-        payment_link_id: data.id,
-        stone_id: data.stone_id,
-        valor: valor
-      };
-
-      setLinkPagamentoData(normalizedData);
-
-      // Adicionar como pagamento pendente
-      onAddPagamento({
-        forma_pagamento: "Link de Pagamento",
-        valor: valor,
-        parcelas: 1,
-        link_pagamento: normalizedData.link_pagamento,
-        status: "AGUARDANDO"
-      });
-
-      setNovoPagamento({ forma: "Dinheiro", valor: "", parcelas: 1 });
-      toast.success("Link de pagamento gerado!");
-    } catch (err) {
-      console.error("Erro ao gerar link:", err);
-      toast.error(err.message || "Erro ao gerar link de pagamento");
-    } finally {
-      setGerandoLink(false);
-    }
-  };
-
-
-  const copiarLink = async () => {
-    if (!linkPagamentoData?.link_pagamento) return;
-    try {
-      await navigator.clipboard.writeText(linkPagamentoData.link_pagamento);
-      setLinkCopiado(true);
-      toast.success("Link copiado!");
-      setTimeout(() => setLinkCopiado(false), 2000);
-    } catch (err) {
-      toast.error("Erro ao copiar");
-    }
-  };
-
-  const downloadQrCode = async () => {
-    if (!linkPagamentoData?.qr_code_url) return;
-    try {
-      const response = await fetch(linkPagamentoData.qr_code_url);
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `qrcode_pagamento.png`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      toast.success("QR Code baixado!");
-    } catch (err) {
-      toast.error("Erro ao baixar");
-    }
-  };
-
-  const enviarWhatsAppPara = async (numero, isAlternativo = false) => {
-    if (!linkPagamentoData?.link_pagamento || !numero) {
-      toast.error("Número de telefone não fornecido");
-      return;
-    }
-
-    const telefone = numero.replace(/\D/g, '');
-    const telefoneFormatado = telefone.startsWith('55') ? telefone : `55${telefone}`;
-
-    // Se for número alternativo diferente do cadastrado, salvar no cliente
-    if (isAlternativo && cliente?.id && cliente?.telefone) {
-      const telefoneClienteNormalizado = cliente.telefone.replace(/\D/g, '');
-      if (telefone !== telefoneClienteNormalizado) {
-        try {
-          await base44.entities.Cliente.update(cliente.id, {
-            telefone_alternativo: telefone
-          });
-          toast.success("Contato alternativo salvo!");
-        } catch (err) {
-          console.error("Erro ao salvar contato alternativo:", err);
-        }
-      }
-    }
-
-    const nomeCliente = cliente?.nome_completo?.split(' ')[0] || 'Cliente';
-    const mensagem = encodeURIComponent(
-      `Olá ${nomeCliente}! 👋\n\n` +
-      `Segue o link para pagamento:\n\n` +
-      `💰 Valor: R$ ${linkPagamentoData.valor?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n\n` +
-      `🔗 Link: ${linkPagamentoData.link_pagamento}\n\n` +
-      `Você pode pagar com Pix, Cartão ou Boleto.\n\n` +
-      `- Móveis Pedro II`
-    );
-    window.open(`https://wa.me/${telefoneFormatado}?text=${mensagem}`, '_blank');
-  };
 
   const handleAplicarCupom = async () => {
     if (!cupomCodigo.trim()) return;
@@ -355,6 +229,29 @@ export default function PainelPagamento({
     }
   }, [descontoPercent, valores.subtotal, tokenGerencial]);
 
+  // Arredondamento logica
+  const isArredondamento = !cupomAplicado && !tokenGerencial && desconto !== 0;
+
+  const handleArredondar = () => {
+    if (valores.subtotal <= 0) return;
+
+    if (isArredondamento) {
+      setDesconto(0);
+      toast.info("Arredondamento removido");
+    } else {
+      const arredondado = Math.round(valores.subtotal / 10) * 10;
+      const diff = valores.subtotal - arredondado;
+      if (diff === 0) {
+        toast.info("O valor já está arredondado!");
+        return;
+      }
+      setDesconto(diff);
+      if (cupomAplicado) handleRemoverCupom();
+      if (tokenGerencial) handleRemoverToken();
+      toast.success(`Total ajustado para R$ ${arredondado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
+    }
+  };
+
   // [CORREÇÃO] Atualizar valor do 'Receber na Entrega' sempre que o restante mudar
   // E garantir que a forma de pagamento tenha um padrão se estiver vazio
   useEffect(() => {
@@ -391,8 +288,23 @@ export default function PainelPagamento({
             </div>
           </div>
 
-          <h3 className="font-semibold text-sm uppercase text-gray-500 dark:text-gray-400 flex items-center gap-2 mt-2">
-            <DollarSign className="w-4 h-4" /> Resumo Financeiro
+          <h3 className="font-semibold text-sm uppercase text-gray-500 dark:text-gray-400 flex items-center justify-between mt-2 mb-2">
+            <div className="flex items-center gap-2">
+              <DollarSign className="w-4 h-4" /> Resumo Financeiro
+            </div>
+            <Button
+              variant={isArredondamento ? "default" : "outline"}
+              size="sm"
+              className={`h-6 text-xs px-2 transition-colors ${isArredondamento
+                ? "bg-green-500 text-white hover:bg-green-600 dark:bg-green-600 dark:hover:bg-green-700 border-transparent shadow-sm"
+                : "border-gray-200 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-800"
+                }`}
+              onClick={handleArredondar}
+              disabled={valores.subtotal <= 0 || loading || savingOrcamento}
+              title={isArredondamento ? "Remover arredondamento" : "Arredondar para a dezena mais próxima"}
+            >
+              {isArredondamento ? "Arredondado" : "Arredondar"}
+            </Button>
           </h3>
 
           <div className="flex-1 flex flex-col justify-center gap-6">
@@ -427,10 +339,16 @@ export default function PainelPagamento({
                 <span className="font-medium">R$ {valores.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
               </div>
 
-              {desconto > 0 && (
-                <div className="flex justify-between items-center text-sm text-purple-600 dark:text-purple-400">
-                  <span className="flex items-center gap-1"><Tag className="w-3 h-3" /> Desconto {cupomAplicado && `(${cupomAplicado.codigo})`}</span>
-                  <span className="font-bold">- R$ {desconto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+              {desconto !== 0 && (
+                <div className={`flex justify-between items-center text-sm ${desconto > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-blue-600 dark:text-blue-400'}`}>
+                  <span className="flex items-center gap-1">
+                    <Tag className="w-3 h-3" />
+                    {desconto > 0 ? `Desconto ${cupomAplicado ? `(${cupomAplicado.codigo})` : ''}` : 'Arredondamento'}
+                  </span>
+                  <span className="font-bold">
+                    {desconto > 0 ? '- ' : '+ '}
+                    R$ {Math.abs(desconto).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
                 </div>
               )}
 
@@ -518,7 +436,7 @@ export default function PainelPagamento({
                       <div>
                         <p className="text-xs text-amber-500 dark:text-amber-400 font-medium flex items-center gap-1">
                           {tokenGerencial.tipo_token === 'SUPERVISOR_MODE' ? 'Modo Supervisor' : 'Token Único'}
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200">
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200">
                             {tokenGerencial.permissao}
                           </span>
                         </p>
@@ -540,7 +458,7 @@ export default function PainelPagamento({
                     <div className="space-y-3">
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-amber-700 dark:text-amber-400 font-medium">Desconto Autorizado</span>
-                        <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
+                        <span className="text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
                           Máx: {tokenGerencial.valor_limite || 30}%
                         </span>
                       </div>
@@ -573,7 +491,7 @@ export default function PainelPagamento({
                             value={desconto > 0 ? desconto.toFixed(2) : ''}
                             onChange={(e) => {
                               let valR = parseFloat(e.target.value);
-                              if (isNaN(valR)) valR = 0;
+                              if (isNaN(valR) || valR < 0) valR = 0;
 
                               // Calcula a porcentagem equivalente
                               let newPercent = (valR / valores.subtotal) * 100;
@@ -617,7 +535,7 @@ export default function PainelPagamento({
 
                   {/* Info adicional para SUPER_CAIXA */}
                   {tokenGerencial.permissao === 'SUPER_CAIXA' && (
-                    <p className="text-[10px] text-purple-600 flex items-center gap-1">
+                    <p className="text-xs text-purple-600 flex items-center gap-1">
                       <Check className="w-3 h-3" /> Modo Super Caixa - Todas permissões liberadas
                     </p>
                   )}
@@ -670,7 +588,7 @@ export default function PainelPagamento({
                   <Label className="text-xs mb-1.5 block">Forma de Pagamento</Label>
                   <Select value={novoPagamento.forma} onValueChange={v => setNovoPagamento({ ...novoPagamento, forma: v })}>
                     <SelectTrigger className="h-10 bg-white dark:bg-neutral-800">
-                      <SelectValue />
+                      <SelectValue placeholder="Selecione" />
                     </SelectTrigger>
                     <SelectContent>
                       {formasPagamentoBase.map(f => {
@@ -680,7 +598,7 @@ export default function PainelPagamento({
                             <span className="flex items-center gap-2">
                               {f}
                               {acr && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
                                   +{acr.tipo === 'porcentagem' ? `${acr.valor}%` : `R$${acr.valor}`}
                                 </span>
                               )}
@@ -720,8 +638,8 @@ export default function PainelPagamento({
                     />
                   </div>
                   {/* Preview do acréscimo */}
-                  {novoPagamento.valor && getAcrescimo(novoPagamento.forma) && (
-                    <p className="text-[10px] text-blue-600 mt-1 flex items-center gap-1">
+                  {novoPagamento.valor && novoPagamento.forma && getAcrescimo(novoPagamento.forma) && (
+                    <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
                       <TrendingUp className="w-3 h-3" />
                       +R$ {calcularAcrescimo(novoPagamento.forma, parseFloat(novoPagamento.valor)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de acréscimo
                     </p>
@@ -732,7 +650,7 @@ export default function PainelPagamento({
                   size="lg"
                   className="h-10 px-6 bg-green-600 hover:bg-green-700 text-white font-bold w-full sm:w-auto"
                   onClick={handleAdd}
-                  disabled={!novoPagamento.valor}
+                  disabled={!novoPagamento.valor || !novoPagamento.forma}
                 >
                   <Plus className="w-5 h-5 mr-1" /> Adicionar
                 </Button>
@@ -746,7 +664,7 @@ export default function PainelPagamento({
                 <span className="text-xs bg-gray-200 dark:bg-neutral-700 px-2 py-0.5 rounded-full text-gray-600 dark:text-gray-300">{pagamentos.length}</span>
               </div>
 
-              <div className="overflow-y-auto flex-1 p-2 space-y-2 max-h-[200px] lg:max-h-[300px]">
+              <div className="overflow-y-auto flex-1 p-2 space-y-2">
                 {pagamentos.length === 0 && !pagamentoEntrega.ativo ? (
                   <div className="h-full flex flex-col items-center justify-center text-gray-400 py-8">
                     <Wallet className="w-8 h-8 mb-2 opacity-20" />
@@ -763,7 +681,7 @@ export default function PainelPagamento({
                             <div className="flex items-center gap-2">
                               {p.parcelas > 1 && <span className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded">{p.parcelas}x</span>}
                               {p.acrescimo > 0 && (
-                                <span className="text-[10px] text-blue-600">
+                                <span className="text-xs text-blue-600">
                                   R$ {(p.valor_base || p.valor - p.acrescimo).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} + R$ {p.acrescimo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} acréscimo
                                 </span>
                               )}
@@ -788,21 +706,37 @@ export default function PainelPagamento({
                           </div>
                           <div>
                             <p className="font-medium text-sm text-orange-800 dark:text-orange-400">Receber na Entrega</p>
-                            <div className="mt-1">
+                            <div className="flex gap-2 mt-1">
                               <Select
                                 value={pagamentoEntrega.forma || "Dinheiro"}
-                                onValueChange={(val) => setPagamentoEntrega(prev => ({ ...prev, forma: val }))}
+                                onValueChange={(val) => setPagamentoEntrega(prev => ({ ...prev, forma: val, parcelas: 1 }))}
                               >
                                 <SelectTrigger className="h-6 text-xs w-[130px] bg-white/50 border-orange-200 focus:ring-orange-500 text-orange-700">
                                   <SelectValue placeholder="Selecione" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="Dinheiro">Dinheiro</SelectItem>
                                   <SelectItem value="Pix">Pix</SelectItem>
-                                  <SelectItem value="Cartão">Cartão</SelectItem>
-                                  <SelectItem value="A Combinar">A Combinar</SelectItem>
+                                  <SelectItem value="Dinheiro">Dinheiro</SelectItem>
+                                  <SelectItem value="Cartão de Crédito">Cartão de Crédito</SelectItem>
+                                  <SelectItem value="Cartão de Débito">Cartão de Débito</SelectItem>
                                 </SelectContent>
                               </Select>
+
+                              {(pagamentoEntrega.forma === "Cartão de Crédito" || pagamentoEntrega.forma?.includes("Crédito")) && (
+                                <Select
+                                  value={String(pagamentoEntrega.parcelas || 1)}
+                                  onValueChange={(val) => setPagamentoEntrega(prev => ({ ...prev, parcelas: Number(val) }))}
+                                >
+                                  <SelectTrigger className="h-6 text-xs w-[70px] bg-white/50 border-orange-200 focus:ring-orange-500 text-orange-700">
+                                    <SelectValue placeholder="1x" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {Array.from({ length: 12 }).map((_, i) => (
+                                      <SelectItem key={i + 1} value={String(i + 1)}>{i + 1}x</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -817,7 +751,8 @@ export default function PainelPagamento({
                                 ...pagamentoEntrega,
                                 ativo: e.target.checked,
                                 valor: e.target.checked ? valores.restante : 0,
-                                forma: pagamentoEntrega.forma || "Dinheiro" // Define padrão ao ativar
+                                forma: pagamentoEntrega.forma || "Dinheiro", // Define padrão ao ativar
+                                parcelas: pagamentoEntrega.parcelas || 1
                               })}
                               className="accent-orange-500 w-4 h-4 cursor-pointer"
                               title={pagamentoEntrega.ativo ? "Remover pagamento na entrega" : "Adicionar pagamento na entrega"}
@@ -831,108 +766,6 @@ export default function PainelPagamento({
               </div>
             </div>
 
-            {/* Link de Pagamento - QR Code Inline Display */}
-            {linkPagamentoData && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200 dark:border-blue-800/50 p-4"
-              >
-                <div className="flex items-start gap-4">
-                  {/* QR Code */}
-                  <div className="bg-white dark:bg-neutral-800 rounded-lg p-2 shadow-sm border">
-                    <img
-                      src={linkPagamentoData.qr_code_url}
-                      alt="QR Code"
-                      className="w-28 h-28"
-                    />
-                  </div>
-
-                  {/* Info e Ações */}
-                  <div className="flex-1 space-y-3">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <Link2 className="w-4 h-4 text-blue-600" />
-                        <span className="font-semibold text-sm text-blue-800 dark:text-blue-400">Link de Pagamento Gerado</span>
-                      </div>
-                      <p className="text-lg font-bold text-gray-900 dark:text-white">
-                        R$ {linkPagamentoData.valor?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </p>
-                    </div>
-
-                    {/* Link Copiável */}
-                    <div className="flex items-center gap-2 bg-white dark:bg-neutral-800 rounded-lg p-2 border text-xs">
-                      <input
-                        type="text"
-                        value={linkPagamentoData.link_pagamento}
-                        readOnly
-                        className="flex-1 bg-transparent border-none focus:outline-none text-gray-500 font-mono truncate"
-                      />
-                      <Button size="sm" variant="ghost" onClick={copiarLink} className="h-7 px-2">
-                        {linkCopiado ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
-                      </Button>
-                    </div>
-
-                    {/* Botões de Ação */}
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      <Button size="sm" variant="outline" onClick={downloadQrCode} className="h-8 text-xs gap-1">
-                        <Download className="w-3.5 h-3.5" /> Baixar QR
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => window.open(linkPagamentoData.link_pagamento, '_blank')} className="h-8 text-xs gap-1 text-blue-600">
-                        <ExternalLink className="w-3.5 h-3.5" /> Abrir
-                      </Button>
-                    </div>
-
-                    {/* WhatsApp Options */}
-                    <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800/50 space-y-2">
-                      <p className="text-xs font-semibold text-green-800 dark:text-green-400 flex items-center gap-1">
-                        <MessageCircle className="w-3.5 h-3.5" /> Enviar via WhatsApp
-                      </p>
-
-                      {/* Option 1: Send to registered client */}
-                      {cliente?.telefone && (
-                        <Button
-                          size="sm"
-                          onClick={() => enviarWhatsAppPara(cliente.telefone)}
-                          className="w-full h-9 text-xs gap-2 bg-green-600 hover:bg-green-700 justify-start"
-                        >
-                          <User className="w-3.5 h-3.5" />
-                          Enviar para {cliente?.nome_completo?.split(' ')[0]} ({cliente.telefone})
-                        </Button>
-                      )}
-
-                      {/* Option 2: Send to custom number */}
-                      <div className="flex gap-2">
-                        <div className="flex-1 relative">
-                          <Input
-                            type="tel"
-                            placeholder="Outro número (ex: 11999998888)"
-                            value={numeroAlternativo}
-                            onChange={(e) => setNumeroAlternativo(e.target.value.replace(/\D/g, ''))}
-                            className="h-9 text-xs pl-8"
-                          />
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">+55</span>
-                        </div>
-                        <Button
-                          size="sm"
-                          onClick={() => enviarWhatsAppPara(numeroAlternativo, true)}
-                          disabled={!numeroAlternativo || numeroAlternativo.length < 10}
-                          className="h-9 text-xs gap-1 bg-green-600 hover:bg-green-700 shrink-0"
-                        >
-                          <MessageCircle className="w-3.5 h-3.5" /> Enviar
-                        </Button>
-                      </div>
-
-                      {numeroAlternativo && cliente?.telefone && numeroAlternativo !== cliente.telefone.replace(/\D/g, '') && (
-                        <p className="text-[10px] text-green-700 dark:text-green-400 italic">
-                          💾 Este número será salvo como contato alternativo do cliente
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            )}
 
             {/* Opções Extras (Entrega e Obs) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -953,7 +786,7 @@ export default function PainelPagamento({
 
               <div className={valores.restante > 0 && !pagamentoEntrega.ativo ? "" : "md:col-span-2"}>
                 <div className="relative">
-                  <Label className="text-[10px] font-semibold uppercase text-gray-400 absolute -top-2 left-2 bg-white dark:bg-neutral-900 px-1">Observações</Label>
+                  <Label className="text-xs font-semibold uppercase text-gray-400 absolute -top-2 left-2 bg-white dark:bg-neutral-900 px-1">Observações</Label>
                   <Textarea
                     className="min-h-[50px] max-h-[80px] text-xs resize-none bg-white dark:bg-neutral-800 pt-3"
                     placeholder="Detalhes da entrega, observações internas..."
@@ -970,12 +803,45 @@ export default function PainelPagamento({
             <Button
               variant="outline"
               className="h-14 text-sm border-gray-200 hover:bg-gray-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-              onClick={onOrcamento}
+              onClick={() => setModalOrcamentoOpen(true)}
               disabled={disabled || savingOrcamento}
             >
               {savingOrcamento ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Clock className="w-4 h-4 mr-2" />}
               Salvar Orçamento
             </Button>
+
+            <Dialog open={modalOrcamentoOpen} onOpenChange={setModalOrcamentoOpen}>
+              <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                  <DialogTitle>Salvar Orçamento</DialogTitle>
+                  <DialogDescription>
+                    Defina a validade deste orçamento em dias.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="py-2">
+                  <Label>Validade (Dias)</Label>
+                  <Input
+                    type="number"
+                    value={validadeOrcamentoDias}
+                    onChange={(e) => setValidadeOrcamentoDias(Number(e.target.value))}
+                    min={1}
+                    max={365}
+                    className="mt-2 h-10"
+                  />
+                  <p className="text-xs text-gray-500 mt-2">
+                    Válido até: <strong>{new Date(Date.now() + validadeOrcamentoDias * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR')}</strong>
+                  </p>
+                </div>
+                <DialogFooter className="mt-4">
+                  <Button variant="outline" onClick={() => setModalOrcamentoOpen(false)}>Cancelar</Button>
+                  <Button onClick={() => {
+                    setModalOrcamentoOpen(false);
+                    onOrcamento(validadeOrcamentoDias);
+                  }} className="bg-green-600 hover:bg-green-700 text-white">Salvar Orçamento</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             <Button
               className="h-14 bg-green-600 hover:bg-green-700 text-white font-bold text-lg shadow-lg shadow-green-900/20 active:scale-[0.98] transition-all"
               onClick={onFinalizar}
@@ -994,7 +860,7 @@ export default function PainelPagamento({
 function BadgePagamento({ tipo }) {
   const icons = {
     Dinheiro: <Wallet className="w-3 h-3" />,
-    Pix: <span className="font-bold text-[9px]">PIX</span>,
+    Pix: <span className="font-bold text-[11px]">PIX</span>,
     default: <CreditCard className="w-3 h-3" />
   };
   return (

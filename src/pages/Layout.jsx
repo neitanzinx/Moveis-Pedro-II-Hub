@@ -24,14 +24,79 @@ import StoreSelectorModal from "@/components/common/StoreSelectorModal";
 import { MENU_ITEMS } from "@/config/permissions";
 import { useAuth } from "@/hooks/useAuth";
 
+import { supabase } from "@/lib/supabase";
+import { differenceInHours } from "date-fns";
+import { useConnectionStatus } from "@/hooks/useConnectionStatus";
+import { Activity, Wifi, WifiOff, MessageCircleOff } from "lucide-react";
+
 export default function Layout({ children, currentPageName }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, loading, can, logout, selectedStore, setSelectedStore } = useAuth();
+
+  // Buscar alertas/pendências para o badge do menu
+  const { data: menuBadges } = useQuery({
+    queryKey: ['menu-badges-compras'],
+    queryFn: async () => {
+      if (!user) return null;
+
+      let count = 0;
+      if (user.cargo === 'Financeiro' || user.cargo === 'Administrador') {
+        const { count: pendingApps } = await supabase
+          .from('compras_aprovacoes')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'pendente');
+        count += (pendingApps || 0);
+      }
+
+      if (user.cargo === 'Estoque' || user.cargo === 'Gerente Geral' || user.cargo === 'Administrador') {
+        // Não faturados ou sem resposta > 24h
+        const { data: ordens } = await supabase
+          .from('compras_ordens')
+          .select('status, updated_at, created_at, devolutiva')
+          .or('status.eq.NÃO FATURADO,status.eq.APROVADO')
+          .is('deleted_at', null);
+
+        const criticos = (ordens || []).filter(o => {
+          if (o.status === 'NÃO FATURADO') return true;
+          if (o.status === 'APROVADO' && !o.devolutiva) {
+            const horas = differenceInHours(new Date(), new Date(o.updated_at || o.created_at));
+            return horas > 24;
+          }
+          return false;
+        });
+        count += criticos.length;
+      }
+      return count;
+    },
+    enabled: !!user,
+    refetchInterval: 30000 // A cada 30 segundos
+  });
+
+  // Buscar assistências pendentes para o badge do menu
+  const { data: assistenciaBadges = 0 } = useQuery({
+    queryKey: ['menu-badges-assistencia'],
+    queryFn: async () => {
+      if (!user) return 0;
+      const { count, error } = await supabase
+        .from('assistencias_tecnicas')
+        .select('*', { count: 'exact', head: true })
+        .not('status', 'in', '("Concluída", "Cancelada")');
+
+      if (error) {
+        console.error('Erro ao buscar badges de assistência:', error);
+        return 0;
+      }
+      return count || 0;
+    },
+    enabled: !!user && can('view_assistencia'),
+    refetchInterval: 30000
+  });
   const { brandName, brandLogo, isModuleActive } = useTenant();
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const [buscaAberta, setBuscaAberta] = useState(false);
   const [novoUsuarioModalOpen, setNovoUsuarioModalOpen] = useState(false);
+  const { isSystemOnline, isWhatsAppConnected } = useConnectionStatus();
 
   useEffect(() => {
     localStorage.setItem('darkMode', darkMode);
@@ -109,10 +174,33 @@ export default function Layout({ children, currentPageName }) {
                   <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                     {user?.loja ? `Loja ${user.loja}` : (selectedStore ? `Loja ${selectedStore}` : 'Sistema')}
                   </p>
+
+                  {/* Status Indicators */}
+                  <div className="flex items-center gap-2 mt-1">
+                    <div
+                      className="flex items-center gap-1"
+                      title={isSystemOnline ? "Sistema Online" : "Sistema Offline (Sem internet)"}
+                    >
+                      <div className={`w-2 h-2 rounded-full ${isSystemOnline ? 'bg-green-500' : 'bg-red-500'}`} />
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">
+                        {isSystemOnline ? 'Online' : 'Offline'}
+                      </span>
+                    </div>
+                    <div
+                      className="flex items-center gap-1"
+                      title={isWhatsAppConnected ? "WhatsApp Conectado" : "WhatsApp Desconectado"}
+                    >
+                      <div className={`w-2 h-2 rounded-full ${isWhatsAppConnected ? 'bg-green-500' : 'bg-orange-500'}`} />
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium">
+                        {isWhatsAppConnected ? 'WhatsApp' : 'WhatsApp'}
+                      </span>
+                    </div>
+                  </div>
+
                   {!user?.loja && selectedStore && (
                     <button
                       onClick={() => setSelectedStore(null)}
-                      className="text-[10px] text-green-600 hover:underline text-left cursor-pointer"
+                      className="text-[10px] text-green-600 hover:underline text-left cursor-pointer mt-1"
                     >
                       Trocar Loja
                     </button>
@@ -163,6 +251,16 @@ export default function Layout({ children, currentPageName }) {
                             {item.title === 'Estoque' && alertasAtivos.length > 0 && (
                               <Badge className="h-5 w-5 flex items-center justify-center p-0 bg-red-500 hover:bg-red-600 text-white text-[10px] group-data-[collapsible=icon]:absolute group-data-[collapsible=icon]:-top-1 group-data-[collapsible=icon]:-right-1">
                                 {alertasAtivos.length}
+                              </Badge>
+                            )}
+                            {item.title === 'Setor de Compras' && menuBadges > 0 && (
+                              <Badge className="h-5 w-5 flex items-center justify-center p-0 bg-red-500 hover:bg-red-600 text-white text-[10px] group-data-[collapsible=icon]:absolute group-data-[collapsible=icon]:-top-1 group-data-[collapsible=icon]:-right-1">
+                                {menuBadges > 99 ? '99+' : menuBadges}
+                              </Badge>
+                            )}
+                            {item.title === 'Assistência Técnica' && assistenciaBadges > 0 && (
+                              <Badge className="h-5 w-5 flex items-center justify-center p-0 bg-red-500 hover:bg-red-600 text-white text-[10px] group-data-[collapsible=icon]:absolute group-data-[collapsible=icon]:-top-1 group-data-[collapsible=icon]:-right-1">
+                                {assistenciaBadges > 99 ? '99+' : assistenciaBadges}
                               </Badge>
                             )}
                           </Link>

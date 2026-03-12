@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { base44 } from "@/api/base44Client";
+import { comprasService } from "@/services/comprasService";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,8 +31,8 @@ import {
 export default function DashboardComprasTab({ onNavigate }) {
     // Buscar dados
     const { data: pedidos = [], isLoading: loadingPedidos } = useQuery({
-        queryKey: ['pedidos-compra'],
-        queryFn: () => base44.entities.PedidoCompra.list('-created_at')
+        queryKey: ['pedidos-compra-dashboard'],
+        queryFn: () => comprasService.getOrdens({ limit: 500 })
     });
 
     const { data: produtos = [], isLoading: loadingProdutos } = useQuery({
@@ -50,7 +51,7 @@ export default function DashboardComprasTab({ onNavigate }) {
         const valorAberto = pedidosAbertos.reduce((sum, p) => sum + (p.valor_total || 0), 0);
 
         const aguardandoRecebimento = pedidos.filter(p =>
-            ['Enviado', 'Confirmado', 'Parcialmente Recebido'].includes(p.status)
+            ['Confirmado', 'Em Conferência', 'Parcialmente Recebido'].includes(p.status)
         );
 
         const pedidosAtrasados = pedidos.filter(p => {
@@ -121,6 +122,9 @@ export default function DashboardComprasTab({ onNavigate }) {
         // 4. Pedidos Recentes
         const recentes = pedidos.slice(0, 5);
 
+        // 5. Pedidos Em Conferência (Real-time tracking)
+        const emConferencia = pedidos.filter(p => p.status === 'Em Conferência');
+
         return {
             kpis: {
                 valorAberto,
@@ -132,7 +136,8 @@ export default function DashboardComprasTab({ onNavigate }) {
                 economiaTotal,
                 pedidosPromocionaisCount: pedidosPromocionaisMes.length,
                 listaPedidosAtrasados: pedidosAtrasados.slice(0, 5),
-                listaProdutosRepor: produtosAbaixoMinimo.slice(0, 8)
+                listaProdutosRepor: produtosAbaixoMinimo.slice(0, 8),
+                emConferencia
             },
             charts: {
                 evolution: last6Months,

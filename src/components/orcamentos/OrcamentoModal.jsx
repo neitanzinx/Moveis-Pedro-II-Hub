@@ -29,6 +29,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     cliente_nome: "",
     cliente_telefone: "",
     itens: [],
+    pagamentos: [],
     valor_total: 0,
     desconto: 0,
     status: "Pendente",
@@ -39,6 +40,9 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
   const [selectedProduto, setSelectedProduto] = useState(null);
   const [quantidade, setQuantidade] = useState(1);
 
+  const [searchCliente, setSearchCliente] = useState("");
+  const [isClienteDropdownOpen, setIsClienteDropdownOpen] = useState(false);
+
   const { data: lojas = [] } = useQuery({
     queryKey: ['lojas'],
     queryFn: () => base44.entities.Loja.list('nome'),
@@ -48,6 +52,13 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
   useEffect(() => {
     if (orcamento) {
       setFormData(orcamento);
+      // Initialize search with client name if editing an existing quote
+      if (orcamento.cliente_nome) {
+        setSearchCliente(orcamento.cliente_nome);
+      } else if (orcamento.cliente_id && clientes) {
+        const cliente = clientes.find(c => c.id === orcamento.cliente_id);
+        if (cliente) setSearchCliente(cliente.nome_completo);
+      }
     } else {
       const numeroOrcamento = `ORC-${Math.floor(10000 + Math.random() * 90000)}`; // Fixed random number generation
       setFormData({
@@ -59,10 +70,15 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
         cliente_nome: "",
         cliente_telefone: "",
         itens: [],
+        pagamentos: [],
         valor_total: 0,
         desconto: 0,
         status: "Pendente",
         observacoes: "",
+        cidade: "",
+        bairro: "",
+        endereco: "",
+        valor_frete: 0,
       });
     }
   }, [orcamento, isOpen]);
@@ -79,7 +95,15 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
       cliente_nome: cliente?.nome_completo || "",
       cliente_telefone: cliente?.telefone || ""
     });
+    setSearchCliente(cliente?.nome_completo || "");
+    setIsClienteDropdownOpen(false);
   };
+
+  const clientesFiltrados = clientes.filter(c =>
+    c.nome_completo?.toLowerCase().includes(searchCliente.toLowerCase()) ||
+    c.cpf?.includes(searchCliente) ||
+    c.telefone?.includes(searchCliente)
+  );
 
   const adicionarProduto = () => {
     if (!selectedProduto || quantidade <= 0) return;
@@ -186,24 +210,44 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
             </div>
 
             <div className="grid md:grid-cols-2 gap-4">
-              <div>
+              <div className="relative">
                 <Label htmlFor="cliente">Cliente *</Label>
-                <Select
-                  value={formData.cliente_id}
-                  onValueChange={handleClienteChange}
-                  required
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione um cliente" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {clientes.map(cliente => (
-                      <SelectItem key={cliente.id} value={cliente.id}>
-                        {cliente.nome_completo}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="relative mt-2">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Input
+                    placeholder="Buscar por nome, CPF ou telefone..."
+                    value={searchCliente || formData.cliente_nome}
+                    onChange={(e) => {
+                      setSearchCliente(e.target.value);
+                      setIsClienteDropdownOpen(true);
+                      if (formData.cliente_id) {
+                        setFormData({ ...formData, cliente_id: "", cliente_nome: "", cliente_telefone: "" });
+                      }
+                    }}
+                    onFocus={() => setIsClienteDropdownOpen(true)}
+                    className="pl-9"
+                    required={!formData.cliente_id}
+                  />
+                </div>
+                {isClienteDropdownOpen && searchCliente && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    {clientesFiltrados.length > 0 ? (
+                      clientesFiltrados.map(cliente => (
+                        <button
+                          key={cliente.id}
+                          type="button"
+                          onClick={() => handleClienteChange(cliente.id)}
+                          className="w-full text-left px-4 py-3 hover:bg-gray-50 flex flex-col"
+                        >
+                          <span className="font-medium text-green-900">{cliente.nome_completo}</span>
+                          <span className="text-xs text-gray-500">{cliente.cpf || 'CPF n/d'} • {cliente.telefone}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-4 py-3 text-sm text-gray-500">Nenhum cliente encontrado</div>
+                    )}
+                  </div>
+                )}
               </div>
               <div>
                 <Label htmlFor="loja">Loja *</Label>
@@ -331,25 +375,64 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                   onChange={(e) => setFormData({ ...formData, desconto: parseFloat(e.target.value) || 0 })}
                 />
               </div>
-              <div className="flex items-end">
-                <div className="w-full p-4 rounded-lg" style={{ backgroundColor: '#07593f', color: 'white' }}>
-                  <p className="text-sm mb-1">Valor Total</p>
-                  <p className="text-2xl font-bold">
-                    R$ {formData.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                  </p>
-                </div>
+              <div>
+                <Label htmlFor="valor_frete">Frete (R$)</Label>
+                <Input
+                  id="valor_frete"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.valor_frete}
+                  onChange={(e) => setFormData({ ...formData, valor_frete: parseFloat(e.target.value) || 0 })}
+                />
               </div>
             </div>
 
-            <div>
-              <Label htmlFor="observacoes">Observações</Label>
-              <Textarea
-                id="observacoes"
-                value={formData.observacoes}
-                onChange={(e) => setFormData({ ...formData, observacoes: e.target.value })}
-                rows={3}
-              />
+            <div className="grid md:grid-cols-3 gap-4">
+              <div>
+                <Label htmlFor="cidade">Cidade</Label>
+                <Input
+                  id="cidade"
+                  value={formData.cidade}
+                  onChange={(e) => setFormData({ ...formData, cidade: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="bairro">Bairro</Label>
+                <Input
+                  id="bairro"
+                  value={formData.bairro}
+                  onChange={(e) => setFormData({ ...formData, bairro: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="endereco">Endereço</Label>
+                <Input
+                  id="endereco"
+                  value={formData.endereco}
+                  onChange={(e) => setFormData({ ...formData, endereco: e.target.value })}
+                />
+              </div>
             </div>
+
+            <div className="flex items-end">
+              <div className="w-full p-4 rounded-lg" style={{ backgroundColor: '#07593f', color: 'white' }}>
+                <p className="text-sm mb-1">Valor Total</p>
+                <p className="text-2xl font-bold">
+                  R$ {formData.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="observacoes">Observações</Label>
+            <Textarea
+              id="observacoes"
+              value={formData.observacoes}
+              onChange={(e) => setFormData({ ...formData, observacoes: e.target.value })}
+              rows={3}
+            />
           </div>
 
           <DialogFooter className="mt-6">

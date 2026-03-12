@@ -12,9 +12,10 @@ import { base44, supabase } from "@/api/base44Client";
 import { Truck, User, Mail, Phone, Building2, Briefcase, KeyRound, RotateCcw, Copy, Eye, EyeOff, Loader2, CheckCircle2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
+import { getCargoPrefix, CARGOS } from "@/config/cargos";
 
 // Cargos que NÃO precisam de loja (trabalham para todas)
-const CARGOS_SEM_LOJA = ['Administrador', 'Gerente Geral', 'Financeiro', 'RH', 'Estoque', 'Logística', 'Agendamento', 'Entregador', 'Montador Externo'];
+const CARGOS_SEM_LOJA = ['Administrador', 'Gerente Geral', 'Financeiro', 'RH', 'Estoque', 'Logística', 'Agendamento', 'Entregador', 'Montador', 'Montador Externo'];
 
 // Lista de cargos disponíveis
 const CARGOS_DISPONIVEIS = [
@@ -25,6 +26,7 @@ const CARGOS_DISPONIVEIS = [
   { value: 'Estoque', label: 'Estoque' },
   { value: 'Financeiro', label: 'Financeiro' },
   { value: 'Logística', label: 'Logística' },
+  { value: 'Montador', label: 'Montador' },
   { value: 'Entregador', label: 'Entregador' },
   { value: 'Montador Externo', label: 'Montador Externo' },
   { value: 'RH', label: 'RH' },
@@ -68,7 +70,8 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
     telefone: usuario?.telefone || "",
     cargo: usuario?.cargo || "Vendedor",
     loja: usuario?.loja || "",
-    ativo: usuario?.ativo ?? true
+    ativo: usuario?.ativo ?? true,
+    pin_montagem: usuario?.pin_montagem || ""
   });
   const [resetandoSenha, setResetandoSenha] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState(null);
@@ -137,14 +140,8 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
       }
 
       // 4. Gerar matrícula
-      const setorMap = {
-        'Administrador': 'AD', 'Gerente Geral': 'GG', 'Gerente': 'GE',
-        'Vendedor': 'VE', 'Estoque': 'ES', 'Financeiro': 'FI',
-        'Logística': 'LO', 'Entregador': 'EN', 'Montador': 'LO',
-        'Montador Externo': 'MO', 'RH': 'RH', 'Agendamento': 'AG'
-      };
-      const setor = setorMap[data.cargo] || 'AD';
-      const matricula = await gerarMatricula(setor);
+      const setorCode = getCargoPrefix(data.cargo);
+      const matricula = await gerarMatricula(setorCode);
 
       // 5. Criar registro em public_users (upsert para lidar com registros órfãos)
       const isVendedor = data.cargo === 'Vendedor';
@@ -201,7 +198,8 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
         cargo: data.cargo,
         loja: precisaLoja ? data.loja : null,
         ativo: data.ativo,
-        is_vendedor: data.cargo === 'Vendedor'
+        is_vendedor: data.cargo === 'Vendedor',
+        pin_montagem: data.pin_montagem
       };
 
       return base44.entities.User.update(usuario.id, dadosUsuario);
@@ -462,6 +460,27 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
               <Badge variant="destructive" className="ml-2">Desativado</Badge>
             )}
           </div>
+
+          {/* Campo PIN de Montagem */}
+          {(dados.cargo === 'Montador' || dados.cargo === 'Logística' || dados.cargo === 'Estoque') && (
+            <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-100 dark:border-blue-900/30">
+              <div className="flex items-center gap-2 mb-2">
+                <KeyRound className="w-4 h-4 text-blue-600" />
+                <Label className="text-blue-900 dark:text-blue-100 font-bold">Senha de Montagem (PIN)</Label>
+              </div>
+              <Input
+                type="password"
+                maxLength={4}
+                value={dados.pin_montagem}
+                onChange={(e) => setDados({ ...dados, pin_montagem: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                placeholder="Ex: 1234"
+                className="bg-white"
+              />
+              <p className="text-xs text-blue-600 mt-2">
+                Senha de 4 dígitos usada para autorizar conclusões de montagem na Logística.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-3 mt-6">

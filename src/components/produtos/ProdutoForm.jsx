@@ -36,7 +36,7 @@ export default function ProdutoForm({ produto = null, onSave, isLoading }) {
     preco_venda: 0,
     preco_custo: 0,
     quantidade_estoque: 0,
-    estoque_minimo: 5,
+    estoque_minimo: "",
     ativo: true
   });
 
@@ -179,7 +179,7 @@ export default function ProdutoForm({ produto = null, onSave, isLoading }) {
       altura: Number(formData.altura),
       profundidade: Number(formData.profundidade),
       quantidade_estoque: Number(formData.quantidade_estoque),
-      estoque_minimo: Number(formData.estoque_minimo),
+      estoque_minimo: formData.estoque_minimo ? Number(formData.estoque_minimo) : 0,
     };
 
     onSave(dadosParaSalvar);
@@ -473,7 +473,7 @@ export default function ProdutoForm({ produto = null, onSave, isLoading }) {
             id="estoque_minimo"
             type="number"
             value={formData.estoque_minimo}
-            onChange={(e) => setFormData({ ...formData, estoque_minimo: parseInt(e.target.value) || 5 })}
+            onChange={(e) => setFormData({ ...formData, estoque_minimo: e.target.value })}
           />
         </div>
       </div>

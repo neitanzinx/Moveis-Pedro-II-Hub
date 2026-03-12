@@ -1,15 +1,58 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
+import { supabase } from "@/lib/supabase";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Image as ImageIcon, Upload, Loader2, CheckCircle, X, Trash2, Palette } from "lucide-react";
+import { Image as ImageIcon, Upload, Loader2, CheckCircle, X, Trash2, Palette, Save } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useOrganization } from "@/contexts/TenantContext";
 
 export default function ConfiguracaoLogo({ user }) {
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState(null);
   const queryClient = useQueryClient();
+
+  const { organization, refreshTenant } = useOrganization();
+  const [nomeEmpresa, setNomeEmpresa] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const [nameMessage, setNameMessage] = useState(null);
+
+  useEffect(() => {
+    if (organization?.name) {
+      setNomeEmpresa(organization.name);
+    }
+  }, [organization]);
+
+  const handleSaveName = async () => {
+    if (!nomeEmpresa.trim()) {
+      setNameMessage({ type: 'error', text: 'O nome da empresa não pode ser vazio.' });
+      return;
+    }
+
+    setSavingName(true);
+    setNameMessage(null);
+    try {
+      const { error } = await supabase
+        .from('organizations')
+        .update({ name: nomeEmpresa })
+        .eq('id', organization.id);
+
+      if (error) throw error;
+
+      setNameMessage({ type: 'success', text: 'Nome da empresa atualizado com sucesso!' });
+      if (refreshTenant) refreshTenant();
+
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (error) {
+      console.error('Erro ao salvar nome:', error);
+      setNameMessage({ type: 'error', text: 'Falha ao salvar o nome. Tente novamente.' });
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
@@ -37,6 +80,16 @@ export default function ConfiguracaoLogo({ user }) {
       // Atualizar o usuário
       await base44.auth.updateMe({ logo_url: file_url });
 
+      // Atualizar a logo da organização (Tenant)
+      if (organization?.id) {
+        const { error: orgError } = await supabase
+          .from('organizations')
+          .update({ logo_url: file_url })
+          .eq('id', organization.id);
+
+        if (orgError) throw orgError;
+      }
+
       // Recarregar caches
       queryClient.invalidateQueries({ queryKey: ['users'] });
 
@@ -59,6 +112,15 @@ export default function ConfiguracaoLogo({ user }) {
     setUploading(true);
     try {
       await base44.auth.updateMe({ logo_url: null });
+
+      // Remover logo da organização (Tenant)
+      if (organization?.id) {
+        await supabase
+          .from('organizations')
+          .update({ logo_url: null })
+          .eq('id', organization.id);
+      }
+
       queryClient.invalidateQueries({ queryKey: ['users'] });
       setMessage({ type: 'success', text: 'Logo removida.' });
       setTimeout(() => window.location.reload(), 1000);
@@ -188,6 +250,52 @@ export default function ConfiguracaoLogo({ user }) {
             </div>
           </div>
 
+        </CardContent>
+      </Card>
+
+      {/* Configuração do Nome da Empresa */}
+      <Card className="border-t-4 border-t-green-600 shadow-sm">
+        <CardHeader>
+          <CardTitle>Informações da Empresa</CardTitle>
+          <CardDescription>
+            Este nome representará a sua marca em todo o sistema e nas etiquetas impressas.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-2 max-w-md">
+            <Label htmlFor="nomeEmpresa">Nome da Empresa</Label>
+            <Input
+              id="nomeEmpresa"
+              value={nomeEmpresa}
+              onChange={(e) => setNomeEmpresa(e.target.value)}
+              placeholder="Ex: Móveis Pedro II"
+              disabled={savingName}
+            />
+          </div>
+
+          <Button
+            onClick={handleSaveName}
+            disabled={savingName}
+            className="bg-green-700 hover:bg-green-800"
+          >
+            {savingName ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4 mr-2" />
+            )}
+            Salvar Nome
+          </Button>
+
+          {nameMessage && (
+            <Alert className={`max-w-md
+              ${nameMessage.type === 'error' ? 'border-red-200 bg-red-50 text-red-800' : 'border-green-200 bg-green-50 text-green-800'}
+            `}>
+              <AlertDescription className="flex items-center gap-2">
+                {nameMessage.type === 'error' ? <X className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                {nameMessage.text}
+              </AlertDescription>
+            </Alert>
+          )}
         </CardContent>
       </Card>
     </div>

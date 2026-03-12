@@ -75,6 +75,8 @@ export const ItemNfeEmitida = base44.entities.ItemNfeEmitida;
 
 export const AssistenciaTecnica = base44.entities.AssistenciaTecnica;
 
+export const SolicitacaoEncomenda = base44.entities.SolicitacaoEncomenda;
+
 
 // auth sdk:
 export const User = base44.auth;

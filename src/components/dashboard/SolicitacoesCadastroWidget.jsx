@@ -20,6 +20,7 @@ export default function SolicitacoesCadastroWidget() {
     const [targetProducts, setTargetProducts] = useState([]);
     const [selectedTargetProduct, setSelectedTargetProduct] = useState(null);
     const [selectedTargetVariation, setSelectedTargetVariation] = useState(null);
+    const [isSearching, setIsSearching] = useState(false);
 
     // Full Registration Modal State
     const [fullRegistrationModalOpen, setFullRegistrationModalOpen] = useState(false);
@@ -101,53 +102,44 @@ export default function SolicitacoesCadastroWidget() {
         onError: (err) => toast.error("Erro ao atualizar: " + err.message)
     });
 
-    const handleOpenRegistration = (req) => {
-        // Helper to extract value from "Key: Value" lines in observacoes
-        const extractVal = (key) => {
-            const regex = new RegExp(`${key}:\\s*(.+)`, 'i');
-            const match = req.observacoes?.match(regex);
-            return match ? match[1].trim() : null;
-        };
+    const handleOpenRegistration = async (req) => {
+        // If we have a fornecedor_id, we can fetch its name, but mostly we just need the ID for the form
+        // We might want to pass it as string or keep as obj
 
-        // Parse Dimensions from "A:100cm x L:200cm x P:50cm" or similar
-        // Or from the legacy 'medidas' field if available and matching pattern
-        let altura = '', largura = '', profundidade = '';
-        const medidasStr = extractVal('Dimensões') || req.medidas || '';
-
-        if (medidasStr) {
-            const altMatch = medidasStr.match(/A:(\d+(?:\.\d+)?)/i);
-            const largMatch = medidasStr.match(/L:(\d+(?:\.\d+)?)/i);
-            const profMatch = medidasStr.match(/P:(\d+(?:\.\d+)?)/i);
-            if (altMatch) altura = altMatch[1];
-            if (largMatch) largura = largMatch[1];
-            if (profMatch) profundidade = profMatch[1];
+        let fornecedor_nome = '';
+        if (req.fornecedor_id) {
+            try {
+                // Best effort to get name for display, though select component handles ID mapping
+                const { data: f } = await supabase.from('fornecedores').select('nome_empresa, nome_contato').eq('id', req.fornecedor_id).single();
+                if (f) fornecedor_nome = f.nome_empresa || f.nome_contato || '';
+            } catch (e) {
+                console.warn('Could not fetch fornecedor name pre-fill', e);
+            }
         }
-
 
         const productPreData = {
             nome: req.nome_produto,
-            categoria: extractVal('Categoria') || '',
-            ambiente: extractVal('Ambiente') || '',
-            fornecedor_nome: extractVal('Fornecedor') || '',
-            material: extractVal('Material') || '',
-            altura,
-            largura,
-            profundidade,
-            descricao: [
-                req.observacoes || '',
-            ].filter(Boolean).join('\n'),
+            categoria: req.categoria || '',
+            ambiente: req.ambiente || '',
+            fornecedor_id: req.fornecedor_id?.toString() || '',
+            fornecedor_nome: fornecedor_nome,
+            material: req.material || '',
+            altura: req.altura?.toString() || '',
+            largura: req.largura?.toString() || '',
+            profundidade: req.profundidade?.toString() || '',
+            descricao: req.observacoes || '',
             preco_venda: req.preco_sugerido || 0,
             ativo: true,
             // [NOVO] Pre-fill variations
-            temVariacoes: !!extractVal('Cor') || !!extractVal('Tecido'),
-            variacoes: (extractVal('Cor') || extractVal('Tecido')) ? [{
+            temVariacoes: !!req.cor || !!req.tecido,
+            variacoes: (req.cor || req.tecido) ? [{
                 id: Date.now().toString(),
-                nome: `${extractVal('Cor') || ''} ${extractVal('Tecido') || ''}`.trim(),
-                cor: extractVal('Cor') || '',
-                tamanho: medidasStr || extractVal('Tecido') || '',
-                largura,
-                altura,
-                profundidade,
+                nome: `${req.cor || ''} ${req.tecido || ''}`.trim(),
+                cor: req.cor || '',
+                tamanho: req.medidas || req.tecido || '', // Legacy medidas string for now if present, better to use structured 
+                largura: req.largura?.toString() || '',
+                altura: req.altura?.toString() || '',
+                profundidade: req.profundidade?.toString() || '',
                 preco_venda: req.preco_sugerido || 0,
                 estoque_cd: 0, // Starts at 0, manager confirms
                 fotos: []
@@ -164,31 +156,14 @@ export default function SolicitacoesCadastroWidget() {
         const { data: parent } = await supabase.from('produtos').select('*').eq('id', req.produto_pai_id).single();
         if (!parent) return toast.error("Produto pai não encontrado.");
 
-        // Extract Variation Data
-        const extractVal = (key) => {
-            const regex = new RegExp(`${key}:\\s*(.+)`, 'i');
-            const match = req.observacoes?.match(regex);
-            return match ? match[1].trim() : null;
-        };
-        const medidasStr = extractVal('Dimensões') || req.medidas || '';
-        let altura = '', largura = '', profundidade = '';
-        if (medidasStr) {
-            const altMatch = medidasStr.match(/A:(\d+(?:\.\d+)?)/i);
-            const largMatch = medidasStr.match(/L:(\d+(?:\.\d+)?)/i);
-            const profMatch = medidasStr.match(/P:(\d+(?:\.\d+)?)/i);
-            if (altMatch) altura = altMatch[1];
-            if (largMatch) largura = largMatch[1];
-            if (profMatch) profundidade = profMatch[1];
-        }
-
         const novaVariacao = {
             id: Date.now().toString(),
-            nome: `${extractVal('Cor') || ''} ${extractVal('Tecido') || ''}`.trim() || 'Nova Variação',
-            cor: extractVal('Cor') || '',
-            tamanho: medidasStr || extractVal('Tecido') || '',
-            largura,
-            altura,
-            profundidade,
+            nome: `${req.cor || ''} ${req.tecido || ''}`.trim() || 'Nova Variação',
+            cor: req.cor || '',
+            tamanho: req.medidas || req.tecido || '',
+            largura: req.largura?.toString() || '',
+            altura: req.altura?.toString() || '',
+            profundidade: req.profundidade?.toString() || '',
             preco_venda: req.preco_sugerido || parent.preco_venda || 0,
             estoque_cd: 0,
             fotos: []
@@ -330,14 +305,34 @@ export default function SolicitacoesCadastroWidget() {
     });
 
     // Search for generic products to merge
+    React.useEffect(() => {
+        const delayDebounceFn = setTimeout(() => {
+            if (targetProductSearch.length >= 2) {
+                handleSearchProduct();
+            } else if (targetProductSearch.length === 0) {
+                setTargetProducts([]);
+            }
+        }, 300);
+
+        return () => clearTimeout(delayDebounceFn);
+    }, [targetProductSearch]);
+
     const handleSearchProduct = async () => {
-        if (!targetProductSearch) return;
-        const { data } = await supabase
-            .from('produtos')
-            .select('*')
-            .ilike('nome', `%${targetProductSearch}%`)
-            .limit(5);
-        setTargetProducts(data || []);
+        setIsSearching(true);
+        try {
+            const { data, error } = await supabase
+                .from('produtos')
+                .select('*')
+                .or(`nome.ilike.%${targetProductSearch}%,modelo_referencia.ilike.%${targetProductSearch}%,sku.ilike.%${targetProductSearch}%`)
+                .limit(10);
+
+            if (error) throw error;
+            setTargetProducts(data || []);
+        } catch (err) {
+            console.error('Erro na busca real-time:', err);
+        } finally {
+            setIsSearching(false);
+        }
     };
 
     return (
@@ -421,80 +416,169 @@ export default function SolicitacoesCadastroWidget() {
 
             {/* Merge Modal */}
             <Dialog open={mergeModalOpen} onOpenChange={setMergeModalOpen}>
-                <DialogContent>
+                <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
                     <DialogHeader>
-                        <DialogTitle>Vincular a Produto Existente</DialogTitle>
-                        <DialogDescription>
-                            O vendedor não encontrou, mas o produto já existe? Selecione abaixo para corrigir o estoque.
+                        <DialogTitle className="text-2xl font-bold text-gray-900">Vincular a Produto Existente</DialogTitle>
+                        <DialogDescription className="text-base text-gray-500">
+                            Selecione o produto correto para vincular a esta solicitação e corrigir o estoque automaticamente.
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="space-y-4">
-                        <div className="p-3 bg-amber-50 rounded border border-amber-100 text-sm">
-                            <p><strong>Solicitado:</strong> {selectedRequest?.nome_produto}</p>
-                            <p>Isso irá abater do estoque do produto selecionado a quantidade vendida como genérico nesta solicitação.</p>
+                    <div className="flex-1 overflow-hidden flex flex-col space-y-4 py-2">
+                        <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 shadow-sm flex justify-between items-center animate-in fade-in slide-in-from-top-4 duration-500">
+                            <div>
+                                <p className="text-amber-800 font-semibold text-xs uppercase tracking-wider mb-1">Produto da Solicitação:</p>
+                                <h4 className="text-xl font-bold text-gray-900">{selectedRequest?.nome_produto}</h4>
+                                <div className="flex gap-4 mt-1 text-sm text-amber-900/70">
+                                    {selectedRequest?.cor && <p><strong>Cor:</strong> {selectedRequest.cor}</p>}
+                                    {selectedRequest?.medidas && <p><strong>Medidas:</strong> {selectedRequest.medidas}</p>}
+                                </div>
+                            </div>
+                            <div className="text-right hidden sm:block">
+                                <Badge variant="outline" className="bg-white border-amber-200 text-amber-700 h-8 px-4 font-bold">
+                                    R$ {selectedRequest?.preco_sugerido}
+                                </Badge>
+                                <p className="text-[10px] text-amber-600 mt-1 italic">Preço sugerido pelo vendedor</p>
+                            </div>
                         </div>
 
-                        <div className="flex gap-2">
+                        <div className="relative group">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 group-focus-within:text-amber-500 transition-colors" />
                             <Input
-                                placeholder="Buscar produto cadastrado..."
+                                placeholder="🔍 Buscar por Nome do Produto, SKU, Referência ou Modelo..."
                                 value={targetProductSearch}
                                 onChange={e => setTargetProductSearch(e.target.value)}
+                                className="pl-10 h-12 text-lg border-gray-300 rounded-xl focus:ring-amber-500 shadow-sm transition-all"
+                                autoFocus
                             />
-                            <Button onClick={handleSearchProduct} variant="secondary"><Search className="w-4 h-4" /></Button>
+                            {isSearching && (
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                    <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
+                                </div>
+                            )}
                         </div>
 
-                        <div className="max-h-40 overflow-y-auto space-y-2">
-                            {targetProducts.map(p => (
-                                <div
-                                    key={p.id}
-                                    onClick={() => {
-                                        setSelectedTargetProduct(p);
-                                        setSelectedTargetVariation(null); // Reset variation when product changes
-                                    }}
-                                    className={`p-2 border rounded cursor-pointer text-sm flex justify-between ${selectedTargetProduct?.id === p.id ? 'border-green-500 bg-green-50' : 'hover:bg-gray-50'}`}
-                                >
-                                    <span>{p.nome}</span>
-                                    <span className="text-gray-500">{p.quantidade_estoque} un</span>
+                        <div className="flex-1 overflow-y-auto min-h-[300px] space-y-3 pr-2 custom-scrollbar">
+                            {targetProducts.length > 0 ? (
+                                targetProducts.map(p => (
+                                    <div
+                                        key={p.id}
+                                        onClick={() => {
+                                            setSelectedTargetProduct(p);
+                                            setSelectedTargetVariation(null);
+                                        }}
+                                        className={`group p-4 rounded-xl border-2 transition-all cursor-pointer relative overflow-hidden ${selectedTargetProduct?.id === p.id
+                                            ? 'border-amber-500 bg-amber-50/50 shadow-md ring-1 ring-amber-500'
+                                            : 'border-gray-100 bg-white hover:border-amber-200 hover:shadow-sm'
+                                            }`}
+                                    >
+                                        <div className="flex justify-between items-start">
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <h5 className="font-bold text-lg text-gray-900 group-hover:text-amber-700 transition-colors">{p.nome}</h5>
+                                                    <Badge variant="outline" className="text-[9px] uppercase font-mono py-0 h-4">ID: {p.id}</Badge>
+                                                </div>
+
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                                                    <div>
+                                                        <p className="text-gray-400 uppercase text-[9px] font-bold tracking-tighter">Referência/SKU</p>
+                                                        <p className="text-gray-700 font-medium truncate">{p.modelo_referencia || p.sku || 'N/A'}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-gray-400 uppercase text-[9px] font-bold tracking-tighter">Estoque Atual</p>
+                                                        <p className={`font-bold ${p.quantidade_estoque > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                                            {p.quantidade_estoque} unidades
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-gray-400 uppercase text-[9px] font-bold tracking-tighter">Categoria</p>
+                                                        <p className="text-gray-700 font-medium">{p.categoria || 'Sem categoria'}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-gray-400 uppercase text-[9px] font-bold tracking-tighter">Fornecedor</p>
+                                                        <p className="text-gray-700 font-medium truncate">{p.fornecedor_nome || '-'}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="ml-4 text-right">
+                                                <p className="text-2xl font-black text-amber-600">
+                                                    R$ {Number(p.preco_venda || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </p>
+                                                <p className="text-[10px] text-gray-400 mt-1 uppercase">Preço de Venda</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Subtle background indicator for selection */}
+                                        {selectedTargetProduct?.id === p.id && (
+                                            <div className="absolute right-0 top-0 bottom-0 w-1 bg-amber-500" />
+                                        )}
+                                    </div>
+                                ))
+                            ) : targetProductSearch.length >= 2 && !isSearching ? (
+                                <div className="flex flex-col items-center justify-center py-12 text-gray-400 bg-gray-50/50 rounded-2xl border-2 border-dashed border-gray-200">
+                                    <PackagePlus className="w-12 h-12 mb-4 opacity-20" />
+                                    <p className="text-lg">Ops! Nenhum produto encontrado.</p>
+                                    <p className="text-sm">Tente buscar por um termo diferente ou confira as informações.</p>
                                 </div>
-                            ))}
+                            ) : null}
                         </div>
                     </div>
 
                     {/* Variações Selector (if applies) */}
                     {selectedTargetProduct?.variacoes?.length > 0 && (
-                        <div className="space-y-2 border-t pt-4">
-                            <Label>Selecione a Variação vendida:</Label>
-                            <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto">
+                        <div className="space-y-3 border-t pt-4 mt-2 animate-in zoom-in-95 duration-300">
+                            <Label className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                Selecione a Variação vendida:
+                            </Label>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[180px] overflow-y-auto pr-1">
                                 {selectedTargetProduct.variacoes.map(v => (
                                     <div
                                         key={v.id}
                                         onClick={() => setSelectedTargetVariation(v)}
-                                        className={`p-2 border rounded flex justify-between items-center cursor-pointer ${selectedTargetVariation?.id === v.id ? 'bg-amber-100 border-amber-500' : 'hover:bg-gray-50'}`}
+                                        className={`p-3 border-2 rounded-xl flex flex-col justify-center items-center gap-2 cursor-pointer transition-all ${selectedTargetVariation?.id === v.id
+                                            ? 'bg-amber-600 border-amber-700 text-white shadow-inner scale-[1.02]'
+                                            : 'bg-white hover:border-amber-300 hover:bg-amber-50/30'
+                                            }`}
                                     >
                                         <div className="flex items-center gap-2">
-                                            {v.cor_hex && <div className="w-4 h-4 rounded-full border" style={{ backgroundColor: v.cor_hex }}></div>}
-                                            <span className="text-sm font-medium">{v.nome || v.cor || 'Variação sem nome'}</span>
-                                            <span className="text-xs text-gray-500">({v.tamanho || '-'})</span>
+                                            {v.cor_hex && <div className="w-5 h-5 rounded-full border border-white/20 shadow-sm" style={{ backgroundColor: v.cor_hex }}></div>}
+                                            <span className="text-xs font-bold text-center leading-tight">
+                                                {v.nome || v.cor || 'Variação'}
+                                            </span>
                                         </div>
-                                        <Badge variant="outline">{v.estoque_cd || 0} un</Badge>
+                                        <div className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${selectedTargetVariation?.id === v.id ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                                            Estoque: {v.estoque_cd || 0}
+                                        </div>
                                     </div>
                                 ))}
                             </div>
                         </div>
                     )}
 
-                    <DialogFooter className="mt-4">
-                        <Button variant="ghost" onClick={() => setMergeModalOpen(false)}>Cancelar</Button>
+                    <DialogFooter className="mt-6 pt-4 border-t gap-2 flex-col sm:flex-row">
                         <Button
+                            variant="ghost"
+                            size="lg"
+                            className="text-gray-500 hover:text-gray-700"
+                            onClick={() => setMergeModalOpen(false)}
+                        >
+                            Cancelar
+                        </Button>
+                        <Button
+                            size="lg"
                             onClick={() => mergeProductMutation.mutate({
                                 requestId: selectedRequest.id,
                                 targetProductId: selectedTargetProduct.id,
                                 targetVariationId: selectedTargetVariation?.id
                             })}
                             disabled={!selectedTargetProduct || mergeProductMutation.isPending || (selectedTargetProduct.variacoes?.length > 0 && !selectedTargetVariation)}
-                            className="bg-amber-600 hover:bg-amber-700 text-white"
+                            className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-8 shadow-lg shadow-amber-200 transition-all active:scale-95 disabled:opacity-50"
                         >
-                            Confirmar Vinculação
+                            {mergeProductMutation.isPending ? (
+                                <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Processando...</>
+                            ) : (
+                                "Confirmar Vinculação"
+                            )}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

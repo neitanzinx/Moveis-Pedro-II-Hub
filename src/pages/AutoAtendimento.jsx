@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Camera, Search, ArrowRight, CheckCircle, RefreshCcw, Loader2, Trash2, AlertTriangle, Image as ImageIcon } from "lucide-react";
+import { Camera, Search, ArrowRight, CheckCircle, RefreshCcw, Loader2, Trash2, AlertTriangle, Image as ImageIcon, Clock } from "lucide-react";
 import { toast } from "sonner";
 
 const TIPOS_ASSISTENCIA = [
@@ -24,7 +24,9 @@ export default function AutoAtendimento() {
     // Identification
     const [searchTerm, setSearchTerm] = useState("");
     const [pedido, setPedido] = useState(null);
+    const [pedidosRelacionados, setPedidosRelacionados] = useState([]);
     const [errorMsg, setErrorMsg] = useState("");
+    const [orderStatus, setOrderStatus] = useState(null); // Para mostrar status se não entregue
 
     // Details
     const [tipo, setTipo] = useState("Conserto");
@@ -47,7 +49,7 @@ export default function AutoAtendimento() {
     }, [stream]);
 
     // Step 1: Find Order
-    const handleSearch = async () => {
+    const handleSearch = async (forcedPedido = null) => {
         setErrorMsg("");
         if (!searchTerm.trim()) {
             const msg = "Digite o número do pedido ou CPF";
@@ -69,41 +71,66 @@ export default function AutoAtendimento() {
                 .maybeSingle();
 
             // If not found by pedido, try by CPF/CNPJ or telefone via clientes table
-            if (!data && cleanSearch.length >= 10) {
-                // Try to find client by CPF/CNPJ or telefone
-                const { data: cliente } = await supabase
+            if (!data) {
+                const searchParam = cleanSearch || searchTerm.trim();
+
+                // Try to find client by CPF, CNPJ or telefone
+                const { data: matchedClients, error: clientError } = await supabase
                     .from('clientes')
                     .select('id')
-                    .or(`cpf_cnpj.eq.${cleanSearch},telefone.ilike.%${cleanSearch}%`)
-                    .maybeSingle();
+                    .or(`cpf.ilike.%${searchParam}%,cnpj.ilike.%${searchParam}%,cpf_cnpj.ilike.%${searchParam}%,telefone.ilike.%${searchParam}%`)
+                    .limit(1);
 
-                if (cliente) {
-                    const { data: vendaByCliente } = await supabase
+                if (clientError) console.error('Erro ao buscar cliente:', clientError);
+
+                if (matchedClients && matchedClients.length > 0) {
+                    const cliente = matchedClients[0];
+                    const { data: vendaByCliente, error: vendaError } = await supabase
                         .from('vendas')
                         .select('*')
                         .eq('cliente_id', cliente.id)
-                        .order('created_at', { ascending: false })
+                        .order('data_venda', { ascending: false })
                         .limit(1)
                         .maybeSingle();
+
+                    if (vendaError) console.error('Erro ao buscar venda por cliente:', vendaError);
                     data = vendaByCliente;
                 }
 
-                // Also try directly by cliente_telefone in vendas
+                // Fallback: search directly in vendas by cliente_telefone or cliente_nome
                 if (!data) {
-                    const { data: vendaByTel } = await supabase
+                    const { data: vendaFallback, error: fallbackError } = await supabase
                         .from('vendas')
                         .select('*')
-                        .ilike('cliente_telefone', `%${cleanSearch}%`)
-                        .order('created_at', { ascending: false })
+                        .or(`cliente_telefone.ilike.%${searchParam}%,cliente_nome.ilike.%${searchTerm.trim()}%`)
+                        .order('data_venda', { ascending: false })
                         .limit(1)
                         .maybeSingle();
-                    data = vendaByTel;
+
+                    if (fallbackError) console.error('Erro ao buscar venda fallback:', fallbackError);
+                    data = vendaFallback;
                 }
             }
 
             if (error) throw error;
 
             if (data) {
+                // Verificar se o pedido foi entregue
+                const { data: entregas, error: entregaError } = await supabase
+                    .from('entregas')
+                    .select('id')
+                    .eq('venda_id', data.id)
+                    .eq('status', 'Entregue');
+
+                if (entregaError) throw entregaError;
+
+                if (!entregas || entregas.length === 0) {
+                    const msg = "Solicitações de troca ou defeito só podem ser feitas após a entrega do pedido.";
+                    setErrorMsg(msg);
+                    toast.error(msg);
+                    return;
+                }
+
                 setPedido(data);
                 toast.success("Pedido encontrado!");
                 setStep(1);
@@ -130,10 +157,16 @@ export default function AutoAtendimento() {
                 audio: false
             });
             setStream(mediaStream);
-            if (videoRef.current) {
-                videoRef.current.srcObject = mediaStream;
-            }
             setCameraActive(true);
+
+            // Allow React to render the <video> element before attaching the stream
+            setTimeout(() => {
+                if (videoRef.current) {
+                    videoRef.current.srcObject = mediaStream;
+                    videoRef.current.play().catch(e => console.error("Error playing video:", e));
+                }
+            }, 100);
+
         } catch (err) {
             console.error("Erro ao acessar câmera:", err);
             toast.error("Não foi possível acessar a câmera. Verifique as permissões.");
@@ -155,9 +188,30 @@ export default function AutoAtendimento() {
         const canvas = canvasRef.current;
         const context = canvas.getContext('2d');
 
-        // Set canvas dimensions to match video
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        // Default to client dimensions or standard HD if intrinsic dimensions are not yet available
+        let width = video.videoWidth || video.clientWidth || 1280;
+        let height = video.videoHeight || video.clientHeight || 720;
+
+        // Maximum dimensions to prevent canvas memory/processing errors on mobile
+        const MAX_WIDTH = 1280;
+        const MAX_HEIGHT = 1280;
+
+        // Calculate aspect ratio and resize if necessary
+        if (width > height) {
+            if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+            }
+        } else {
+            if (height > MAX_HEIGHT) {
+                width *= MAX_HEIGHT / height;
+                height = MAX_HEIGHT;
+            }
+        }
+
+        // Set canvas dimensions
+        canvas.width = width;
+        canvas.height = height;
 
         // Draw video frame
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -172,12 +226,30 @@ export default function AutoAtendimento() {
         context.shadowBlur = 4;
         context.fillText(text, 20, canvas.height - 30);
 
-        // Convert to blob
-        canvas.toBlob((blob) => {
-            const url = URL.createObjectURL(blob);
-            setPhotos(prev => [...prev, { blob, url, name: `foto_${Date.now()}.jpg` }]);
-            toast.success("Foto capturada!");
-        }, 'image/jpeg', 0.85);
+        try {
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            if (dataUrl === "data:,") {
+                console.error("toDataURL returned empty data url.");
+                toast.error("Erro ao processar imagem da câmera.");
+                return;
+            }
+            // Convert dataUrl to blob object for the photos array (to match the expected structure)
+            fetch(dataUrl)
+                .then(res => res.blob())
+                .then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    setPhotos(prev => [...prev, { blob, url, name: `foto_${Date.now()}.jpg` }]);
+                    toast.success("Foto capturada!");
+                    stopCamera();
+                })
+                .catch(err => {
+                    console.error("Failed to convert dataURL to blob", err);
+                    toast.error("Erro interno ao processar a memória da imagem.");
+                });
+        } catch (e) {
+            console.error("toDataURL Error:", e);
+            toast.error("Erro na captura. O dispositivo pode estar sem memória para imagens grandes.");
+        }
     };
 
     const removePhoto = (index) => {
@@ -277,9 +349,33 @@ export default function AutoAtendimento() {
                                     </p>
                                 )}
                             </div>
-                            <Button className="w-full bg-green-700 hover:bg-green-800 text-white" onClick={handleSearch} disabled={loading}>
+                            <Button className="w-full bg-green-700 hover:bg-green-800 text-white" onClick={() => handleSearch()} disabled={loading}>
                                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Buscar Pedido"}
                             </Button>
+
+                            {/* Seleção de Pedidos se houver múltiplos */}
+                            {pedidosRelacionados.length > 0 && (
+                                <div className="mt-6 pt-6 border-t">
+                                    <h3 className="font-semibold text-sm mb-3">Encontramos mais de um pedido. Selecione um:</h3>
+                                    <div className="space-y-2">
+                                        {pedidosRelacionados.map((p) => (
+                                            <button
+                                                key={p.id}
+                                                onClick={() => handleSearch(p)}
+                                                className="w-full text-left p-3 rounded-lg border hover:border-green-500 hover:bg-green-50 transition-colors flex justify-between items-center group"
+                                            >
+                                                <div>
+                                                    <p className="font-medium text-sm">Pedido #{p.numero_pedido}</p>
+                                                    <p className="text-xs text-gray-500">
+                                                        {new Date(p.data_venda).toLocaleDateString('pt-BR')} - {p.loja}
+                                                    </p>
+                                                </div>
+                                                <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-green-600" />
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </CardContent>
                     </Card>
                 )}
@@ -295,18 +391,15 @@ export default function AutoAtendimento() {
                                 <p><strong>Cliente:</strong> {pedido?.cliente_nome}</p>
                             </div>
 
-                            <div className="space-y-2">
-                                <Label>Tipo de Solicitação</Label>
-                                <Select value={tipo} onValueChange={setTipo}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {TIPOS_ASSISTENCIA.map(t => (
-                                            <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                            {/* Request Type hidden or defaulted since customer doesn't decide */}
+                            <div className="bg-amber-50 p-3 rounded-lg border border-amber-100 text-sm mb-4">
+                                <p className="text-amber-800 font-medium flex items-center gap-2">
+                                    <AlertTriangle className="w-4 h-4" />
+                                    Sua solicitação será analisada
+                                </p>
+                                <p className="text-amber-700 mt-1">
+                                    Nossa equipe técnica avaliará o problema relatado e as fotos para determinar se será necessário troca, conserto ou envio de peças.
+                                </p>
                             </div>
 
                             <div className="space-y-2">
@@ -344,7 +437,7 @@ export default function AutoAtendimento() {
                             {cameraActive ? (
                                 <div className="space-y-4">
                                     <div className="aspect-[3/4] bg-black rounded-lg overflow-hidden relative">
-                                        <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover"></video>
+                                        <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover"></video>
                                         <canvas ref={canvasRef} className="hidden"></canvas>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2">
@@ -393,6 +486,44 @@ export default function AutoAtendimento() {
                                     </Button>
                                 </div>
                             )}
+                        </CardContent>
+                    </Card>
+                )}
+
+                {step === 4 && (
+                    <Card className="border-t-4 border-t-amber-500">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <Clock className="w-5 h-5 text-amber-500" />
+                                Status do Pedido
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm text-gray-500">Número do Pedido:</span>
+                                    <span className="font-semibold">#{pedido?.numero_pedido}</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm text-gray-500">Status Geral:</span>
+                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${pedido?.status === 'Entregue' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                                        }`}>
+                                        {pedido?.status}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between items-center border-t pt-2 mt-2">
+                                    <span className="text-sm text-gray-500">Status da Entrega:</span>
+                                    <span className="font-medium text-amber-700">{orderStatus?.entrega}</span>
+                                </div>
+                            </div>
+
+                            <p className="text-sm text-gray-600 text-center">
+                                Solicitações de assistência técnica, troca ou devolução só podem ser realizadas após a entrega ser confirmada pelo sistema.
+                            </p>
+
+                            <Button onClick={() => setStep(0)} variant="outline" className="w-full">
+                                Nova Consulta
+                            </Button>
                         </CardContent>
                     </Card>
                 )}

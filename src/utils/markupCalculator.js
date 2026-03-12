@@ -158,3 +158,46 @@ export function calculateMarkupDetails(product) {
     };
 }
 
+/**
+ * Normaliza um valor percentual para fração decimal.
+ * - Se contém "%" no texto original, o parseFloat já ignora, mas o valor inteiro (ex: 10) precisa ser dividido por 100.
+ * - Valores > 1 são tratados como percentuais inteiros (ex: 10 → 0.10, 12 → 0.12).
+ * - Valores <= 1 são tratados como já em fração decimal (ex: 0.10 → 0.10).
+ */
+function normalizePercent(val) {
+    const num = parseFloat(val || 0);
+    if (isNaN(num)) return 0;
+    return num > 1 ? num / 100 : num;
+}
+
+/**
+ * Calcula o preço final de venda usando a fórmula da planilha:
+ * =ARREDONDAR.PARA.CIMA(custo × (1+frete%) × (1+IPI%) × (1+grupo%) × markup, 0)
+ *
+ * - Frete, IPI e Grupo são percentuais (10,00% = 0.10)
+ * - Markup é multiplicador direto (ex: 2.70)
+ *
+ * @param {Object} produto - Dados do produto com campos de custeio
+ * @returns {number} Preço final arredondado para cima (inteiro)
+ */
+export function calcularPrecoFinalImportacao(produto) {
+    const custo = parseFloat(produto.preco_custo || 0);
+    if (custo <= 0) return 0;
+
+    const frete = normalizePercent(produto.frete_custo);
+    const ipi = normalizePercent(produto.ipi_percentual);
+
+    // Usa o grupo de markup ativo (prioridade: grupo preenchido)
+    const grupoVal = produto.markup_grupo2_montagem ||
+        produto.markup_grupo1_prontos ||
+        produto.markup_grupo3_lustre || 0;
+    const grupo = normalizePercent(grupoVal);
+
+    // Markup é multiplicador direto (ex: 2.70)
+    const markup = parseFloat(produto.markup_aplicado || 0);
+    if (markup <= 0) return 0;
+
+    const resultado = custo * (1 + frete) * (1 + ipi) * (1 + grupo) * markup;
+    return Math.ceil(resultado); // ARREDONDAR.PARA.CIMA(..., 0)
+}
+

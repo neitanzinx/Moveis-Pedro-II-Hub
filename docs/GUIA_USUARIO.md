@@ -98,7 +98,7 @@ Abertura de chamados para Trocas, Devoluções ou Reparos.
 ## 3. 📦 Setor de Estoque
 **Acesso Principal:** Estoquistas
 
-### **Produtos**
+### **Produtos**        
 *   Cadastro completo com fotos, preços (custo/venda) e dados fiscais.
 *   Sistema hierárquico: Produto Pai → Variações (cores, tamanhos).
 *   **Badge de Qualidade:** Indica completude do cadastro (Verde/Amarelo/Vermelho).

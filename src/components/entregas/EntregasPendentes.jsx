@@ -3,23 +3,64 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Printer, Calendar, MapPin, User, Phone, CheckCircle, Clock, AlertTriangle } from "lucide-react";
-import { format, differenceInDays } from "date-fns";
+import { Printer, Calendar, MapPin, User, Phone, CheckCircle, Clock, AlertTriangle, Edit2 } from "lucide-react";
+import { format, differenceInDays, addDays } from "date-fns";
 import { base44 } from "@/api/base44Client";
 import { EMPRESA } from "@/config/empresa";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 import AgendarEntregaModal from "./AgendarEntregaModal";
 
 export default function EntregasPendentes({ entregas, vendas, clientes }) {
   const [selecionados, setSelecionados] = useState([]);
   const [imprimindo, setImprimindo] = useState(false);
+  const { user, can } = useAuth();
   const [modalAgendar, setModalAgendar] = useState({ open: false, entrega: null, multiplos: [] });
+  const [modalPrazo, setModalPrazo] = useState({ open: false, entrega: null });
+  const [novoPrazo, setNovoPrazo] = useState("");
+  const [novaDataLimite, setNovaDataLimite] = useState("");
+
   const queryClient = useQueryClient();
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => base44.entities.Entrega.update(id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['entregas'] })
   });
+
+  const updatePrazoMutation = useMutation({
+    mutationFn: async ({ entregaId, vendaId, prazo, dataLimite }) => {
+      // 1. Atualizar Entrega
+      await base44.entities.Entrega.update(entregaId, {
+        prazo_entrega: prazo,
+        data_limite: dataLimite
+      });
+
+      // 2. Atualizar Venda se existir vendaId
+      if (vendaId) {
+        await base44.entities.Venda.update(vendaId, {
+          prazo_entrega: prazo
+        });
+      }
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['entregas'] });
+      queryClient.invalidateQueries({ queryKey: ['vendas'] });
+      toast.success("Prazo de entrega atualizado com sucesso!");
+      setModalPrazo({ open: false, entrega: null });
+    },
+    onError: (err) => {
+      console.error("Erro ao atualizar prazo:", err);
+      toast.error("Erro ao atualizar prazo de entrega.");
+    }
+  });
+
+  const isAdmin = user?.cargo === 'Administrador' || can('manage_vendas');
 
   // Separar impressos e não impressos
   const naoImpressos = entregas.filter(e => !e.impresso);
@@ -333,7 +374,24 @@ export default function EntregasPendentes({ entregas, vendas, clientes }) {
                       <span className="font-bold text-lg text-green-800 dark:text-green-400">
                         #{entrega.numero_pedido}
                       </span>
-                      {getUrgenciaBadge(entrega.data_limite)}
+                      <div className="flex items-center gap-1">
+                        {getUrgenciaBadge(entrega.data_limite)}
+                        {isAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-gray-400 hover:text-blue-600"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setModalPrazo({ open: true, entrega });
+                              setNovoPrazo(entrega.prazo_entrega || "");
+                              setNovaDataLimite(entrega.data_limite || "");
+                            }}
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
                       {entrega.impresso && (
                         <Badge variant="outline" className="border-green-500 text-green-600">
                           <CheckCircle className="w-3 h-3 mr-1" />
@@ -408,6 +466,73 @@ export default function EntregasPendentes({ entregas, vendas, clientes }) {
         entrega={modalAgendar.entrega}
         entregasSelecionadas={modalAgendar.multiplos}
       />
+
+      {/* Modal de Troca de Prazo (Admin) */}
+      <Dialog open={modalPrazo.open} onOpenChange={(open) => !open && setModalPrazo({ open: false, entrega: null })}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Alterar Prazo de Entrega</DialogTitle>
+            <DialogDescription>
+              Ajuste o prazo de entrega para o pedido #{modalPrazo.entrega?.numero_pedido}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label>Prazo Padrão</Label>
+              <Select
+                value={novoPrazo}
+                onValueChange={(v) => {
+                  setNovoPrazo(v);
+                  const diasStr = v.match(/\d+/);
+                  if (diasStr) {
+                    const dias = parseInt(diasStr[0]);
+                    setNovaDataLimite(format(addDays(new Date(), dias), 'yyyy-MM-dd'));
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um prazo..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="15 dias úteis">15 dias úteis</SelectItem>
+                  <SelectItem value="45 dias úteis">45 dias úteis</SelectItem>
+                  <SelectItem value="Retirado na loja">Retirado na loja</SelectItem>
+                  <SelectItem value="Customizado">Customizado</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Data Limite Sugerida/Final</Label>
+              <Input
+                type="date"
+                value={novaDataLimite}
+                onChange={(e) => setNovaDataLimite(e.target.value)}
+              />
+              <p className="text-[10px] text-gray-500">
+                Esta data define a prioridade no funil logístico.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModalPrazo({ open: false, entrega: null })}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => updatePrazoMutation.mutate({
+                entregaId: modalPrazo.entrega?.id,
+                vendaId: modalPrazo.entrega?.venda_id,
+                prazo: novoPrazo,
+                dataLimite: novaDataLimite
+              })}
+              disabled={updatePrazoMutation.isPending}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {updatePrazoMutation.isPending ? "Salvando..." : "Salvar Alteração"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

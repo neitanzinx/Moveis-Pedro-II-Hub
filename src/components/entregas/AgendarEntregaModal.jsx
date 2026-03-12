@@ -9,7 +9,7 @@ import { base44 } from "@/api/base44Client";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { format, addDays } from "date-fns";
 
-export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregasSelecionadas = [] }) {
+export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregasSelecionadas }) {
   const [formData, setFormData] = useState({
     data_agendada: "",
     turno: "Manhã",
@@ -17,10 +17,11 @@ export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregas
     responsavel: "",
     observacoes: ""
   });
-  
+
   const queryClient = useQueryClient();
-  const isMultiple = entregasSelecionadas.length > 0;
-  const totalEntregas = isMultiple ? entregasSelecionadas.length : 1;
+  const selecionadas = entregasSelecionadas || [];
+  const isMultiple = selecionadas.length > 0;
+  const totalEntregas = isMultiple ? selecionadas.length : 1;
 
   const { data: caminhoes = [] } = useQuery({
     queryKey: ['caminhoes'],
@@ -31,7 +32,7 @@ export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregas
     mutationFn: async (data) => {
       if (isMultiple) {
         // Atualizar múltiplas entregas
-        for (const ent of entregasSelecionadas) {
+        for (const ent of selecionadas) {
           await base44.entities.Entrega.update(ent.id, data);
         }
       } else {
@@ -45,6 +46,7 @@ export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregas
   });
 
   useEffect(() => {
+    if (!isOpen) return;
     if (entrega && !isMultiple) {
       setFormData({
         data_agendada: entrega.data_agendada || "",
@@ -54,7 +56,6 @@ export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregas
         observacoes: entrega.observacoes || ""
       });
     } else {
-      // Reset para múltiplas entregas
       setFormData({
         data_agendada: "",
         turno: "Manhã",
@@ -63,7 +64,7 @@ export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregas
         observacoes: ""
       });
     }
-  }, [entrega, isMultiple, entregasSelecionadas]);
+  }, [entrega?.id, isMultiple, isOpen]);
 
   const handleSave = () => {
     updateMutation.mutate(formData);
@@ -88,8 +89,8 @@ export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregas
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Calendar className="w-5 h-5 text-blue-600" />
-            {isMultiple 
-              ? `Agendar ${totalEntregas} Entregas` 
+            {isMultiple
+              ? `Agendar ${totalEntregas} Entregas`
               : `Agendar Entrega #${entrega?.numero_pedido}`
             }
           </DialogTitle>
@@ -165,11 +166,10 @@ export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregas
                 type="button"
                 variant={formData.turno === "Manhã" ? "default" : "outline"}
                 onClick={() => setFormData({ ...formData, turno: "Manhã" })}
-                className={`h-14 flex flex-col items-center justify-center gap-1 ${
-                  formData.turno === "Manhã" 
-                    ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-500' 
-                    : 'hover:border-amber-400 hover:text-amber-600'
-                }`}
+                className={`h-14 flex flex-col items-center justify-center gap-1 ${formData.turno === "Manhã"
+                  ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-500'
+                  : 'hover:border-amber-400 hover:text-amber-600'
+                  }`}
               >
                 <Sun className="w-5 h-5" />
                 <span className="text-sm font-medium">Manhã</span>
@@ -179,11 +179,10 @@ export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregas
                 type="button"
                 variant={formData.turno === "Tarde" ? "default" : "outline"}
                 onClick={() => setFormData({ ...formData, turno: "Tarde" })}
-                className={`h-14 flex flex-col items-center justify-center gap-1 ${
-                  formData.turno === "Tarde" 
-                    ? 'bg-orange-600 hover:bg-orange-700 text-white border-orange-600' 
-                    : 'hover:border-orange-400 hover:text-orange-600'
-                }`}
+                className={`h-14 flex flex-col items-center justify-center gap-1 ${formData.turno === "Tarde"
+                  ? 'bg-orange-600 hover:bg-orange-700 text-white border-orange-600'
+                  : 'hover:border-orange-400 hover:text-orange-600'
+                  }`}
               >
                 <Sunset className="w-5 h-5" />
                 <span className="text-sm font-medium">Tarde</span>
@@ -205,11 +204,10 @@ export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregas
                   type="button"
                   variant={formData.caminhao_id === c.id ? "default" : "outline"}
                   onClick={() => setFormData({ ...formData, caminhao_id: c.id })}
-                  className={`h-14 flex flex-col items-center justify-center gap-1 ${
-                    formData.caminhao_id === c.id 
-                      ? 'bg-green-700 hover:bg-green-800 text-white border-green-700' 
-                      : 'hover:border-green-500 hover:text-green-700'
-                  }`}
+                  className={`h-14 flex flex-col items-center justify-center gap-1 ${formData.caminhao_id === c.id
+                    ? 'bg-green-700 hover:bg-green-800 text-white border-green-700'
+                    : 'hover:border-green-500 hover:text-green-700'
+                    }`}
                 >
                   <Truck className="w-5 h-5" />
                   <span className="text-sm font-bold">{c.nome}</span>
@@ -248,8 +246,8 @@ export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregas
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button 
-            onClick={handleSave} 
+          <Button
+            onClick={handleSave}
             disabled={!formData.data_agendada || updateMutation.isPending}
             className="bg-blue-600 hover:bg-blue-700"
           >

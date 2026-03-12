@@ -7,14 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Package, AlertTriangle, ArrowRightLeft,
-  ClipboardCheck, Building2, Plus, Loader2, Upload
+  ClipboardCheck, Building2, Plus, Loader2, Upload, Truck, ScanBarcode
 } from "lucide-react";
 
 // Tab Components
 import EstoqueTab from "../components/estoque/EstoqueTab";
+import BipagemTab from "../components/estoque/BipagemTab";
 
 import TransferenciasTab from "../components/estoque/TransferenciasTab";
 import InventarioTab from "../components/estoque/InventarioTab";
+import RecebimentosTab from "../components/estoque/RecebimentosTab";
 
 export default function Estoque() {
   const { user, loading } = useAuth();
@@ -35,6 +37,15 @@ export default function Estoque() {
 
   const transferenciasPendentes = transferencias.filter(t => t.status === 'Pendente').length;
 
+  const { data: pedidos = [] } = useQuery({
+    queryKey: ['pedidos-compra-recebimento-count'],
+    queryFn: async () => {
+      const { data } = await base44.entities.PedidoCompra.search({ limit: 100 });
+      return data.filter(p => ['Enviado', 'Confirmado', 'Em Conferência', 'Parcialmente Recebido'].includes(p.status));
+    }
+  });
+  const pedidosPendentes = pedidos.length;
+
   if (loading || !user) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -48,7 +59,9 @@ export default function Estoque() {
 
   const tabs = [
     { id: "estoque", label: "Produtos", icon: Package, count: produtos.length },
+    { id: "recebimentos", label: "Recebimentos", icon: Truck, count: pedidosPendentes, variant: "default" },
     { id: "transferencias", label: "Transferências", icon: ArrowRightLeft, count: transferenciasPendentes },
+    { id: "bipagem", label: "Bipagem Rápida", icon: ScanBarcode },
     { id: "inventario", label: "Inventário", icon: ClipboardCheck },
   ];
 
@@ -77,18 +90,22 @@ export default function Estoque() {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full max-w-2xl grid-cols-3">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="flex w-full md:w-max h-auto p-1.5 bg-gray-100/80 backdrop-blur-sm rounded-2xl border border-gray-200/50 shadow-sm gap-1 overflow-x-auto no-scrollbar">
           {tabs.map(tab => (
-            <TabsTrigger key={tab.id} value={tab.id} className="flex items-center gap-2">
-              <tab.icon className="w-4 h-4" />
-              <span className="hidden sm:inline">{tab.label}</span>
+            <TabsTrigger
+              key={tab.id}
+              value={tab.id}
+              className="flex items-center gap-2.5 px-6 py-2.5 rounded-xl transition-all duration-200 data-[state=active]:bg-white data-[state=active]:text-green-700 data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-gray-200 hover:bg-white/50 whitespace-nowrap"
+            >
+              <tab.icon className="w-4 h-4 transition-colors" />
+              <span className="font-semibold text-sm">{tab.label}</span>
               {tab.count > 0 && (
                 <Badge
                   variant={tab.variant || "secondary"}
-                  className={`ml-1 h-5 min-w-[20px] px-1.5 text-[10px] font-bold ${tab.variant === "destructive"
-                    ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                    : "bg-gray-100 text-gray-600 dark:bg-neutral-800 dark:text-gray-400"
+                  className={`ml-1 h-5 min-w-[20px] px-1.5 text-[10px] font-bold rounded-full ${tab.variant === "destructive"
+                    ? "bg-red-100 text-red-700"
+                    : "bg-green-100 text-green-700"
                     }`}
                 >
                   {tab.count}
@@ -104,6 +121,12 @@ export default function Estoque() {
           </TabsContent>
           <TabsContent value="transferencias" className="m-0">
             <TransferenciasTab user={user} />
+          </TabsContent>
+          <TabsContent value="recebimentos" className="m-0">
+            <RecebimentosTab />
+          </TabsContent>
+          <TabsContent value="bipagem" className="m-0">
+            <BipagemTab />
           </TabsContent>
           <TabsContent value="inventario" className="m-0">
             <InventarioTab user={user} />

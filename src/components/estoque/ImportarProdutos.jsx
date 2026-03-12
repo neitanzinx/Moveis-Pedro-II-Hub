@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { base44 } from "@/api/base44Client";
+import { calcularPrecoFinalImportacao } from '@/utils/markupCalculator';
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -112,14 +113,9 @@ const COLUMN_MAP = {
 
   // === DESCONTOS ===
   'descontos vendedor': 'desconto_max_vendedor',
-  'descontos vendendor': 'desconto_max_vendedor', // typo comum
   'desconto vendedor': 'desconto_max_vendedor',
   'descontos gerencial': 'desconto_max_gerencial',
   'desconto gerencial': 'desconto_max_gerencial',
-  'descontos campanha a': 'desconto_campanha_a',
-  'desconto campanha a': 'desconto_campanha_a',
-  'descontos campanha b': 'desconto_campanha_b',
-  'desconto campanha b': 'desconto_campanha_b',
 
   // === MONTAGEM ===
   'movéis montagem': 'requer_montagem',
@@ -316,6 +312,12 @@ export default function ImportarProdutos() {
           } else if (mapped.grupo_markup === 'lustre' && mapped.markup_grupo3_lustre) {
             mapped.markup_aplicado = mapped.markup_grupo3_lustre;
           }
+        }
+
+        // Auto-calcular preço de venda se não fornecido
+        // Fórmula: ARREDONDAR.PARA.CIMA(custo × (1+frete%) × (1+IPI%) × (1+grupo%) × markup, 0)
+        if (!mapped.preco_venda && mapped.preco_custo && mapped.markup_aplicado) {
+          mapped.preco_venda = calcularPrecoFinalImportacao(mapped);
         }
 
         // Validações

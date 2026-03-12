@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Package, CheckCircle, AlertTriangle, CloudOff } from 'lucide-react';
-import { useToast } from "@/components/ui/use-toast";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
@@ -44,7 +44,6 @@ const playSound = (type) => {
 
 export default function EntradaEstoque() {
     const { user, loading: authLoading } = useAuth();
-    const { toast } = useToast();
     const [scannedItems, setScannedItems] = useState([]);
     const [lastScanTime, setLastScanTime] = useState({}); // Map of GTIN -> timestamp
     const [scanBuffer, setScanBuffer] = useState({}); // Map of GTIN -> current volume count

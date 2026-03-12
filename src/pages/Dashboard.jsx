@@ -111,14 +111,24 @@ export default function Dashboard() {
       vendasFiltradas.forEach(v => {
         const d = new Date(v.data_venda);
         if (!isNaN(d.getTime())) {
+          // Usar chave YYYY-MM-DD para garantir a ordenação correta das datas
+          const ano = d.getFullYear();
+          const mes = String(d.getMonth() + 1).padStart(2, '0');
+          const diaMes = String(d.getDate()).padStart(2, '0');
+          const chaveOrdenacao = `${ano}-${mes}-${diaMes}`;
+          
           const dia = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-          vendasMap[dia] = (vendasMap[dia] || 0) + (Number(v.valor_total) || 0);
+          if (!vendasMap[chaveOrdenacao]) {
+            vendasMap[chaveOrdenacao] = { dia, valor: 0 };
+          }
+          vendasMap[chaveOrdenacao].valor += (Number(v.valor_total) || 0);
         }
       });
 
-      result.chartData = Object.entries(vendasMap)
-        .map(([dia, valor]) => ({ dia, valor }))
-        .slice(-15); // Últimos 15 dias com vendas
+      result.chartData = Object.keys(vendasMap)
+        .sort() // Ordem alfabética nas datas (antiga para a mais nova)
+        .slice(-15) // Pega as 15 variáveis mais recentes
+        .map(chave => vendasMap[chave]);
 
       // 5. Top Produtos
       const prodMap = {};

@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { getZapApiUrl } from '../../utils/zapApiUrl';
 import { CARGOS, LOJAS, getCargoConfig } from "@/config/cargos";
+import { toast } from "sonner";
 
 import { supabase } from "@/lib/supabase";
 
@@ -34,7 +35,7 @@ export default function GestaoFuncionarios({ currentUser }) {
 
     // Estados dos modais
     const [selectedUser, setSelectedUser] = useState(null);
-    const [modalType, setModalType] = useState(null); // 'create' | 'reset' | 'toggle' | 'edit'
+    const [modalType, setModalType] = useState(null); // 'create' | 'reset' | 'toggle' | 'edit' | 'cargo'
     const [showPassword, setShowPassword] = useState(false);
     const [generatedPassword, setGeneratedPassword] = useState(null);
     const [generatedMatricula, setGeneratedMatricula] = useState(null);
@@ -77,15 +78,40 @@ export default function GestaoFuncionarios({ currentUser }) {
         };
     }, [queryClient]);
 
+    // Helper: garantir token fresco (força refresh para evitar token expirado no cache)
+    const getFreshAccessToken = async () => {
+        // Sempre tenta refresh primeiro para garantir token válido
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshData?.session) {
+            return refreshData.session.access_token;
+        }
+        // Se refresh falhar, tenta getSession como fallback
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+            return session.access_token;
+        }
+        throw new Error('Sessão expirada. Faça login novamente.');
+    };
+
     // Mutation para criar credenciais
     const createCredentialsMutation = useMutation({
         mutationFn: async (userId) => {
-            const { data, error } = await supabase.functions.invoke('admin-actions', {
-                body: { action: 'create_credentials', user_id: userId }
+            const accessToken = await getFreshAccessToken();
+
+            // Chamar Edge Function via fetch direto (garante Authorization header correto)
+            const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-actions`;
+            const response = await fetch(fnUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${accessToken}`,
+                    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
+                },
+                body: JSON.stringify({ action: 'create_credentials', user_id: userId })
             });
 
-            if (error) throw error;
-            if (data.error) throw new Error(data.error);
+            const data = await response.json();
+            if (data?.error) throw new Error(data.error);
 
             return data;
         },
@@ -105,12 +131,22 @@ export default function GestaoFuncionarios({ currentUser }) {
     // Mutation para resetar senha
     const resetPasswordMutation = useMutation({
         mutationFn: async (userId) => {
-            const { data, error } = await supabase.functions.invoke('admin-actions', {
-                body: { action: 'reset_password', user_id: userId }
+            const accessToken = await getFreshAccessToken();
+
+            // Chamar Edge Function via fetch direto (garante Authorization header correto)
+            const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-actions`;
+            const response = await fetch(fnUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${accessToken}`,
+                    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
+                },
+                body: JSON.stringify({ action: 'reset_password', user_id: userId })
             });
 
-            if (error) throw error;
-            if (data.error) throw new Error(data.error);
+            const data = await response.json();
+            if (data?.error) throw new Error(data.error);
 
             return data;
         },
@@ -148,10 +184,29 @@ export default function GestaoFuncionarios({ currentUser }) {
     // Mutation para editar funcionário
     const updateUserMutation = useMutation({
         mutationFn: async ({ userId, updates }) => {
+            // 1. Update User record
             await base44.entities.User.update(userId, updates);
+
+            // 2. Sync with Colaborador if exists
+            if (updates.cargo || updates.full_name) {
+                try {
+                    // Fetch list to find colab with this user_id
+                    const cols = await base44.entities.Colaborador.list();
+                    const colab = cols.find(c => c.user_id === userId);
+                    if (colab) {
+                        await base44.entities.Colaborador.update(colab.id, {
+                            cargo: updates.cargo || colab.cargo,
+                            nome_completo: updates.full_name || colab.nome_completo
+                        });
+                    }
+                } catch (syncError) {
+                    console.error("Erro ao sincronizar com Colaborador:", syncError);
+                }
+            }
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['funcionarios-gestao'] });
+            queryClient.invalidateQueries({ queryKey: ['colaboradores'] }); // Invalidate colabs too
             toast.success("Funcionário atualizado!");
             handleCloseModal();
         },
@@ -204,7 +259,7 @@ export default function GestaoFuncionarios({ currentUser }) {
         setGeneratedPassword(null);
         setGeneratedMatricula(null);
         setShowPassword(false);
-        if (type === 'edit') {
+        if (type === 'edit' || type === 'cargo') {
             setEditData({
                 full_name: user.full_name || '',
                 cargo: user.cargo || '',
@@ -214,6 +269,9 @@ export default function GestaoFuncionarios({ currentUser }) {
             });
         }
     };
+
+    // Config do cargo selecionado no modal de edição rápida
+    const editCargoConfig = editData?.cargo ? getCargoConfig(editData.cargo) : null;
 
     const handleCloseModal = () => {
         setModalType(null);
@@ -286,8 +344,6 @@ export default function GestaoFuncionarios({ currentUser }) {
             </Badge>
         );
     };
-
-    const editCargoConfig = editData ? getCargoConfig(editData.cargo) : null;
 
     return (
         <div className="space-y-6">
@@ -518,6 +574,15 @@ export default function GestaoFuncionarios({ currentUser }) {
                                                             </Button>
                                                         </>
                                                     )}
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-8"
+                                                        onClick={() => handleOpenModal(user, 'cargo')}
+                                                        title="Alterar Cargo"
+                                                    >
+                                                        <Shield className="w-4 h-4" />
+                                                    </Button>
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
@@ -782,6 +847,85 @@ export default function GestaoFuncionarios({ currentUser }) {
                         >
                             {toggleAccountMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                             {selectedUser?.ativo === false ? 'Ativar' : 'Desativar'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal: Alterar Cargo Rápido */}
+            <Dialog open={modalType === 'cargo'} onOpenChange={handleCloseModal}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Shield className="w-5 h-5 text-green-700" />
+                            Alterar Cargo
+                        </DialogTitle>
+                        <DialogDescription>
+                            Alterar cargo de {selectedUser?.full_name}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="py-4 space-y-4">
+                        <div className="space-y-2">
+                            <Label>Novo Cargo</Label>
+                            <Select
+                                value={editData?.cargo}
+                                onValueChange={(val) => setEditData({ ...editData, cargo: val })}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Selecione o cargo" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {CARGOS.filter(c => c.value !== 'Pendente Definição').map(c => (
+                                        <SelectItem key={c.value} value={c.value}>
+                                            <div className="flex items-center gap-2">
+                                                {createElement(c.icon, { className: "w-4 h-4" })}
+                                                {c.label}
+                                            </div>
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {editCargoConfig?.requiresStore && (
+                            <div className="space-y-2">
+                                <Label>Loja</Label>
+                                <Select
+                                    value={editData?.loja}
+                                    onValueChange={(val) => setEditData({ ...editData, loja: val })}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Selecione a loja" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {LOJAS.map(loja => (
+                                            <SelectItem key={loja} value={loja}>{loja}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
+
+                        <div className="flex items-center space-x-2 p-2 bg-gray-50 rounded-lg">
+                            <Checkbox
+                                id="is_vendedor_quick"
+                                checked={editData?.is_vendedor}
+                                onCheckedChange={(val) => setEditData({ ...editData, is_vendedor: val })}
+                            />
+                            <Label htmlFor="is_vendedor_quick" className="text-sm cursor-pointer">Definir como Vendedor</Label>
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={handleCloseModal}>Cancelar</Button>
+                        <Button
+                            onClick={handleSaveEdit}
+                            disabled={updateUserMutation.isPending}
+                            className="bg-green-700 hover:bg-green-800"
+                        >
+                            {updateUserMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                            Salvar Alteração
                         </Button>
                     </DialogFooter>
                 </DialogContent>

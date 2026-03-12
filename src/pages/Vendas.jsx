@@ -14,13 +14,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { abrirNotaPedidoPDF } from "../components/vendas/NotaPedidoPDF";
 import { useAuth } from "@/hooks/useAuth";
 import { useConfirm } from "@/hooks/useConfirm";
 import ArquivoTab from "../components/vendas/ArquivoTab";
 import EmitirNFeModal from "../components/vendas/EmitirNFeModal";
 import TransferirMontagemModal from "../components/vendas/TransferirMontagemModal";
+import { VendaDetalhesModal } from "@/components/vendas/VendaDetalhesModal";
 
 export default function Vendas() {
     const [search, setSearch] = useState("");
@@ -29,6 +30,8 @@ export default function Vendas() {
     const [nfeModalOpen, setNfeModalOpen] = useState(false);
     const [vendaParaNfe, setVendaParaNfe] = useState(null);
     const [clienteParaNfe, setClienteParaNfe] = useState(null);
+    const [selectedVendaDetalhes, setSelectedVendaDetalhes] = useState(null);
+    const [isDetalhesModalOpen, setIsDetalhesModalOpen] = useState(false);
 
     const liberarEntregaMutation = useMutation({
         mutationFn: (id) => base44.entities.Entrega.update(id, {
@@ -57,6 +60,7 @@ export default function Vendas() {
     const [modalTransferencia, setModalTransferencia] = useState(null); // { vendaId }
     const queryClient = useQueryClient();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const confirm = useConfirm();
 
     // Hook de Autenticação e Controle de Acesso
@@ -72,6 +76,45 @@ export default function Vendas() {
         queryKey: ['clientes'],
         queryFn: () => base44.entities.Cliente.list()
     });
+
+    // Smart Return Flow: Reabrir modal de emissão se solicitado via URL
+    React.useEffect(() => {
+        const emitirNfeId = searchParams.get('emitirNfe');
+        if (emitirNfeId) {
+            // Força atualização dos dados da venda e do cliente para garantir que edições sejam refletidas
+            queryClient.invalidateQueries({ queryKey: ['vendas'] });
+            queryClient.invalidateQueries({ queryKey: ['clientes'] });
+        }
+
+        if (emitirNfeId && vendas.length > 0 && clientes.length > 0 && !isLoading) {
+            const venda = vendas.find(v => v.id === emitirNfeId);
+            if (venda) {
+                const cliente = clientes.find(c => c.id === venda.cliente_id);
+                // Mesmo se cliente não for encontrado na lista (ex: muitas páginas), tenta abrir
+                // Idealmente buscaria o cliente individualmente, mas assumindo que está na lista recente
+
+                if (cliente) {
+                    setClienteParaNfe(cliente);
+                } else {
+                    // Fallback se não achar cliente na lista carregada
+                    // Poderia fazer um fetch aqui, mas por simplicidade vamos tentar renderizar sem ou esperar refetch
+                    // O componente EmitirNFeModal pode precisar do cliente. 
+                    // Se user for admin, talvez não precise? Geralmente precisa.
+                }
+
+                setVendaParaNfe(venda);
+                setClienteParaNfe(cliente);
+                setNfeModalOpen(true);
+
+                // Limpar URL para não reabrir ao dar F5
+                setSearchParams(params => {
+                    const newParams = new URLSearchParams(params);
+                    newParams.delete('emitirNfe');
+                    return newParams;
+                }, { replace: true });
+            }
+        }
+    }, [searchParams, vendas, clientes, isLoading, setSearchParams]);
 
     // Query para buscar lançamentos (para poder cancelar os vinculados)
     const { data: lancamentos = [] } = useQuery({
@@ -117,7 +160,47 @@ export default function Vendas() {
                 });
             }
 
-            // 3. Retornar itens ao estoque
+            // 3. Cancelar entregas vinculadas
+            const entregasVenda = entregas.filter(e =>
+                e.venda_id === venda.id || e.numero_pedido === venda.numero_pedido
+            );
+            for (const entrega of entregasVenda) {
+                if (entrega.status !== 'Cancelado') {
+                    await base44.entities.Entrega.update(entrega.id, {
+                        status: 'Cancelado',
+                        observacoes: (entrega.observacoes || '') + ' [VENDA CANCELADA]'
+                    });
+                }
+            }
+
+            // 4. Cancelar montagens vinculadas (internas e externas)
+            const montagensVenda = montagens.filter(m => m.venda_id === venda.id);
+            for (const montagem of montagensVenda) {
+                if (montagem.status !== 'cancelada') {
+                    await base44.entities.MontagemItem.update(montagem.id, {
+                        status: 'cancelada',
+                        observacoes: (montagem.observacoes || '') + ' [VENDA CANCELADA]'
+                    });
+                }
+            }
+
+            // 5. Cancelar assistências técnicas vinculadas
+            try {
+                const todasAssistencias = await base44.entities.AssistenciaTecnica.list();
+                const assistenciasVenda = todasAssistencias.filter(a => a.venda_id === venda.id);
+                for (const assistencia of assistenciasVenda) {
+                    if (assistencia.status !== 'Cancelada') {
+                        await base44.entities.AssistenciaTecnica.update(assistencia.id, {
+                            status: 'Cancelada',
+                            observacoes: (assistencia.observacoes || '') + ' [VENDA CANCELADA]'
+                        });
+                    }
+                }
+            } catch (err) {
+                console.error('Erro ao cancelar assistências:', err);
+            }
+
+            // 6. Retornar itens ao estoque
             if (venda.itens && venda.itens.length > 0) {
                 for (const item of venda.itens) {
                     if (item.produto_id) {
@@ -127,9 +210,9 @@ export default function Vendas() {
                             const produto = produtos.find(p => p.id === item.produto_id);
 
                             if (produto) {
-                                const novaQuantidade = (produto.quantidade || 0) + (item.quantidade || 1);
+                                const novaQuantidade = (produto.quantidade_estoque || 0) + (item.quantidade || 1);
                                 await base44.entities.Produto.update(item.produto_id, {
-                                    quantidade: novaQuantidade
+                                    quantidade_estoque: novaQuantidade
                                 });
                             }
                         } catch (err) {
@@ -139,13 +222,21 @@ export default function Vendas() {
                 }
             }
 
-            return { vendaId: venda.id, lancamentosCancelados: lancamentosVenda.length };
+            return {
+                vendaId: venda.id,
+                lancamentosCancelados: lancamentosVenda.length,
+                entregasCanceladas: entregasVenda.length,
+                montagensCanceladas: montagensVenda.length
+            };
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['vendas'] });
             queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
             queryClient.invalidateQueries({ queryKey: ['produtos'] });
-            toast.success("Venda cancelada e estoque retornado!");
+            queryClient.invalidateQueries({ queryKey: ['entregas'] });
+            queryClient.invalidateQueries({ queryKey: ['montagens'] });
+            queryClient.invalidateQueries({ queryKey: ['assistencias'] });
+            toast.success("Venda cancelada! Entregas, montagens, assistências e lançamentos também foram cancelados.");
         }
     });
 
@@ -218,7 +309,7 @@ export default function Vendas() {
     const handleCancelarVenda = async (venda) => {
         const confirmed = await confirm({
             title: "Cancelar Venda",
-            message: `Tem certeza que deseja CANCELAR a venda #${venda.numero_pedido}?\n\nIsso também cancelará todos os lançamentos financeiros vinculados.`,
+            message: `Tem certeza que deseja CANCELAR a venda #${venda.numero_pedido}?\n\nIsso também cancelará todos os lançamentos financeiros, entregas, montagens e assistências vinculadas.`,
             confirmText: "Cancelar Venda",
             variant: "destructive"
         });
@@ -237,9 +328,17 @@ export default function Vendas() {
     // 1. Filtra pelo Escopo do Usuário (Dono / Loja / Tudo)
     const vendasPermitidas = filterData(vendas, { userField: 'responsavel_id' });
 
-    // 2. Filtros de Busca e Status da Tela
+    // 2. Filtros de Busca e Status da Tela (exclui cancelados da aba principal)
     const filtered = vendasPermitidas.filter(v => {
+        if (v.status === 'Cancelado') return false;
         if (statusFilter !== 'all' && v.status !== statusFilter) return false;
+        if (search && !v.cliente_nome?.toLowerCase().includes(search.toLowerCase()) && !v.numero_pedido?.includes(search)) return false;
+        return true;
+    });
+
+    // 3. Filtro para aba de cancelados
+    const filteredCancelados = vendasPermitidas.filter(v => {
+        if (v.status !== 'Cancelado') return false;
         if (search && !v.cliente_nome?.toLowerCase().includes(search.toLowerCase()) && !v.numero_pedido?.includes(search)) return false;
         return true;
     });
@@ -265,10 +364,14 @@ export default function Vendas() {
 
             {/* Sistema de Abas */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full max-w-md grid-cols-2">
+                <TabsList className="grid w-full max-w-lg grid-cols-3">
                     <TabsTrigger value="vendas" className="flex items-center gap-2">
                         <ShoppingCart className="w-4 h-4" />
                         Vendas
+                    </TabsTrigger>
+                    <TabsTrigger value="cancelados" className="flex items-center gap-2">
+                        <XCircle className="w-4 h-4" />
+                        Cancelados
                     </TabsTrigger>
                     <TabsTrigger value="arquivo" className="flex items-center gap-2">
                         <Archive className="w-4 h-4" />
@@ -299,7 +402,6 @@ export default function Vendas() {
                                 <SelectItem value="all">Todos os status</SelectItem>
                                 <SelectItem value="Pagamento Pendente">Pendente</SelectItem>
                                 <SelectItem value="Pago">Pago</SelectItem>
-                                <SelectItem value="Cancelado">Cancelado</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>
@@ -329,28 +431,40 @@ export default function Vendas() {
                                                         <h4 className="text-sm font-semibold">Legenda de Status</h4>
                                                         <div className="space-y-1">
                                                             <div className="flex items-center gap-2 text-xs">
-                                                                <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
-                                                                    <Clock className="h-3 w-3" />
-                                                                </Badge>
-                                                                <span className="text-gray-600">A Agendar (Sem data definida)</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-2 text-xs">
                                                                 <Badge className="bg-orange-100 text-orange-700 border-orange-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
                                                                     <ClipboardList className="h-3 w-3" />
                                                                 </Badge>
                                                                 <span className="text-gray-600">Pendente Triagem (Sem data)</span>
                                                             </div>
                                                             <div className="flex items-center gap-2 text-xs">
-                                                                <Badge className="bg-amber-100 text-amber-700 border-amber-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
-                                                                    <Truck className="h-3 w-3" />
+                                                                <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <Package className="h-3 w-3" />
                                                                 </Badge>
-                                                                <span className="text-gray-600">Aguardando Entrega</span>
+                                                                <span className="text-gray-600">Aguardando Expedição</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-xs">
+                                                                <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <Clock className="h-3 w-3" />
+                                                                </Badge>
+                                                                <span className="text-gray-600">A Agendar (Sem data definida)</span>
                                                             </div>
                                                             <div className="flex items-center gap-2 text-xs">
                                                                 <Badge className="bg-amber-100 text-amber-700 border-amber-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
-                                                                    <Wrench className="h-3 w-3" />
+                                                                    <Truck className="h-3 w-3" />
                                                                 </Badge>
-                                                                <span className="text-gray-600">Montagem Pendente</span>
+                                                                <span className="text-gray-600">Entrega Agendada / Pendente</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-xs">
+                                                                <Badge className="bg-blue-100 text-blue-700 border-blue-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <Truck className="h-3 w-3" />
+                                                                </Badge>
+                                                                <span className="text-gray-600">Em Rota de Entrega</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 text-xs">
+                                                                <Badge className="bg-green-100 text-green-700 border-green-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <CheckCircle className="h-3 w-3" />
+                                                                </Badge>
+                                                                <span className="text-gray-600">Entregue / Concluído</span>
                                                             </div>
                                                             <div className="flex items-center gap-2 text-xs">
                                                                 <Badge className="bg-teal-100 text-teal-700 border-teal-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
@@ -359,16 +473,10 @@ export default function Vendas() {
                                                                 <span className="text-gray-600">Entregue, aguardando montador</span>
                                                             </div>
                                                             <div className="flex items-center gap-2 text-xs">
-                                                                <Badge className="bg-green-100 text-green-700 border-green-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
-                                                                    <CheckCircle className="h-3 w-3" />
+                                                                <Badge className="bg-amber-100 text-amber-700 border-amber-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
+                                                                    <Wrench className="h-3 w-3" />
                                                                 </Badge>
-                                                                <span className="text-gray-600">Concluído / Pronto p/ Entrega</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-2 text-xs">
-                                                                <Badge className="bg-blue-100 text-blue-700 border-blue-200 h-5 w-5 p-0 flex items-center justify-center shrink-0">
-                                                                    <Truck className="h-3 w-3" />
-                                                                </Badge>
-                                                                <span className="text-gray-600">Em Rota de Entrega</span>
+                                                                <span className="text-gray-600">Montagem Pendente</span>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -395,7 +503,14 @@ export default function Vendas() {
                                     </TableRow>
                                 ) : (
                                     filtered.map(venda => (
-                                        <TableRow key={venda.id}>
+                                        <TableRow
+                                            key={venda.id}
+                                            className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                            onClick={() => {
+                                                setSelectedVendaDetalhes(venda);
+                                                setIsDetalhesModalOpen(true);
+                                            }}
+                                        >
                                             <TableCell className="font-medium">#{venda.numero_pedido}</TableCell>
                                             <TableCell>
                                                 <div className="flex flex-col">
@@ -621,6 +736,133 @@ export default function Vendas() {
                     </div>
                 </TabsContent>
 
+                {/* Aba Cancelados */}
+                <TabsContent value="cancelados" className="space-y-4">
+                    <div className="flex gap-4 items-center bg-white dark:bg-neutral-900 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-neutral-800">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <Input
+                                placeholder="Buscar por cliente ou nº do pedido..."
+                                className="pl-9 border-gray-200 dark:border-neutral-700"
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-sm border border-gray-100 dark:border-neutral-800 overflow-hidden">
+                        <Table>
+                            <TableHeader className="bg-gray-50 dark:bg-neutral-950">
+                                <TableRow>
+                                    <TableHead className="w-[100px]">Pedido</TableHead>
+                                    <TableHead>Cliente</TableHead>
+                                    <TableHead>Produtos</TableHead>
+                                    <TableHead>Data</TableHead>
+                                    <TableHead>Loja</TableHead>
+                                    <TableHead>Vendedor</TableHead>
+                                    <TableHead>Total</TableHead>
+                                    <TableHead>Situação</TableHead>
+                                    <TableHead className="text-right">Ações</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {isLoading ? (
+                                    <TableRow>
+                                        <TableCell colSpan={9} className="text-center py-8 text-gray-500">
+                                            <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
+                                            Carregando...
+                                        </TableCell>
+                                    </TableRow>
+                                ) : filteredCancelados.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={9} className="text-center py-12 text-gray-500">
+                                            <XCircle className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                                            <p className="font-medium">Nenhuma venda cancelada encontrada.</p>
+                                            <p className="text-sm mt-1">As vendas canceladas aparecerão aqui.</p>
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    filteredCancelados.map(venda => (
+                                        <TableRow
+                                            key={venda.id}
+                                            className="cursor-pointer hover:bg-muted/50 transition-colors opacity-75"
+                                            onClick={() => {
+                                                setSelectedVendaDetalhes(venda);
+                                                setIsDetalhesModalOpen(true);
+                                            }}
+                                        >
+                                            <TableCell className="font-medium">#{venda.numero_pedido}</TableCell>
+                                            <TableCell>
+                                                <div className="flex flex-col">
+                                                    <span className="font-medium text-gray-900 dark:text-white">{venda.cliente_nome}</span>
+                                                    <span className="text-xs text-gray-500">{venda.cliente_telefone}</span>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>
+                                                <div className="max-w-[200px]">
+                                                    {(venda.itens || []).slice(0, 2).map((item, idx) => (
+                                                        <div key={idx} className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                                                            {item.quantidade}x {item.produto_nome || item.nome}
+                                                        </div>
+                                                    ))}
+                                                    {(venda.itens || []).length > 2 && (
+                                                        <span className="text-[10px] text-gray-400">+{(venda.itens || []).length - 2} mais...</span>
+                                                    )}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="text-sm text-gray-600 dark:text-gray-400">
+                                                {new Date(venda.data_venda).toLocaleDateString('pt-BR')}
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge variant="outline" className="font-normal text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-neutral-800">
+                                                    {venda.loja}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell>
+                                                <span className="text-sm text-gray-600 dark:text-gray-400">
+                                                    {(() => {
+                                                        if (!venda.responsavel_id) return '-';
+                                                        const responsavelId = String(venda.responsavel_id).toLowerCase();
+                                                        const u = users.find(u =>
+                                                            String(u.id).toLowerCase() === responsavelId ||
+                                                            String(u.email).toLowerCase() === responsavelId
+                                                        );
+                                                        return u?.full_name || u?.email || '-';
+                                                    })()}
+                                                </span>
+                                            </TableCell>
+                                            <TableCell className="font-bold text-gray-900 dark:text-white">
+                                                R$ {venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge className="bg-red-100 text-red-800 border-red-200 border px-2 py-0.5 text-[10px] uppercase tracking-wider">
+                                                    Cancelado
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                <div className="flex justify-end gap-2">
+                                                    <Button variant="ghost" size="icon" onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        const clienteCompleto = clientes.find(c => c.id === venda.cliente_id) || { nome_completo: venda.cliente_nome, telefone: venda.cliente_telefone };
+                                                        let nomeVendedor = venda.responsavel_nome;
+                                                        if (venda.responsavel_id) {
+                                                            const u = users.find(user => user.id === venda.responsavel_id);
+                                                            if (u && u.full_name) nomeVendedor = u.full_name;
+                                                        }
+                                                        abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name);
+                                                    }}>
+                                                        <FileText className="w-4 h-4 text-blue-600" />
+                                                    </Button>
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
+                    </div>
+                </TabsContent>
+
                 {/* Aba Arquivo */}
                 <TabsContent value="arquivo">
                     <ArquivoTab />
@@ -634,6 +876,12 @@ export default function Vendas() {
                 venda={vendaParaNfe}
                 cliente={clienteParaNfe}
                 user={user}
+            />
+
+            <VendaDetalhesModal
+                isOpen={isDetalhesModalOpen}
+                onClose={() => setIsDetalhesModalOpen(false)}
+                venda={selectedVendaDetalhes}
             />
 
             {/* Modal Solicitar Reagendamento */}
@@ -851,8 +1099,12 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
 
     const badges = [];
 
+    // 0. Pre-calculating delivery info to avoid conflicting statuses
+    const entregasVenda = entregas.filter(e => e.numero_pedido === venda.numero_pedido);
+    const temDataEntrega = entregasVenda.some(e => e.data_agendada);
+
     // 1. Verificação de Triagem
-    if (!venda.triagem_realizada) {
+    if (!venda.triagem_realizada && !temDataEntrega) {
         badges.push(
             <Badge key="triagem" className="bg-orange-100 text-orange-700 border border-orange-200 gap-1 w-fit">
                 <ClipboardList className="w-3 h-3" />
@@ -862,7 +1114,6 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
     }
 
     // 2. Verificação de Entrega
-    const entregasVenda = entregas.filter(e => e.numero_pedido === venda.numero_pedido);
 
     // Se não tem entregas criadas
     if (entregasVenda.length === 0) {
@@ -883,11 +1134,13 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
                     Aguardando Pgto
                 </Badge>
             );
-        } else {
+        } else if (venda.triagem_realizada) {
+            // SÓ mostra Aguardando Expedição se a triagem já foi feita!
+            // E se não for Pagamento Pendente ou Cliente Retira.
             badges.push(
                 <Badge key="processando" className="bg-yellow-100 text-yellow-700 border border-yellow-200 gap-1 w-fit">
                     <Package className="w-3 h-3" />
-                    Aguardando Entrega
+                    Aguardando Expedição
                 </Badge>
             );
         }

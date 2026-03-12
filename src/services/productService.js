@@ -102,7 +102,7 @@ async function fetchGoogleProduct(gtin, apiKey, cx) {
                 marca: 'A DEFINIR',
                 ncm: '',
                 foto_url: item.pagemap?.cse_image?.[0]?.src || null, // Tenta pegar a foto
-                status: 'REVISAO_PENDENTE' // Marca para saneamento futuro
+                status: 'REVISAO_PENDENTE'
             };
         }
     } catch (err) {

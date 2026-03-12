@@ -1,6 +1,8 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/hooks/useAuth";
+import { useTenant } from "@/contexts/TenantContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -32,7 +34,8 @@ import {
   ChevronUp,
   Ruler,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Layers
 } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -43,6 +46,8 @@ import { formatPrice } from "@/utils/productFormatters";
 import { getColorHex } from "@/components/produtos/FurnitureColorPicker";
 import { CATEGORIAS } from "@/constants/productConstants";
 import ProductQualityBadge from "@/components/produtos/ProductQualityBadge";
+import GeradorEtiquetasModal from "@/components/estoque/GeradorEtiquetasModal";
+import { Printer } from "lucide-react";
 
 export default function Produtos() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -56,7 +61,12 @@ export default function Produtos() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingProduto, setEditingProduto] = useState(null);
   const [savingProduto, setSavingProduto] = useState(false);
+  const [pendingReturnUrl, setPendingReturnUrl] = useState(null);
+  const [focusField, setFocusField] = useState(null);
+  const [isGeradorEtiquetasOpen, setIsGeradorEtiquetasOpen] = useState(false);
+  const [produtosParaEtiqueta, setProdutosParaEtiqueta] = useState([]);
   const { user, loading } = useAuth();
+  const { organization } = useTenant();
 
   const queryClient = useQueryClient();
   const confirm = useConfirm();
@@ -65,6 +75,34 @@ export default function Produtos() {
     queryKey: ['produtos'],
     queryFn: () => base44.entities.Produto.list('nome'),
   });
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  // Check for highlight param to auto-open edit modal
+  useEffect(() => {
+    const highlightId = searchParams.get('highlight');
+    const returnUrl = searchParams.get('returnUrl');
+    const focus = searchParams.get('focus');
+
+    if (highlightId && produtos?.length > 0 && !isLoading) {
+      const productToEdit = produtos.find(p => String(p.id) === String(highlightId));
+      if (productToEdit) {
+        setPendingReturnUrl(returnUrl ? decodeURIComponent(returnUrl) : null);
+        setFocusField(focus);
+        handleEdit(productToEdit);
+
+        // Remove params to avoid reopening on refresh
+        setSearchParams(params => {
+          const newParams = new URLSearchParams(params);
+          newParams.delete('highlight');
+          newParams.delete('returnUrl');
+          newParams.delete('focus');
+          return newParams;
+        }, { replace: true });
+      }
+    }
+  }, [produtos, isLoading, searchParams, setSearchParams]);
 
   const deleteMutation = useMutation({
     mutationFn: (id) => base44.entities.Produto.delete(id),
@@ -175,7 +213,28 @@ export default function Produtos() {
 
   const handleQuickSave = async (data) => {
     try {
+      const precoNovo = parseFloat(data.preco_venda) || 0;
+      const precoAntigo = editingProduto?.preco_venda || 0;
+
       await base44.entities.Produto.update(editingProduto.id, data);
+
+      // --- REGISTRAR HISTÓRICO DE PREÇOS ---
+      try {
+        if (editingProduto?.id && precoNovo !== precoAntigo) {
+          await base44.entities.HistoricoPrecos?.create?.({
+            organization_id: organization?.id || '00000000-0000-0000-0000-000000000001',
+            produto_id: editingProduto.id,
+            preco_antigo: precoAntigo,
+            preco_novo: precoNovo,
+            tipo: 'venda',
+            motivo: 'Edição Rápida',
+            usuario_nome: user?.nome || 'Sistema'
+          });
+        }
+      } catch (histErr) {
+        console.warn('Não foi possível registrar histórico de preços (Quick Edit):', histErr);
+      }
+
       queryClient.invalidateQueries({ queryKey: ['produtos'] });
       setIsQuickEditOpen(false);
       setEditingProduto(null);
@@ -216,16 +275,44 @@ export default function Produtos() {
   const handleSave = async (data) => {
     setSavingProduto(true);
     try {
+      let savedProduct;
+      const precoNovo = parseFloat(data.preco_venda) || 0;
+      const precoAntigo = editingProduto?.preco_venda || 0;
+
       if (editingProduto?.id) {
-        await base44.entities.Produto.update(editingProduto.id, data);
+        savedProduct = await base44.entities.Produto.update(editingProduto.id, data);
         toast.success("Produto atualizado com sucesso");
       } else {
-        await base44.entities.Produto.create(data);
+        savedProduct = await base44.entities.Produto.create(data);
         toast.success("Produto cadastrado com sucesso");
       }
+
+      // --- REGISTRAR HISTÓRICO DE PREÇOS ---
+      try {
+        if (savedProduct && savedProduct.id && precoNovo !== precoAntigo) {
+          await base44.entities.HistoricoPrecos?.create?.({
+            organization_id: organization?.id || '00000000-0000-0000-0000-000000000001',
+            produto_id: savedProduct.id,
+            preco_antigo: precoAntigo,
+            preco_novo: precoNovo,
+            tipo: 'venda',
+            motivo: editingProduto?.id ? 'Atualização Manual' : 'Cadastro Inicial',
+            usuario_nome: user?.nome || 'Sistema'
+          });
+        }
+      } catch (histErr) {
+        console.warn('Não foi possível registrar histórico de preços:', histErr);
+      }
+
       queryClient.invalidateQueries({ queryKey: ['produtos'] });
       setIsModalOpen(false);
       setEditingProduto(null);
+
+      // Smart return flow
+      if (pendingReturnUrl) {
+        navigate(pendingReturnUrl);
+        setPendingReturnUrl(null);
+      }
     } catch (error) {
       console.error("Erro ao salvar:", error);
       toast.error("Erro ao salvar produto: " + error.message);
@@ -267,6 +354,15 @@ export default function Produtos() {
                 Importar CSV
               </Button>
               <Button
+                onClick={() => { setProdutosParaEtiqueta([]); setIsGeradorEtiquetasOpen(true); }}
+                variant="outline"
+                size="lg"
+                className="gap-2 border-green-200 text-green-700 hover:bg-green-50"
+              >
+                <Printer className="w-5 h-5" />
+                Gerar Etiquetas
+              </Button>
+              <Button
                 onClick={handleNew}
                 size="lg"
                 className="gap-2"
@@ -287,7 +383,9 @@ export default function Produtos() {
           >
             <CardContent className="p-4 text-center">
               <Package className="w-6 h-6 mx-auto mb-1 text-gray-500" />
-              <p className="text-2xl font-bold" style={{ color: '#07593f' }}>{stats.total}</p>
+              <p className="text-2xl font-bold" style={{ color: '#07593f' }}>
+                {stats.total >= 100000 ? '+100k' : stats.total}
+              </p>
               <p className="text-xs text-gray-500">Total</p>
             </CardContent>
           </Card>
@@ -450,12 +548,19 @@ export default function Produtos() {
                     </div>
                   )}
 
+                  {/* ID Badge (Top Left) */}
+                  <div className="absolute top-1.5 left-1.5 z-10">
+                    <Badge variant="outline" className="h-5 px-1.5 text-[10px] bg-white/90 backdrop-blur shadow-sm border-gray-200 text-gray-500">
+                      #{produto.id}
+                    </Badge>
+                  </div>
+
                   {/* Badges Overlay */}
                   {produto.ativo === false && (
-                    <Badge variant="destructive" className="h-5 px-1.5 text-[10px] shadow-sm">Inativo</Badge>
+                    <Badge variant="destructive" className="absolute bottom-1.5 left-1.5 h-5 px-1.5 text-[10px] shadow-sm z-10">Inativo</Badge>
                   )}
                   {(produto.requer_atencao || !produto.preco_venda) && (
-                    <Badge className="bg-orange-500 text-[10px] h-5 px-1.5 shadow-sm">
+                    <Badge className="absolute bottom-1.5 right-1.5 bg-orange-500 text-[10px] h-5 px-1.5 shadow-sm z-10">
                       {!produto.preco_venda ? 'S/ Preço' : 'Atenção'}
                     </Badge>
                   )}
@@ -470,7 +575,10 @@ export default function Produtos() {
 
                 {/* Quick Edit Button (Overlay) */}
                 {canEdit && (
-                  <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                  <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20 flex gap-1">
+                    <Button size="icon" variant="secondary" className="h-7 w-7 shadow-sm bg-white/90 backdrop-blur" onClick={(e) => { e.stopPropagation(); setProdutosParaEtiqueta([produto]); setIsGeradorEtiquetasOpen(true); }} title="Imprimir Etiqueta">
+                      <Printer className="w-3.5 h-3.5 text-green-700" />
+                    </Button>
                     <Button size="icon" variant="secondary" className="h-7 w-7 shadow-sm bg-white/90 backdrop-blur" onClick={(e) => { e.stopPropagation(); setIsQuickEditOpen(true); setEditingProduto(produto); }} title="Editar">
                       <Edit className="w-3.5 h-3.5 text-gray-700" />
                     </Button>
@@ -493,26 +601,39 @@ export default function Produtos() {
                       <p className="text-[11px] text-gray-400 truncate clamp-1">{produto.fornecedor_nome}</p>
                     )}
 
+                    {/* Dimensoes e Material */}
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 flex items-center" title="Dimensões (LxAxP)">
+                        <Ruler className="w-3 h-3 mr-1 opacity-50" />
+                        {(produto.largura || produto.altura || produto.profundidade)
+                          ? `${produto.largura || '?'}x${produto.altura || '?'}x${produto.profundidade || '?'}`
+                          : 'Dim: N/A'}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100 flex items-center" title="Material">
+                        <Layers className="w-3 h-3 mr-1 opacity-50" /> {produto.material || 'Mat: N/A'}
+                      </span>
+                    </div>
+
                     {/* Atributos da Variação (Cor/Tamanho) */}
-                    {(produto.cor || produto.tamanho) && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {produto.cor && (
-                          <Badge variant="secondary" className="text-[10px] px-1.5 h-5 flex items-center gap-1 bg-gray-50 border border-gray-100">
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      <Badge variant="secondary" className="text-[10px] px-1.5 h-5 flex items-center gap-1 bg-gray-50 border border-gray-100" title="Cor">
+                        {produto.cor ? (
+                          <>
                             <div
                               className="w-2 h-2 rounded-full border border-gray-300"
                               style={{ background: getColorHex(produto.cor) }}
                             />
                             {produto.cor}
-                          </Badge>
+                          </>
+                        ) : (
+                          <span className="text-gray-400">Cor: N/A</span>
                         )}
-                        {produto.tamanho && (
-                          <Badge variant="secondary" className="text-[10px] px-1.5 h-5 bg-gray-50 border border-gray-100">
-                            <Ruler className="w-3 h-3 mr-1 text-gray-400" />
-                            {produto.tamanho}
-                          </Badge>
-                        )}
-                      </div>
-                    )}
+                      </Badge>
+                      <Badge variant="secondary" className="text-[10px] px-1.5 h-5 bg-gray-50 border border-gray-100" title="Tamanho">
+                        <Ruler className="w-3 h-3 mr-1 text-gray-400" />
+                        {produto.tamanho || 'Tam: N/A'}
+                      </Badge>
+                    </div>
                   </div>
 
                   {/* Footer: Price & Stock */}
@@ -628,6 +749,10 @@ export default function Produtos() {
                             <Edit className="w-4 h-4 mr-2" />
                             Editar
                           </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => { setProdutosParaEtiqueta([produto]); setIsGeradorEtiquetasOpen(true); }}>
+                            <Printer className="w-4 h-4 mr-2" />
+                            Imprimir Etiqueta
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleDuplicate(produto)}>
                             <Copy className="w-4 h-4 mr-2" />
                             Duplicar
@@ -658,7 +783,7 @@ export default function Produtos() {
         {!isLoading && filteredProdutos.length > 0 && (
           <div className="flex flex-col md:flex-row justify-between items-center mt-6 gap-4">
             <p className="text-sm text-gray-500">
-              Exibindo {Math.min((currentPage - 1) * itemsPerPage + 1, filteredProdutos.length)} - {Math.min(currentPage * itemsPerPage, filteredProdutos.length)} de {filteredProdutos.length} produtos
+              Exibindo {Math.min((currentPage - 1) * itemsPerPage + 1, filteredProdutos.length)} - {Math.min(currentPage * itemsPerPage, filteredProdutos.length)} de {filteredProdutos.length >= 100000 ? '+100k' : filteredProdutos.length} produtos
             </p>
 
             <div className="flex gap-2 items-center">
@@ -693,9 +818,16 @@ export default function Produtos() {
         }}
         onSave={handleSave}
         produto={editingProduto}
+        focusField={focusField}
         isLoading={savingProduto}
       />
 
+      <GeradorEtiquetasModal
+        isOpen={isGeradorEtiquetasOpen}
+        onClose={() => setIsGeradorEtiquetasOpen(false)}
+        produtosPreSelecionados={produtosParaEtiqueta}
+        user={user}
+      />
       {/* Modal de Edição Rápida */}
       <ProdutoQuickEditModal
         isOpen={isQuickEditOpen}

@@ -15,6 +15,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Plus, Trash2, Upload, X, FileText, Image } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { toast } from "sonner";
+import { AlertCircle } from "lucide-react";
 
 const TIPOS_ASSISTENCIA = [
     { value: "Devolução", label: "Devolução", color: "bg-red-100 text-red-800" },
@@ -69,6 +71,8 @@ export default function AssistenciaTecnicaModal({
     });
 
     const [vendaSelecionada, setVendaSelecionada] = useState(null);
+    const [entregue, setEntregue] = useState(false);
+    const [verificandoEntrega, setVerificandoEntrega] = useState(false);
     const [searchVenda, setSearchVenda] = useState("");
     const [uploadingFile, setUploadingFile] = useState(false);
 
@@ -81,6 +85,7 @@ export default function AssistenciaTecnicaModal({
             });
             const venda = vendas.find(v => v.id === assistencia.venda_id);
             setVendaSelecionada(venda);
+            setEntregue(true); // Se já existe assistência, assumimos que a entrega foi verificada ou já passou pelo filtro
         } else {
             setFormData({
                 venda_id: "",
@@ -104,11 +109,33 @@ export default function AssistenciaTecnicaModal({
         }
     }, [assistencia, vendas, isOpen]);
 
-    const handleVendaChange = (vendaId) => {
+    const handleVendaChange = async (vendaId) => {
         const venda = vendas.find(v => v.id === vendaId);
         if (!venda) return;
 
         setVendaSelecionada(venda);
+        setVerificandoEntrega(true);
+        setEntregue(false);
+
+        try {
+            // Verificar se há entrega concluída no Supabase para esta venda
+            const { data: entregas, error } = await base44.supabase
+                .from('entregas')
+                .select('id')
+                .eq('venda_id', vendaId)
+                .eq('status', 'Entregue');
+
+            if (error) throw error;
+
+            // Se houver pelo menos uma entrega concluída, permite
+            setEntregue(entregas && entregas.length > 0);
+        } catch (err) {
+            toast.error("Erro ao verificar status de entrega. Permitindo abertura por precaução.");
+            setEntregue(true);
+        } finally {
+            setVerificandoEntrega(false);
+        }
+
         setFormData({
             ...formData,
             venda_id: vendaId,
@@ -158,8 +185,7 @@ export default function AssistenciaTecnicaModal({
                 }]
             });
         } catch (error) {
-            console.error("Erro ao fazer upload:", error);
-            alert("Erro ao fazer upload do arquivo");
+            toast.error("Erro ao fazer upload do arquivo. Verifique o tamanho e formato.");
         } finally {
             setUploadingFile(false);
         }
@@ -274,24 +300,29 @@ export default function AssistenciaTecnicaModal({
 
                         {/* Info do Pedido Selecionado */}
                         {vendaSelecionada && (
-                            <Alert className="bg-green-50 border-green-200">
-                                <AlertDescription>
-                                    <div className="flex flex-wrap gap-4">
-                                        <div>
-                                            <strong>Pedido:</strong> #{vendaSelecionada.numero_pedido}
+                            <>
+                                <Alert className={`border-2 ${entregue ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-300'}`}>
+                                    <AlertDescription>
+                                        <div className="flex flex-wrap gap-4 items-center">
+                                            <div>
+                                                <strong>Pedido:</strong> #{vendaSelecionada.numero_pedido}
+                                            </div>
+                                            <div>
+                                                <strong>Cliente:</strong> {vendaSelecionada.cliente_nome}
+                                            </div>
+                                            <div>
+                                                <strong>Status Entrega:</strong> {verificandoEntrega ? <Loader2 className="w-3 h-3 animate-spin inline ml-1" /> : (entregue ? <Badge className="bg-green-600 ml-1">Entregue</Badge> : <Badge variant="destructive" className="ml-1">Não Entregue</Badge>)}
+                                            </div>
+                                            {!entregue && !verificandoEntrega && (
+                                                <div className="w-full mt-2 text-red-700 font-bold flex items-center gap-2">
+                                                    <AlertCircle className="w-4 h-4" />
+                                                    Trocas/Defeitos só podem ser registrados após a entrega concluída.
+                                                </div>
+                                            )}
                                         </div>
-                                        <div>
-                                            <strong>Cliente:</strong> {vendaSelecionada.cliente_nome}
-                                        </div>
-                                        <div>
-                                            <strong>Valor:</strong> R$ {vendaSelecionada.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </div>
-                                        <div>
-                                            <strong>Data:</strong> {new Date(vendaSelecionada.data_venda).toLocaleDateString('pt-BR')}
-                                        </div>
-                                    </div>
-                                </AlertDescription>
-                            </Alert>
+                                    </AlertDescription>
+                                </Alert>
+                            </>
                         )}
 
                         {/* Status e Prioridade */}
@@ -545,7 +576,7 @@ export default function AssistenciaTecnicaModal({
                         </Button>
                         <Button
                             type="submit"
-                            disabled={isLoading || !formData.venda_id || !formData.descricao_problema}
+                            disabled={isLoading || !formData.venda_id || !formData.descricao_problema || (!entregue && !assistencia)}
                             style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
                         >
                             {isLoading ? (

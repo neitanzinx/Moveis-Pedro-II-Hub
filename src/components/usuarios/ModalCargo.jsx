@@ -38,7 +38,6 @@ const PERMISSOES_INFO = {
   'approve_devolucoes': 'Aprovar ou rejeitar devoluções',
   'view_financeiro': 'Visualizar dados financeiros',
   'manage_financeiro': 'Gerenciar lançamentos financeiros',
-  'view_notas': 'Visualizar notas fiscais',
   'view_relatorios': 'Acessar relatórios e análises',
   'view_rh': 'Visualizar dados de RH',
   'manage_rh': 'Gerenciar folha de pagamento e colaboradores',
@@ -106,7 +105,6 @@ export default function ModalCargo({ cargo, onClose }) {
     'Montagem': permissoesFiltradas.filter(p => p.includes('montagem')),
     'Devoluções': permissoesFiltradas.filter(p => p.includes('devolucao')),
     'Financeiro': permissoesFiltradas.filter(p => p.includes('financeiro')),
-    'Notas Fiscais': permissoesFiltradas.filter(p => p.includes('notas')),
     'Relatórios': permissoesFiltradas.filter(p => p.includes('relatorio')),
     'Recursos Humanos': permissoesFiltradas.filter(p => p.includes('rh')),
     'Administração Total': permissoesFiltradas.filter(p => p === '*')

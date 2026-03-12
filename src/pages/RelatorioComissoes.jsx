@@ -172,10 +172,16 @@ export default function RelatorioComissoes() {
 
     csv += `\nTOTAL GERAL,,${comissoesPorVendedor.reduce((sum, i) => sum + i.quantidadeVendas, 0)},R$ ${totalGeralVendas.toFixed(2)},R$ ${totalGeralComissoes.toFixed(2)}`;
 
+    const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `comissoes_${mesInicio}_${mesFim}.csv`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const abrirModalPagamento = (item) => {

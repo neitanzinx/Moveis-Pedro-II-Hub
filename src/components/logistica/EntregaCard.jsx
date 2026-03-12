@@ -28,7 +28,8 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
     else alert("Telefone não cadastrado");
   };
 
-  const isPendente = entrega.status_confirmacao === 'Aguardando Resposta' || (!entrega.status_confirmacao && entrega.data_agendada);
+  const isPendente = (!entrega.status_confirmacao && entrega.data_agendada);
+  const isNotificado = entrega.status_confirmacao === 'Notificada';
   const isProblema = entrega.status_confirmacao === 'Requer Atenção';
   const isConfirmado = entrega.status_confirmacao === 'Confirmada';
 
@@ -49,6 +50,10 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
     statusColor = "yellow";
     bgColor = "bg-amber-50";
     ringColor = "ring-amber-200";
+  } else if (isNotificado) {
+    statusColor = "emerald";
+    bgColor = "bg-emerald-50";
+    ringColor = "ring-emerald-200";
   }
 
   const borderClass = `border-l-4 border-l-${statusColor}-500`;
@@ -154,47 +159,45 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
         </div>
 
         {/* Bottom: Ações/Status se necessário */}
-        {
-          (entrega._notificado || (isColumn && (isPendente || isProblema || entrega.data_agendada))) && (
-            <div className={`mt-auto pt-1 border-t border-dashed border-gray-300/50 flex items-center justify-end gap-1`}>
-              {entrega._notificado && !isConfirmado && (
-                <Badge variant="outline" className="text-[8px] px-1 h-4 border-green-300 bg-green-100/50 text-green-700">
-                  Avisado
-                </Badge>
-              )}
-              {isProblema && (
-                <Badge variant="outline" className="text-[8px] px-1 h-4 border-red-300 bg-red-100/50 text-red-700">
-                  Atenção
-                </Badge>
-              )}
-              {isColumn && (
-                <>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-4 w-4 hover:bg-red-50 text-red-400"
-                    title="Solicitar Reagendamento (Cliente não pode receber)"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (onClick) onClick(entrega, 'reagendar');
-                    }}
-                  >
-                    <CalendarX className="w-3 h-3" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-4 w-4 hover:bg-green-50 text-green-600"
-                    onClick={contatoManual}
-                    title="Contato Manual (WhatsApp)"
-                  >
-                    <MessageCircle className="w-3 h-3" />
-                  </Button>
-                </>
-              )}
-            </div>
-          )
-        }
+        {(isNotificado || isProblema || (isColumn && (isPendente || entrega.data_agendada))) && (
+          <div className="mt-auto pt-1 border-t border-dashed border-gray-300/50 flex items-center justify-end gap-1">
+            {isNotificado && !isConfirmado && (
+              <Badge variant="outline" className="text-[8px] px-1 h-4 border-emerald-300 bg-emerald-100/50 text-emerald-700">
+                Notificada
+              </Badge>
+            )}
+            {isProblema && (
+              <Badge variant="outline" className="text-[8px] px-1 h-4 border-red-300 bg-red-100/50 text-red-700">
+                Atenção
+              </Badge>
+            )}
+            {isColumn && (
+              <>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-4 w-4 hover:bg-red-50 text-red-400"
+                  title="Solicitar Reagendamento (Cliente não pode receber)"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onClick) onClick(entrega, 'reagendar');
+                  }}
+                >
+                  <CalendarX className="w-3 h-3" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-4 w-4 hover:bg-green-50 text-green-600"
+                  onClick={contatoManual}
+                  title="Contato Manual (WhatsApp)"
+                >
+                  <MessageCircle className="w-3 h-3" />
+                </Button>
+              </>
+            )}
+          </div>
+        )}
 
       </Card >
     </div >

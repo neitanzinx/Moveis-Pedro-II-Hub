@@ -567,7 +567,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
         for (const entrega of entregasNaoNotificadas) {
           try {
             await base44.entities.Entrega.update(entrega.id, {
-              status_confirmacao: 'Confirmada', // Atualizado: Fluxo direto para Confirmada
+              status_confirmacao: 'Notificada', // Fluxo direto para Notificada
               whatsapp_enviado: true,
               data_notificacao: entrega.data_agendada?.split('T')[0],
               turno_notificacao: entrega.turno,
@@ -855,7 +855,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
           id: modalReagendamento.entrega.id,
           data: {
             ...modalReagendamento.novoAgendamento,
-            status_confirmacao: 'Aguardando Resposta', // Resetar confirmação pois mudou data
+            status_confirmacao: 'Notificada', // Resetar confirmação pois mudou data
             historico_reagendamentos: [...historicoAtual, novoEvento]
           }
         });
@@ -884,7 +884,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
           toast.warning("Reagendado, mas erro ao notificar WhatsApp.");
         }
 
-        toast.success("Entrega reagendada! Status resetado para 'Aguardando Resposta'.");
+        toast.success("Entrega reagendada! Status resetado para 'Notificada'.");
       } else {
         // CASO 2: CANCELAR (Voltar para Triagem)
         await atualizarEntregaMutation.mutateAsync({

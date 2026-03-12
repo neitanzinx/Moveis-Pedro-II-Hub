@@ -2,8 +2,8 @@ require("dotenv").config();
 const { createClient } = require('@supabase/supabase-js');
 
 // Configuração Supabase
-const SUPABASE_URL = "https://stgatkuwnouzwczkpphs.supabase.co";
-const SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN0Z2F0a3V3bm91endjemtwcGhzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTY0MjcxMywiZXhwIjoyMDgxMjE4NzEzfQ.tCjXAoG5RgFukroLkKqp7zuBeZz2mqVhbX0I8W1pIjI";
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
@@ -29,8 +29,9 @@ async function buscarAniversariantesHoje() {
 
         // Filtra localmente por dia e mês
         const aniversariantes = clientes.filter(cliente => {
-            const dataNasc = new Date(cliente.data_nascimento);
-            return dataNasc.getDate() === dia && (dataNasc.getMonth() + 1) === mes;
+            if (!cliente.data_nascimento) return false;
+            const [, mes_nasc, dia_nasc] = cliente.data_nascimento.split('-').map(Number);
+            return dia_nasc === dia && mes_nasc === mes;
         });
 
         console.log(`✅ Encontrados ${aniversariantes.length} aniversariantes`);

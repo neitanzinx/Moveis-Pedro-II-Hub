@@ -1,13 +1,18 @@
 // Supabase Edge Function: cancelar-nfe
 // Deploy: supabase functions deploy cancelar-nfe --no-verify-jwt
+// API: Nuvem Fiscal (multi-tenant)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { getNuvemFiscalToken } from '../_shared/nuvemFiscalAuth.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
+
+// Only managers/admins can cancel NF-e
+const ROLES_CANCELAMENTO = ['Administrador', 'Gerente', 'Gerente Geral'];
 
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
@@ -15,11 +20,11 @@ serve(async (req) => {
     }
 
     try {
-        const { nfe_id, justificativa, ambiente = 'homologacao' } = await req.json()
+        const { nfe_ref, justificativa, ambiente = 'homologacao', user_id, organization_id } = await req.json()
 
-        if (!nfe_id) {
+        if (!nfe_ref) {
             return new Response(
-                JSON.stringify({ error: 'nfe_id é obrigatório' }),
+                JSON.stringify({ error: 'nfe_ref é obrigatório (ID da NF-e na Nuvem Fiscal)' }),
                 { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             )
         }
@@ -31,80 +36,123 @@ serve(async (req) => {
             )
         }
 
-        const CLIENT_ID = ambiente === 'producao'
-            ? Deno.env.get('NUVEM_FISCAL_PROD_ID')
-            : Deno.env.get('NUVEM_FISCAL_HOMOLOG_ID');
-
-        const CLIENT_SECRET = ambiente === 'producao'
-            ? Deno.env.get('NUVEM_FISCAL_PROD_SECRET')
-            : Deno.env.get('NUVEM_FISCAL_HOMOLOG_SECRET');
-
-        if (!CLIENT_ID || !CLIENT_SECRET) {
+        if (!user_id) {
             return new Response(
-                JSON.stringify({ error: 'Credenciais não configuradas', configurado: false }),
-                { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                JSON.stringify({ error: 'user_id é obrigatório' }),
+                { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             )
         }
 
-        const API_BASE = ambiente === 'producao'
-            ? 'https://api.nuvemfiscal.com.br'
-            : 'https://api.sandbox.nuvemfiscal.com.br';
-
-        // Autenticar
-        const authResponse = await fetch('https://auth.nuvemfiscal.com.br/oauth/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-                grant_type: 'client_credentials',
-                client_id: CLIENT_ID,
-                client_secret: CLIENT_SECRET,
-                scope: 'nfe'
-            })
-        });
-
-        if (!authResponse.ok) {
-            throw new Error('Falha na autenticação');
-        }
-
-        const { access_token } = await authResponse.json();
-
-        // Cancelar NFe
-        const cancelResponse = await fetch(`${API_BASE}/nfe/${nfe_id}/cancelamento`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${access_token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ justificativa })
-        });
-
-        const cancelData = await cancelResponse.json();
-
-        if (!cancelResponse.ok) {
-            throw new Error(cancelData.message || 'Erro ao cancelar NFe');
-        }
-
-        // Atualizar status no banco
         const supabase = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         )
 
+        // ─── RBAC: Only managers/admins can cancel ───────────────────────────
+        const { data: usuario, error: userError } = await supabase
+            .from('public_users')
+            .select('id, cargo, nome')
+            .eq('id', user_id)
+            .single();
+
+        if (userError || !usuario) {
+            throw new Error('Usuário não encontrado.');
+        }
+
+        if (!ROLES_CANCELAMENTO.includes(usuario.cargo)) {
+            return new Response(
+                JSON.stringify({
+                    success: false,
+                    error: 'Somente gerentes e administradores podem cancelar NF-e.',
+                    code: 'ROLE_BLOCKED'
+                }),
+                { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+        }
+
+        // ─── Resolve organization_id ─────────────────────────────────────────
+        let orgId = organization_id;
+
+        if (!orgId) {
+            const { data: nfeRecord } = await supabase
+                .from('notas_fiscais_emitidas')
+                .select('venda_id')
+                .eq('nuvem_fiscal_id', nfe_ref)
+                .single();
+
+            if (nfeRecord?.venda_id) {
+                const { data: venda } = await supabase
+                    .from('vendas')
+                    .select('organization_id')
+                    .eq('id', nfeRecord.venda_id)
+                    .single();
+
+                orgId = venda?.organization_id;
+            }
+        }
+
+        if (!orgId) {
+            return new Response(
+                JSON.stringify({ error: 'Não foi possível identificar a organização.', configurado: false }),
+                { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+        }
+
+        // ─── Get Nuvem Fiscal Token ──────────────────────────────────────────
+        let auth;
+        try {
+            auth = await getNuvemFiscalToken(supabase, orgId, ambiente);
+        } catch (e) {
+            return new Response(
+                JSON.stringify({ error: (e as Error).message, configurado: false }),
+                { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+        }
+
+        // ─── Nuvem Fiscal API: Cancel ────────────────────────────────────────
+        const cancelResponse = await fetch(`${auth.baseUrl}/nfe/${nfe_ref}/cancelamento`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${auth.accessToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ justificativa }),
+        });
+
+        const cancelData = await cancelResponse.json();
+
+        if (!cancelResponse.ok) {
+            const errMsg = cancelData.error?.message || cancelData.mensagem || JSON.stringify(cancelData);
+            throw new Error(`Erro ao cancelar NF-e: ${errMsg}`);
+        }
+
+        // ─── Update Database Records ─────────────────────────────────────────
         await supabase
             .from('notas_fiscais_emitidas')
             .update({
-                status: 'Cancelada',
+                status: 'cancelado',
                 motivo_status: justificativa,
-                updated_at: new Date().toISOString()
+                updated_at: new Date().toISOString(),
             })
-            .eq('nuvem_fiscal_id', nfe_id);
+            .eq('nuvem_fiscal_id', nfe_ref);
+
+        // Also update vendas table
+        await supabase
+            .from('vendas')
+            .update({
+                nfe_emitida: false,
+                nfe_status: 'cancelado',
+                nfe_mensagem: `Cancelada por ${usuario.nome}: ${justificativa}`,
+            })
+            .eq('nfe_ref', nfe_ref);
 
         return new Response(
             JSON.stringify({
                 success: true,
-                status: 'Cancelada',
+                status: 'cancelado',
                 protocolo: cancelData.protocolo,
-                mensagem: 'NFe cancelada com sucesso'
+                mensagem: 'NF-e cancelada com sucesso',
+                cancelado_por: usuario.nome,
             }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
@@ -112,7 +160,7 @@ serve(async (req) => {
     } catch (error) {
         console.error('Erro:', error);
         return new Response(
-            JSON.stringify({ success: false, error: error.message }),
+            JSON.stringify({ success: false, error: (error as Error).message }),
             { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
     }

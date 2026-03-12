@@ -29,21 +29,18 @@ serve(async (req) => {
 
         const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
         const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-        const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 
-        const supabaseClient = createClient(
-            supabaseUrl,
-            supabaseAnonKey,
-            { auth: { persistSession: false }, global: { headers: { Authorization: authHeader } } }
-        );
+        // Criar admin client primeiro (usado para todas operações)
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+            auth: { persistSession: false }
+        });
 
-        const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token);
+        // Validar o token do usuário chamador usando admin client
+        const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
 
         if (userError || !user) {
             return returnError('Unauthorized: ' + (userError?.message || 'Token inválido/expirado'));
         }
-
-        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
         const { data: userData, error: profileError } = await supabaseAdmin
             .from('public_users')

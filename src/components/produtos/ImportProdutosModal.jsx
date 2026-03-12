@@ -1,6 +1,8 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { calcularPrecoFinalImportacao } from '@/utils/markupCalculator';
 import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabase';
 import { useTenant, useLojas } from '@/contexts/TenantContext';
 import {
     Dialog,
@@ -97,7 +99,15 @@ const BASE_COLUMN_MAPPING = {
     'frete': 'frete_custo',
     'ipi': 'ipi_percentual',
 
-    // === MARKUP ===
+    // === MARKUP / GRUPOS ===
+    'grupo 1: prontos': 'markup_grupo1_prontos',
+    'grupo 1 prontos': 'markup_grupo1_prontos',
+    'prontos': 'markup_grupo1_prontos',
+    'grupo 2: montagem': 'markup_grupo2_montagem',
+    'grupo 2 montagem': 'markup_grupo2_montagem',
+    'grupo 3: lustre': 'markup_grupo3_lustre',
+    'grupo 3 lustre': 'markup_grupo3_lustre',
+    'lustre': 'markup_grupo3_lustre',
     'markup': 'markup_aplicado',
 
     // === PREÇO DE VENDA ===
@@ -136,6 +146,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
     const [errors, setErrors] = useState([]);
     const [importing, setImporting] = useState(false);
     const [progress, setProgress] = useState(0);
+    const [currentlyProcessing, setCurrentlyProcessing] = useState([]); // Visualização mini-grade
     const [step, setStep] = useState(1); // 1: upload, 2: preview, 3: importing, 4: enriching NCM
     const cancelImportRef = React.useRef(false);
 
@@ -158,16 +169,28 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
         // Adiciona mapeamentos dinâmicos para cada loja
         lojas.forEach(loja => {
-            const codigoNormalizado = loja.codigo.toLowerCase().replace(/\s+/g, '_');
-            const nomeNormalizado = loja.nome.toLowerCase().replace(/\s+/g, '_');
-            const fieldName = `estoque_${codigoNormalizado}`;
+            if (!loja) return;
+            const codigo = loja.codigo ? String(loja.codigo) : '';
+            const nome = loja.nome ? String(loja.nome) : '';
+            const identifier = codigo || nome;
+            if (!identifier) return;
+
+            const codigoNormalizado = codigo.toLowerCase().replace(/\s+/g, '_');
+            const nomeNormalizado = nome.toLowerCase().replace(/\s+/g, '_');
+            const fieldName = `estoque_${codigoNormalizado || nomeNormalizado}`;
 
             // Várias formas de escrever o nome da loja no CSV
-            dynamicMapping[`mostruario loja ${loja.codigo.toLowerCase()}`] = fieldName;
-            dynamicMapping[`mostruario ${loja.codigo.toLowerCase()}`] = fieldName;
-            dynamicMapping[loja.codigo.toLowerCase()] = fieldName;
-            dynamicMapping[codigoNormalizado] = fieldName;
-            dynamicMapping[nomeNormalizado] = fieldName;
+            if (codigo) {
+                dynamicMapping[`mostruario loja ${codigo.toLowerCase()}`] = fieldName;
+                dynamicMapping[`mostruario ${codigo.toLowerCase()}`] = fieldName;
+                dynamicMapping[codigo.toLowerCase()] = fieldName;
+                dynamicMapping[codigoNormalizado] = fieldName;
+            }
+            if (nome) {
+                dynamicMapping[`mostruario loja ${nome.toLowerCase()}`] = fieldName;
+                dynamicMapping[`mostruario ${nome.toLowerCase()}`] = fieldName;
+                dynamicMapping[nomeNormalizado] = fieldName;
+            }
         });
 
         // === Mapeamentos especiais para compatibilidade com planilha atual ===
@@ -186,25 +209,24 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
     // Gera template CSV dinâmico com lojas
     const CSV_TEMPLATE = useMemo(() => {
-        const lojasHeaders = lojas.map(l => `MOSTRUARIO ${l.nome.toUpperCase()}`).join(',');
+        const lojasHeaders = lojas.map(l => `MOSTRUARIO ${(l?.nome || '').toUpperCase()}`).join(',');
         return `${CSV_TEMPLATE_HEADER},${lojasHeaders}${CSV_TEMPLATE_FOOTER}\nAltaro,Sofá 3 Lugares,ALT-SF3R,1200,220,95,100,,Cinza,Suede,5${',0'.repeat(lojas.length)},12,150,5,100,2640,5,15,SIM`;
     }, [lojas]);
 
-    // Gerar SKU único
-    // Formato: FOR-MOD-NNNN ou FOR-MOD-NNNN-COR-VV (para variações)
-    const generateSKU = (fornecedor, modelo, index, cor = null, varIndex = null) => {
-        const forPart = (fornecedor || 'GEN').substring(0, 3).toUpperCase().replace(/[^A-Z]/g, '');
-        const modPart = (modelo || 'PRD').substring(0, 3).toUpperCase().replace(/[^A-Z]/g, '');
-        const numPart = String(Date.now() % 10000 + index).padStart(4, '0');
+    // Gerar SKU único e DETERMINÍSTICO
+    // Formato: FOR-MOD-COR (sanitizado)
+    const generateSKU = (fornecedor, modelo, cor = null) => {
+        const forPart = (fornecedor || 'GEN').substring(0, 3).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const modPart = (modelo || 'PRD').substring(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-        // Se é uma variação, adicionar cor e índice
-        if (cor && varIndex) {
-            const corPart = cor.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, '') || 'STD';
-            const varPart = String(varIndex).padStart(2, '0');
-            return `${forPart || 'GEN'}-${modPart || 'PRD'}-${numPart}-${corPart}-${varPart}`;
+        let sku = `${forPart}-${modPart}`;
+
+        if (cor) {
+            const corPart = String(cor).substring(0, 10).toUpperCase().replace(/[^A-Z0-9]/g, '');
+            sku += `-${corPart}`;
         }
 
-        return `${forPart || 'GEN'}-${modPart || 'PRD'}-${numPart}`;
+        return sku;
     };
 
     // Detectar categoria e ambiente automaticamente baseado no nome do produto
@@ -336,7 +358,15 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         const rawHeaders = firstLine.split(separator).map(h => h.trim().replace(/"/g, ''));
         console.log('[Import] Headers encontrados:', rawHeaders.slice(0, 5), '...');
 
-        const headers = rawHeaders.map(h => normalizeColumn(h));
+        const headers = rawHeaders.map((h, index) => {
+            let mapped = normalizeColumn(h);
+            if (!mapped || mapped === '') {
+                // Fallbacks baseados na posição da planilha do cliente caso o cabeçalho venha vazio
+                if (index === 2) mapped = 'nome';
+                if (index === 8) mapped = 'dimensao_extra';
+            }
+            return mapped;
+        });
         console.log('[Import] Headers mapeados:', headers.slice(0, 5), '...');
 
         const data = [];
@@ -364,17 +394,34 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                 row[header] = values[index] || '';
             });
 
-            // Validação básica
-            if (!row.nome) {
-                parseErrors.push(`Linha ${i + 1}: Nome/Descrição do produto é obrigatório`);
+            // Check if the entire row is empty
+            const isRowEmpty = Object.values(row).every(val => String(val).trim() === '');
+            if (isRowEmpty) {
+                continue;
+            }
+
+            // Validação inteligente: se não tem nome, verificar se é linha de separação/cabeçalho
+            // ou se é um produto real com nome faltando
+            if (!row.nome || String(row.nome).trim() === '') {
+                // Verificar se tem dados significativos de produto (preço, modelo, etc.)
+                const temPreco = parseNum(row.preco_custo) > 0 || parseNum(row.preco_venda) > 0;
+                const temModelo = row.modelo_referencia && String(row.modelo_referencia).trim().length > 0;
+
+                if (temPreco || temModelo) {
+                    // Tem dados reais mas falta o nome → erro real
+                    parseErrors.push(`Linha ${i + 1}: Nome/Descrição do produto é obrigatório (tem preço/modelo mas sem nome)`);
+                }
+                // Caso contrário: linha de separação/cabeçalho → ignorar silenciosamente
                 continue;
             }
 
             // Extrair estoque dinâmico por loja
             const estoquePorLoja = {};
             lojas.forEach(loja => {
-                const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
-                const fieldName = `estoque_${codigoNorm}`;
+                if (!loja) return;
+                const identifier = (loja.codigo || loja.nome || '').toLowerCase().replace(/\s+/g, '_');
+                if (!identifier) return;
+                const fieldName = `estoque_${identifier}`;
                 estoquePorLoja[fieldName] = parseInt(row[fieldName]) || 0;
             });
 
@@ -389,6 +436,9 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                 impostos_percentual: parseNum(row.impostos_percentual) || 0,
                 frete_custo: parseNum(row.frete_custo) || 0,
                 ipi_percentual: parseNum(row.ipi_percentual) || 0,
+                markup_grupo1_prontos: parseNum(row.markup_grupo1_prontos) || 0,
+                markup_grupo2_montagem: parseNum(row.markup_grupo2_montagem) || 0,
+                markup_grupo3_lustre: parseNum(row.markup_grupo3_lustre) || 0,
                 markup_aplicado: parseNum(row.markup_aplicado),
                 desconto_max_vendedor: parseNum(row.desconto_max_vendedor) || 5,
                 desconto_max_gerencial: parseNum(row.desconto_max_gerencial) || 15,
@@ -403,18 +453,67 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         return { data, errors: parseErrors };
     };
 
-    // NÃO AGRUPA MAIS - Retorna lista plana preparada
+    // Explode variações de cor e tecido separadas por vírgula em linhas individuais
     const prepareProducts = (data) => {
-        return data.map(row => {
-            // Garante que todo produto tenha um ID temporário para a UI de preview
-            return {
-                ...row,
-                id: row.id || Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                // Mantém estrutura "variacoes" vazia apenas se algum componente legado depender, 
-                // mas a lógica principal vai ignorar.
-                variacoes: []
-            };
-        });
+        const result = [];
+
+        for (const row of data) {
+            const corRaw = row.cor ? String(row.cor).trim() : '';
+            const tecidoRaw = row.modelos_tecidos ? String(row.modelos_tecidos).trim() : '';
+
+            // Se tiver vírgula, split em múltiplas variações
+            // NOTA: "/" dentro de um nome (ex: "Branco HP/Nature") NÃO é separador, só vírgula
+            let variacoes = [];
+
+            if (corRaw) {
+                variacoes = variacoes.concat(corRaw.split(',').map(c => c.trim()).filter(c => c.length > 0));
+            }
+            if (tecidoRaw) {
+                variacoes = variacoes.concat(tecidoRaw.split(',').map(c => c.trim()).filter(c => c.length > 0));
+            }
+
+            // Remove duplicatas
+            variacoes = [...new Set(variacoes)];
+
+            if (variacoes.length === 0) {
+                variacoes = [''];
+            }
+
+            if (variacoes.length <= 1) {
+                // Produto único (sem variação ou variação única)
+                result.push({
+                    ...row,
+                    cor: variacoes[0] || '',
+                    cor_hex: variacoes[0] ? getColorHex(variacoes[0]) : null,
+                    id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                    variacoes: []
+                });
+            } else {
+                // Múltiplas variações → duplica o produto para cada variação
+                console.log(`[Import] Linha ${row.linha}: Explodindo ${variacoes.length} variações de "${row.nome}":`, variacoes);
+                for (const v of variacoes) {
+                    let uniqueCodigoBarras = row.codigo_barras;
+                    if (uniqueCodigoBarras) {
+                        const corPart = String(v).substring(0, 10).toUpperCase().replace(/[^A-Z0-9]/g, '');
+                        if (corPart) {
+                            uniqueCodigoBarras = `${uniqueCodigoBarras}-${corPart}`;
+                        }
+                    }
+
+                    result.push({
+                        ...row,
+                        codigo_barras: uniqueCodigoBarras,
+                        cor: v,
+                        cor_hex: getColorHex(v),
+                        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                        variacoes: []
+                    });
+                }
+            }
+        }
+
+        console.log(`[Import] prepareProducts: ${data.length} linhas CSV → ${result.length} produtos individuais`);
+        return result;
     };
 
     // Handle file upload
@@ -528,153 +627,171 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         const total = groupedProducts.length;
         let imported = 0;
         let failed = 0;
+        const failedProducts = [];
 
-        for (let index = 0; index < groupedProducts.length; index++) {
-            // Verificar se foi cancelado
-            if (cancelImportRef.current) {
-                toast.warning(`Importação cancelada. ${imported} produtos importados de ${total}.`);
-                break;
-            }
+        // Processamento paralelo (workers) para acelerar múltiplas gravações
+        // Limite reduzido para 12 para evitar erros de conexão e rate-limit (ERR_FAILED / Failed to fetch)
+        const CONCURRENCY_LIMIT = 12;
 
-            const product = groupedProducts[index];
-            try {
-                // Constroi nome único concatenando variações
-                let nomeUnico = product.nome;
-                const variaveisNome = [];
-                if (product.cor) variaveisNome.push(product.cor);
-                if (product.tamanho) variaveisNome.push(product.tamanho);
-                if (product.dimensao_extra) variaveisNome.push(product.dimensao_extra);
+        const worker = async () => {
+            while (currentIndex < groupedProducts.length) {
+                if (cancelImportRef.current) break;
 
-                if (variaveisNome.length > 0) {
-                    nomeUnico = `${product.nome} - ${variaveisNome.join(' ')}`;
-                }
+                const index = currentIndex++;
+                const product = groupedProducts[index];
 
-                // Gera SKU único
-                // Se já tiver código de barras no CSV, usa ele. Se não, gera.
-                const sku = product.codigo_barras || generateSKU(product.fornecedor_nome, product.modelo_referencia, index, product.cor);
-
-                // Detecta categoria e ambiente automaticamente se não fornecidos
-                const detected = detectCategoryAndAmbiente(product.nome);
-                const categoria = product.categoria || detected.categoria;
-                const ambiente = product.ambiente || detected.ambiente;
-
-                // === CÁLCULO DE ESTOQUE TOTAL ===
-                // O product já tem os campos estoque_nomeloja vindos do parseCSV
-                let totalEstoque = 0;
-                lojas.forEach(loja => {
-                    const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
-                    const fieldName = `estoque_${codigoNorm}`;
-                    totalEstoque += (parseInt(product[fieldName]) || 0);
+                // Atualizar o array de exibição em tempo real (mantém max 3)
+                setCurrentlyProcessing(prev => {
+                    const next = [product.nome, ...prev].slice(0, 3);
+                    return next;
                 });
 
-                const produtoData = {
-                    // Identificação
-                    codigo_barras: sku,
-                    nome: nomeUnico,
-                    categoria: categoria,
-                    ambiente: ambiente,
-                    fornecedor_nome: product.fornecedor_nome || '',
-                    modelo_referencia: product.modelo_referencia || '',
-                    material: product.material || '',
-
-                    // Variações (agora atributos diretos do produto único)
-                    cor: product.cor || null,
-                    cor_hex: product.cor ? getColorHex(product.cor) : null,
-                    tamanho: product.tamanho || null,
-
-                    tipo_entrega_padrao: 'desmontado',
-
-                    // Dimensões
-                    largura: product.largura || null,
-                    altura: product.altura || null,
-                    profundidade: product.profundidade || null,
-
-                    // Preços
-                    preco_custo: product.preco_custo || 0,
-                    preco_venda: product.preco_venda || 0,
-
-                    // Custeio
-                    impostos_percentual: product.impostos_percentual || 0,
-                    frete_custo: product.frete_custo || 0,
-                    ipi_percentual: product.ipi_percentual || 0,
-
-                    // Markup
-                    markup_aplicado: product.markup_aplicado,
-
-                    // Descontos
-                    desconto_max_vendedor: product.desconto_max_vendedor || 5,
-                    desconto_max_gerencial: product.desconto_max_gerencial || 15,
-
-                    // Estoque
-                    quantidade_estoque: totalEstoque,
-                    estoque_minimo: 5,
-
-                    // Campos dinâmicos de estoque por loja já estão no ...product se passarmos,
-                    // mas precisamos garantir que estao no formato certo para criar?
-                    // O base44.entities.Produto.create deve aceitar os campos extras se o backend suportar.
-                    // Assumindo que o create aceita campos extras ou que precisamos passá-los um a um?
-                    // O ideal é passar explicitamente o que sabemos que existe.
-
-                    // Montagem
-                    requer_montagem: product.requer_montagem || false,
-                    montagem_terceirizado: product.montagem_terceirizado || false,
-
-                    // NÃO É MAIS PARENT/CHILD
-                    variacoes: [],
-                    fotos: [],
-                    ativo: true,
-                    is_parent: false,
-                    parent_id: null, // NULO PARA SEMPRE
-
-                    // Multi-tenant
-                    organization_id: organization?.id || '00000000-0000-0000-0000-000000000001'
-                };
-
-                // Adiciona campos de estoque por loja explicitamente
-                lojas.forEach(loja => {
-                    const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
-                    const fieldName = `estoque_${codigoNorm}`;
-                    if (product[fieldName] !== undefined) {
-                        produtoData[fieldName] = product[fieldName];
-                    }
-                });
-
-                const novoProduto = await base44.entities.Produto.create(produtoData);
-
-                // === REGISTRAR HISTÓRICO DE PREÇOS ===
                 try {
-                    if (novoProduto && novoProduto.id) {
-                        await base44.entities.HistoricoPrecos?.create?.({
-                            organization_id: organization?.id || '00000000-0000-0000-0000-000000000001',
-                            produto_id: novoProduto.id,
-                            preco_antigo: 0,
-                            preco_novo: produtoData.preco_venda,
-                            tipo: 'custo',
-                            motivo: `Importação - ${file?.name || 'arquivo'}`,
-                            usuario_nome: user?.nome || 'Sistema'
-                        });
+                    // Constroi nome único concatenando variações
+                    let nomeUnico = product.nome;
+                    const variaveisNome = [];
+                    if (product.cor) variaveisNome.push(product.cor);
+                    if (product.tamanho) variaveisNome.push(product.tamanho);
+                    if (product.dimensao_extra) variaveisNome.push(product.dimensao_extra);
+
+                    if (variaveisNome.length > 0) {
+                        nomeUnico = `${product.nome} - ${variaveisNome.join(' ')}`;
                     }
-                } catch (histErr) {
-                    console.warn('[Import] Não foi possível registrar histórico de preços:', histErr);
+
+                    // Gera SKU único e DETERMINÍSTICO
+                    const sku = product.codigo_barras || generateSKU(product.fornecedor_nome, product.modelo_referencia, product.cor);
+
+                    // Detecta categoria e ambiente automaticamente se não fornecidos
+                    const detected = detectCategoryAndAmbiente(product.nome);
+                    const categoria = product.categoria || detected.categoria;
+                    const ambiente = product.ambiente || detected.ambiente;
+
+                    // CÁLCULO DE ESTOQUE TOTAL
+                    let totalEstoque = 0;
+                    lojas.forEach(loja => {
+                        if (!loja) return;
+                        const identifier = (loja.codigo || loja.nome || '').toLowerCase().replace(/\s+/g, '_');
+                        if (!identifier) return;
+                        const fieldName = `estoque_${identifier}`;
+                        totalEstoque += (parseInt(product[fieldName]) || 0);
+                    });
+
+                    const produtoData = {
+                        codigo_barras: sku,
+                        nome: nomeUnico,
+                        categoria: categoria,
+                        ambiente: ambiente,
+                        fornecedor_nome: product.fornecedor_nome || '',
+                        modelo_referencia: product.modelo_referencia || '',
+                        material: product.material || '',
+
+                        cor: product.cor || null,
+                        cor_hex: product.cor ? getColorHex(product.cor) : null,
+                        tipo_entrega_padrao: 'desmontado',
+
+                        largura: product.largura || null,
+                        altura: product.altura || null,
+                        profundidade: product.profundidade || null,
+
+                        preco_custo: product.preco_custo || 0,
+                        preco_venda: product.preco_venda || calcularPrecoFinalImportacao(product) || 0,
+
+                        impostos_percentual: product.impostos_percentual || 0,
+                        frete_custo: product.frete_custo || 0,
+                        ipi_percentual: product.ipi_percentual || 0,
+
+                        markup_grupo1_prontos: product.markup_grupo1_prontos || null,
+                        markup_grupo2_montagem: product.markup_grupo2_montagem || null,
+                        markup_grupo3_lustre: product.markup_grupo3_lustre || null,
+                        markup_aplicado: product.markup_aplicado,
+
+                        desconto_max_vendedor: product.desconto_max_vendedor || 5,
+                        desconto_max_gerencial: product.desconto_max_gerencial || 15,
+
+                        quantidade_estoque: totalEstoque,
+                        estoque_minimo: 0,
+                        estoque_ideal: 0,
+
+                        requer_montagem: product.requer_montagem || false,
+                        montagem_terceirizado: product.montagem_terceirizado || false,
+
+                        variacoes: [],
+                        fotos: [],
+                        ativo: true,
+                        is_parent: false,
+                        parent_id: null,
+                        organization_id: organization?.id || '00000000-0000-0000-0000-000000000001'
+                    };
+
+                    let resultado;
+                    const { data: existente } = await supabase
+                        .from('produtos')
+                        .select('id')
+                        .eq('codigo_barras', produtoData.codigo_barras)
+                        .maybeSingle();
+
+                    if (existente && existente.id) {
+                        const { codigo_barras, id, ...updateData } = produtoData;
+                        delete updateData.codigo_barras;
+                        delete updateData.id;
+                        resultado = await base44.entities.Produto.update(existente.id, updateData);
+                    } else {
+                        resultado = await base44.entities.Produto.create(produtoData);
+                    }
+
+                    try {
+                        if (resultado && resultado.id) {
+                            await base44.entities.HistoricoPrecos?.create?.({
+                                organization_id: organization?.id || '00000000-0000-0000-0000-000000000001',
+                                produto_id: resultado.id,
+                                preco_antigo: 0,
+                                preco_novo: produtoData.preco_venda,
+                                tipo: 'venda',
+                                motivo: `Importação Smart - ${file?.name || 'arquivo'}`,
+                                usuario_nome: user?.nome || 'Sistema'
+                            });
+                        }
+                    } catch (histErr) {
+                        console.warn('[Import] Não foi possível registrar histórico de preços:', histErr);
+                    }
+
+                    imported++;
+                } catch (err) {
+                    console.error('Erro ao importar:', product.nome, err);
+                    failed++;
+                    failedProducts.push(product.nome);
                 }
 
-                imported++;
-            } catch (err) {
-                console.error('Erro ao importar:', product.nome, err);
-                failed++;
-            }
+                setProgress(Math.round(((imported + failed) / total) * 100));
 
-            setProgress(Math.round(((imported + failed) / total) * 100));
+                // Pequeno delay para evitar sobrecarregar o Supabase e o navegador
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+        };
+
+        // Iniciar os workers em paralelo
+        let currentIndex = 0;
+        const workers = Array(Math.min(CONCURRENCY_LIMIT, groupedProducts.length))
+            .fill(0)
+            .map(() => worker());
+
+        await Promise.all(workers);
+
+        if (cancelImportRef.current) {
+            toast.warning(`Importação cancelada. ${imported} produtos processados de ${total}.`);
         }
 
         setImporting(false);
 
         if (failed === 0) {
-            toast.success(`${imported} produto(s) importado(s) com sucesso!`);
+            toast.success(`${imported} produto(s) processados com sucesso! (Smart Upsert ativado)`);
             onSuccess?.();
             handleClose();
         } else {
-            toast.warning(`${imported} importados, ${failed} falharam`);
+            const errorMsg = failedProducts.length <= 3
+                ? failedProducts.join(', ')
+                : `${failedProducts.slice(0, 3).join(', ')} e mais ${failedProducts.length - 3} itens. Veja o console para detalhes.`;
+            toast.warning(`${imported} importados. Falharam ${failed}: ${errorMsg}`, { duration: 10000 });
         }
     };
 
@@ -727,6 +844,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         setErrors([]);
         setStep(1);
         setProgress(0);
+        setCurrentlyProcessing([]);
         onClose();
     };
 
@@ -831,10 +949,15 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="font-semibold">
-                                        {groupedProducts.length} produto(s) encontrado(s)
+                                        {groupedProducts.length} produto(s) a importar
                                     </p>
                                     <p className="text-sm text-gray-500">
-                                        {parsedData.length} linha(s) no total
+                                        {parsedData.length} linha(s) no CSV
+                                        {groupedProducts.length > parsedData.length && (
+                                            <span className="text-blue-600 ml-1">
+                                                (expandido de {parsedData.length} por variações de cor)
+                                            </span>
+                                        )}
                                     </p>
                                 </div>
                                 <Button variant="outline" size="sm" onClick={() => setStep(1)}>
@@ -844,14 +967,38 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                             </div>
 
                             <div className="space-y-3 max-h-[400px] overflow-y-auto">
-                                {groupedProducts.map((product, index) => {
-                                    // Calcula totais do produto
-                                    const estoqueTotal = product.variacoes.reduce((sum, v) =>
-                                        sum + (v.estoque_cd || 0) + (v.estoque_mostruario_mega_store || 0) +
-                                        (v.estoque_mostruario_centro || 0) + (v.estoque_mostruario_ponte_branca || 0) +
-                                        (v.estoque_mostruario_futura || 0), 0);
-                                    const precoMin = Math.min(...product.variacoes.map(v => v.preco_venda || 0).filter(p => p > 0)) || 0;
-                                    const precoMax = Math.max(...product.variacoes.map(v => v.preco_venda || 0));
+                                {groupedProducts.slice(0, 200).map((product, index) => {
+                                    // === CÁLCULO DE ESTOQUE TOTAL ===
+                                    let estoqueTotal = 0;
+                                    lojas.forEach(loja => {
+                                        const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
+                                        const fieldName = `estoque_${codigoNorm}`;
+                                        estoqueTotal += (parseInt(product[fieldName]) || 0);
+                                    });
+
+                                    // Se houver variações, calcula o range. Se não, usa o preço do produto.
+                                    let precoMin = 0;
+                                    let precoMax = 0;
+
+                                    if (product.variacoes && product.variacoes.length > 0) {
+                                        const precos = product.variacoes.map(v => v.preco_venda || 0).filter(p => p > 0);
+                                        precoMin = precos.length > 0 ? Math.min(...precos) : 0;
+                                        precoMax = precos.length > 0 ? Math.max(...precos) : 0;
+
+                                        // Somar estoque das variações se existirem
+                                        estoqueTotal = product.variacoes.reduce((sum, v) => {
+                                            let estVar = 0;
+                                            lojas.forEach(loja => {
+                                                const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
+                                                const fieldName = `estoque_${codigoNorm}`;
+                                                estVar += (parseInt(v[fieldName]) || 0);
+                                            });
+                                            return sum + estVar;
+                                        }, 0);
+                                    } else {
+                                        precoMin = product.preco_venda || 0;
+                                        precoMax = precoMin;
+                                    }
 
                                     return (
                                         <Card key={index} className="overflow-hidden">
@@ -865,21 +1012,31 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                                         </h4>
                                                         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-gray-500">
                                                             {product.fornecedor_nome && (
-                                                                <span>📦 {product.fornecedor_nome}</span>
+                                                                <span>Fornecedor: <span className="font-medium text-gray-700">{product.fornecedor_nome}</span></span>
                                                             )}
                                                             {product.modelo_referencia && (
-                                                                <span>🏷️ {product.modelo_referencia}</span>
+                                                                <span>Ref: <span className="font-medium text-gray-700">{product.modelo_referencia}</span></span>
                                                             )}
                                                             {product.categoria && (
-                                                                <span>📂 {product.categoria}</span>
+                                                                <span>Categoria: <span className="font-medium text-gray-700">{product.categoria}</span></span>
+                                                            )}
+                                                            {product.cor && (
+                                                                <span className="flex items-center gap-1">
+                                                                    Cor:
+                                                                    <div className="w-2 h-2 rounded-full border bg-white ml-0.5" style={{ backgroundColor: getColorHex(product.cor) || '#ccc' }} />
+                                                                    <span className="font-medium text-gray-700">{product.cor}</span>
+                                                                </span>
+                                                            )}
+                                                            {(product.largura || product.altura || product.profundidade) && (
+                                                                <span>Dimensões: <span className="font-medium text-gray-700">{product.largura || '?'}x{product.altura || '?'}x{product.profundidade || '?'} cm</span></span>
                                                             )}
                                                             {showFinancials && product.markup_aplicado && (
-                                                                <span>📊 Markup: {product.markup_aplicado}%</span>
+                                                                <span>Markup: <span className="font-medium text-gray-700">{product.markup_aplicado}</span></span>
                                                             )}
                                                             {product.ncm && (
                                                                 <span className={`inline-flex items-center gap-1 ${product.ncm_fonte === 'gemini' ? 'text-purple-600 font-medium' : ''
                                                                     }`}>
-                                                                    📝 NCM: {product.ncm}
+                                                                    NCM: <span className="font-medium">{product.ncm}</span>
                                                                     {product.ncm_fonte === 'gemini' && (
                                                                         <Sparkles className="w-3 h-3 text-purple-600 inline ml-0.5" />
                                                                     )}
@@ -888,87 +1045,105 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                                         </div>
                                                     </div>
                                                     <div className="text-right flex-shrink-0">
-                                                        <Badge variant="secondary" className="mb-1">
-                                                            {product.variacoes.length} variação(ões)
-                                                        </Badge>
+                                                        {product.variacoes.length > 0 && (
+                                                            <Badge variant="secondary" className="mb-1">
+                                                                {product.variacoes.length} variação(ões)
+                                                            </Badge>
+                                                        )}
                                                         <div className="text-xs text-gray-500">
                                                             {estoqueTotal} un total
                                                         </div>
                                                         <div className="text-sm font-semibold text-green-600">
                                                             {precoMin === precoMax ?
                                                                 `R$ ${precoMin.toFixed(2)}` :
-                                                                `R$ ${precoMin.toFixed(2)} - ${precoMax.toFixed(2)}`
+                                                                `R$ ${precoMin.toFixed(2)} - R$ ${precoMax.toFixed(2)}`
                                                             }
                                                         </div>
                                                     </div>
                                                 </div>
                                             </div>
 
-                                            {/* Tabela de variações */}
-                                            <CardContent className="p-0">
-                                                <div className="max-h-[180px] overflow-y-auto">
-                                                    <table className="w-full text-xs">
-                                                        <thead className="bg-gray-100 sticky top-0">
-                                                            <tr>
-                                                                <th className="text-left px-3 py-2 font-medium">Cor</th>
-                                                                <th className="text-left px-3 py-2 font-medium">Dimensões</th>
-                                                                {showFinancials && <th className="text-right px-3 py-2 font-medium">Custo</th>}
-                                                                <th className="text-right px-3 py-2 font-medium">Venda</th>
-                                                                <th className="text-right px-3 py-2 font-medium">Est.</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {product.variacoes.map((v, i) => {
-                                                                const estVar = (v.estoque_cd || 0) + (v.estoque_mostruario_mega_store || 0) +
-                                                                    (v.estoque_mostruario_centro || 0) + (v.estoque_mostruario_ponte_branca || 0) +
-                                                                    (v.estoque_mostruario_futura || 0);
-                                                                const dims = [v.largura, v.altura, v.profundidade].filter(d => d).join('×');
+                                            {/* Tabela de variações (apenas se houver mais de uma ou se for legível) */}
+                                            {product.variacoes.length > 0 && (
+                                                <CardContent className="p-0">
+                                                    <div className="max-h-[180px] overflow-y-auto">
+                                                        <table className="w-full text-xs">
+                                                            <thead className="bg-gray-100 sticky top-0">
+                                                                <tr>
+                                                                    <th className="text-left px-3 py-2 font-medium">Cor</th>
+                                                                    <th className="text-left px-3 py-2 font-medium">Dimensões</th>
+                                                                    {showFinancials && <th className="text-right px-3 py-2 font-medium">Custo</th>}
+                                                                    <th className="text-right px-3 py-2 font-medium">Venda</th>
+                                                                    <th className="text-right px-3 py-2 font-medium">Est.</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {product.variacoes.map((v, i) => {
+                                                                    let estVar = 0;
+                                                                    lojas.forEach(loja => {
+                                                                        const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
+                                                                        const fieldName = `estoque_${codigoNorm}`;
+                                                                        estVar += (parseInt(v[fieldName]) || 0);
+                                                                    });
 
-                                                                return (
-                                                                    <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                                                        <td className="px-3 py-2">
-                                                                            <div className="flex items-center gap-2">
-                                                                                <div
-                                                                                    className="w-4 h-4 rounded border shadow-sm flex-shrink-0"
-                                                                                    style={{ backgroundColor: v.cor_hex || '#ccc' }}
-                                                                                />
-                                                                                <span className="truncate max-w-[100px]" title={v.cor || 'Sem cor'}>
-                                                                                    {v.cor || 'Sem cor'}
-                                                                                </span>
-                                                                                {v.tamanho && (
-                                                                                    <span className="text-gray-400">({v.tamanho})</span>
-                                                                                )}
-                                                                            </div>
-                                                                        </td>
-                                                                        <td className="px-3 py-2 text-gray-500">
-                                                                            {dims ? `${dims} cm` : '-'}
-                                                                        </td>
-                                                                        {showFinancials && (
-                                                                            <td className="px-3 py-2 text-right text-gray-500">
-                                                                                {v.preco_custo > 0 ? `R$ ${v.preco_custo.toFixed(2)}` : '-'}
+                                                                    const dims = [v.largura, v.altura, v.profundidade].filter(d => d).join('×');
+
+                                                                    return (
+                                                                        <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                                            <td className="px-3 py-2">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <div
+                                                                                        className="w-4 h-4 rounded border shadow-sm flex-shrink-0"
+                                                                                        style={{ backgroundColor: v.cor_hex || '#ccc' }}
+                                                                                    />
+                                                                                    <span className="truncate max-w-[100px]" title={v.cor || 'Sem cor'}>
+                                                                                        {v.cor || 'Sem cor'}
+                                                                                    </span>
+                                                                                    {v.tamanho && (
+                                                                                        <span className="text-gray-400">({v.tamanho})</span>
+                                                                                    )}
+                                                                                </div>
                                                                             </td>
-                                                                        )}
-                                                                        <td className="px-3 py-2 text-right font-medium text-green-600">
-                                                                            R$ {(v.preco_venda || 0).toFixed(2)}
-                                                                        </td>
-                                                                        <td className="px-3 py-2 text-right">
-                                                                            <Badge
-                                                                                variant={estVar > 0 ? 'secondary' : 'outline'}
-                                                                                className="text-xs px-1.5"
-                                                                            >
-                                                                                {estVar}
-                                                                            </Badge>
-                                                                        </td>
-                                                                    </tr>
-                                                                );
-                                                            })}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </CardContent>
+                                                                            <td className="px-3 py-2 text-gray-500">
+                                                                                {dims ? `${dims} cm` : '-'}
+                                                                            </td>
+                                                                            {showFinancials && (
+                                                                                <td className="px-3 py-2 text-right text-gray-500">
+                                                                                    {v.preco_custo > 0 ? `R$ ${v.preco_custo.toFixed(2)}` : '-'}
+                                                                                </td>
+                                                                            )}
+                                                                            <td className="px-3 py-2 text-right font-medium text-green-600">
+                                                                                R$ {(v.preco_venda || 0).toFixed(2)}
+                                                                            </td>
+                                                                            <td className="px-3 py-2 text-right">
+                                                                                <Badge
+                                                                                    variant={estVar > 0 ? 'secondary' : 'outline'}
+                                                                                    className="text-xs px-1.5"
+                                                                                >
+                                                                                    {estVar}
+                                                                                </Badge>
+                                                                            </td>
+                                                                        </tr>
+                                                                    );
+                                                                })}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </CardContent>
+                                            )}
                                         </Card>
                                     );
                                 })}
+                                {groupedProducts.length > 200 && (
+                                    <div className="text-center py-6 border-2 border-dashed rounded-lg bg-gray-50">
+                                        <p className="text-gray-500">
+                                            Mostrando visualização dos primeiros <span className="font-semibold text-gray-700">200</span> produtos para otimizar o desempenho.
+                                        </p>
+                                        <p className="font-medium text-green-700 mt-1">
+                                            Fique tranquilo! Todos os {groupedProducts.length} produtos da planilha serão importados ao continuar.
+                                        </p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
@@ -990,8 +1165,37 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                 )}
                             </div>
 
-                            <Progress value={progress} className="h-2" />
-                            <p className="text-center text-sm text-gray-500">{progress}%</p>
+                            <div className="space-y-2">
+                                <Progress value={progress} className="h-2" />
+                                <div className="flex justify-between items-center text-sm text-gray-500">
+                                    <span>Processando itens...</span>
+                                    <span className="font-semibold">{progress}%</span>
+                                </div>
+                            </div>
+
+                            {/* Visualização de Grade: Itens sendo processados agora */}
+                            {importing && currentlyProcessing.length > 0 && (
+                                <div className="mt-8 pt-6 border-t border-gray-100">
+                                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3 text-center">Processando Itens (50x)</p>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        {currentlyProcessing.map((itemName, idx) => (
+                                            <div
+
+
+                                                key={`${itemName}-${idx}`}
+                                                className="bg-gray-50 rounded-md border border-gray-100 p-3 flex items-center gap-3 animate-pulse shadow-sm"
+                                            >
+                                                <div className="w-8 h-8 rounded bg-gray-200 flex items-center justify-center flex-shrink-0">
+                                                    <Loader2 className="w-4 h-4 text-gray-400 animate-spin" />
+                                                </div>
+                                                <p className="text-sm font-medium text-gray-700 truncate" title={itemName}>
+                                                    {itemName}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

@@ -76,7 +76,7 @@ export default function ColaboradorDetalhesModal({ colaborador, onClose, onEdit 
                                     {colaborador.nome_completo}
                                 </h2>
                                 <p className="text-sm text-gray-500">
-                                    {colaborador.cargo || 'Sem cargo'} • {colaborador.setor || 'Sem setor'}
+                                    {colaborador.cargo || 'Sem cargo'}
                                 </p>
                             </div>
                         </DialogTitle>
@@ -152,7 +152,7 @@ export default function ColaboradorDetalhesModal({ colaborador, onClose, onEdit 
                         </h3>
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 rounded-xl border" style={{ borderColor: '#E5E0D8' }}>
                             <InfoItem icon={Building} label="Cargo" value={colaborador.cargo} />
-                            <InfoItem icon={Building} label="Setor" value={colaborador.setor} />
+
                             <InfoItem icon={FileText} label="Tipo de Contrato" value={colaborador.tipo_contrato} />
                             <InfoItem icon={Calendar} label="Data de Admissão" value={colaborador.data_admissao ? new Date(colaborador.data_admissao).toLocaleDateString('pt-BR') : null} />
                             <InfoItem icon={DollarSign} label="Salário Base" value={colaborador.salario_base ? `R$ ${Number(colaborador.salario_base).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />

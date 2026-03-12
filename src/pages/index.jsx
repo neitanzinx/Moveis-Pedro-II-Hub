@@ -9,7 +9,7 @@ const Dashboard = lazy(() => import("./Dashboard.jsx"));
 const Produtos = lazy(() => import("./Produtos.jsx"));
 const Clientes = lazy(() => import("./Clientes.jsx"));
 const Vendas = lazy(() => import("./Vendas.jsx"));
-const Entregas = lazy(() => import("./Entregas.jsx"));
+
 const Orcamentos = lazy(() => import("./Orcamentos.jsx"));
 const AssistenciaTecnica = lazy(() => import("./AssistenciaTecnica.jsx"));
 const Configuracoes = lazy(() => import("./Configuracoes.jsx"));
@@ -29,7 +29,6 @@ const Estoque = lazy(() => import("./Estoque.jsx"));
 const ModoReuniao = lazy(() => import("./ModoReuniao.jsx"));
 const PDV = lazy(() => import("./PDV.jsx"));
 const CatalogoWhatsApp = lazy(() => import("./CatalogoWhatsApp.jsx"));
-const NotasFiscais = lazy(() => import("./NotasFiscais.jsx"));
 const LogisticaSemanal = lazy(() => import("./LogisticaSemanal.jsx"));
 const Entregador = lazy(() => import("./Entregador.jsx"));
 const Marketing = lazy(() => import("./Marketing.jsx"));
@@ -43,8 +42,6 @@ const DashboardGerente = lazy(() => import("./DashboardGerente.jsx"));
 const AvaliacaoNPS = lazy(() => import("./AvaliacaoNPS.jsx"));
 const Mostruario = lazy(() => import("./Mostruario.jsx"));
 const EntradaEstoque = lazy(() => import("./EntradaEstoque.jsx"));
-const EstoqueBipagem = lazy(() => import("./EstoqueBipagem.jsx"));
-const SaneamentoEstoque = lazy(() => import("./SaneamentoEstoque.jsx"));
 
 // ============================================================================
 // CARREGAMENTO SÍNCRONO - Páginas Públicas (críticas para SEO e primeira impressão)
@@ -75,14 +72,14 @@ import { useAuth } from "@/hooks/useAuth";
 
 
 const PAGES = {
-    Dashboard, Produtos, Clientes, Vendas, Entregas, Orcamentos, AssistenciaTecnica,
+    Dashboard, Produtos, Clientes, Vendas, Orcamentos, AssistenciaTecnica,
     Configuracoes, SelecaoVendedor, RelatorioComissoes,
     BoasVindas, GerenciamentoUsuarios, Financeiro, Montagem, Fornecedores,
     RecursosHumanos, RelatoriosAvancados, TransferenciaEstoque, Inventario,
-    AlertasRecompra, Estoque, ModoReuniao, PDV, CatalogoWhatsApp, NotasFiscais,
+    AlertasRecompra, Estoque, ModoReuniao, PDV, CatalogoWhatsApp,
     LogisticaSemanal, Entregador, Marketing, MontadorExterno,
     ExportacaoContabil, SetorCompras, DashboardBI, DashboardGerente, Mostruario,
-    EntradaEstoque, SaneamentoEstoque, EstoqueBipagem
+    EntradaEstoque
 };
 
 function _getCurrentPage(url) {
@@ -108,7 +105,10 @@ function PagesContent() {
     const { user, loading } = useAuth();
     const currentPage = _getCurrentPage(location.pathname);
 
-    if (loading) {
+    // Mover lógica de loading para o final do "processamento de hooks"
+    // ou garantir que as rotas públicas que não usam hooks extras venham depois do loading se necessário.
+
+    if (loading && !location.pathname.startsWith('/avaliacao/') && location.pathname !== '/' && location.pathname !== '/home' && location.pathname !== '/vip') {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-800"></div>
@@ -154,8 +154,9 @@ function PagesContent() {
     }
 
     // Rota de rastreio pública
-    if (location.pathname.startsWith('/rastreio/')) {
-        return <RastreioPublico />;
+    if (location.pathname.startsWith('/rastreio')) {
+        const id = location.pathname.split('/').pop();
+        return <RastreioPublico idProp={id !== 'rastreio' ? id : null} />;
     }
 
     // ===== LOGIN DE FUNCIONÁRIOS =====
@@ -255,7 +256,7 @@ function PagesContent() {
 
                         {/* Operacional e Logística */}
                         <Route path="/admin/Estoque" element={<Estoque />} />
-                        <Route path="/admin/Entregas" element={<Entregas />} />
+
                         <Route path="/admin/LogisticaSemanal" element={<LogisticaSemanal />} />
                         <Route path="/admin/Montagem" element={<Montagem />} />
                         <Route path="/admin/AssistenciaTecnica" element={<AssistenciaTecnica />} />
@@ -268,18 +269,16 @@ function PagesContent() {
                         <Route path="/admin/Produtos" element={<Produtos />} />
                         <Route path="/admin/Fornecedores" element={<Fornecedores />} />
                         <Route path="/admin/Entrada" element={<EntradaEstoque />} />
-                        <Route path="/admin/EstoqueBipagem" element={<EstoqueBipagem />} />
-                        <Route path="/admin/Saneamento" element={<SaneamentoEstoque />} />
 
                         {/* Gestão e Financeiro */}
                         <Route path="/admin/Financeiro" element={<Financeiro />} />
-                        <Route path="/admin/NotasFiscais" element={<NotasFiscais />} />
                         <Route path="/admin/RelatorioComissoes" element={<RelatorioComissoes />} />
                         <Route path="/admin/RelatoriosAvancados" element={<RelatoriosAvancados />} />
                         <Route path="/admin/RecursosHumanos" element={<RecursosHumanos />} />
                         <Route path="/admin/Marketing" element={<Marketing />} />
                         <Route path="/admin/ExportacaoContabil" element={<ExportacaoContabil />} />
                         <Route path="/admin/SetorCompras" element={<SetorCompras />} />
+                        <Route path="/admin/setorcompras" element={<SetorCompras />} />
                         <Route path="/admin/DashboardBI" element={<DashboardBI />} />
                         <Route path="/admin/DashboardGerente" element={<DashboardGerente />} />
 

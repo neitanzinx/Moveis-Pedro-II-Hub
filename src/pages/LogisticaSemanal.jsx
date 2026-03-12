@@ -74,7 +74,7 @@ export default function LogisticaSemanal() {
   const colunasSemana = [];
   const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 7; i++) {
     const data = new Date();
     data.setDate(hoje.getDate() + i);
     const dataStr = data.toISOString().split('T')[0];

@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
     FileText, Send, CheckCircle, PackageCheck, Truck, AlertTriangle,
-    Search, Eye, Edit, Trash2, Tag, TrendingDown, Building2
+    Search, Eye, Edit, Trash2, Tag, TrendingDown, Building2, Clock
 } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 
@@ -22,6 +22,7 @@ export default function PedidosList({ onEdit, onView, onDelete, onReceber }) {
         'Rascunho': { cor: 'bg-gray-100 text-gray-800', icon: FileText },
         'Enviado': { cor: 'bg-blue-100 text-blue-800', icon: Send },
         'Confirmado': { cor: 'bg-purple-100 text-purple-800', icon: CheckCircle },
+        'Em Conferência': { cor: 'bg-blue-600 text-white shadow-sm', icon: Clock },
         'Parcialmente Recebido': { cor: 'bg-orange-100 text-orange-800', icon: PackageCheck },
         'Recebido': { cor: 'bg-green-100 text-green-800', icon: Truck },
         'Cancelado': { cor: 'bg-red-100 text-red-800', icon: AlertTriangle }
@@ -298,7 +299,7 @@ export default function PedidosList({ onEdit, onView, onDelete, onReceber }) {
                                                             </Button>
                                                         </>
                                                     )}
-                                                    {['Enviado', 'Confirmado', 'Parcialmente Recebido'].includes(pedido.status) && (
+                                                    {['Confirmado', 'Em Conferência', 'Parcialmente Recebido'].includes(pedido.status) && (
                                                         <Button
                                                             variant="outline"
                                                             size="sm"

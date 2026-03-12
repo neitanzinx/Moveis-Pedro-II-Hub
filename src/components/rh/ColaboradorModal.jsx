@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, createElement } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { base44, supabase } from "@/api/base44Client";
+import { CARGOS, LOJAS, getCargoConfig, getCargoPrefix } from "@/config/cargos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,36 +23,24 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
     User, Briefcase, MapPin, CreditCard, Link, Save, Loader2, Gift, DollarSign, Calendar,
-    KeyRound, CheckCircle2, AlertCircle, Copy, Eye, EyeOff, RotateCcw, UserX, UserCheck, Trash2
+    KeyRound, CheckCircle2, AlertCircle, Copy, Eye, EyeOff, RotateCcw, UserX, UserCheck, Trash2,
+    Shield, Moon, AlertTriangle, Users
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { getZapApiUrl } from "@/utils/zapApiUrl";
 import { formatarCPF, formatarTelefone, formatarCEP } from "@/utils/formatters";
+import { gerarResumoEstimado, INSALUBRIDADE_GRAUS } from "@/utils/calculosTrabalhistas";
 
 
 
 const STATUS_OPTIONS = ["Ativo", "Férias", "Licença", "Afastado", "Desligado"];
-const SETOR_OPTIONS = ["Vendas", "Logística", "Montagem", "Administrativo", "Financeiro", "RH", "Estoque", "Atendimento"];
 const CONTRATO_OPTIONS = ["CLT", "PJ", "Estagiário", "Temporário"];
 const ESTADOS = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"];
 const TIPO_PAGAMENTO = ["Mensal", "Quinzenal", "Semanal"];
 const DIAS_PAGAMENTO = Array.from({ length: 31 }, (_, i) => i + 1);
 
-const CARGO_OPTIONS = [
-    "Administrador",
-    "Gerente",
-    "Vendedor",
-    "Estoque",
-    "Logística",
-    "Montador",
-    "Montador Externo",
-    "Entregador",
-    "Financeiro",
-    "RH",
-    "Agendamento",
-    "Atendimento"
-];
+// Sector field has been removed, permissions and views are now driven purely by Cargo.
 
 // Utility function to format currency
 const formatCurrency = (value) => {
@@ -61,7 +50,7 @@ const formatCurrency = (value) => {
 
 export default function ColaboradorModal({ colaborador, usuarios = [], onClose, onSuccess, initialTab = "pessoal" }) {
     const queryClient = useQueryClient();
-    const isEditing = !!colaborador;
+    const isEditing = !!colaborador && !colaborador.isAcessoRapido;
 
     const [formData, setFormData] = useState({
         // Dados Pessoais
@@ -73,8 +62,8 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
         email: colaborador?.email || "",
         // Dados Profissionais
         cargo: colaborador?.cargo || "",
+        loja: colaborador?.loja || "",
         pin_montagem: colaborador?.pin_montagem || "",
-        setor: colaborador?.setor || "",
         status: colaborador?.status || "Ativo",
         tipo_contrato: colaborador?.tipo_contrato || "CLT",
         data_admissao: colaborador?.data_admissao || "",
@@ -109,35 +98,48 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
         // Sistema
         user_id: colaborador?.user_id || "",
         observacoes: colaborador?.observacoes || "",
+        // Adicionais CLT
+        adicional_noturno: colaborador?.adicional_noturno || false,
+        insalubridade_grau: colaborador?.insalubridade_grau || "",
+        periculosidade: colaborador?.periculosidade || false,
+        numero_dependentes: colaborador?.numero_dependentes || 0,
     });
 
     const [saving, setSaving] = useState(false);
 
-    // Calculate totals for preview
+    // Calculate totals for preview using the centralized CLT engine
     const totals = useMemo(() => {
-        const salarioBase = Number(formData.salario_base) || 0;
-        const valeTransporte = Number(formData.vale_transporte) || 0;
-        const valeAlimentacao = Number(formData.vale_alimentacao) || 0;
-        const valeRefeicao = Number(formData.vale_refeicao) || 0;
-        const planoSaude = Number(formData.plano_saude) || 0;
-        const planoOdontologico = Number(formData.plano_odontologico) || 0;
-        const bonusMensal = Number(formData.bonus_mensal) || 0;
-        const outrosBeneficios = Number(formData.outros_beneficios) || 0;
-
-        const totalBeneficios = valeTransporte + valeAlimentacao + valeRefeicao +
-            planoSaude + planoOdontologico + bonusMensal + outrosBeneficios;
-
-        return {
-            salarioBase,
-            totalBeneficios,
-            totalBruto: salarioBase + totalBeneficios
-        };
+        return gerarResumoEstimado(formData);
     }, [formData]);
 
     const createMutation = useMutation({
-        mutationFn: (data) => base44.entities.Colaborador.create(data),
+        mutationFn: async (data) => {
+            const colaboradorData = { ...data };
+            delete colaboradorData.loja;
+
+            // 1. Create Colaborador record
+            const createdColab = await base44.entities.Colaborador.create(colaboradorData);
+
+            // 2. Sync with public_users if linked
+            if (data.user_id && data.cargo) {
+                try {
+                    const cargoConfig = getCargoConfig(data.cargo);
+                    await base44.entities.User.update(data.user_id, {
+                        cargo: data.cargo,
+                        full_name: data.nome_completo,
+                        loja: cargoConfig?.requiresStore ? data.loja : null,
+                        is_vendedor: data.cargo === 'Vendedor'
+                    });
+                } catch (syncError) {
+                    console.error("Erro ao sincronizar com public_users:", syncError);
+                }
+            }
+
+            return createdColab;
+        },
         onSuccess: (createdData) => {
             queryClient.invalidateQueries(['colaboradores']);
+            queryClient.invalidateQueries(['users']);
             toast.success("Colaborador cadastrado com sucesso!");
             // Call onSuccess with the created data to show the summary modal
             if (onSuccess) {
@@ -152,9 +154,31 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
     });
 
     const updateMutation = useMutation({
-        mutationFn: ({ id, data }) => base44.entities.Colaborador.update(id, data),
+        mutationFn: async ({ id, data }) => {
+            const colaboradorData = { ...data };
+            delete colaboradorData.loja;
+            // 1. Update Colaborador record
+            const updatedColab = await base44.entities.Colaborador.update(id, colaboradorData);
+
+            // 2. Sync with public_users if linked
+            if (data.user_id && data.cargo) {
+                try {
+                    const cargoConfig = getCargoConfig(data.cargo);
+                    await base44.entities.User.update(data.user_id, {
+                        cargo: data.cargo,
+                        full_name: data.nome_completo,
+                        loja: cargoConfig?.requiresStore ? data.loja : null,
+                        is_vendedor: data.cargo === 'Vendedor'
+                    });
+                } catch (syncError) {
+                    console.error("Erro ao sincronizar com public_users:", syncError);
+                }
+            }
+            return updatedColab;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries(['colaboradores']);
+            queryClient.invalidateQueries(['users']); // Invalidate users too
             toast.success("Colaborador atualizado com sucesso!");
             onClose();
         },
@@ -228,13 +252,7 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
             if (!authUser?.user?.id) throw new Error("ID de usuário não retornado.");
 
             // 3. Map Sector
-            const setorMap = {
-                'Administrador': 'AD', 'Gerente Geral': 'GG', 'Gerente': 'GE',
-                'Vendedor': 'VE', 'Estoque': 'ES', 'Financeiro': 'FI',
-                'Logística': 'LO', 'Entregador': 'EN', 'Montador': 'LO',
-                'Montador Externo': 'MO', 'RH': 'RH', 'Agendamento': 'AG'
-            };
-            const setor = setorMap[formData.cargo] || 'AD';
+            const setor = getCargoPrefix(formData.cargo);
 
             // 4. Create Credentials (Backend)
             const token = localStorage.getItem('employee_token');
@@ -375,6 +393,11 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
             outros_beneficios: formData.outros_beneficios ? Number(formData.outros_beneficios) : 0,
             dia_pagamento: formData.dia_pagamento ? Number(formData.dia_pagamento) : 5,
             user_id: formData.user_id || null,
+            // CLT toggles
+            adicional_noturno: formData.adicional_noturno || false,
+            insalubridade_grau: formData.insalubridade_grau || null,
+            periculosidade: formData.periculosidade || false,
+            numero_dependentes: Number(formData.numero_dependentes) || 0,
         };
 
         try {
@@ -494,30 +517,45 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <Label htmlFor="cargo">Cargo</Label>
-                                <Select value={formData.cargo} onValueChange={(v) => handleChange("cargo", v)}>
+                                <Select value={formData.cargo} onValueChange={(v) => {
+                                    handleChange("cargo", v);
+                                    // Clear loja if new cargo doesn't require store
+                                    const config = getCargoConfig(v);
+                                    if (!config?.requiresStore) {
+                                        handleChange("loja", "");
+                                    }
+                                }}>
                                     <SelectTrigger>
                                         <SelectValue placeholder="Selecione o cargo" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {CARGO_OPTIONS.map(c => (
-                                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                                        {CARGOS.filter(c => c.value !== 'Pendente Definição').map(c => (
+                                            <SelectItem key={c.value} value={c.value}>
+                                                <div className="flex items-center gap-2">
+                                                    {createElement(c.icon, { className: "w-4 h-4", style: { color: c.color } })}
+                                                    {c.label}
+                                                </div>
+                                            </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <div>
-                                <Label htmlFor="setor">Setor</Label>
-                                <Select value={formData.setor} onValueChange={(v) => handleChange("setor", v)}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Selecione o setor" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {SETOR_OPTIONS.map(s => (
-                                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
+
+                            {getCargoConfig(formData.cargo)?.requiresStore && (
+                                <div>
+                                    <Label htmlFor="loja">Loja</Label>
+                                    <Select value={formData.loja} onValueChange={(v) => handleChange("loja", v)}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Selecione a loja" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {LOJAS.map(l => (
+                                                <SelectItem key={l} value={l}>{l}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
                             <div>
                                 <Label htmlFor="status">Status</Label>
                                 <Select value={formData.status} onValueChange={(v) => handleChange("status", v)}>
@@ -544,7 +582,7 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                                     </SelectContent>
                                 </Select>
                             </div>
-                            {formData.cargo === "Montador" && (
+                            {(formData.cargo === "Montador" || formData.cargo === "Logística" || formData.cargo === "Estoque") && (
                                 <div>
                                     <Label htmlFor="pin_montagem">Senha de Montagem (PIN)</Label>
                                     <Input
@@ -723,6 +761,91 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                             </CardContent>
                         </Card>
 
+                        {/* Adicionais CLT */}
+                        <Card className="border-0 shadow-sm bg-orange-50">
+                            <CardContent className="pt-4">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Shield className="w-5 h-5 text-orange-600" />
+                                    <h3 className="font-semibold text-orange-800">Adicionais CLT</h3>
+                                    <span className="text-xs text-orange-500 ml-auto">Ative conforme aplicável</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="flex items-center justify-between p-3 bg-white rounded-lg border">
+                                        <div className="flex items-center gap-2">
+                                            <Moon className="w-4 h-4 text-indigo-500" />
+                                            <div>
+                                                <Label className="text-sm font-medium">Adicional Noturno</Label>
+                                                <p className="text-xs text-gray-500">+20% sobre salário base</p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleChange("adicional_noturno", !formData.adicional_noturno)}
+                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${formData.adicional_noturno ? 'bg-indigo-500' : 'bg-gray-300'
+                                                }`}
+                                        >
+                                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${formData.adicional_noturno ? 'translate-x-6' : 'translate-x-1'
+                                                }`} />
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center justify-between p-3 bg-white rounded-lg border">
+                                        <div className="flex items-center gap-2">
+                                            <AlertTriangle className="w-4 h-4 text-red-500" />
+                                            <div>
+                                                <Label className="text-sm font-medium">Periculosidade</Label>
+                                                <p className="text-xs text-gray-500">+30% sobre salário base</p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleChange("periculosidade", !formData.periculosidade)}
+                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${formData.periculosidade ? 'bg-red-500' : 'bg-gray-300'
+                                                }`}
+                                        >
+                                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${formData.periculosidade ? 'translate-x-6' : 'translate-x-1'
+                                                }`} />
+                                        </button>
+                                    </div>
+                                    <div className="p-3 bg-white rounded-lg border">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Shield className="w-4 h-4 text-amber-500" />
+                                            <Label className="text-sm font-medium">Insalubridade</Label>
+                                        </div>
+                                        <Select
+                                            value={formData.insalubridade_grau || "nenhuma"}
+                                            onValueChange={(v) => handleChange("insalubridade_grau", v === "nenhuma" ? "" : v)}
+                                        >
+                                            <SelectTrigger className="h-8">
+                                                <SelectValue placeholder="Nenhuma" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="nenhuma">Nenhuma</SelectItem>
+                                                <SelectItem value="minimo">Mínimo (10% do S.M.)</SelectItem>
+                                                <SelectItem value="medio">Médio (20% do S.M.)</SelectItem>
+                                                <SelectItem value="maximo">Máximo (40% do S.M.)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="p-3 bg-white rounded-lg border">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Users className="w-4 h-4 text-green-600" />
+                                            <Label className="text-sm font-medium">Nº Dependentes</Label>
+                                        </div>
+                                        <Input
+                                            type="number"
+                                            min="0"
+                                            max="20"
+                                            value={formData.numero_dependentes}
+                                            onChange={(e) => handleChange("numero_dependentes", Number(e.target.value) || 0)}
+                                            className="h-8"
+                                            placeholder="0"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Para IRRF e Sal. Família</p>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+
                         {/* Configuração de Pagamento */}
                         <Card className="border-0 shadow-sm bg-amber-50">
                             <CardContent className="pt-4">
@@ -767,22 +890,97 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                             </CardContent>
                         </Card>
 
-                        {/* Resumo */}
+                        {/* Resumo Mensal Expandido */}
                         <Card className="border-2" style={{ borderColor: '#07593f' }}>
                             <CardContent className="pt-4">
-                                <h3 className="font-semibold mb-3" style={{ color: '#07593f' }}>Resumo Mensal</h3>
-                                <div className="space-y-2">
+                                <h3 className="font-semibold mb-3" style={{ color: '#07593f' }}>Resumo Mensal (CLT)</h3>
+                                <div className="space-y-1.5">
+                                    {/* Base */}
                                     <div className="flex justify-between">
                                         <span className="text-gray-600">Salário Base</span>
-                                        <span className="font-medium">{formatCurrency(totals.salarioBase)}</span>
+                                        <span className="font-medium">{formatCurrency(totals.salario_base)}</span>
                                     </div>
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-600">Total Benefícios</span>
-                                        <span className="font-medium text-blue-600">{formatCurrency(totals.totalBeneficios)}</span>
+
+                                    {/* Adicionais */}
+                                    {totals.adicional_noturno > 0 && (
+                                        <div className="flex justify-between text-indigo-600">
+                                            <span>(+) Adic. Noturno 20%</span>
+                                            <span>+ {formatCurrency(totals.adicional_noturno)}</span>
+                                        </div>
+                                    )}
+                                    {totals.insalubridade > 0 && (
+                                        <div className="flex justify-between text-amber-600">
+                                            <span>(+) Insalubridade</span>
+                                            <span>+ {formatCurrency(totals.insalubridade)}</span>
+                                        </div>
+                                    )}
+                                    {totals.periculosidade > 0 && (
+                                        <div className="flex justify-between text-red-600">
+                                            <span>(+) Periculosidade 30%</span>
+                                            <span>+ {formatCurrency(totals.periculosidade)}</span>
+                                        </div>
+                                    )}
+
+                                    {/* Bruto */}
+                                    <div className="border-t pt-1.5 flex justify-between font-semibold">
+                                        <span>Salário Bruto</span>
+                                        <span>{formatCurrency(totals.salario_bruto)}</span>
                                     </div>
+
+                                    {/* Benefícios empresa */}
+                                    {totals.beneficios_empresa > 0 && (
+                                        <div className="flex justify-between text-blue-600">
+                                            <span>(+) Benefícios Empresa</span>
+                                            <span>+ {formatCurrency(totals.beneficios_empresa)}</span>
+                                        </div>
+                                    )}
+
+                                    {/* Descontos */}
+                                    <div className="border-t pt-1.5">
+                                        <p className="text-xs text-gray-500 mb-1">Descontos obrigatórios:</p>
+                                    </div>
+                                    <div className="flex justify-between text-red-600">
+                                        <span>(-) INSS ({totals.inss_faixa})</span>
+                                        <span>- {formatCurrency(totals.inss)}</span>
+                                    </div>
+                                    {totals.irrf > 0 && (
+                                        <div className="flex justify-between text-red-600">
+                                            <span>(-) IRRF ({totals.irrf_faixa})</span>
+                                            <span>- {formatCurrency(totals.irrf)}</span>
+                                        </div>
+                                    )}
+                                    {totals.vale_transporte > 0 && (
+                                        <div className="flex justify-between text-red-600">
+                                            <span>(-) Desc. VT (6% CLT)</span>
+                                            <span>- {formatCurrency(totals.vale_transporte)}</span>
+                                        </div>
+                                    )}
+
+                                    {/* Benefícios trabalhador */}
+                                    {totals.salario_familia > 0 && (
+                                        <div className="flex justify-between text-green-600">
+                                            <span>(+) Salário Família</span>
+                                            <span>+ {formatCurrency(totals.salario_familia)}</span>
+                                        </div>
+                                    )}
+
+                                    {/* Líquido */}
                                     <div className="border-t pt-2 flex justify-between">
-                                        <span className="font-semibold" style={{ color: '#07593f' }}>Total Bruto</span>
-                                        <span className="font-bold text-lg" style={{ color: '#07593f' }}>{formatCurrency(totals.totalBruto)}</span>
+                                        <span className="font-bold text-lg" style={{ color: '#07593f' }}>Líquido Estimado</span>
+                                        <span className="font-bold text-lg" style={{ color: '#07593f' }}>{formatCurrency(totals.salario_liquido)}</span>
+                                    </div>
+
+                                    {/* FGTS e custo empresa */}
+                                    <div className="border-t pt-1.5 mt-2">
+                                        <p className="text-xs text-gray-500 mb-1">Encargos empresa (não desconta do funcionário):</p>
+                                    </div>
+                                    <div className="flex justify-between text-orange-600">
+                                        <span>FGTS (8%)</span>
+                                        <span>{formatCurrency(totals.fgts)}</span>
+                                    </div>
+                                    <div className="flex justify-between font-semibold text-gray-700">
+                                        <span>Custo Total Empresa</span>
+                                        <span>{formatCurrency(totals.custo_total_empresa)}</span>
                                     </div>
                                 </div>
                             </CardContent>

@@ -8,9 +8,20 @@ import { Badge } from "@/components/ui/badge";
 import {
     Users, Search, Plus, Edit, Trash2, Eye, UserCheck,
     UserX, Phone, Mail, Building, Calendar, DollarSign,
-
-    Filter, Download, MoreVertical, FileText, KeyRound
+    Filter, Download, MoreVertical, FileText, KeyRound,
+    RotateCcw, Copy, EyeOff, Loader2, CheckCircle2, AlertCircle, Shield
 } from "lucide-react";
+import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
+import { getZapApiUrl } from "@/utils/zapApiUrl";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import {
     Select,
     SelectContent,
@@ -35,6 +46,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import ColaboradorModal from "./ColaboradorModal";
 import ColaboradorDetalhesModal from "./ColaboradorDetalhesModal";
 
@@ -50,17 +62,7 @@ const STATUS_OPTIONS = [
     { value: "Desligado", label: "Desligado" },
 ];
 
-const SETOR_OPTIONS = [
-    { value: "todos", label: "Todos os Setores" },
-    { value: "Vendas", label: "Vendas" },
-    { value: "Logística", label: "Logística" },
-    { value: "Montagem", label: "Montagem" },
-    { value: "Administrativo", label: "Administrativo" },
-    { value: "Financeiro", label: "Financeiro" },
-    { value: "RH", label: "RH" },
-    { value: "Estoque", label: "Estoque" },
-    { value: "Atendimento", label: "Atendimento" },
-];
+
 
 const CONTRATO_OPTIONS = [
     { value: "todos", label: "Todos os Contratos" },
@@ -74,7 +76,7 @@ export default function ColaboradoresTab() {
     const queryClient = useQueryClient();
     const [busca, setBusca] = useState("");
     const [filtroStatus, setFiltroStatus] = useState("todos");
-    const [filtroSetor, setFiltroSetor] = useState("todos");
+
     const [filtroContrato, setFiltroContrato] = useState("todos");
     const [modalAberto, setModalAberto] = useState(false);
     const [modalDetalhes, setModalDetalhes] = useState(false);
@@ -82,6 +84,8 @@ export default function ColaboradoresTab() {
     const [colaboradorSelecionado, setColaboradorSelecionado] = useState(null);
     const [novoColaborador, setNovoColaborador] = useState(null);
     const [confirmDelete, setConfirmDelete] = useState(null);
+    const [passwordResetData, setPasswordResetData] = useState(null);
+    const [showPassword, setShowPassword] = useState(false);
 
     const [initialTab, setInitialTab] = useState("pessoal");
     const [modalUsuarioAberto, setModalUsuarioAberto] = useState(false);
@@ -116,16 +120,88 @@ export default function ColaboradoresTab() {
         },
     });
 
-    // Filter collaborators
-    const colaboradoresFiltrados = colaboradores.filter(c => {
+    const resetPasswordMutation = useMutation({
+        mutationFn: async (userId) => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) throw new Error("Sessão expirada. Faça login novamente.");
+
+            const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-actions`;
+            const response = await fetch(fnUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`,
+                    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
+                },
+                body: JSON.stringify({ action: 'reset_password', user_id: userId })
+            });
+
+            const data = await response.json();
+            if (data?.error) throw new Error(data.error);
+            return data;
+        },
+        onSuccess: (data) => {
+            setPasswordResetData({
+                password: data.senha_temporaria,
+                matricula: colaboradorSelecionado?.matricula || "N/A",
+                whatsappSent: data.whatsapp_enviado
+            });
+            toast.success(data.whatsapp_enviado
+                ? "Senha resetada e enviada via WhatsApp!"
+                : "Senha resetada! (WhatsApp não disponível)");
+        },
+        onError: (error) => {
+            toast.error("Erro ao resetar senha: " + error.message);
+        }
+    });
+
+    const handleResetPassword = (colaborador) => {
+        const userId = colaborador.user_id || (colaborador.isAcessoRapido ? colaborador.id : null);
+        if (!userId) {
+            toast.error("Este colaborador não possui acesso ao sistema vinculado.");
+            return;
+        }
+        setColaboradorSelecionado(colaborador);
+        if (confirm(`Deseja resetar a senha de ${colaborador.nome_completo || colaborador.full_name}?`)) {
+            resetPasswordMutation.mutate(userId);
+        }
+    };
+
+    const copyToClipboard = (text, type) => {
+        navigator.clipboard.writeText(text);
+        toast.success(`${type} copiado(a)!`);
+    };
+
+    // Filter and merge collaborators with Acesso Rápido users
+    const acesoRapidoUsers = usuarios
+        .filter(u => {
+            // Must have cargo and matricula starting with MP- (Employee indicator)
+            const isEmployee = u.cargo && u.matricula?.startsWith('MP-');
+            // Must not be already linked to a collaborator
+            const isNotLinked = !colaboradores.some(colab => colab.user_id === u.id);
+            return isEmployee && isNotLinked;
+        })
+        .map(u => ({
+            ...u,
+            id: u.id, // Keep the user id
+            nome_completo: u.full_name,
+            isAcessoRapido: true,
+            status: 'Acesso Rápido'
+        }));
+
+    const todosColaboradores = [...colaboradores, ...acesoRapidoUsers];
+
+    const colaboradoresFiltrados = todosColaboradores.filter(c => {
         const matchBusca = !busca ||
             c.nome_completo?.toLowerCase().includes(busca.toLowerCase()) ||
             c.cpf?.includes(busca) ||
-            c.email?.toLowerCase().includes(busca.toLowerCase());
+            c.email?.toLowerCase().includes(busca.toLowerCase()) ||
+            c.matricula?.toLowerCase().includes(busca.toLowerCase());
+
         const matchStatus = filtroStatus === "todos" || c.status === filtroStatus;
-        const matchSetor = filtroSetor === "todos" || c.setor === filtroSetor;
         const matchContrato = filtroContrato === "todos" || c.tipo_contrato === filtroContrato;
-        return matchBusca && matchStatus && matchSetor && matchContrato;
+
+        return matchBusca && matchStatus && matchContrato;
     });
 
     // Metrics
@@ -133,6 +209,7 @@ export default function ColaboradoresTab() {
     const totalFerias = colaboradores.filter(c => c.status === 'Férias').length;
     const totalLicenca = colaboradores.filter(c => c.status === 'Licença').length;
     const totalDesligados = colaboradores.filter(c => c.status === 'Desligado').length;
+    const totalAcessoRapido = acesoRapidoUsers.length;
 
     const abrirModal = (colaborador = null) => {
         setColaboradorSelecionado(colaborador);
@@ -169,15 +246,17 @@ export default function ColaboradoresTab() {
                 return { backgroundColor: '#FED7AA', color: '#C2410C' };
             case 'Desligado':
                 return { backgroundColor: '#FEE2E2', color: '#991B1B' };
+            case 'Acesso Rápido':
+                return { backgroundColor: '#E0F2FE', color: '#0369A1' };
             default:
                 return { backgroundColor: '#E5E7EB', color: '#374151' };
         }
     };
 
     const exportarCSV = () => {
-        let csv = "Nome,CPF,Cargo,Setor,Status,Tipo Contrato,Salário Base,Data Admissão,Telefone,Email\n";
+        let csv = "Nome,CPF,Cargo,Status,Tipo Contrato,Salário Base,Data Admissão,Telefone,Email\n";
         colaboradoresFiltrados.forEach(c => {
-            csv += `"${c.nome_completo || ''}","${c.cpf || ''}","${c.cargo || ''}","${c.setor || ''}","${c.status || ''}","${c.tipo_contrato || ''}","${c.salario_base || ''}","${c.data_admissao || ''}","${c.telefone || ''}","${c.email || ''}"\n`;
+            csv += `"${c.nome_completo || ''}","${c.cpf || ''}","${c.cargo || ''}","${c.status || ''}","${c.tipo_contrato || ''}","${c.salario_base || ''}","${c.data_admissao || ''}","${c.telefone || ''}","${c.email || ''}"\n`;
         });
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = window.URL.createObjectURL(blob);
@@ -237,13 +316,25 @@ export default function ColaboradoresTab() {
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-xs text-gray-500">Total Geral</p>
-                                <p className="text-2xl font-bold" style={{ color: '#07593f' }}>{colaboradores.length}</p>
+                                <p className="text-2xl font-bold" style={{ color: '#07593f' }}>{todosColaboradores.length}</p>
                             </div>
                             <Users className="w-8 h-8 opacity-50" style={{ color: '#07593f' }} />
                         </div>
                     </CardContent>
                 </Card>
             </div>
+
+            {/* Acesso Rápido Alert */}
+            {totalAcessoRapido > 0 && (
+                <Alert className="bg-blue-50 border-blue-200">
+                    <KeyRound className="h-4 w-4 text-blue-600" />
+                    <AlertDescription className="text-blue-800 flex items-center justify-between w-full">
+                        <span>
+                            Existem <strong>{totalAcessoRapido}</strong> usuários com acesso ao sistema aguardando cadastro completo no RH.
+                        </span>
+                    </AlertDescription>
+                </Alert>
+            )}
 
             {/* Filters and Actions */}
             <Card className="border-0 shadow-lg">
@@ -268,16 +359,7 @@ export default function ColaboradoresTab() {
                                 ))}
                             </SelectContent>
                         </Select>
-                        <Select value={filtroSetor} onValueChange={setFiltroSetor}>
-                            <SelectTrigger className="w-full md:w-40">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {SETOR_OPTIONS.map(opt => (
-                                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+
                         <Select value={filtroContrato} onValueChange={setFiltroContrato}>
                             <SelectTrigger className="w-full md:w-40">
                                 <SelectValue />
@@ -360,7 +442,7 @@ export default function ColaboradoresTab() {
                                             <div className="flex items-center gap-3 text-sm text-gray-500">
                                                 <span className="flex items-center gap-1">
                                                     <Building className="w-3 h-3" />
-                                                    {colaborador.cargo || 'Sem cargo'} • {colaborador.setor || 'Sem setor'}
+                                                    {colaborador.cargo || 'Sem cargo'}
                                                 </span>
                                                 {colaborador.tipo_contrato && (
                                                     <Badge variant="outline" className="text-xs">
@@ -410,22 +492,71 @@ export default function ColaboradoresTab() {
                                                 </Button>
                                             </DropdownMenuTrigger>
                                             <DropdownMenuContent align="end">
-                                                <DropdownMenuItem onClick={() => abrirDetalhes(colaborador)}>
+                                                <DropdownMenuItem onClick={() => abrirDetalhes(colaborador)} disabled={colaborador.isAcessoRapido}>
                                                     <Eye className="w-4 h-4 mr-2" />
                                                     Ver Detalhes
                                                 </DropdownMenuItem>
-                                                <DropdownMenuItem onClick={() => abrirResumo(colaborador)}>
+                                                <DropdownMenuItem onClick={() => abrirResumo(colaborador)} disabled={colaborador.isAcessoRapido}>
                                                     <FileText className="w-4 h-4 mr-2" />
                                                     Ver Resumo Contratação
                                                 </DropdownMenuItem>
                                                 <DropdownMenuSeparator />
-                                                <DropdownMenuItem onClick={() => abrirModal(colaborador)}>
+                                                {colaborador.isAcessoRapido && (
+                                                    <DropdownMenuItem onClick={() => abrirModal({
+                                                        nome_completo: colaborador.full_name,
+                                                        email: colaborador.email,
+                                                        cargo: colaborador.cargo,
+                                                        user_id: colaborador.id,
+                                                        isAcessoRapido: true
+                                                    })}>
+                                                        <UserCheck className="w-4 h-4 mr-2 text-blue-600" />
+                                                        Completar Cadastro RH
+                                                    </DropdownMenuItem>
+                                                )}
+                                                <DropdownMenuItem onClick={() => {
+                                                    if (colaborador.isAcessoRapido) {
+                                                        abrirModal({
+                                                            nome_completo: colaborador.full_name,
+                                                            email: colaborador.email,
+                                                            cargo: colaborador.cargo,
+                                                            user_id: colaborador.id,
+                                                            isAcessoRapido: true
+                                                        });
+                                                    } else {
+                                                        abrirModal(colaborador);
+                                                    }
+                                                }}>
                                                     <Edit className="w-4 h-4 mr-2" />
                                                     Editar
                                                 </DropdownMenuItem>
+                                                <DropdownMenuItem onClick={() => {
+                                                    if (colaborador.isAcessoRapido) {
+                                                        setColaboradorSelecionado({
+                                                            ...colaborador,
+                                                            nome_completo: colaborador.full_name,
+                                                            user_id: colaborador.id,
+                                                            isAcessoRapido: true
+                                                        });
+                                                    } else {
+                                                        setColaboradorSelecionado(colaborador);
+                                                    }
+                                                    setInitialTab("profissional");
+                                                    setModalAberto(true);
+                                                }}>
+                                                    <Shield className="w-4 h-4 mr-2" />
+                                                    Alterar Cargo
+                                                </DropdownMenuItem>
+                                                <DropdownMenuSeparator />
+                                                {(colaborador.user_id || colaborador.isAcessoRapido) && (
+                                                    <DropdownMenuItem onClick={() => handleResetPassword(colaborador)}>
+                                                        <RotateCcw className="w-4 h-4 mr-2" />
+                                                        Redefinir Senha
+                                                    </DropdownMenuItem>
+                                                )}
                                                 <DropdownMenuItem
                                                     onClick={() => setConfirmDelete(colaborador)}
                                                     className="text-red-600"
+                                                    disabled={colaborador.isAcessoRapido}
                                                 >
                                                     <Trash2 className="w-4 h-4 mr-2" />
                                                     Excluir
@@ -509,6 +640,84 @@ export default function ColaboradoresTab() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* Password Reset Result Modal */}
+            <Dialog open={!!passwordResetData} onOpenChange={() => {
+                setPasswordResetData(null);
+                setShowPassword(false);
+            }}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <RotateCcw className="w-5 h-5 text-orange-600" />
+                            Senha Redefinida
+                        </DialogTitle>
+                        <DialogDescription>
+                            Dados de acesso para <strong>{colaboradorSelecionado?.nome_completo}</strong>
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="py-4 space-y-4">
+                        {passwordResetData?.whatsappSent ? (
+                            <Alert className="bg-green-50 border-green-200">
+                                <CheckCircle2 className="w-4 h-4 text-green-600" />
+                                <AlertDescription className="text-green-800">
+                                    A nova senha foi enviada para o WhatsApp do colaborador!
+                                </AlertDescription>
+                            </Alert>
+                        ) : (
+                            <Alert className="bg-yellow-50 border-yellow-200">
+                                <AlertCircle className="w-4 h-4 text-yellow-600" />
+                                <AlertDescription className="text-yellow-800">
+                                    Não foi possível enviar via WhatsApp. Informe os dados manualmente:
+                                </AlertDescription>
+                            </Alert>
+                        )}
+
+                        <div className="space-y-3">
+                            <div className="p-3 bg-gray-50 rounded-lg">
+                                <p className="text-xs text-gray-500 mb-1">Matrícula</p>
+                                <div className="flex items-center justify-between">
+                                    <code className="text-lg font-mono font-bold">{passwordResetData?.matricula}</code>
+                                    <Button size="sm" variant="ghost" onClick={() => copyToClipboard(passwordResetData?.matricula, 'Matrícula')}>
+                                        <Copy className="w-4 h-4" />
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <div className="p-3 bg-gray-50 rounded-lg">
+                                <p className="text-xs text-gray-500 mb-1">Nova Senha Temporária</p>
+                                <div className="flex items-center justify-between">
+                                    <code className="text-lg font-mono font-bold">
+                                        {showPassword ? passwordResetData?.password : '••••••••'}
+                                    </code>
+                                    <div className="flex gap-1">
+                                        <Button size="sm" variant="ghost" onClick={() => setShowPassword(!showPassword)}>
+                                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                        </Button>
+                                        <Button size="sm" variant="ghost" onClick={() => copyToClipboard(passwordResetData?.password, 'Senha')}>
+                                            <Copy className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <Alert className="bg-blue-50 border-blue-200">
+                            <Shield className="w-4 h-4 text-blue-600" />
+                            <AlertDescription className="text-blue-800 text-sm">
+                                O colaborador deverá trocar esta senha no próximo acesso.
+                            </AlertDescription>
+                        </Alert>
+                    </div>
+
+                    <DialogFooter>
+                        <Button onClick={() => setPasswordResetData(null)} style={{ background: '#07593f' }}>
+                            Fechar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

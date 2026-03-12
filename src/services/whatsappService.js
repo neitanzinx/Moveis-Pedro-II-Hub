@@ -1,5 +1,6 @@
 import { toast } from "sonner";
 import { ZAP_API_URL as API_URL } from "@/utils/zapApiUrl";
+import { saveToOfflineQueue } from "@/utils/offlineQueue";
 
 export const whatsappService = {
     /**
@@ -9,18 +10,16 @@ export const whatsappService = {
     checkStatus: async () => {
         try {
             const response = await fetch(`${API_URL}/status`);
-            return response.ok;
+            if (!response.ok) return false;
+
+            const data = await response.json();
+            return data.status === 'connected' || data.status === 'online';
         } catch (error) {
             console.error("Erro ao verificar status do WhatsApp:", error);
             return false;
         }
     },
 
-    /**
-     * Envia uma mensagem de texto simples
-     * @param {string} telefone - Número do telefone (com DDD)
-     * @param {string} mensagem - Texto da mensagem
-     */
     sendMessage: async (telefone, mensagem) => {
         if (!telefone) return;
 
@@ -28,16 +27,24 @@ export const whatsappService = {
         const numbersOnly = telefone.replace(/\D/g, '');
         const formattedPhone = numbersOnly.startsWith('55') ? numbersOnly : `55${numbersOnly}`;
 
+        const payload = {
+            phone: formattedPhone,
+            message: mensagem,
+        };
+
+        if (!navigator.onLine) {
+            await saveToOfflineQueue('sendMessage', [telefone, mensagem]);
+            toast.info("Sem internet: Mensagem do Zap salva para envio posterior.");
+            return true; // Retorna true para a UI prosseguir achando que deu certo offline
+        }
+
         try {
             const response = await fetch(`${API_URL}/send-text`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    phone: formattedPhone,
-                    message: mensagem,
-                }),
+                body: JSON.stringify(payload),
             });
 
             if (!response.ok) {
@@ -47,8 +54,45 @@ export const whatsappService = {
             }
             return true;
         } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                await saveToOfflineQueue('sendMessage', [telefone, mensagem]);
+                toast.info("Sem conexão com servidor: Mensagem do Zap salva para envio posterior.");
+                return true;
+            }
             console.error("Erro no envio do WhatsApp:", error);
             toast.error("Erro ao enviar mensagem automática do WhatsApp");
+            return false;
+        }
+    },
+
+    sendImageMessage: async (telefone, imageUrl, caption) => {
+        if (!telefone || !imageUrl) return false;
+
+        const numbersOnly = telefone.replace(/\D/g, '');
+        const formattedPhone = numbersOnly.startsWith('55') ? numbersOnly : `55${numbersOnly}`;
+
+        const payload = {
+            phone: formattedPhone,
+            imageUrl: imageUrl,
+            caption: caption,
+        };
+
+        try {
+            const response = await fetch(`${API_URL}/send-image-url`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.error || 'Falha ao enviar imagem');
+            }
+            return true;
+        } catch (error) {
+            console.error("Erro no envio de imagem WhatsApp:", error);
             return false;
         }
     },
@@ -141,6 +185,12 @@ _Móveis Pedro II_`;
      * @param {Array} entregas 
      */
     notifyRouteStart: async (entregas) => {
+        if (!navigator.onLine) {
+            await saveToOfflineQueue('notifyRouteStart', [entregas]);
+            toast.info("Sem internet: Aviso de início de rota salvo para envio posterior.");
+            return true;
+        }
+
         try {
             const response = await fetch(`${API_URL}/aviso-inicio-rota`, {
                 method: 'POST',
@@ -149,6 +199,11 @@ _Móveis Pedro II_`;
             });
             return response.ok;
         } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                await saveToOfflineQueue('notifyRouteStart', [entregas]);
+                toast.info("Servidor inacessível: Aviso de rota salvo para envio posterior.");
+                return true;
+            }
             console.error("Erro ao notificar início de rota:", error);
             return false;
         }
@@ -160,6 +215,12 @@ _Móveis Pedro II_`;
      * @param {object} updateData 
      */
     notifyDeliveryCompletion: async (idConcluida, updateData) => {
+        if (!navigator.onLine) {
+            await saveToOfflineQueue('notifyDeliveryCompletion', [idConcluida, updateData]);
+            toast.info("Sem internet: Confirmação de entrega salva para envio posterior.");
+            return true;
+        }
+
         try {
             const response = await fetch(`${API_URL}/concluir-entrega`, {
                 method: 'POST',
@@ -171,6 +232,11 @@ _Móveis Pedro II_`;
             });
             return response.ok;
         } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                await saveToOfflineQueue('notifyDeliveryCompletion', [idConcluida, updateData]);
+                toast.info("Servidor inacessível: Confirmação de entrega salva para posterior.");
+                return true;
+            }
             console.error("Erro ao notificar conclusão:", error);
             throw error; // Re-throw para fallback no frontend
         }
@@ -180,6 +246,12 @@ _Móveis Pedro II_`;
      * @param {Array} entregas - Array de objetos de entrega formatados
      */
     sendConfirmations: async (entregas) => {
+        if (!navigator.onLine) {
+            await saveToOfflineQueue('sendConfirmations', [entregas]);
+            toast.info("Sem internet: Confirmações salvas para envio posterior.");
+            return { ok: true, status: 200 }; // Fake response for UI success
+        }
+
         try {
             const response = await fetch(`${API_URL}/disparar-confirmacoes`, {
                 method: 'POST',
@@ -188,6 +260,11 @@ _Móveis Pedro II_`;
             });
             return response; // Retorna response para tratar erros específicos se necessário
         } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                await saveToOfflineQueue('sendConfirmations', [entregas]);
+                toast.info("Servidor inacessível: Confirmações salvas para envio posterior.");
+                return { ok: true, status: 200 }; // Fake response
+            }
             console.error("Erro ao enviar confirmações:", error);
             throw error;
         }
@@ -198,6 +275,12 @@ _Móveis Pedro II_`;
      * @param {Array} entregas - Array de {telefone, nome, numero_pedido}
      */
     rescheduleDeliveries: async (entregas) => {
+        if (!navigator.onLine) {
+            await saveToOfflineQueue('rescheduleDeliveries', [entregas]);
+            toast.info("Sem internet: Notificação de reagendamento salva offline.");
+            return true;
+        }
+
         try {
             const response = await fetch(`${API_URL}/reagendar-entregas`, {
                 method: 'POST',
@@ -206,6 +289,11 @@ _Móveis Pedro II_`;
             });
             return response.ok;
         } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                await saveToOfflineQueue('rescheduleDeliveries', [entregas]);
+                toast.info("Servidor inacessível: Reagendamento salvo offline.");
+                return true;
+            }
             console.error("Erro ao reagendar entregas:", error);
             return false;
         }
@@ -216,14 +304,29 @@ _Móveis Pedro II_`;
      * @param {object} data
      */
     notifyAssemblyScheduled: async (data) => {
+        if (!navigator.onLine) {
+            await saveToOfflineQueue('notifyAssemblyScheduled', [data]);
+            toast.info("Sem internet: Aviso de agendamento salvo offline.");
+            return true;
+        }
+
         try {
             const response = await fetch(`${API_URL}/aviso-montagem-agendada`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
+            if (!response.ok && response.status === 503) {
+                await saveToOfflineQueue('notifyAssemblyScheduled', [data]);
+                return true;
+            }
             return response.ok;
         } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                await saveToOfflineQueue('notifyAssemblyScheduled', [data]);
+                toast.info("Servidor inacessível: Aviso de agendamento salvo offline.");
+                return true;
+            }
             console.error("Erro ao notificar agendamento de montagem:", error);
             throw error;
         }
@@ -234,14 +337,29 @@ _Móveis Pedro II_`;
      * @param {object} data
      */
     notifyAssemblyCancelled: async (data) => {
+        if (!navigator.onLine) {
+            await saveToOfflineQueue('notifyAssemblyCancelled', [data]);
+            toast.info("Sem internet: Aviso de cancelamento salvo offline.");
+            return true;
+        }
+
         try {
             const response = await fetch(`${API_URL}/aviso-montagem-cancelada`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
+            if (!response.ok && response.status === 503) {
+                await saveToOfflineQueue('notifyAssemblyCancelled', [data]);
+                return true;
+            }
             return response.ok;
         } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                await saveToOfflineQueue('notifyAssemblyCancelled', [data]);
+                toast.info("Servidor inacessível: Aviso de cancelamento salvo offline.");
+                return true;
+            }
             console.error("Erro ao notificar cancelamento de montagem:", error);
             throw error;
         }
@@ -252,14 +370,29 @@ _Móveis Pedro II_`;
      * @param {object} data
      */
     notifyAssemblyRescheduled: async (data) => {
+        if (!navigator.onLine) {
+            await saveToOfflineQueue('notifyAssemblyRescheduled', [data]);
+            toast.info("Sem internet: Aviso de reagendamento salvo offline.");
+            return true;
+        }
+
         try {
             const response = await fetch(`${API_URL}/aviso-montagem-reagendada`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
+            if (!response.ok && response.status === 503) {
+                await saveToOfflineQueue('notifyAssemblyRescheduled', [data]);
+                return true;
+            }
             return response.ok;
         } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                await saveToOfflineQueue('notifyAssemblyRescheduled', [data]);
+                toast.info("Servidor inacessível: Aviso de reagendamento salvo offline.");
+                return true;
+            }
             console.error("Erro ao notificar reagendamento de montagem:", error);
             throw error;
         }
@@ -270,6 +403,11 @@ _Móveis Pedro II_`;
      * @param {object} data 
      */
     sendMarketingMessage: async (data) => {
+        if (!navigator.onLine) {
+            await saveToOfflineQueue('sendMarketingMessage', [data]);
+            toast.info("Sem internet: Marketing salvo offline.");
+            return true;
+        }
         try {
             const response = await fetch(`${API_URL}/enviar-mensagem-marketing`, {
                 method: 'POST',
@@ -280,6 +418,54 @@ _Móveis Pedro II_`;
         } catch (error) {
             console.error("Erro ao enviar mensagem de marketing:", error);
             throw error;
+        }
+    },
+
+    /**
+     * Envia confirmação de venda pós-venda via WhatsApp (com PDF anexo)
+     * @param {object} data - { telefone, nome, pedido, prazo, produtos, pdf_base64 }
+     */
+    sendSaleConfirmation: async (data) => {
+        if (!navigator.onLine) {
+            await saveToOfflineQueue('sendSaleConfirmation', [data]);
+            toast.info("Sem internet: Comprovante de venda salvo para envio posterior via WhatsApp.");
+            return true;
+        }
+
+        try {
+            const response = await fetch(`${API_URL}/mensagem-pos-venda`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            const responseData = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                console.error('❌ Bot respondeu com erro:', responseData);
+                if (response.status === 503) {
+                    // WhatsApp desconectado — salva na fila para reenviar quando reconectar
+                    await saveToOfflineQueue('sendSaleConfirmation', [data]);
+                    toast.info("WhatsApp desconectado: Comprovante salvo para envio automático quando reconectar.");
+                    return true;
+                } else {
+                    toast.error("Erro ao enviar comprovante no WhatsApp.");
+                }
+                return false;
+            }
+
+            console.log("✅ WhatsApp enviado:", responseData);
+            toast.success("Comprovante enviado ao cliente via WhatsApp!");
+            return true;
+        } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                await saveToOfflineQueue('sendSaleConfirmation', [data]);
+                toast.info("Servidor inacessível: Comprovante de venda salvo para envio posterior.");
+                return true;
+            }
+            console.error("❌ Erro conexão bot:", error);
+            toast.warning("Não foi possível conectar ao robô de WhatsApp agora.");
+            return false;
         }
     },
 

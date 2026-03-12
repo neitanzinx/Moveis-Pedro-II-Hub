@@ -12,7 +12,8 @@ export const CARGOS = [
         permissions: ['Nenhuma - aguardando aprovação'],
         requiresStore: false,
         canRegister: false,
-        mobileAppOnly: false
+        mobileAppOnly: false,
+        prefix: 'PD'
     },
     {
         value: 'Administrador',
@@ -24,7 +25,8 @@ export const CARGOS = [
         permissions: ['Acesso total ao sistema', 'Gerenciar usuários', 'Aprovar cadastros', 'Editar configurações'],
         requiresStore: false,
         canRegister: false, // Não pode se auto-cadastrar
-        mobileAppOnly: false
+        mobileAppOnly: false,
+        prefix: 'AD'
     },
     {
         value: 'Gerente',
@@ -36,7 +38,8 @@ export const CARGOS = [
         permissions: ['Acesso completo da loja', 'Aprovar devolucoes', 'Ver relatorios da loja', 'Gerenciar equipe da loja'],
         requiresStore: true,
         canRegister: false,
-        mobileAppOnly: false
+        mobileAppOnly: false,
+        prefix: 'GE'
     },
     {
         value: 'Gerente Geral',
@@ -57,10 +60,11 @@ export const CARGOS = [
         color: '#3b82f6',
         bgColor: '#eff6ff',
         description: 'Realiza vendas e atendimento',
-        permissions: ['Criar vendas e orcamentos', 'Gerenciar clientes', 'Ver comissoes proprias'],
+        permissions: ['Fazer vendas', 'Consultar estoque', 'Ver clientes', 'Criar crediario', 'Agenda entregas'],
         requiresStore: true,
-        canRegister: true,
-        mobileAppOnly: false
+        canRegister: true, // Vendedor pode se cadastrar (acesso rápido)
+        mobileAppOnly: false,
+        prefix: 'VE'
     },
     {
         value: 'Estoque',
@@ -69,10 +73,11 @@ export const CARGOS = [
         color: '#10b981',
         bgColor: '#ecfdf5',
         description: 'Controla produtos e inventário',
-        permissions: ['Gerenciar produtos', 'Movimentação de estoque', 'Gerenciar entregas'],
-        requiresStore: false,
-        canRegister: true,
-        mobileAppOnly: false
+        permissions: ['Receber mercadoria', 'Conferir carga', 'Movimentar estoque', 'Inventario'],
+        requiresStore: true, // Geralmente associado a uma loja ou CD
+        canRegister: false,
+        mobileAppOnly: false,
+        prefix: 'ES'
     },
     {
         value: 'Logística',
@@ -81,10 +86,11 @@ export const CARGOS = [
         color: '#0ea5e9',
         bgColor: '#f0f9ff',
         description: 'Coordena entregas e rotas',
-        permissions: ['Gerenciar entregas', 'Agendar montagens', 'Ver clientes'],
+        permissions: ['Roteirizar entregas', 'Alocar montagem', 'Status frota', 'Painel separador'],
         requiresStore: false,
-        canRegister: true,
-        mobileAppOnly: false
+        canRegister: false,
+        mobileAppOnly: false,
+        prefix: 'LO'
     },
     {
         value: 'Financeiro',
@@ -93,10 +99,11 @@ export const CARGOS = [
         color: '#8b5cf6',
         bgColor: '#f5f3ff',
         description: 'Controle financeiro e fiscal',
-        permissions: ['Controle financeiro completo', 'Emitir notas fiscais', 'Relatórios financeiros'],
+        permissions: ['Aprovar crediario', 'Contas pagas/receber', 'Fechamento caixa', 'Relatorios financeiros'],
         requiresStore: false,
-        canRegister: true,
-        mobileAppOnly: false
+        canRegister: false,
+        mobileAppOnly: false,
+        prefix: 'FI'
     },
     {
         value: 'Agendamento',
@@ -108,7 +115,8 @@ export const CARGOS = [
         permissions: ['Agendar montagens', 'Gerenciar montadores', 'Confirmar entregas'],
         requiresStore: false,
         canRegister: true,
-        mobileAppOnly: false
+        mobileAppOnly: false,
+        prefix: 'AG'
     },
     {
         value: 'RH',
@@ -117,10 +125,11 @@ export const CARGOS = [
         color: '#ec4899',
         bgColor: '#fdf2f8',
         description: 'Gestão de pessoas',
-        permissions: ['Gerenciar colaboradores', 'Folha de pagamento', 'Férias e licenças'],
+        permissions: ['Gestao de funcionarios', 'Folha pagamento', 'Controle ponto', 'Atestados'],
         requiresStore: false,
-        canRegister: true,
-        mobileAppOnly: false
+        canRegister: false,
+        mobileAppOnly: false,
+        prefix: 'RH'
     },
     {
         value: 'Entregador',
@@ -129,10 +138,24 @@ export const CARGOS = [
         color: '#22c55e',
         bgColor: '#f0fdf4',
         description: 'App móvel de entregas',
-        permissions: ['App de entregas', 'Registrar entregas', 'Capturar assinaturas'],
+        permissions: ['APP Motorista', 'Baixar entregas', 'Registrar ocorrencias', 'Anexar fotos'],
+        requiresStore: false,
+        canRegister: true, // Foco do cadastro rápido atual
+        mobileAppOnly: true, // Indica que usa apenas o app na rua
+        prefix: 'EN'
+    },
+    {
+        value: 'Montador',
+        label: 'Montador',
+        icon: Package,
+        color: '#f59e0b',
+        bgColor: '#fffbeb',
+        description: 'Montador interno de móveis',
+        permissions: ['Baixar entregas', 'APP Ajudante'],
         requiresStore: false,
         canRegister: true,
-        mobileAppOnly: true
+        mobileAppOnly: true,
+        prefix: 'AJ'
     },
     {
         value: 'Montador Externo',
@@ -141,10 +164,11 @@ export const CARGOS = [
         color: '#f97316',
         bgColor: '#fff7ed',
         description: 'App móvel de montagens',
-        permissions: ['App de montagem', 'Pegar montagens', 'Registrar conclusão'],
+        permissions: ['APP Montador', 'Baixar montagens', 'Aprovar laudos', 'Registrar assistencia'],
         requiresStore: false,
         canRegister: true,
-        mobileAppOnly: true
+        mobileAppOnly: true,
+        prefix: 'MO'
     }
 ];
 
@@ -159,8 +183,13 @@ export const STATUS_APROVACAO = {
 };
 
 // Funções auxiliares
-export const getCargoConfig = (cargo) => {
-    return CARGOS.find(c => c.value === cargo) || null;
+export const getCargoConfig = (value) => {
+    return CARGOS.find(c => c.value === value) || CARGOS[0];
+};
+
+export const getCargoPrefix = (cargoValue) => {
+    const config = getCargoConfig(cargoValue);
+    return config?.prefix || 'AD';
 };
 
 export const getCargosParaCadastro = () => {

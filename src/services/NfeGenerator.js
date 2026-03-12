@@ -133,19 +133,22 @@ const buildEmit = (emitente) => {
 };
 
 const buildDest = (cliente) => {
-    const docTag = cliente.cpf_cnpj.length > 11 ? 'CNPJ' : 'CPF';
+    const rawDoc = cliente.cpf || cliente.cnpj || cliente.cpf_cnpj || '';
+    const cleanDoc = String(rawDoc).replace(/\D/g, '');
+    const docTag = cleanDoc.length > 11 ? 'CNPJ' : 'CPF';
+
     return `
         <dest>
-            <${docTag}>${cliente.cpf_cnpj.replace(/\D/g, '')}</${docTag}>
-            <xNome>${cliente.nome}</xNome>
+            <${docTag}>${cleanDoc}</${docTag}>
+            <xNome>${cliente.nome_completo || cliente.razao_social || cliente.nome}</xNome>
             <enderDest>
-                <xLgr>${cliente.endereco_logradouro || 'Rua Desconhecida'}</xLgr>
-                <nro>${cliente.endereco_numero || 'S/N'}</nro>
-                <xBairro>${cliente.endereco_bairro || 'Centro'}</xBairro>
+                <xLgr>${cliente.endereco || cliente.logradouro || 'Rua Desconhecida'}</xLgr>
+                <nro>${cliente.numero || 'S/N'}</nro>
+                <xBairro>${cliente.bairro || 'Centro'}</xBairro>
                 <cMun>3550308</cMun> {/* TODO: Mapear codigo municipio cliente */}
-                <xMun>${cliente.endereco_cidade || 'Sao Paulo'}</xMun>
-                <UF>${cliente.endereco_uf || 'SP'}</UF>
-                <CEP>${(cliente.endereco_cep || '00000000').replace(/\D/g, '')}</CEP>
+                <xMun>${cliente.cidade || 'Sao Paulo'}</xMun>
+                <UF>${cliente.estado || cliente.uf || 'SP'}</UF>
+                <CEP>${(cliente.cep || '00000000').replace(/\D/g, '')}</CEP>
                 <cPais>1058</cPais>
                 <xPais>BRASIL</xPais>
             </enderDest>

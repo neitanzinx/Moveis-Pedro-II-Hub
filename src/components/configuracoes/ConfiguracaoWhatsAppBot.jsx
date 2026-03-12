@@ -16,12 +16,13 @@ import {
     RefreshCw, Power, PowerOff, Smartphone, Bot, Sparkles,
     QrCode, Wifi, WifiOff, Truck, Package, ShoppingBag,
     Wrench, Megaphone, ChevronDown, ChevronRight, Edit2, Eye, EyeOff,
-    Copy, Gift, MapPin, AlertTriangle, Clock, Calendar, Key, Rocket
+    Copy, Gift, MapPin, AlertTriangle, Clock, Calendar, Key, Rocket, CloudOff, Trash2
 } from "lucide-react";
 import { toast } from "sonner";
 import QRCode from "qrcode";
 
 import { ZAP_API_URL as WHATSAPP_BOT_URL } from "@/utils/zapApiUrl";
+import { getOfflineQueue, removeOfflineQueueItem } from "@/utils/offlineQueue";
 
 
 // Definição de todos os templates de mensagens
@@ -334,7 +335,6 @@ export default function ConfiguracaoWhatsAppBot() {
     const [reconnecting, setReconnecting] = useState(false);
     const [disconnecting, setDisconnecting] = useState(false);
     const [activeTab, setActiveTab] = useState("conexao");
-    const [showApiKey, setShowApiKey] = useState(false);
 
     // Estado da conexão WhatsApp
     const [connectionStatus, setConnectionStatus] = useState('initializing');
@@ -342,15 +342,7 @@ export default function ConfiguracaoWhatsAppBot() {
     const [qrCodeImage, setQrCodeImage] = useState(null);
     const [connectionInfo, setConnectionInfo] = useState(null);
 
-    // Configurações do agente IA
-    const [settings, setSettings] = useState({
-        ai_enabled: true,
-        ai_model: "gemini-2.0-flash",
-        ai_instructions: "",
-        welcome_message: "",
-        gemini_api_key: ""
-    });
-    const [originalSettings, setOriginalSettings] = useState(null);
+
 
     // Templates de mensagens
     const [messageSettings, setMessageSettings] = useState({});
@@ -363,6 +355,23 @@ export default function ConfiguracaoWhatsAppBot() {
 
     // Expandidos (acordeões)
     const [expandedCategories, setExpandedCategories] = useState({});
+
+    // Fila Offline
+    const [offlineQueue, setOfflineQueue] = useState([]);
+    const [loadingQueue, setLoadingQueue] = useState(false);
+
+    const fetchOfflineQueue = useCallback(async () => {
+        setLoadingQueue(true);
+        const queue = await getOfflineQueue();
+        setOfflineQueue(queue);
+        setLoadingQueue(false);
+    }, []);
+
+    const handleRemoveQueueItem = async (id) => {
+        await removeOfflineQueueItem(id);
+        fetchOfflineQueue();
+        toast.success("Ação cancelada e removida da fila");
+    };
 
     // Polling de status do WhatsApp
     const fetchStatus = useCallback(async () => {
@@ -390,23 +399,12 @@ export default function ConfiguracaoWhatsAppBot() {
         }
     }, [qrCode]);
 
-    // Carregar configurações
+    // Carregar configurações de mensagens
     const loadSettings = async () => {
         try {
             const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/ai-settings`);
             if (res.ok) {
                 const data = await res.json();
-
-                // Separar configurações de IA
-                const aiSettings = {
-                    ai_enabled: data.ai_enabled ?? true,
-                    ai_model: data.ai_model ?? "gemini-2.0-flash",
-                    ai_instructions: data.ai_instructions ?? "",
-                    welcome_message: data.welcome_message ?? "",
-                    gemini_api_key: data.gemini_api_key ?? ""
-                };
-                setSettings(aiSettings);
-                setOriginalSettings(aiSettings);
 
                 // Configurações de mensagens
                 const msgSettings = {};
@@ -443,30 +441,13 @@ export default function ConfiguracaoWhatsAppBot() {
     useEffect(() => {
         fetchStatus();
         loadSettings();
+        fetchOfflineQueue();
 
         const interval = setInterval(fetchStatus, 3000);
         return () => clearInterval(interval);
-    }, [fetchStatus]);
+    }, [fetchStatus, fetchOfflineQueue]);
 
-    const handleSaveAI = async () => {
-        setSaving(true);
-        try {
-            const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/ai-settings`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(settings)
-            });
 
-            if (!res.ok) throw new Error('Falha ao salvar');
-
-            setOriginalSettings({ ...settings });
-            toast.success("Configurações de IA salvas!");
-        } catch (error) {
-            toast.error("Erro ao salvar configurações");
-        } finally {
-            setSaving(false);
-        }
-    };
 
     const handleSaveMessages = async () => {
         setSaving(true);
@@ -554,7 +535,7 @@ export default function ConfiguracaoWhatsAppBot() {
         }));
     };
 
-    const hasAIChanges = JSON.stringify(settings) !== JSON.stringify(originalSettings);
+
     const hasMessageChanges = JSON.stringify(messageSettings) !== JSON.stringify(originalMessageSettings);
 
     const getStatusBadge = () => {
@@ -612,17 +593,13 @@ export default function ConfiguracaoWhatsAppBot() {
                             >
                                 <MessageCircle className="w-4 h-4 mr-2" /> Mensagens Automáticas
                             </TabsTrigger>
+
+
                             <TabsTrigger
-                                value="agente"
+                                value="fila_offline"
                                 className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-green-600 rounded-none px-2 py-3 text-gray-500 hover:text-green-700 data-[state=active]:text-green-700 font-medium transition-all"
                             >
-                                <Bot className="w-4 h-4 mr-2" /> Agente Inteligente (IA)
-                            </TabsTrigger>
-                            <TabsTrigger
-                                value="funcoes"
-                                className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-green-600 rounded-none px-2 py-3 text-gray-500 hover:text-green-700 data-[state=active]:text-green-700 font-medium transition-all"
-                            >
-                                <Sparkles className="w-4 h-4 mr-2" /> Recursos Extras
+                                <CloudOff className="w-4 h-4 mr-2" /> Fila Offline
                             </TabsTrigger>
                         </TabsList>
                     </Tabs>
@@ -792,147 +769,62 @@ export default function ConfiguracaoWhatsAppBot() {
                             </div>
                         </TabsContent>
 
-                        {/* Tab Agente IA */}
-                        <TabsContent value="agente" className="mt-0 space-y-6">
-                            <div className="grid md:grid-cols-[1fr_300px] gap-8">
-                                <div className="space-y-6">
-                                    <div className="flex items-center justify-between p-5 border border-purple-100 bg-purple-50 rounded-xl">
-                                        <div className="flex items-center gap-4">
-                                            <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-purple-600 shadow-sm">
-                                                <Sparkles className="w-6 h-6" />
-                                            </div>
-                                            <div>
-                                                <Label className="text-base font-semibold text-purple-900">Atendimento Inteligente</Label>
-                                                <p className="text-sm text-purple-700">O bot responderá automaticamente dúvidas comuns usando IA.</p>
-                                            </div>
-                                        </div>
-                                        <Switch checked={settings.ai_enabled} onCheckedChange={(v) => setSettings({ ...settings, ai_enabled: v })} className="data-[state=checked]:bg-purple-600" />
-                                    </div>
 
-                                    <div className="space-y-4">
-                                        <div className="space-y-2">
-                                            <Label>Personalidade e Instruções (System Prompt)</Label>
-                                            <Textarea
-                                                value={settings.ai_instructions}
-                                                onChange={(e) => setSettings({ ...settings, ai_instructions: e.target.value })}
-                                                placeholder="Ex: Você é a assistente virtual da Móveis Pedro II. Seja cordial, use emojis e foque em agendar visitas..."
-                                                className="min-h-[200px] font-mono text-sm leading-relaxed"
-                                            />
-                                            <p className="text-xs text-gray-500">Defina como a IA deve se comportar, o que ela sabe sobre a loja e os limites do atendimento.</p>
-                                        </div>
-
-                                        <div className="space-y-2">
-                                            <Label>Mensagem de Boas-vindas</Label>
-                                            <Textarea
-                                                value={settings.welcome_message}
-                                                onChange={(e) => setSettings({ ...settings, welcome_message: e.target.value })}
-                                                placeholder="Ex: Olá! Bem-vindo à Móveis Pedro II. Como posso ajudar hoje?"
-                                                className="min-h-[80px]"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="flex justify-end pt-4 border-t">
-                                        <Button onClick={handleSaveAI} disabled={saving || !hasAIChanges} className="bg-purple-600 hover:bg-purple-700">
-                                            {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando...</> : <><Save className="w-4 h-4 mr-2" /> Salvar Configurações de IA</>}
-                                        </Button>
-                                    </div>
+                        {/* Tab Fila Offline */}
+                        <TabsContent value="fila_offline" className="mt-0 space-y-4">
+                            <div className="flex justify-between items-center mb-6">
+                                <div>
+                                    <h3 className="text-lg font-semibold">Fila de Ações Offline</h3>
+                                    <p className="text-sm text-gray-500">Ações que estão aguardando o envio porque o bot estava offline ou processando.</p>
                                 </div>
-
-                                <div className="space-y-6">
-                                    <div className="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                                        <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                                            <Key className="w-4 h-4" /> Configuração Técnica
-                                        </h4>
-
-                                        <div className="space-y-4">
-                                            <div className="space-y-2">
-                                                <Label className="text-xs text-gray-500 uppercase font-bold tracking-wider">Modelo IA</Label>
-                                                <Select value={settings.ai_model} onValueChange={(v) => setSettings({ ...settings, ai_model: v })}>
-                                                    <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="gemini-2.0-flash">Gemini 2.0 Flash (Recomendado)</SelectItem>
-                                                        <SelectItem value="gemini-1.5-pro">Gemini 1.5 Pro (Mais capaz)</SelectItem>
-                                                        <SelectItem value="gemini-1.5-flash">Gemini 1.5 Flash (Rápido)</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <Label className="text-xs text-gray-500 uppercase font-bold tracking-wider">Chave da API</Label>
-                                                <div className="relative">
-                                                    <Input
-                                                        type={showApiKey ? "text" : "password"}
-                                                        value={settings.gemini_api_key}
-                                                        onChange={(e) => setSettings({ ...settings, gemini_api_key: e.target.value })}
-                                                        placeholder="Padrão do Sistema"
-                                                        className="pr-10 bg-white font-mono text-xs"
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setShowApiKey(!showApiKey)}
-                                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                                                    >
-                                                        {showApiKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                                                    </button>
-                                                </div>
-                                                <p className="text-[10px] text-gray-500 leading-tight">
-                                                    Deixe em branco para usar a chave global configurada em Integrações.
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <Alert className="bg-blue-50 border-blue-100 text-blue-800">
-                                        <Sparkles className="w-4 h-4" />
-                                        <AlertDescription className="text-xs">
-                                            A IA tem acesso ao catálogo de produtos e status de pedidos para responder perguntas simples.
-                                        </AlertDescription>
-                                    </Alert>
-                                </div>
-                            </div>
-                        </TabsContent>
-
-                        {/* Tab Funções */}
-                        <TabsContent value="funcoes" className="mt-0 space-y-4">
-                            <div className="grid md:grid-cols-2 gap-4">
-                                {Object.entries(MESSAGE_TEMPLATES).map(([catKey, category]) => {
-                                    const CatIcon = category.icon;
-                                    const allEnabled = category.messages.every(m => messageSettings[m.key]?.enabled);
-
-                                    return (
-                                        <div key={catKey} className={`p-4 rounded-xl border ${category.borderColor} bg-white hover:shadow-md transition-shadow`}>
-                                            <div className="flex items-start justify-between">
-                                                <div className="flex items-center gap-3">
-                                                    <div className={`p-2.5 rounded-lg ${category.bgColor}`}>
-                                                        <CatIcon className={`w-6 h-6 ${category.color}`} />
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="font-semibold text-gray-900">{category.label}</h4>
-                                                        <p className="text-xs text-gray-500 mt-1">
-                                                            {category.messages.length} tipos de mensagens
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                <Switch
-                                                    checked={allEnabled}
-                                                    onCheckedChange={(v) => {
-                                                        const updates = {};
-                                                        category.messages.forEach(m => {
-                                                            updates[m.key] = { ...messageSettings[m.key], enabled: v };
-                                                        });
-                                                        setMessageSettings(prev => ({ ...prev, ...updates }));
-                                                    }}
-                                                />
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                            <div className="flex justify-end pt-6">
-                                <Button onClick={handleSaveMessages} disabled={saving || !hasMessageChanges} className="bg-green-600 hover:bg-green-700">
-                                    {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando...</> : <><Save className="w-4 h-4 mr-2" /> Salvar Configurações</>}
+                                <Button onClick={fetchOfflineQueue} disabled={loadingQueue} variant="outline" className="border-gray-200">
+                                    <RefreshCw className={`w-4 h-4 mr-2 ${loadingQueue ? 'animate-spin' : ''}`} /> Atualizar Fila
                                 </Button>
+                            </div>
+
+                            <div className="space-y-4">
+                                {offlineQueue.length === 0 ? (
+                                    <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                                        <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm text-gray-400 mx-auto mb-4 border border-gray-100">
+                                            <CloudOff className="w-8 h-8" />
+                                        </div>
+                                        <h4 className="text-lg font-medium text-gray-900">Fila Vazia</h4>
+                                        <p className="text-gray-500 mt-1">Não há nenhuma ação pendente no momento.</p>
+                                    </div>
+                                ) : (
+                                    <div className="grid gap-4">
+                                        {offlineQueue.map(item => (
+                                            <div key={item.id} className="flex flex-col md:flex-row md:items-center justify-between p-5 border rounded-xl bg-white shadow-sm hover:shadow-md transition-shadow gap-4">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-3 mb-2">
+                                                        <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 uppercase tracking-wider text-[10px] font-bold">
+                                                            Pendente
+                                                        </Badge>
+                                                        <span className="font-semibold text-gray-900 border-b border-gray-100 pb-0.5">{item.action}</span>
+                                                    </div>
+
+                                                    <div className="ml-1 pl-3 border-l-2 border-gray-200 space-y-1">
+                                                        {item.payload && item.payload.map((arg, idx) => (
+                                                            <div key={idx} className="text-xs text-gray-600 font-mono bg-gray-50 p-1.5 rounded truncate max-w-xl">
+                                                                {typeof arg === 'object' ? JSON.stringify(arg) : String(arg)}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+
+                                                    <p className="text-xs text-gray-400 mt-3 flex items-center gap-1.5">
+                                                        <Clock className="w-3.5 h-3.5" />
+                                                        Adicionado em: {new Date(item.timestamp).toLocaleString()}
+                                                    </p>
+                                                </div>
+                                                <div className="flex items-center gap-3 shrink-0 self-end md:self-auto border-t md:border-t-0 pt-4 md:pt-0 w-full md:w-auto">
+                                                    <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 ml-auto w-full md:w-auto" onClick={() => handleRemoveQueueItem(item.id)}>
+                                                        <Trash2 className="w-4 h-4 mr-2" /> Cancelar Ação
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </TabsContent>
                     </Tabs>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { base44, supabase } from "@/api/base44Client";
+import { comprasService } from "@/services/comprasService";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getColorHex } from "@/components/produtos/FurnitureColorPicker";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -33,15 +34,21 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
         data_previsao_entrega: '',
         observacoes: '',
         condicoes_pagamento: '',
+        condicoes_pagamento_outros: '',
         valor_frete: 0,
         valor_desconto: 0,
         itens: [],
+        centro_custo_id: '',
         // Campos de promoção
         compra_promocional: false,
         preco_tabela_total: 0,
         promocao_inicio: '',
         promocao_fim: '',
-        promocao_observacao: ''
+        promocao_observacao: '',
+        // Campos Edilene
+        quem_aceitou: '',
+        canal_comunicacao: 'WHATSAPP',
+        devolutiva: ''
     });
 
     const [buscaProduto, setBuscaProduto] = useState("");
@@ -69,18 +76,31 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                 data_pedido: pedido.data_pedido || new Date().toISOString().split('T')[0],
                 data_previsao_entrega: pedido.data_previsao_entrega || '',
                 observacoes: pedido.observacoes || '',
-                condicoes_pagamento: pedido.condicoes_pagamento || '',
+                condicoes_pagamento: ['À Vista', '30 dias', '30/60 dias', '30/60/90 dias', 'Permuta'].includes(pedido.condicoes_pagamento)
+                    ? pedido.condicoes_pagamento : (pedido.condicoes_pagamento ? 'Outros' : ''),
+                condicoes_pagamento_outros: !['À Vista', '30 dias', '30/60 dias', '30/60/90 dias', 'Permuta', '', null, undefined].includes(pedido.condicoes_pagamento)
+                    ? pedido.condicoes_pagamento : '',
                 valor_frete: pedido.valor_frete || 0,
                 valor_desconto: pedido.valor_desconto || 0,
                 itens: pedido.itens || [],
+                centro_custo_id: pedido.centro_custo_id || '',
                 compra_promocional: pedido.tipo_preco === 'promocional',
                 preco_tabela_total: pedido.preco_tabela_total || 0,
                 promocao_inicio: pedido.promocao_inicio || '',
                 promocao_fim: pedido.promocao_fim || '',
-                promocao_observacao: pedido.promocao_observacao || ''
+                promocao_observacao: pedido.promocao_observacao || '',
+                quem_aceitou: pedido.quem_aceitou || '',
+                canal_comunicacao: pedido.canal_comunicacao || 'WHATSAPP',
+                devolutiva: pedido.devolutiva || ''
             });
         }
     }, [pedido]);
+
+    // Buscar Centros de Custo (Vendedores/Canais)
+    const { data: centrosCusto = [] } = useQuery({
+        queryKey: ['centros-custo-select'],
+        queryFn: () => comprasService.getCentrosCusto()
+    });
 
     // Buscar produtos (Server-Side Search para evitar limite de 1000 itens)
     const { data: produtos = [], isLoading: carregandoProdutos } = useQuery({
@@ -153,13 +173,20 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
     const salvarPedido = useMutation({
         mutationFn: async (data) => {
             if (pedido?.id) {
-                return base44.entities.PedidoCompra.update(pedido.id, data);
+                // For updates, items sync would be needed, keeping simple update for now
+                const { itens, ...ordemData } = data;
+                return comprasService.updateOrdem(pedido.id, ordemData);
             } else {
-                return base44.entities.PedidoCompra.create(data);
+                const { itens, ...ordemData } = data;
+                return comprasService.createOrdem(ordemData, itens);
             }
         },
         onSuccess: (resultado, variables) => {
-            queryClient.invalidateQueries({ queryKey: ['pedidos-compra'] });
+            queryClient.invalidateQueries({ queryKey: ['pedidos-compra-dashboard'] });
+            queryClient.invalidateQueries({ queryKey: ['pedidos-compra-kanban'] });
+            queryClient.invalidateQueries({ queryKey: ['pedidos-compra-recebimento'] });
+            queryClient.invalidateQueries({ queryKey: ['pedidos-em-conferencia-global'] });
+            queryClient.invalidateQueries({ queryKey: ['pedidos-compra-recebimento-count'] });
             toast.success(pedido ? 'Pedido atualizado!' : 'Pedido criado!');
 
             // Se o status foi "Enviado", abrir modal de opções
@@ -221,6 +248,7 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                 quantidade_pedida: quantidade,
                 preco_unitario: precoUnitario || 0,
                 preco_tabela: form.compra_promocional ? precoTabela : null,
+                fora_tabela: document.getElementById('fora-tabela-check')?.checked || false,
                 isNew: true
             };
         }
@@ -335,19 +363,38 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
     };
 
     const finalizarPedido = (status) => {
+        // Desestruturar para remover campos que não existem na tabela pedidos_compra
+        const { compra_promocional, condicoes_pagamento_outros, ...formParaDB } = form;
+
+        const condicoesParaSalvar = form.condicoes_pagamento === 'Outros'
+            ? form.condicoes_pagamento_outros
+            : form.condicoes_pagamento;
+
         const dadosSanitizados = {
-            ...form,
-            status,
+            ...formParaDB,
+            status: pedido ? (formParaDB.status || pedido.status) : (status === 'Rascunho' ? 'NÃO FATURADO' : 'NÃO FATURADO'),
+            centro_custo_id: form.centro_custo_id || null,
+            condicoes_pagamento: condicoesParaSalvar,
             valor_total: calcularTotal(),
             data_pedido: form.data_pedido || null,
             data_previsao_entrega: form.data_previsao_entrega || null,
-            tipo_preco: form.compra_promocional ? 'promocional' : 'tabela',
-            preco_tabela_total: form.compra_promocional ? calcularTotalTabela() : null,
-            economia_total: form.compra_promocional ? economiaTotal : 0,
-            promocao_inicio: form.compra_promocional ? (form.promocao_inicio || null) : null,
-            promocao_fim: form.compra_promocional ? (form.promocao_fim || null) : null,
-            promocao_observacao: form.compra_promocional ? (form.promocao_observacao || null) : null
+            tipo_preco: compra_promocional ? 'promocional' : 'tabela',
+            preco_tabela_total: compra_promocional ? calcularTotalTabela() : null,
+            economia_total: compra_promocional ? economiaTotal : 0,
+            promocao_inicio: compra_promocional ? (form.promocao_inicio || null) : null,
+            promocao_fim: compra_promocional ? (form.promocao_fim || null) : null,
+            promocao_observacao: compra_promocional ? (form.promocao_observacao || null) : null,
+            quem_aceitou: form.quem_aceitou || null,
+            canal_comunicacao: form.canal_comunicacao || 'WHATSAPP',
+            devolutiva: form.devolutiva || null
         };
+
+        // Se estiver salvando como "Enviado" e for novo, vamos mudar o status visual para "NÃO FATURADO"
+        // mas garantir que a lógica de envio continue funcionando.
+        if (status === 'Enviado' && !pedido) {
+            dadosSanitizados.status = 'APROVADO'; // Se enviou, já pula para aprovado no fluxo simplificado
+        }
+
         salvarPedido.mutate(dadosSanitizados);
     };
 
@@ -505,10 +552,31 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                                 </Select>
                             </div>
                             <div>
+                                <Label>Canal de Venda / Vendedor *</Label>
+                                <Select
+                                    value={form.centro_custo_id}
+                                    onValueChange={(v) => setForm({ ...form, centro_custo_id: v })}
+                                >
+                                    <SelectTrigger className={!form.centro_custo_id ? "border-amber-300 bg-amber-50" : ""}>
+                                        <SelectValue placeholder="Quem está comprando?" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {centrosCusto.map(cc => (
+                                            <SelectItem key={cc.id} value={cc.id}>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cc.cor }} />
+                                                    {cc.nome}
+                                                </div>
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className={form.condicoes_pagamento === 'Outros' ? "col-span-2 md:col-span-1" : ""}>
                                 <Label>Condições de Pagamento</Label>
                                 <Select
                                     value={form.condicoes_pagamento}
-                                    onValueChange={(v) => setForm({ ...form, condicoes_pagamento: v })}
+                                    onValueChange={(v) => setForm({ ...form, condicoes_pagamento: v, condicoes_pagamento_outros: v === 'Outros' ? form.condicoes_pagamento_outros : '' })}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Selecione" />
@@ -518,10 +586,22 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                                         <SelectItem value="30 dias">30 dias</SelectItem>
                                         <SelectItem value="30/60 dias">30/60 dias</SelectItem>
                                         <SelectItem value="30/60/90 dias">30/60/90 dias</SelectItem>
-                                        <SelectItem value="Outros">Outros</SelectItem>
+                                        <SelectItem value="Permuta">Permuta</SelectItem>
+                                        <SelectItem value="Outros">Outros...</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
+                            {form.condicoes_pagamento === 'Outros' && (
+                                <div className="col-span-2 md:col-span-1 border-l-2 border-amber-400 pl-3">
+                                    <Label className="text-amber-700">Especificar formato (ex: 30 dias 2 meses)</Label>
+                                    <Input
+                                        value={form.condicoes_pagamento_outros || ''}
+                                        onChange={(e) => setForm({ ...form, condicoes_pagamento_outros: e.target.value })}
+                                        placeholder="Digite a condição..."
+                                        className="border-amber-200 mt-1 focus-visible:ring-amber-500"
+                                    />
+                                </div>
+                            )}
                             <div>
                                 <Label>Data do Pedido</Label>
                                 <Input
@@ -537,6 +617,51 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                                     value={form.data_previsao_entrega}
                                     onChange={(e) => setForm({ ...form, data_previsao_entrega: e.target.value })}
                                 />
+                            </div>
+                        </div>
+
+                        {/* Campos Estruturados Edilene */}
+                        <div className="bg-blue-50/30 border border-blue-100 rounded-xl p-4 space-y-4">
+                            <h3 className="text-sm font-black uppercase tracking-widest text-blue-600 flex items-center gap-2">
+                                <MessageSquare className="w-4 h-4" />
+                                Comunicação e Devolutiva (Template Edilene)
+                            </h3>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <Label className="text-xs uppercase font-bold text-gray-500">Quem Aceitou (No Fornecedor)</Label>
+                                    <Input
+                                        placeholder="Ex: Edilene, Lucas..."
+                                        value={form.quem_aceitou}
+                                        onChange={(e) => setForm({ ...form, quem_aceitou: e.target.value })}
+                                        className="mt-1"
+                                    />
+                                </div>
+                                <div>
+                                    <Label className="text-xs uppercase font-bold text-gray-500">Canal de Comunicação</Label>
+                                    <Select
+                                        value={form.canal_comunicacao}
+                                        onValueChange={(v) => setForm({ ...form, canal_comunicacao: v })}
+                                    >
+                                        <SelectTrigger className="mt-1">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="WHATSAPP">WHATSAPP</SelectItem>
+                                            <SelectItem value="EMAIL">EMAIL</SelectItem>
+                                            <SelectItem value="TELEFONE">TELEFONE</SelectItem>
+                                            <SelectItem value="PRESENCIAL">PRESENCIAL</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="col-span-2">
+                                    <Label className="text-xs uppercase font-bold text-gray-500">Devolutiva do Fornecedor / Histórico</Label>
+                                    <Textarea
+                                        placeholder="Descreva a devolutiva do fornecedor sobre o pedido..."
+                                        value={form.devolutiva}
+                                        onChange={(e) => setForm({ ...form, devolutiva: e.target.value })}
+                                        className="mt-1 min-h-[80px]"
+                                    />
+                                </div>
                             </div>
                         </div>
 
@@ -784,6 +909,15 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                                         className={form.compra_promocional ? "border-green-300 bg-green-50" : ""}
                                     />
                                 </div>
+                                <div className="col-span-1 flex flex-col justify-end pb-2">
+                                    <Label className="text-[10px] text-amber-600 font-bold mb-1 uppercase">Fora Tabela</Label>
+                                    <input
+                                        type="checkbox"
+                                        id="fora-tabela-check"
+                                        className="w-5 h-5 accent-amber-500 rounded border-gray-300 ml-2"
+                                        title="Marque se este item não está na tabela oficial de preços"
+                                    />
+                                </div>
                                 <div className="col-span-2 flex items-end">
                                     <Button
                                         onClick={adicionarItem}
@@ -833,6 +967,11 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                                                                     <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700 border-blue-300">
                                                                         <Sparkles className="w-3 h-3 mr-1" />
                                                                         Novo
+                                                                    </Badge>
+                                                                )}
+                                                                {item.fora_tabela && (
+                                                                    <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-600 border-amber-200 uppercase font-black px-1 h-3.5">
+                                                                        Fora Tabela
                                                                     </Badge>
                                                                 )}
                                                             </div>
