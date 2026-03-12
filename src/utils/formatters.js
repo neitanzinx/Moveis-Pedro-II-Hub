@@ -257,17 +257,37 @@ export function formatarNumero(valor) {
 // ==================== TEXTO ====================
 
 /**
- * Capitaliza primeira letra de cada palavra
+ * Capitaliza primeira letra de cada palavra e remove espaços extras
  * @param {string} texto - Texto a ser capitalizado
  * @returns {string} Texto capitalizado
  */
 export function capitalizar(texto) {
     if (!texto) return '';
     return texto
+        .toString()
         .toLowerCase()
-        .split(' ')
+        .trim()
+        .split(/\s+/)
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
         .join(' ');
+}
+
+/**
+ * Formata nome completo: Primeira Letra Maiúscula
+ * @param {string} nome - Nome a ser formatado
+ * @returns {string} Nome formatado
+ */
+export function formatarNome(nome) {
+    return capitalizar(nome);
+}
+
+/**
+ * Formata endereço: Primeira Letra Maiúscula
+ * @param {string} endereco - Endereço a ser formatado
+ * @returns {string} Endereço formatado
+ */
+export function formatarEndereco(endereco) {
+    return capitalizar(endereco);
 }
 
 /**
