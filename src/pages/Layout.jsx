@@ -164,8 +164,14 @@ export default function Layout({ children, currentPageName }) {
                 <div className="w-8 h-8 rounded bg-white dark:bg-neutral-800 flex items-center justify-center overflow-hidden flex-shrink-0">
                   <img src={user.logo_url} alt="Logo" className="w-full h-full object-contain" />
                 </div>
+              ) : brandLogo ? (
+                <div className="w-8 h-8 rounded bg-white dark:bg-neutral-800 flex items-center justify-center overflow-hidden flex-shrink-0">
+                  <img src={brandLogo} alt="Logo" className="w-full h-full object-contain" />
+                </div>
               ) : (
-                <div className="w-8 h-8 rounded bg-green-700 flex items-center justify-center text-white font-bold flex-shrink-0">M</div>
+                <div className="w-8 h-8 rounded bg-green-700 flex items-center justify-center text-white font-bold flex-shrink-0">
+                  {brandName?.charAt(0).toUpperCase() || 'M'}
+                </div>
               )}
               <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
                 <h2 className="font-bold text-sm text-gray-900 dark:text-white truncate">{brandName}</h2>
