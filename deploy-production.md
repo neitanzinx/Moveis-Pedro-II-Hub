@@ -31,7 +31,7 @@ Variáveis essenciais:
 - `NODE_ENV=production`
 - `PORT=3001`
 - `SUPABASE_URL=...`
-- `SUPABASE_SERVICE_KEY=...`
+- `SUPABASE_SERVICE_KEY=<SUA_CHAVE_SERVICE_ROLE_AQUI>`
 - `PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable`
 - `VITE_ZAP_API_URL=` (Deixe vazio ou use a URL do seu site se necessário, mas no modo monólito ele usa a relativa)
 
