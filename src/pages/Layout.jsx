@@ -160,11 +160,7 @@ export default function Layout({ children, currentPageName }) {
 
             {/* Logo and Title Row */}
             <div className="flex items-center w-full gap-2 p-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
-              {user?.logo_url ? (
-                <div className="w-8 h-8 rounded bg-white dark:bg-neutral-800 flex items-center justify-center overflow-hidden flex-shrink-0">
-                  <img src={user.logo_url} alt="Logo" className="w-full h-full object-contain" />
-                </div>
-              ) : brandLogo ? (
+              {brandLogo ? (
                 <div className="w-8 h-8 rounded bg-white dark:bg-neutral-800 flex items-center justify-center overflow-hidden flex-shrink-0">
                   <img src={brandLogo} alt="Logo" className="w-full h-full object-contain" />
                 </div>
