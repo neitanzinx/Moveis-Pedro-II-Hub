@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase } from '@/lib/supabase';
 
 /**
  * ApprovalEngine handles the logic for calculating approval levels,

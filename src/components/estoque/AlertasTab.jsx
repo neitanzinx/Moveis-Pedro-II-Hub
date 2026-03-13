@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,7 +59,7 @@ export default function AlertasTab({ user }) {
   const isWarehouse = user?.cargo === 'Estoque';
 
   // Calcular alertas de recompra
-  const calcularAlertasRecompra = () => {
+  const alertasCalculados = useMemo(() => {
     const alertas = [];
     const hoje = new Date();
     const ultimosMeses = new Date();
@@ -115,22 +115,25 @@ export default function AlertasTab({ user }) {
     });
 
     return alertas.sort((a, b) => a.dias_para_acabar - b.dias_para_acabar);
-  };
+  }, [produtos, vendas]);
 
-  const alertasCalculados = calcularAlertasRecompra();
+  const autoGeradoRef = useRef(false);
 
   // Atualizar alertas automaticamente quando há novos alertas calculados
   useEffect(() => {
+    if (autoGeradoRef.current) return;
+
     if (alertasCalculados.length > 0 && alertasExistentes.length === 0) {
       // Auto-gerar alertas se houver alertas calculados e nenhum alerta ativo
       const autoGerarAlertas = async () => {
+        autoGeradoRef.current = true;
         for (const alerta of alertasCalculados) {
           await criarAlertaMutation.mutateAsync(alerta);
         }
       };
       autoGerarAlertas();
     }
-  }, [alertasCalculados.length, alertasExistentes.length]);
+  }, [alertasCalculados, alertasExistentes.length]);
 
   const gerarAlertas = async () => {
     for (const alerta of alertasExistentes.filter(a => a.status === 'Ativo')) {

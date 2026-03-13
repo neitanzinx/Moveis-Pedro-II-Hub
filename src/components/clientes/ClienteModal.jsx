@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { formatarCPF, formatarCNPJ, formatarTelefone, formatarNome, formatarEndereco } from "@/utils/formatters";
 import {
   Dialog,
   DialogContent,
@@ -130,43 +131,6 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
     }
   }, [cliente, isOpen]);
 
-  const formatarCPF = (valor) => {
-    const numeros = valor.replace(/\D/g, '');
-    if (numeros.length <= 11) {
-      return numeros
-        .replace(/(\d{3})(\d)/, '$1.$2')
-        .replace(/(\d{3})(\d)/, '$1.$2')
-        .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
-    }
-    return valor;
-  };
-
-  const formatarCNPJ = (valor) => {
-    const numeros = valor.replace(/\D/g, '');
-    if (numeros.length <= 14) {
-      return numeros
-        .replace(/(\d{2})(\d)/, '$1.$2')
-        .replace(/(\d{3})(\d)/, '$1.$2')
-        .replace(/(\d{3})(\d)/, '$1/$2')
-        .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
-    }
-    return valor;
-  };
-
-  const formatarTelefone = (valor) => {
-    const numeros = valor.replace(/\D/g, '');
-    if (numeros.length <= 11) {
-      return numeros
-        .replace(/(\d{2})/, '($1) ')
-        .replace(/(\d{5})(\d)/, '$1-$2');
-    }
-    return valor;
-  };
-
-  const formatarTexto = (valor) => {
-    if (!valor) return "";
-    return valor.toLowerCase().replace(/(?:^|\s|["'([{])+\S/g, match => match.toUpperCase());
-  };
 
   // Função auxiliar para buscar com timeout
   const fetchWithTimeout = async (resource, options = {}) => {
@@ -195,17 +159,17 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
       if (isEntrega) {
         setFormData(prev => ({
           ...prev,
-          endereco_entrega_rua: formatarTexto(dados.logradouro || dados.street || ""),
-          endereco_entrega_bairro: formatarTexto(dados.bairro || dados.neighborhood || ""),
-          endereco_entrega_cidade: formatarTexto(dados.localidade || dados.city || ""),
+          endereco_entrega_rua: formatarEndereco(dados.logradouro || dados.street || ""),
+          endereco_entrega_bairro: formatarEndereco(dados.bairro || dados.neighborhood || ""),
+          endereco_entrega_cidade: formatarEndereco(dados.localidade || dados.city || ""),
           endereco_entrega_estado: dados.uf || dados.state || "",
         }));
       } else {
         setFormData(prev => ({
           ...prev,
-          endereco: formatarTexto(dados.logradouro || dados.street || ""),
-          bairro: formatarTexto(dados.bairro || dados.neighborhood || ""),
-          cidade: formatarTexto(dados.localidade || dados.city || ""),
+          endereco: formatarEndereco(dados.logradouro || dados.street || ""),
+          bairro: formatarEndereco(dados.bairro || dados.neighborhood || ""),
+          cidade: formatarEndereco(dados.localidade || dados.city || ""),
           estado: dados.uf || dados.state || "",
         }));
       }
@@ -266,16 +230,16 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
 
       setFormData(prev => ({
         ...prev,
-        razao_social: formatarTexto(data.razao_social || ""),
-        nome_completo: formatarTexto(data.nome_fantasia || data.razao_social || prev.nome_completo),
+        razao_social: formatarNome(data.razao_social || ""),
+        nome_completo: formatarNome(data.nome_fantasia || data.razao_social || prev.nome_completo),
         telefone: formatarTelefone(data.ddd_telefone_1 ? data.ddd_telefone_1 + (data.telefone_1 || "") : prev.telefone),
         email: data.email || prev.email,
         cep: data.cep?.replace(/\D/g, '') || "",
         endereco: formatarTexto(data.logradouro || ""),
         numero: data.numero || "",
         complemento: formatarTexto(data.complemento || ""),
-        bairro: formatarTexto(data.bairro || ""),
-        cidade: formatarTexto(data.municipio || ""),
+        bairro: formatarEndereco(data.bairro || ""),
+        cidade: formatarEndereco(data.municipio || ""),
         estado: data.uf || "",
       }));
     } catch (error) {
@@ -397,7 +361,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
             <Label>Rua/Logradouro</Label>
             <Input
               value={getValue(isEntrega ? "rua" : "endereco")}
-              onChange={(e) => setValue(isEntrega ? "rua" : "endereco", formatarTexto(e.target.value))}
+              onChange={(e) => setValue(isEntrega ? "rua" : "endereco", formatarNome(e.target.value))}
               disabled={disabled}
             />
           </div>
@@ -417,7 +381,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
             <Label>Complemento</Label>
             <Input
               value={getValue("complemento")}
-              onChange={(e) => setValue("complemento", formatarTexto(e.target.value))}
+              onChange={(e) => setValue("complemento", formatarNome(e.target.value))}
               placeholder="Apt 101, Bloco A..."
               disabled={disabled}
             />
@@ -431,7 +395,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
           </Label>
           <Input
             value={getValue("ponto_referencia")}
-            onChange={(e) => setValue("ponto_referencia", formatarTexto(e.target.value))}
+            onChange={(e) => setValue("ponto_referencia", formatarNome(e.target.value))}
             placeholder="Próximo ao mercado, em frente à farmácia..."
             disabled={disabled}
           />
@@ -442,7 +406,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
             <Label>Bairro</Label>
             <Input
               value={getValue("bairro")}
-              onChange={(e) => setValue("bairro", formatarTexto(e.target.value))}
+              onChange={(e) => setValue("bairro", formatarNome(e.target.value))}
               disabled={disabled}
             />
           </div>
@@ -450,7 +414,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
             <Label>Cidade</Label>
             <Input
               value={getValue("cidade")}
-              onChange={(e) => setValue("cidade", formatarTexto(e.target.value))}
+              onChange={(e) => setValue("cidade", formatarNome(e.target.value))}
               disabled={disabled}
             />
           </div>
@@ -509,7 +473,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
                     <Input
                       id="nome_completo"
                       value={formData.nome_completo}
-                      onChange={(e) => setFormData({ ...formData, nome_completo: formatarTexto(e.target.value) })}
+                      onChange={(e) => setFormData({ ...formData, nome_completo: formatarNome(e.target.value) })}
                       required
                     />
                   </div>
@@ -552,7 +516,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
                       <Input
                         id="razao_social"
                         value={formData.razao_social}
-                        onChange={(e) => setFormData({ ...formData, razao_social: formatarTexto(e.target.value) })}
+                        onChange={(e) => setFormData({ ...formData, razao_social: formatarNome(e.target.value) })}
                       />
                     </div>
                   </div>
@@ -561,7 +525,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
                     <Input
                       id="nome_completo"
                       value={formData.nome_completo}
-                      onChange={(e) => setFormData({ ...formData, nome_completo: formatarTexto(e.target.value) })}
+                      onChange={(e) => setFormData({ ...formData, nome_completo: formatarNome(e.target.value) })}
                       required
                     />
                   </div>

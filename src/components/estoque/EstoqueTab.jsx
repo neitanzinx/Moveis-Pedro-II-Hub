@@ -15,8 +15,11 @@ import MovimentacaoModal from "./MovimentacaoModal";
 import { useConfirm } from "@/hooks/useConfirm";
 import { toast } from "sonner";
 import GeradorEtiquetasModal from "./GeradorEtiquetasModal";
+import { useLojas } from "@/hooks/useLojas";
+import { obterCampoEstoqueDaLoja } from "@/constants/productConstants";
 
 export default function EstoqueTab({ user }) {
+  const { lojas: lojasAtivas = [] } = useLojas();
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedCategoria, setSelectedCategoria] = useState("todas");
@@ -357,10 +360,22 @@ export default function EstoqueTab({ user }) {
                           <Badge variant="destructive" className="h-4 px-1 text-[10px]">Baixo</Badge>
                         )}
                         <div className="text-[10px] text-gray-500 flex gap-1 flex-wrap justify-center max-w-[120px]">
-                          {(produto.estoque_cd > 0) && <span title="Depósito/CD">CD:{produto.estoque_cd}</span>}
-                          {(produto.estoque_loja_centro > 0) && <span title="Loja Centro">CN:{produto.estoque_loja_centro}</span>}
-                          {(produto.estoque_loja_carangola > 0) && <span title="Loja Carangola">CR:{produto.estoque_loja_carangola}</span>}
-                          {(produto.estoque_loja_ponte_branca > 0) && <span title="Loja P. Branca">PB:{produto.estoque_loja_ponte_branca}</span>}
+                          {lojasAtivas.map(loja => {
+                            const campo = obterCampoEstoqueDaLoja(loja);
+                            const qtd = produto[campo];
+                            if (qtd > 0) {
+                              const sigla = loja.nome === "Depósito / CD" ? "CD" : 
+                                            loja.nome === "Centro" ? "CN" :
+                                            loja.nome === "Ponte Branca" ? "PB" :
+                                            loja.nome.substring(0, 2).toUpperCase();
+                              return (
+                                <span key={loja.id} title={loja.nome}>
+                                  {sigla}:{qtd}
+                                </span>
+                              );
+                            }
+                            return null;
+                          })}
                         </div>
                       </div>
                     </TableCell>

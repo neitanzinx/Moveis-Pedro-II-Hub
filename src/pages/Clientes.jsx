@@ -11,6 +11,7 @@ import ClienteModal from "../components/clientes/ClienteModal";
 import { ClienteCRMModal } from "../components/clientes/ClienteCRMModal";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
+import { formatarTelefone, formatarCPF, formatarNome, formatarEndereco, capitalizar } from "@/utils/formatters";
 
 // Helper para exibir badge do tier baseado em coroas
 const getTierBadge = (cliente) => {
@@ -359,7 +360,7 @@ export default function Clientes() {
                         <div>
                           <div className="flex items-center gap-2">
                             <p className="font-medium text-gray-900 dark:text-white">
-                              {cliente.nome_completo}
+                              {formatarNome(cliente.nome_completo)}
                             </p>
                             {(() => {
                               const tier = getTierBadge(cliente);
@@ -375,7 +376,7 @@ export default function Clientes() {
                             })()}
                           </div>
                           <p className="text-xs text-gray-500">
-                            {cliente.cpf || "CPF não informado"} • {cliente.coroas || cliente.fidelidade_steps || 0} Coroas
+                            {formatarCPF(cliente.cpf) || "CPF não informado"} • {cliente.coroas || cliente.fidelidade_steps || 0} Coroas
                           </p>
                         </div>
                       </div>
@@ -383,7 +384,7 @@ export default function Clientes() {
                     <TableCell>
                       <div className="space-y-1">
                         <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                          <Phone className="w-3 h-3" /> {cliente.telefone}
+                          <Phone className="w-3 h-3" /> {formatarTelefone(cliente.telefone)}
                         </div>
                         {cliente.email && (
                           <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
@@ -400,14 +401,14 @@ export default function Clientes() {
                             <div>
                               <span className="font-medium text-xs text-gray-500">Cliente:</span>
                               <span className="ml-1">
-                                {cliente.endereco}, {cliente.numero || 's/n'}
-                                {cliente.complemento && ` - ${cliente.complemento}`}
-                                {cliente.bairro && ` - ${cliente.bairro}`}
+                                {formatarEndereco(cliente.endereco)}, {cliente.numero || 's/n'}
+                                {cliente.complemento && ` - ${capitalizar(cliente.complemento)}`}
+                                {cliente.bairro && ` - ${capitalizar(cliente.bairro)}`}
                               </span>
                               <span className="text-xs text-gray-400 block">
-                                {cliente.cidade}/{cliente.estado}
+                                {capitalizar(cliente.cidade)}/{cliente.estado?.toUpperCase()}
                                 {cliente.ponto_referencia && (
-                                  <span className="text-orange-500 ml-1">(Ref: {cliente.ponto_referencia})</span>
+                                  <span className="text-orange-500 ml-1">(Ref: {capitalizar(cliente.ponto_referencia)})</span>
                                 )}
                               </span>
                             </div>

@@ -172,8 +172,9 @@ export const CARGOS = [
     }
 ];
 
-// Lista de lojas disponíveis
-export const LOJAS = ["Centro", "Carangola", "Ponte Branca"];
+// Lista de lojas disponíveis - DEPRECATED: Use o hook useLojas() para obter dados do banco
+// export const LOJAS = ["Centro", "Carangola", "Ponte Branca"];
+export const LOJAS = []; // Mantido como array vazio para evitar quebras imediatas em imports legados
 
 // Status de aprovação possíveis
 export const STATUS_APROVACAO = {

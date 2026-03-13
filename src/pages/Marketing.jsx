@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
+import { formatarTelefone, formatarNome, capitalizar } from "@/utils/formatters";
 import {
     Tag, Plus, Pencil, Trash2, Loader2, Percent, DollarSign,
     Calendar, Hash, AlertCircle, Copy, Check, MessageCircle, Send,
@@ -611,8 +612,8 @@ export default function Marketing() {
                                                 {orcamentosPendentes.map((orc) => (
                                                     <tr key={orc.id} className="hover:bg-gray-50">
                                                         <td className="px-4 py-3">
-                                                            <p className="font-medium">{orc.cliente_nome}</p>
-                                                            <p className="text-xs text-gray-500">{orc.cliente_telefone}</p>
+                                                            <p className="font-medium">{formatarNome(orc.cliente_nome)}</p>
+                                                            <p className="text-xs text-gray-500">{formatarTelefone(orc.cliente_telefone)}</p>
                                                         </td>
                                                         <td className="px-4 py-3">
                                                             <span className="font-bold text-green-700">{formatarValor(orc.valor_total)}</span>
@@ -679,10 +680,10 @@ export default function Marketing() {
                                                     <div className="flex items-start justify-between">
                                                         <div>
                                                             <div className="flex items-center gap-2">
-                                                                <Gift className={`w - 5 h - 5 ${isHoje ? 'text-purple-600' : 'text-gray-400'} `} />
-                                                                <span className="font-bold">{cliente.nome_completo}</span>
+                                                                <Gift className={`w-5 h-5 ${isHoje ? 'text-purple-600' : 'text-gray-400'}`} />
+                                                                <span className="font-bold">{formatarNome(cliente.nome_completo)}</span>
                                                             </div>
-                                                            <p className="text-sm text-gray-500 mt-1">{cliente.telefone}</p>
+                                                            <p className="text-sm text-gray-500 mt-1">{formatarTelefone(cliente.telefone)}</p>
                                                             <p className="text-xs text-purple-600 font-medium mt-2">
                                                                 Dia {diaAniversario} {isHoje && "(HOJE!)"}
                                                             </p>

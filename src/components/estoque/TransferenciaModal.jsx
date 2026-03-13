@@ -12,9 +12,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { LOJAS_MOSTRUARIO } from "@/constants/productConstants";
+import { useLojas } from "@/hooks/useLojas";
 
-export default function TransferenciaModal({ isOpen, onClose, onSave, transferencia, produtos, isLoading }) {
+export default function TransferenciaModal({ open, onOpenChange, onSave, transferencia, produtos, isLoading }) {
+  const { data: lojasReal = [] } = useLojas();
   const [formData, setFormData] = useState({
     numero_transferencia: "",
     produto_id: "",
@@ -27,6 +28,9 @@ export default function TransferenciaModal({ isOpen, onClose, onSave, transferen
     motivo: "",
     observacoes: "",
   });
+
+  const isOpen = open;
+  const onClose = () => onOpenChange(false);
 
   useEffect(() => {
     if (transferencia) {
@@ -125,7 +129,7 @@ export default function TransferenciaModal({ isOpen, onClose, onSave, transferen
                     <SelectValue placeholder="Origem" />
                   </SelectTrigger>
                   <SelectContent>
-                    {LOJAS_MOSTRUARIO.map(loja => (
+                    {lojasReal.map(loja => (
                       <SelectItem key={loja.id} value={loja.nome}>{loja.nome}</SelectItem>
                     ))}
                   </SelectContent>
@@ -143,7 +147,7 @@ export default function TransferenciaModal({ isOpen, onClose, onSave, transferen
                     <SelectValue placeholder="Destino" />
                   </SelectTrigger>
                   <SelectContent>
-                    {LOJAS_MOSTRUARIO.map(loja => (
+                    {lojasReal.map(loja => (
                       <SelectItem key={loja.id} value={loja.nome}>{loja.nome}</SelectItem>
                     ))}
                   </SelectContent>

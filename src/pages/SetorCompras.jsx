@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { base44, supabase } from "@/api/base44Client";
+import { base44, supabase } from "@/lib/supabase";
 import { comprasService } from "@/services/comprasService";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";

@@ -1,7 +1,8 @@
 import React, { useState, useMemo, createElement } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { base44, supabase } from "@/api/base44Client";
-import { CARGOS, LOJAS, getCargoConfig, getCargoPrefix } from "@/config/cargos";
+import { CARGOS, getCargoConfig, getCargoPrefix } from "@/config/cargos";
+import { useLojas } from "@/hooks/useLojas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,6 +51,7 @@ const formatCurrency = (value) => {
 
 export default function ColaboradorModal({ colaborador, usuarios = [], onClose, onSuccess, initialTab = "pessoal" }) {
     const queryClient = useQueryClient();
+    const { data: lojasReal = [] } = useLojas();
     const isEditing = !!colaborador && !colaborador.isAcessoRapido;
 
     const [formData, setFormData] = useState({
@@ -224,26 +226,12 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
 
     const createAccessMutation = useMutation({
         mutationFn: async () => {
-            // 1. Validation
             if (!formData.email) throw new Error("Email é obrigatório para criar acesso.");
             if (!formData.cargo) throw new Error("Cargo é obrigatório.");
 
-            // Check store requirement
-            const CARGOS_SEM_LOJA = ['Administrador', 'Gerente Geral', 'Financeiro', 'RH', 'Estoque', 'Logística', 'Agendamento', 'Entregador', 'Montador', 'Montador Externo'];
-            // Try to find loja in formData or from linked user or collaborator data? 
-            // In ColaboradorModal we don't strictly have a 'loja' field in formData except implicitly?
-            // Actually formData doesn't have 'loja'. We might need to ask for it?
-            // Wait, formData DOES NOT have 'loja'. NovoUsuarioModal had it.
-            // We need to check if we can infer it or if we need to add it to formData/UI if it's missing.
-            // For now, let's assume 'sem loja' or we need to prompt.
-            // EDIT: Colaborador doesn't usually have a store field directly? 
-            // Let's look at the backend/schema. Colaborador has 'loja_id'? Or checks 'setor'?
-            // NovoUsuarioModal asks for 'loja'.
-            // If cargo needs loja and we don't have it, we might fail.
-            // Let's add 'loja' to formData if not present? Or just pass null and let backend decide?
-
-            // 2. SignUp Supabase
+            const cargoConfig = getCargoConfig(formData.cargo);
             const senhaTemp = 'Temp' + Math.random().toString(36).substring(2, 8) + '1';
+            
             const { data: authUser, error: authError } = await base44.auth.signUp({
                 email: formData.email,
                 password: senhaTemp
@@ -251,97 +239,84 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
             if (authError) throw new Error(authError.message);
             if (!authUser?.user?.id) throw new Error("ID de usuário não retornado.");
 
-            // 3. Map Sector
             const setor = getCargoPrefix(formData.cargo);
+            const matricula = await (async () => {
+                const { data: existingMatriculas } = await supabase
+                    .from('public_users')
+                    .select('matricula')
+                    .like('matricula', `MP-${setor}%`)
+                    .order('matricula', { ascending: false })
+                    .limit(1);
 
-            // 4. Create Credentials (Backend)
-            const token = localStorage.getItem('employee_token');
-            const apiUrl = getZapApiUrl();
-            const response = await fetch(`${apiUrl}/api/auth/employee/create`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': token ? `Bearer ${token}` : ''
-                },
-                body: JSON.stringify({
-                    user_id: authUser.user.id,
-                    setor_code: setor
-                })
-            });
+                let nextNumber = 1;
+                if (existingMatriculas?.length > 0) {
+                    const lastMatricula = existingMatriculas[0].matricula;
+                    const lastNumberStr = lastMatricula.replace(`MP-${setor}`, '');
+                    const lastNumber = parseInt(lastNumberStr, 10);
+                    if (!isNaN(lastNumber)) nextNumber = lastNumber + 1;
+                }
+                return `MP-${setor}${nextNumber.toString().padStart(4, '0')}`;
+            })();
 
-            const credenciaisData = response.ok ? await response.json() : null;
-
-            // 5. Create Public User
             const userPayload = {
                 id: authUser.user.id,
                 email: formData.email,
                 full_name: formData.nome_completo,
                 cargo: formData.cargo,
-                loja: null, // We don't have store selector here yet, default null
-                status_aprovacao: 'Aprovado',
-                is_vendedor: formData.cargo === 'Vendedor',
-                meta_mensal: 0,
+                loja: cargoConfig?.requiresStore ? formData.loja : null,
                 ativo: true,
                 primeiro_acesso: true,
-                matricula: credenciaisData?.matricula || null
+                matricula: matricula,
+                is_vendedor: formData.cargo === 'Vendedor'
             };
 
-            const { error: insertError } = await supabase
-                .from('public_users')
-                .insert(userPayload);
+            const { error: insertError } = await supabase.from('public_users').upsert(userPayload);
+            if (insertError) throw new Error(insertError.message);
 
-            if (insertError) throw insertError;
-
-            return {
-                user_id: authUser.user.id,
-                matricula: credenciaisData?.matricula,
-                senha_temporaria: credenciaisData?.senha_temporaria || senhaTemp
-            };
+            return { matricula, senha_temporaria: senhaTemp, user_id: authUser.user.id };
         },
         onSuccess: (data) => {
             setGeneratedMatricula(data.matricula);
             setGeneratedPassword(data.senha_temporaria);
             setFormData(prev => ({ ...prev, user_id: data.user_id }));
             queryClient.invalidateQueries(['users']);
-            queryClient.invalidateQueries(['colaboradores']);
             toast.success("Acesso criado com sucesso!");
         },
-        onError: (err) => toast.error(err.message)
+        onError: (error) => toast.error("Erro ao criar acesso: " + error.message)
     });
 
     const resetPasswordMutation = useMutation({
         mutationFn: async () => {
-            if (!formData.user_id) return;
             const apiUrl = getZapApiUrl();
             const response = await fetch(`${apiUrl}/api/auth/employee/reset-password`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('employee_token')}`
+                },
                 body: JSON.stringify({ user_id: formData.user_id })
             });
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Erro ao resetar senha');
-            }
+            if (!response.ok) throw new Error('Falha ao resetar senha');
             return response.json();
         },
         onSuccess: (data) => {
             setGeneratedPassword(data.senha_temporaria);
-            setGeneratedMatricula(linkedUser?.matricula || "N/A");
-            toast.success("Senha resetada!");
+            setShowPassword(true);
+            toast.success("Senha resetada com sucesso!");
         },
-        onError: (err) => toast.error(err.message)
+        onError: (error) => toast.error("Erro ao resetar senha: " + error.message)
     });
 
     const toggleAccessMutation = useMutation({
         mutationFn: async () => {
-            if (!linkedUser) return;
-            await base44.entities.User.update(linkedUser.id, { ativo: !linkedUser.ativo });
+            const novoStatus = linkedUser?.ativo === false;
+            return base44.entities.User.update(formData.user_id, { ativo: novoStatus });
         },
         onSuccess: () => {
             queryClient.invalidateQueries(['users']);
-            toast.success("Status de acesso alterado.");
+            toast.success("Status de acesso alterado!");
         },
-        onError: (err) => toast.error(err.message)
+        onError: (error) => toast.error("Erro ao alterar acesso: " + error.message)
     });
 
     const handleChange = (field, value) => {
@@ -349,63 +324,37 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
     };
 
     const buscarCep = async () => {
-        if (formData.cep.length !== 8) return;
-        try {
-            const response = await fetch(`https://viacep.com.br/ws/${formData.cep}/json/`);
-            const data = await response.json();
-            if (!data.erro) {
-                setFormData(prev => ({
-                    ...prev,
-                    endereco: data.logradouro || "",
-                    bairro: data.bairro || "",
-                    cidade: data.localidade || "",
-                    estado: data.uf || "",
-                }));
+        const cep = formData.cep?.replace(/\D/g, "");
+        if (cep?.length === 8) {
+            try {
+                const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+                const data = await response.json();
+                if (!data.erro) {
+                    setFormData(prev => ({
+                        ...prev,
+                        endereco: data.logradouro,
+                        bairro: data.bairro,
+                        cidade: data.localidade,
+                        estado: data.uf
+                    }));
+                }
+            } catch (error) {
+                console.error("Erro ao buscar CEP:", error);
             }
-        } catch (error) {
-            console.error("Erro ao buscar CEP:", error);
         }
     };
 
-    const handleSubmit = async () => {
-        if (!formData.nome_completo) {
-            toast.error("Nome completo é obrigatório");
-            return;
-        }
-
+    const handleSubmit = async (e) => {
+        if (e) e.preventDefault();
         setSaving(true);
-
-        const dataToSave = {
-            ...formData,
-            // Convert empty strings to null for date fields
-            data_nascimento: formData.data_nascimento || null,
-            data_admissao: formData.data_admissao || null,
-            data_demissao: formData.data_demissao || null,
-            // Convert numeric fields
-            salario_base: formData.salario_base ? Number(formData.salario_base) : null,
-            carga_horaria: formData.carga_horaria ? Number(formData.carga_horaria) : null,
-            vale_transporte: formData.vale_transporte ? Number(formData.vale_transporte) : 0,
-            vale_alimentacao: formData.vale_alimentacao ? Number(formData.vale_alimentacao) : 0,
-            vale_refeicao: formData.vale_refeicao ? Number(formData.vale_refeicao) : 0,
-            plano_saude: formData.plano_saude ? Number(formData.plano_saude) : 0,
-            plano_odontologico: formData.plano_odontologico ? Number(formData.plano_odontologico) : 0,
-            bonus_mensal: formData.bonus_mensal ? Number(formData.bonus_mensal) : 0,
-            outros_beneficios: formData.outros_beneficios ? Number(formData.outros_beneficios) : 0,
-            dia_pagamento: formData.dia_pagamento ? Number(formData.dia_pagamento) : 5,
-            user_id: formData.user_id || null,
-            // CLT toggles
-            adicional_noturno: formData.adicional_noturno || false,
-            insalubridade_grau: formData.insalubridade_grau || null,
-            periculosidade: formData.periculosidade || false,
-            numero_dependentes: Number(formData.numero_dependentes) || 0,
-        };
-
         try {
             if (isEditing) {
-                await updateMutation.mutateAsync({ id: colaborador.id, data: dataToSave });
+                await updateMutation.mutateAsync({ id: colaborador.id, data: formData });
             } else {
-                await createMutation.mutateAsync(dataToSave);
+                await createMutation.mutateAsync(formData);
             }
+        } catch (error) {
+            console.error("Erro ao salvar:", error);
         } finally {
             setSaving(false);
         }
@@ -415,69 +364,39 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
         <Dialog open onOpenChange={onClose}>
             <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2" style={{ color: '#07593f' }}>
-                        <User className="w-5 h-5" />
+                    <DialogTitle className="flex items-center gap-2 text-2xl font-bold" style={{ color: '#07593f' }}>
+                        {isEditing ? <UserCheck className="w-6 h-6" /> : <User className="w-6 h-6" />}
                         {isEditing ? "Editar Colaborador" : "Novo Colaborador"}
                     </DialogTitle>
                 </DialogHeader>
 
                 <Tabs defaultValue={initialTab} className="mt-4">
-                    <TabsList className="grid w-full grid-cols-6">
-                        <TabsTrigger value="pessoal" className="text-xs">
-                            <User className="w-3 h-3 mr-1" />
-                            Pessoal
+                    <TabsList className="grid grid-cols-5 h-auto p-1 bg-gray-100 rounded-xl">
+                        <TabsTrigger value="pessoal" className="rounded-lg py-2">
+                            <User className="w-4 h-4 mr-2" /> Pessoal
                         </TabsTrigger>
-                        <TabsTrigger value="profissional" className="text-xs">
-                            <Briefcase className="w-3 h-3 mr-1" />
-                            Profissional
+                        <TabsTrigger value="profissional" className="rounded-lg py-2">
+                            <Briefcase className="w-4 h-4 mr-2" /> Profissional
                         </TabsTrigger>
-                        <TabsTrigger value="remuneracao" className="text-xs">
-                            <DollarSign className="w-3 h-3 mr-1" />
-                            Remuneração
+                        <TabsTrigger value="financeiro" className="rounded-lg py-2">
+                            <DollarSign className="w-4 h-4 mr-2" /> Remuneração
                         </TabsTrigger>
-                        <TabsTrigger value="endereco" className="text-xs">
-                            <MapPin className="w-3 h-3 mr-1" />
-                            Endereço
+                        <TabsTrigger value="endereco" className="rounded-lg py-2">
+                            <MapPin className="w-4 h-4 mr-2" /> Endereço
                         </TabsTrigger>
-                        <TabsTrigger value="bancario" className="text-xs">
-                            <CreditCard className="w-3 h-3 mr-1" />
-                            Bancário
-                        </TabsTrigger>
-                        <TabsTrigger value="sistema" className="text-xs">
-                            <Link className="w-3 h-3 mr-1" />
-                            Sistema
+                        <TabsTrigger value="sistema" className="rounded-lg py-2">
+                            <KeyRound className="w-4 h-4 mr-2" /> Sistema
                         </TabsTrigger>
                     </TabsList>
 
-                    {/* Dados Pessoais */}
                     <TabsContent value="pessoal" className="space-y-4 mt-4">
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-3 gap-4">
                             <div className="col-span-2">
-                                <Label htmlFor="nome_completo">Nome Completo *</Label>
+                                <Label htmlFor="nome_completo">Nome Completo</Label>
                                 <Input
                                     id="nome_completo"
                                     value={formData.nome_completo}
                                     onChange={(e) => handleChange("nome_completo", e.target.value)}
-                                    placeholder="Nome completo do colaborador"
-                                />
-                            </div>
-                            <div>
-                                <Label htmlFor="cpf">CPF</Label>
-                                <Input
-                                    id="cpf"
-                                    value={formData.cpf}
-                                    onChange={(e) => handleChange("cpf", formatarCPF(e.target.value))}
-                                    placeholder="000.000.000-00"
-                                    maxLength={14}
-                                />
-                            </div>
-                            <div>
-                                <Label htmlFor="rg">RG</Label>
-                                <Input
-                                    id="rg"
-                                    value={formData.rg}
-                                    onChange={(e) => handleChange("rg", e.target.value)}
-                                    placeholder="00.000.000-0"
                                 />
                             </div>
                             <div>
@@ -490,46 +409,52 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                                 />
                             </div>
                             <div>
+                                <Label htmlFor="cpf">CPF</Label>
+                                <Input
+                                    id="cpf"
+                                    value={formData.cpf}
+                                    onChange={(e) => handleChange("cpf", formatarCPF(e.target.value))}
+                                    maxLength={14}
+                                />
+                            </div>
+                            <div>
+                                <Label htmlFor="rg">RG</Label>
+                                <Input
+                                    id="rg"
+                                    value={formData.rg}
+                                    onChange={(e) => handleChange("rg", e.target.value)}
+                                />
+                            </div>
+                            <div>
                                 <Label htmlFor="telefone">Telefone</Label>
                                 <Input
                                     id="telefone"
                                     value={formData.telefone}
                                     onChange={(e) => handleChange("telefone", formatarTelefone(e.target.value))}
-                                    placeholder="(00) 00000-0000"
-                                    maxLength={15}
                                 />
                             </div>
-                            <div className="col-span-2">
+                            <div className="col-span-3">
                                 <Label htmlFor="email">Email</Label>
                                 <Input
                                     id="email"
                                     type="email"
                                     value={formData.email}
                                     onChange={(e) => handleChange("email", e.target.value)}
-                                    placeholder="email@exemplo.com"
                                 />
                             </div>
                         </div>
                     </TabsContent>
 
-                    {/* Dados Profissionais */}
                     <TabsContent value="profissional" className="space-y-4 mt-4">
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <Label htmlFor="cargo">Cargo</Label>
-                                <Select value={formData.cargo} onValueChange={(v) => {
-                                    handleChange("cargo", v);
-                                    // Clear loja if new cargo doesn't require store
-                                    const config = getCargoConfig(v);
-                                    if (!config?.requiresStore) {
-                                        handleChange("loja", "");
-                                    }
-                                }}>
+                                <Select value={formData.cargo} onValueChange={(v) => handleChange("cargo", v)}>
                                     <SelectTrigger>
                                         <SelectValue placeholder="Selecione o cargo" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {CARGOS.filter(c => c.value !== 'Pendente Definição').map(c => (
+                                        {CARGOS.map(c => (
                                             <SelectItem key={c.value} value={c.value}>
                                                 <div className="flex items-center gap-2">
                                                     {createElement(c.icon, { className: "w-4 h-4", style: { color: c.color } })}
@@ -549,263 +474,98 @@ export default function ColaboradorModal({ colaborador, usuarios = [], onClose, 
                                             <SelectValue placeholder="Selecione a loja" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {LOJAS.map(l => (
-                                                <SelectItem key={l} value={l}>{l}</SelectItem>
+                                            {lojasReal.map(l => (
+                                                <SelectItem key={l.id} value={l.nome}>{l.nome}</SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>
                                 </div>
                             )}
+
                             <div>
                                 <Label htmlFor="status">Status</Label>
                                 <Select value={formData.status} onValueChange={(v) => handleChange("status", v)}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
-                                        {STATUS_OPTIONS.map(s => (
-                                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                                        ))}
+                                        {STATUS_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
                             </div>
+
                             <div>
-                                <Label htmlFor="tipo_contrato">Tipo de Contrato</Label>
+                                <Label htmlFor="tipo_contrato">Contrato</Label>
                                 <Select value={formData.tipo_contrato} onValueChange={(v) => handleChange("tipo_contrato", v)}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
-                                        {CONTRATO_OPTIONS.map(c => (
-                                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                                        ))}
+                                        {CONTRATO_OPTIONS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
                             </div>
-                            {(formData.cargo === "Montador" || formData.cargo === "Logística" || formData.cargo === "Estoque") && (
-                                <div>
-                                    <Label htmlFor="pin_montagem">Senha de Montagem (PIN)</Label>
-                                    <Input
-                                        id="pin_montagem"
-                                        value={formData.pin_montagem}
-                                        onChange={(e) => handleChange("pin_montagem", e.target.value.replace(/\D/g, '').slice(0, 4))}
-                                        placeholder="4 dígitos (Ex: 1234)"
-                                        maxLength={4}
-                                    />
-                                </div>
-                            )}
+                            
                             <div>
-                                <Label htmlFor="data_admissao">Data de Admissão</Label>
-                                <Input
-                                    id="data_admissao"
-                                    type="date"
-                                    value={formData.data_admissao}
-                                    onChange={(e) => handleChange("data_admissao", e.target.value)}
-                                />
+                                <Label htmlFor="data_admissao">Admissão</Label>
+                                <Input type="date" value={formData.data_admissao} onChange={(e) => handleChange("data_admissao", e.target.value)} />
                             </div>
+                            
                             <div>
-                                <Label htmlFor="carga_horaria">Carga Horária Semanal</Label>
-                                <Input
-                                    id="carga_horaria"
-                                    type="number"
-                                    value={formData.carga_horaria}
-                                    onChange={(e) => handleChange("carga_horaria", e.target.value)}
-                                    placeholder="44"
-                                />
+                                <Label htmlFor="carga_horaria">Carga Horária</Label>
+                                <Input type="number" value={formData.carga_horaria} onChange={(e) => handleChange("carga_horaria", Number(e.target.value))} />
                             </div>
-                            {formData.status === "Desligado" && (
-                                <>
-                                    <div>
-                                        <Label htmlFor="data_demissao">Data de Demissão</Label>
-                                        <Input
-                                            id="data_demissao"
-                                            type="date"
-                                            value={formData.data_demissao}
-                                            onChange={(e) => handleChange("data_demissao", e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="col-span-2">
-                                        <Label htmlFor="motivo_demissao">Motivo da Demissão</Label>
-                                        <Textarea
-                                            id="motivo_demissao"
-                                            value={formData.motivo_demissao}
-                                            onChange={(e) => handleChange("motivo_demissao", e.target.value)}
-                                            placeholder="Descreva o motivo..."
-                                        />
-                                    </div>
-                                </>
-                            )}
+                        </div>
+
+                        {(formData.cargo === 'Montador' || formData.cargo === 'Montador Externo') && (
+                            <div className="bg-blue-50 p-4 rounded-lg border">
+                                <Label className="font-bold">PIN de Montagem</Label>
+                                <Input type="password" maxLength={4} value={formData.pin_montagem} onChange={(e) => handleChange("pin_montagem", e.target.value.replace(/\D/g, ''))} />
+                            </div>
+                        )}
+                        
+                        <div className="space-y-2">
+                             <Label htmlFor="observacoes">Observações</Label>
+                             <Textarea id="observacoes" value={formData.observacoes} onChange={(e) => handleChange("observacoes", e.target.value)} className="min-h-[100px]" />
                         </div>
                     </TabsContent>
 
-                    {/* Remuneração e Benefícios - NEW TAB */}
-                    <TabsContent value="remuneracao" className="space-y-4 mt-4">
-                        {/* Salário Base */}
-                        <Card className="border-0 shadow-sm bg-green-50">
-                            <CardContent className="pt-4">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <DollarSign className="w-5 h-5 text-green-600" />
-                                    <h3 className="font-semibold text-green-800">Salário</h3>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <Label htmlFor="salario_base">Salário Base (R$) *</Label>
-                                        <Input
-                                            id="salario_base"
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.salario_base}
-                                            onChange={(e) => handleChange("salario_base", e.target.value)}
-                                            placeholder="0,00"
-                                        />
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        {/* Benefícios */}
+                    <TabsContent value="financeiro" className="space-y-6 mt-4">
                         <Card className="border-0 shadow-sm bg-blue-50">
                             <CardContent className="pt-4">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Gift className="w-5 h-5 text-blue-600" />
-                                    <h3 className="font-semibold text-blue-800">Benefícios</h3>
-                                </div>
-                                <div className="grid grid-cols-3 gap-4">
-                                    <div>
-                                        <Label htmlFor="vale_transporte">Vale Transporte (R$)</Label>
-                                        <Input
-                                            id="vale_transporte"
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.vale_transporte}
-                                            onChange={(e) => handleChange("vale_transporte", e.target.value)}
-                                            placeholder="0,00"
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="vale_alimentacao">Vale Alimentação (R$)</Label>
-                                        <Input
-                                            id="vale_alimentacao"
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.vale_alimentacao}
-                                            onChange={(e) => handleChange("vale_alimentacao", e.target.value)}
-                                            placeholder="0,00"
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="vale_refeicao">Vale Refeição (R$)</Label>
-                                        <Input
-                                            id="vale_refeicao"
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.vale_refeicao}
-                                            onChange={(e) => handleChange("vale_refeicao", e.target.value)}
-                                            placeholder="0,00"
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="plano_saude">Plano de Saúde (R$)</Label>
-                                        <Input
-                                            id="plano_saude"
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.plano_saude}
-                                            onChange={(e) => handleChange("plano_saude", e.target.value)}
-                                            placeholder="0,00"
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="plano_odontologico">Plano Odontológico (R$)</Label>
-                                        <Input
-                                            id="plano_odontologico"
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.plano_odontologico}
-                                            onChange={(e) => handleChange("plano_odontologico", e.target.value)}
-                                            placeholder="0,00"
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="bonus_mensal">Bônus Mensal (R$)</Label>
-                                        <Input
-                                            id="bonus_mensal"
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.bonus_mensal}
-                                            onChange={(e) => handleChange("bonus_mensal", e.target.value)}
-                                            placeholder="0,00"
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="outros_beneficios">Outros Benefícios (R$)</Label>
-                                        <Input
-                                            id="outros_beneficios"
-                                            type="number"
-                                            step="0.01"
-                                            value={formData.outros_beneficios}
-                                            onChange={(e) => handleChange("outros_beneficios", e.target.value)}
-                                            placeholder="0,00"
-                                        />
-                                    </div>
-                                    <div className="col-span-2">
-                                        <Label htmlFor="descricao_outros_beneficios">Descrição Outros Benefícios</Label>
-                                        <Input
-                                            id="descricao_outros_beneficios"
-                                            value={formData.descricao_outros_beneficios}
-                                            onChange={(e) => handleChange("descricao_outros_beneficios", e.target.value)}
-                                            placeholder="Descreva os outros benefícios..."
-                                        />
-                                    </div>
+                                <Label>Salário Base</Label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-2 text-gray-400">R$</span>
+                                    <Input type="number" className="pl-9" value={formData.salario_base} onChange={(e) => handleChange("salario_base", Number(e.target.value))} />
                                 </div>
                             </CardContent>
                         </Card>
 
-                        {/* Adicionais CLT */}
-                        <Card className="border-0 shadow-sm bg-orange-50">
-                            <CardContent className="pt-4">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Shield className="w-5 h-5 text-orange-600" />
-                                    <h3 className="font-semibold text-orange-800">Adicionais CLT</h3>
-                                    <span className="text-xs text-orange-500 ml-auto">Ative conforme aplicável</span>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="flex items-center justify-between p-3 bg-white rounded-lg border">
-                                        <div className="flex items-center gap-2">
-                                            <Moon className="w-4 h-4 text-indigo-500" />
-                                            <div>
-                                                <Label className="text-sm font-medium">Adicional Noturno</Label>
-                                                <p className="text-xs text-gray-500">+20% sobre salário base</p>
-                                            </div>
+                        <Card>
+                            <CardContent className="pt-4 space-y-4">
+                                <Label className="font-bold text-gray-700">Adicionais e Benefícios</Label>
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div className="p-3 bg-white rounded-lg border">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <Label className="text-sm">Noturno</Label>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleChange("adicional_noturno", !formData.adicional_noturno)}
+                                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${formData.adicional_noturno ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                                            >
+                                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${formData.adicional_noturno ? 'translate-x-6' : 'translate-x-1'}`} />
+                                            </button>
                                         </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleChange("adicional_noturno", !formData.adicional_noturno)}
-                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${formData.adicional_noturno ? 'bg-indigo-500' : 'bg-gray-300'
-                                                }`}
-                                        >
-                                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${formData.adicional_noturno ? 'translate-x-6' : 'translate-x-1'
-                                                }`} />
-                                        </button>
                                     </div>
-                                    <div className="flex items-center justify-between p-3 bg-white rounded-lg border">
-                                        <div className="flex items-center gap-2">
-                                            <AlertTriangle className="w-4 h-4 text-red-500" />
-                                            <div>
-                                                <Label className="text-sm font-medium">Periculosidade</Label>
-                                                <p className="text-xs text-gray-500">+30% sobre salário base</p>
-                                            </div>
+                                    <div className="p-3 bg-white rounded-lg border">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <Label className="text-sm">Periculos.</Label>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleChange("periculosidade", !formData.periculosidade)}
+                                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${formData.periculosidade ? 'bg-red-500' : 'bg-gray-300'}`}
+                                            >
+                                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${formData.periculosidade ? 'translate-x-6' : 'translate-x-1'}`} />
+                                            </button>
                                         </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleChange("periculosidade", !formData.periculosidade)}
-                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${formData.periculosidade ? 'bg-red-500' : 'bg-gray-300'
-                                                }`}
-                                        >
-                                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${formData.periculosidade ? 'translate-x-6' : 'translate-x-1'
-                                                }`} />
-                                        </button>
                                     </div>
+
                                     <div className="p-3 bg-white rounded-lg border">
                                         <div className="flex items-center gap-2 mb-2">
                                             <Shield className="w-4 h-4 text-amber-500" />

@@ -1,5 +1,6 @@
 import React from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -17,15 +18,13 @@ import { comprasService } from "@/services/comprasService";
 import { ApprovalEngine } from '@/services/ApprovalEngine';
 import AprovacaoBadge from './AprovacaoBadge';
 import { useAuth } from "@/hooks/useAuth";
-import { base44, supabase } from "@/api/base44Client";
+import { supabase, base44 } from '@/lib/supabase';
 import MarkupCalculator from "./MarkupCalculator";
 
 export default function OCDetailModal({ open, onClose, pedido, fornecedores = [] }) {
     const queryClient = useQueryClient();
     const { user, can } = useAuth();
 
-    const [solicitandoAprovacao, setSolicitandoAprovacao] = React.useState(false);
-    const [usuarioSelecionadoId, setUsuarioSelecionadoId] = React.useState('');
     const [novoComentario, setNovoComentario] = React.useState('');
 
     // Communication fields state
@@ -160,46 +159,7 @@ export default function OCDetailModal({ open, onClose, pedido, fornecedores = []
     };
 
     // --- Queries & Mutations ---
-    const { data: aprovacoes = [], isLoading: loadingAprovacoes } = useQuery({
-        queryKey: ['compras_aprovacoes', pedido?.id],
-        queryFn: () => comprasService.getAprovacoesDaOrdem(pedido.id),
-        enabled: open && !!pedido?.id
-    });
 
-    const { data: usuarios = [] } = useQuery({
-        queryKey: ['funcionarios_ativos'],
-        queryFn: async () => {
-            return base44.entities.Funcionario.list();
-        },
-        select: (data) => data.filter(u => u.ativo && u.cargo !== 'Vendedor' && u.id !== user?.id),
-        enabled: open && solicitandoAprovacao
-    });
-
-    const solicitarAprovacao = useMutation({
-        mutationFn: (userId) => comprasService.requestApproval(pedido?.id, userId),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compras_aprovacoes', pedido?.id] });
-            toast.success("Solicitação de aprovação enviada!");
-            setSolicitandoAprovacao(false);
-            setUsuarioSelecionadoId('');
-        },
-        onError: (err) => {
-            toast.error("Erro ao solicitar aprovação: " + err.message);
-        }
-    });
-
-    const aprovarReprovar = useMutation({
-        mutationFn: ({ aprovacaoId, status, comentarios }) =>
-            comprasService.respondApproval(aprovacaoId, status, comentarios),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['compras_aprovacoes', pedido?.id] });
-            queryClient.invalidateQueries({ queryKey: ['compras_ordens'] });
-            toast.success("Resposta enviada com sucesso!");
-        },
-        onError: (err) => {
-            toast.error("Erro ao responder aprovação: " + err.message);
-        }
-    });
 
     const updateOrdemMutation = useMutation({
         mutationFn: async (data) => {
@@ -303,9 +263,9 @@ export default function OCDetailModal({ open, onClose, pedido, fornecedores = []
                             <TabsTrigger value="itens" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">Itens</TabsTrigger>
                             <TabsTrigger value="aprovacoes" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">
                                 Aprovações
-                                {aprovacoes.filter(a => a.status === 'pendente').length > 0 && (
+                                {pedido.aprovacao_status === 'PENDENTE' && (
                                     <Badge variant="destructive" className="ml-2 w-5 h-5 flex items-center justify-center p-0 text-[10px] rounded-full">
-                                        {aprovacoes.filter(a => a.status === 'pendente').length}
+                                        1
                                     </Badge>
                                 )}
                             </TabsTrigger>
@@ -604,170 +564,30 @@ export default function OCDetailModal({ open, onClose, pedido, fornecedores = []
                                     </div>
 
                                     {pedido.aprovacao_status === 'PENDENTE' && (
-                                        <div className="mt-6 p-4 bg-white border border-amber-200 rounded-xl shadow-sm">
-                                            <p className="text-sm font-bold text-gray-800 mb-3">Sua decisão é necessária:</p>
-                                            <div className="flex gap-2">
-                                                <Button
-                                                    variant="outline"
-                                                    className="flex-1 border-red-200 text-red-600 hover:bg-red-50"
-                                                    onClick={() => {
-                                                        const just = prompt("Justificativa para rejeição:");
-                                                        if (just) handleDecision.mutate({ status: 'REJEITADO', justification: just });
-                                                    }}
-                                                >
-                                                    <X className="w-4 h-4 mr-2" /> Rejeitar
-                                                </Button>
-                                                <Button
-                                                    className="flex-1 bg-green-600 hover:bg-green-700"
-                                                    onClick={() => handleDecision.mutate({ status: 'APROVADO' })}
-                                                >
-                                                    <Check className="w-4 h-4 mr-2" /> Aprovar OC
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            <div className="flex justify-between items-center bg-gray-50 p-3 rounded border text-left">
-                                <div>
-                                    <h3 className="font-medium text-gray-800 uppercase text-xs font-black">Histórico Manual</h3>
-                                    <p className="text-xs text-gray-500">
-                                        Solicitações de aprovação legadas/manuais
-                                    </p>
-                                </div>
-                                {can('Gerenciar Pedidos de Compra') && (
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => setSolicitandoAprovacao(!solicitandoAprovacao)}
-                                        className="bg-white"
-                                    >
-                                        <Plus className="w-4 h-4 mr-1" /> Solicitar Aprovação
-                                    </Button>
-                                )}
-                            </div>
-
-                            {solicitandoAprovacao && (
-                                <Card className="border-blue-200 bg-blue-50/50">
-                                    <CardContent className="p-4 flex items-end gap-3">
-                                        <div className="flex-1 space-y-1">
-                                            <p className="text-sm font-medium text-gray-700">Selecione o usuário para aprovação</p>
-                                            <Select value={usuarioSelecionadoId} onValueChange={setUsuarioSelecionadoId}>
-                                                <SelectTrigger className="bg-white">
-                                                    <SelectValue placeholder="Selecione um gestor/diretor..." />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {usuarios.map(u => (
-                                                        <SelectItem key={u.id} value={u.id}>
-                                                            {u.full_name} ({u.cargo || 'Funcionario'})
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                        <Button
-                                            onClick={() => solicitarAprovacao.mutate(usuarioSelecionadoId)}
-                                            disabled={!usuarioSelecionadoId || solicitarAprovacao.isPending}
-                                            className="bg-blue-600 hover:bg-blue-700 text-white"
-                                        >
-                                            <Send className="w-4 h-4 mr-2" /> Enviar
-                                        </Button>
-                                    </CardContent>
-                                </Card>
-                            )}
-
-                            {loadingAprovacoes ? (
-                                <div className="text-center py-4 text-gray-500">Carregando aprovações...</div>
-                            ) : aprovacoes.length === 0 ? (
-                                <div className="text-center py-8 text-gray-500 border rounded-lg bg-gray-50 border-dashed">
-                                    Nenhuma solicitação de aprovação para este pedido.
-                                </div>
-                            ) : (
-                                <div className="space-y-3">
-                                    {aprovacoes.map(apv => (
-                                        <Card key={apv.id} className={apv.status === 'aprovado' ? 'border-green-200 bg-green-50/30' : apv.status === 'rejeitado' ? 'border-red-200 bg-red-50/30' : ''}>
+                                        <Card className="mt-6 bg-white border border-amber-200 rounded-xl shadow-sm">
                                             <CardContent className="p-4">
-                                                <div className="flex items-start justify-between">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold overflow-hidden">
-                                                            {apv.users?.avatar_url ? (
-                                                                <img src={apv.users.avatar_url} alt={apv.users.full_name} className="w-full h-full object-cover" />
-                                                            ) : (
-                                                                apv.users?.full_name?.substring(0, 2).toUpperCase() || 'US'
-                                                            )}
-                                                        </div>
-                                                        <div>
-                                                            <p className="font-medium">Solicitado para: {apv.users?.full_name}</p>
-                                                            <p className="text-xs text-gray-500 flex items-center gap-1">
-                                                                <Clock className="w-3 h-3" />
-                                                                {format(new Date(apv.created_at), "dd/MM/yyyy 'às' HH:mm")}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        {apv.status === 'pendente' && (
-                                                            <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
-                                                                <AlertCircle className="w-3 h-3 mr-1" />
-                                                                Aguardando
-                                                            </Badge>
-                                                        )}
-                                                        {apv.status === 'aprovado' && (
-                                                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                                                                <Check className="w-3 h-3 mr-1" />
-                                                                Aprovado
-                                                            </Badge>
-                                                        )}
-                                                        {apv.status === 'rejeitado' && (
-                                                            <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-                                                                <X className="w-3 h-3 mr-1" />
-                                                                Rejeitado
-                                                            </Badge>
-                                                        )}
-                                                    </div>
+                                                <p className="text-sm font-bold text-gray-800 mb-3">Sua decisão é necessária:</p>
+                                                <div className="flex gap-2">
+                                                    <Button
+                                                        variant="outline"
+                                                        className="flex-1 border-red-200 text-red-600 hover:bg-red-50"
+                                                        onClick={() => {
+                                                            const just = prompt("Justificativa para rejeição:");
+                                                            if (just) handleDecision.mutate({ status: 'REJEITADO', justification: just });
+                                                        }}
+                                                    >
+                                                        <X className="w-4 h-4 mr-2" /> Rejeitar
+                                                    </Button>
+                                                    <Button
+                                                        className="flex-1 bg-green-600 hover:bg-green-700"
+                                                        onClick={() => handleDecision.mutate({ status: 'APROVADO' })}
+                                                    >
+                                                        <Check className="w-4 h-4 mr-2" /> Aprovar OC
+                                                    </Button>
                                                 </div>
-
-                                                {apv.comentarios && (
-                                                    <div className="mt-3 bg-white p-3 rounded border text-sm text-gray-700 shadow-sm">
-                                                        <span className="font-semibold block mb-1">Comentário:</span>
-                                                        {apv.comentarios}
-                                                    </div>
-                                                )}
-
-                                                {apv.status === 'pendente' && user?.id === apv.user_id && (
-                                                    <div className="mt-4 flex gap-2 justify-end border-t pt-3">
-                                                        <Button
-                                                            variant="outline"
-                                                            className="text-red-600 border-red-200 hover:bg-red-50"
-                                                            onClick={() => {
-                                                                const obs = prompt("Justificativa para rejeição:");
-                                                                if (obs !== null) {
-                                                                    aprovarReprovar.mutate({ aprovacaoId: apv.id, status: 'rejeitado', comentarios: obs });
-                                                                }
-                                                            }}
-                                                            disabled={aprovarReprovar.isPending}
-                                                        >
-                                                            <X className="w-4 h-4 mr-2" />
-                                                            Rejeitar
-                                                        </Button>
-                                                        <Button
-                                                            className="bg-green-600 hover:bg-green-700 text-white"
-                                                            onClick={() => {
-                                                                const obs = prompt("Comentário (Opcional):");
-                                                                if (obs !== null) {
-                                                                    aprovarReprovar.mutate({ aprovacaoId: apv.id, status: 'aprovado', comentarios: obs });
-                                                                }
-                                                            }}
-                                                            disabled={aprovarReprovar.isPending}
-                                                        >
-                                                            <Check className="w-4 h-4 mr-2" />
-                                                            Aprovar Pedido
-                                                        </Button>
-                                                    </div>
-                                                )}
                                             </CardContent>
                                         </Card>
-                                    ))}
+                                    )}
                                 </div>
                             )}
                         </TabsContent>

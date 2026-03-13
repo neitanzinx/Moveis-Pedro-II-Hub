@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { formatarCPF, formatarTelefone } from "@/utils/formatters";
+import { formatarCPF, formatarTelefone, formatarNome, formatarEndereco } from "@/utils/formatters";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -198,12 +198,6 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
     c.telefone?.includes(busca)
   );
 
-  const formatarNome = (str) => {
-    if (!str) return "";
-    return str
-      .toLowerCase()
-      .replace(/(?:^|\s)\S/g, (a) => a.toUpperCase());
-  };
 
   // Construir endereço de entrega para exibição
   const getEnderecoEntregaDisplay = (cliente) => {
@@ -262,7 +256,7 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
           </Button>
           <div className="flex items-center gap-2">
             <p className="font-bold text-green-800 dark:text-green-400 truncate flex items-center gap-2">
-              {clienteSelecionado.nome_completo}
+              {formatarNome(clienteSelecionado.nome_completo)}
               {clienteSelecionado.isNew && (
                 <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse">
                   NOVO
@@ -283,7 +277,7 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
             })()}
           </div>
           <p className="text-xs text-green-700 dark:text-green-500 truncate mt-0.5">
-            {clienteSelecionado.cpf || 'CPF n/d'} • {clienteSelecionado.telefone} • {clienteSelecionado.coroas || clienteSelecionado.fidelidade_steps || 0} Coroas
+            {clienteSelecionado.cpf || 'CPF n/d'} • {formatarTelefone(clienteSelecionado.telefone)} • {clienteSelecionado.coroas || clienteSelecionado.fidelidade_steps || 0} Coroas
           </p>
           {(() => {
             const endereco = getEnderecoEntregaDisplay(clienteSelecionado);
@@ -341,7 +335,7 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                   >
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className="font-medium">{c.nome_completo}</p>
+                        <p className="font-medium">{formatarNome(c.nome_completo)}</p>
                         {(() => {
                           const tier = getTierBadge(c);
                           return (
@@ -354,7 +348,7 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                           );
                         })()}
                       </div>
-                      <p className="text-xs text-gray-500">{c.cpf} • {c.telefone}</p>
+                      <p className="text-xs text-gray-500">{c.cpf} • {formatarTelefone(c.telefone)}</p>
                     </div>
                     <Check className="w-4 h-4 text-green-600 opacity-0 group-hover:opacity-100" />
                   </div>

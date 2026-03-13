@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
+import { useLojas } from "@/hooks/useLojas";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -140,6 +141,8 @@ export default function RelatoriosAvancados() {
     queryKey: ['vendas-relatorios'],
     queryFn: () => base44.entities.Venda.list('-data_venda'),
   });
+
+  const { data: lojas = [] } = useLojas();
 
   const { data: users = [] } = useQuery({
     queryKey: ['users-relatorios'],
@@ -1057,9 +1060,9 @@ export default function RelatoriosAvancados() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="todas">Todas as Lojas</SelectItem>
-                    <SelectItem value="Centro">Centro</SelectItem>
-                    <SelectItem value="Carangola">Carangola</SelectItem>
-                    <SelectItem value="Ponte Branca">Ponte Branca</SelectItem>
+                    {lojas.map(loja => (
+                      <SelectItem key={loja.id} value={loja.nome}>{loja.nome}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

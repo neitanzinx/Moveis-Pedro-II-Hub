@@ -309,6 +309,25 @@ export default function ImportarNFe({ user }) {
     setEtapaAtual("Conectando com servidor...");
 
     try {
+      // Verificar se a nota ja existe no banco para evitar duplicidade
+      const { data: existente, error: errorCheck } = await supabase
+        .from('nota_fiscal_entrada')
+        .select('id, numero_nota')
+        .eq('chave_acesso', chaveLimpa)
+        .maybeSingle();
+
+      if (errorCheck) console.error("Erro ao verificar duplicidade:", errorCheck);
+      
+      if (existente) {
+        setResultado({ 
+          tipo: 'erro', 
+          texto: `Nota Fiscal #${existente.numero_nota} ja importada anteriormente.` 
+        });
+        setConsultandoAPI(false);
+        setEtapaAtual("");
+        return;
+      }
+
       setEtapaAtual("Buscando nota na SEFAZ...");
 
       // Usar Edge Function segura

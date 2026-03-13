@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useLojas } from "@/hooks/useLojas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 
 export default function FiltrosAvancados({ filtros, onChange }) {
   const [aberto, setAberto] = useState(false);
+  const { data: lojas = [] } = useLojas();
 
   const contarFiltrosAtivos = () => {
     let count = 0;
@@ -124,9 +126,9 @@ export default function FiltrosAvancados({ filtros, onChange }) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todas">Todas</SelectItem>
-                  <SelectItem value="Centro">Centro</SelectItem>
-                  <SelectItem value="Carangola">Carangola</SelectItem>
-                  <SelectItem value="Ponte Branca">Ponte Branca</SelectItem>
+                  {lojas.map(loja => (
+                    <SelectItem key={loja.id} value={loja.nome}>{loja.nome}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

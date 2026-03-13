@@ -29,22 +29,20 @@ const COLUMN_MAP = {
   'produto': 'nome',
   'descricao': 'nome',
   'descrição': 'nome',
-  'descrição do produto': 'nome',
-  'descricao do produto': 'nome',
+  'descrição_do_produto': 'nome',
+  'descricao_do_produto': 'nome',
   'categoria': 'categoria',
   'tipo': 'categoria',
 
   // === FABRICANTE / FORNECEDOR ===
   'fabricante': 'fornecedor_nome',
   'fornecedor': 'fornecedor_nome',
-  'fabricante / fornecedor': 'fornecedor_nome',
   'fabricante/fornecedor': 'fornecedor_nome',
 
   // === MODELO / REFERÊNCIA ===
   'modelo': 'modelo_referencia',
-  'modelo / referência': 'modelo_referencia',
   'modelo/referência': 'modelo_referencia',
-  'modelo / referencia': 'modelo_referencia',
+  'modelo/referencia': 'modelo_referencia',
 
   // === DIMENSÕES ===
   'largura': 'largura',
@@ -53,24 +51,23 @@ const COLUMN_MAP = {
   'extra': 'dimensao_extra',
 
   // === VARIAÇÕES ===
-  'variação de cores': 'cor',
-  'variacao de cores': 'cor',
+  'variação_de_cores': 'cor',
+  'variacao_de_cores': 'cor',
   'cor': 'cor',
   'cores': 'cor',
-  'modelos de tecidos': 'modelos_tecidos',
+  'modelos_de_tecidos': 'modelos_tecidos',
   'tecidos': 'modelos_tecidos',
 
   // === ESTOQUE POR LOCAL ===
-  'estoque cd': 'estoque_cd',
   'estoque_cd': 'estoque_cd',
   'cd': 'estoque_cd',
-  'mostruario loja mega store': 'estoque_mostruario_mega_store',
-  'mega store': 'estoque_mostruario_mega_store',
-  'mostruario loja centro': 'estoque_mostruario_centro',
+  'mostruario_loja_mega_store': 'estoque_mostruario_mega_store',
+  'mega_store': 'estoque_mostruario_mega_store',
+  'mostruario_loja_centro': 'estoque_mostruario_centro',
   'centro': 'estoque_mostruario_centro',
-  'mostruario loja ponte branca': 'estoque_mostruario_ponte_branca',
-  'ponte branca': 'estoque_mostruario_ponte_branca',
-  'mostruario loja futura': 'estoque_mostruario_futura',
+  'mostruario_loja_ponte_branca': 'estoque_mostruario_ponte_branca',
+  'ponte_branca': 'estoque_mostruario_ponte_branca',
+  'mostruario_loja_futura': 'estoque_mostruario_futura',
   'futura': 'estoque_mostruario_futura',
   'quantidade': 'quantidade_estoque',
   'qtd': 'quantidade_estoque',
@@ -82,46 +79,44 @@ const COLUMN_MAP = {
   // === CUSTEIO ===
   'preco_custo': 'preco_custo',
   'preço_custo': 'preco_custo',
-  'preco custo': 'preco_custo',
-  'preço de custo': 'preco_custo',
-  'preco de custo': 'preco_custo',
+  'preco_custo': 'preco_custo',
+  'preço_de_custo': 'preco_custo',
+  'preco_de_custo': 'preco_custo',
   'custo': 'preco_custo',
   'impostos': 'impostos_percentual',
   'frete': 'frete_custo',
   'ipi': 'ipi_percentual',
 
   // === MARKUP ===
-  'grupo 1: prontos': 'markup_grupo1_prontos',
-  'grupo 1 prontos': 'markup_grupo1_prontos',
+  'grupo_1:_prontos': 'markup_grupo1_prontos',
+  'grupo_1_prontos': 'markup_grupo1_prontos',
   'prontos': 'markup_grupo1_prontos',
-  'grupo 2: montagem': 'markup_grupo2_montagem',
-  'grupo 2 montagem': 'markup_grupo2_montagem',
-  'grupo 3: lustre': 'markup_grupo3_lustre',
-  'grupo 3 lustre': 'markup_grupo3_lustre',
+  'grupo_2:_montagem': 'markup_grupo2_montagem',
+  'grupo_2_montagem': 'markup_grupo2_montagem',
+  'grupo_3:_lustre': 'markup_grupo3_lustre',
+  'grupo_3_lustre': 'markup_grupo3_lustre',
   'lustre': 'markup_grupo3_lustre',
   'markup': 'markup_aplicado',
 
   // === PREÇO DE VENDA ===
   'preco_venda': 'preco_venda',
   'preço_venda': 'preco_venda',
-  'preco venda': 'preco_venda',
-  'preco venda final': 'preco_venda',
-  'preço venda final': 'preco_venda',
+  'preco_venda_final': 'preco_venda',
+  'preço_venda_final': 'preco_venda',
   'preco': 'preco_venda',
   'preço': 'preco_venda',
   'valor': 'preco_venda',
 
   // === DESCONTOS ===
-  'descontos vendedor': 'desconto_max_vendedor',
-  'desconto vendedor': 'desconto_max_vendedor',
-  'descontos gerencial': 'desconto_max_gerencial',
-  'desconto gerencial': 'desconto_max_gerencial',
+  'descontos_vendedor': 'desconto_max_vendedor',
+  'desconto_vendedor': 'desconto_max_vendedor',
+  'descontos_gerencial': 'desconto_max_gerencial',
+  'desconto_gerencial': 'desconto_max_gerencial',
 
   // === MONTAGEM ===
-  'movéis montagem': 'requer_montagem',
-  'moveis montagem': 'requer_montagem',
-  'requer montagem': 'requer_montagem',
-  'montagem / terceirizado': 'montagem_terceirizado',
+  'movéis_montagem': 'requer_montagem',
+  'moveis_montagem': 'requer_montagem',
+  'requer_montagem': 'requer_montagem',
   'montagem/terceirizado': 'montagem_terceirizado',
   'terceirizado': 'montagem_terceirizado',
 
@@ -197,7 +192,11 @@ export default function ImportarProdutos() {
   };
 
   const normalizarColuna = (coluna) => {
-    const normalizada = coluna.toLowerCase().trim().replace(/\s+/g, '_');
+    const normalizada = coluna
+      .toLowerCase()
+      .trim()
+      .replace(/\s*\/\s*/g, '/') // Une slashes removendo espaços ao redor
+      .replace(/\s+/g, '_');    // Substitui espaços por underscores
     return COLUMN_MAP[normalizada] || normalizada;
   };
 

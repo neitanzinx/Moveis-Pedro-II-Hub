@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLojas } from "@/hooks/useLojas";
+import { calcularEstoqueTotal } from "@/constants/productConstants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,12 +39,10 @@ export default function CatalogoWhatsApp() {
     setPaginaExibicao(1);
   }, [filtroCategoria, filtroAmbiente, filtroDisponibilidade, busca]);
 
+  const { data: lojasAtivas = [] } = useLojas();
+
   const getEstoqueTotal = (p) => {
-    return (p?.estoque_cd || 0) +
-      (p?.estoque_mostruario_mega_store || 0) +
-      (p?.estoque_mostruario_centro || 0) +
-      (p?.estoque_mostruario_ponte_branca || 0) +
-      (p?.estoque_mostruario_futura || 0);
+    return calcularEstoqueTotal(p, lojasAtivas);
   };
 
   useEffect(() => {
@@ -153,9 +153,10 @@ export default function CatalogoWhatsApp() {
     });
 
     texto += `📍 *Nossas Lojas:*\n`;
-    texto += `   • Centro\n`;
-    texto += `   • Carangola\n`;
-    texto += `   • Ponte Branca\n\n`;
+    lojasAtivas.forEach(loja => {
+      texto += `   • ${loja.nome}\n`;
+    });
+    texto += `\n`;
     texto += `💬 *Faça seu pedido pelo WhatsApp!*\n`;
     texto += `🚚 *Entregamos na sua casa!*\n`;
 

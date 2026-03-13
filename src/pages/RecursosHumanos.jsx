@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
+import { formatarNome } from "@/utils/formatters";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -235,7 +236,7 @@ export default function RecursosHumanos() {
       activities.push({
         icon: Calendar,
         title: `Férias ${f.status === 'Aprovada' ? 'aprovadas' : f.status === 'Solicitada' ? 'solicitadas' : f.status.toLowerCase()}`,
-        description: colaborador?.nome || 'Colaborador',
+        description: formatarNome(colaborador?.nome || 'Colaborador'),
         time: f.data_inicio ? new Date(f.data_inicio).toLocaleDateString('pt-BR') : '',
         color: f.status === 'Aprovada' ? '#22c55e' : f.status === 'Solicitada' ? '#f59e0b' : '#64748b'
       });
@@ -247,7 +248,7 @@ export default function RecursosHumanos() {
       activities.push({
         icon: DollarSign,
         title: `Folha ${f.status === 'Pago' ? 'paga' : 'gerada'}`,
-        description: colaborador?.nome || 'Colaborador',
+        description: formatarNome(colaborador?.nome || 'Colaborador'),
         time: `${f.mes_referencia}/${f.ano_referencia}`,
         color: f.status === 'Pago' ? '#22c55e' : '#3b82f6'
       });

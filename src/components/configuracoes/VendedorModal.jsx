@@ -13,15 +13,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { useLojas } from "@/hooks/useLojas";
 
 
 
 export default function VendedorModal({ isOpen, onClose, onSave, vendedor, isLoading }) {
   const [formData, setFormData] = useState({
     nome: "",
-    loja: "Centro",
+    loja: "",
     cpf: "",
     telefone: "",
     email: "",
@@ -31,11 +31,14 @@ export default function VendedorModal({ isOpen, onClose, onSave, vendedor, isLoa
     observacoes: "",
   });
 
-  const { data: lojas = [] } = useQuery({
-    queryKey: ['lojas'],
-    queryFn: () => base44.entities.Loja.list('nome'),
-    select: (data) => data.filter(l => l.ativa),
-  });
+  const { data: lojas = [] } = useLojas();
+
+  useEffect(() => {
+    // Se for um novo vendedor e temos lojas carregadas, define a primeira como padrão se o campo estiver vazio
+    if (!vendedor && lojas.length > 0 && !formData.loja) {
+      setFormData(prev => ({ ...prev, loja: lojas[0].nome }));
+    }
+  }, [lojas, vendedor]);
 
   useEffect(() => {
     if (vendedor) {
@@ -43,7 +46,7 @@ export default function VendedorModal({ isOpen, onClose, onSave, vendedor, isLoa
     } else {
       setFormData({
         nome: "",
-        loja: "Centro",
+        loja: lojas.length > 0 ? lojas[0].nome : "",
         cpf: "",
         telefone: "",
         email: "",

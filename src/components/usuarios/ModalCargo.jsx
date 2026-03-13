@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { formatarNome } from "@/utils/formatters";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Search, Info } from "lucide-react";
@@ -125,7 +126,7 @@ export default function ModalCargo({ cargo, onClose }) {
               <Label>Nome do Cargo *</Label>
               <Input
                 value={dados.nome}
-                onChange={(e) => setDados({ ...dados, nome: e.target.value })}
+                onChange={(e) => setDados({ ...dados, nome: formatarNome(e.target.value) })}
                 placeholder="Vendedor"
               />
             </div>

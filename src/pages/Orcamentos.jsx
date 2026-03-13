@@ -12,6 +12,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { toast } from "sonner";
+import { formatarTelefone, formatarNome } from "@/utils/formatters";
 
 export default function Orcamentos() {
     const [searchTerm, setSearchTerm] = useState("");
@@ -163,8 +164,8 @@ export default function Orcamentos() {
                                     <TableCell className="font-medium">#{orc.numero_orcamento}</TableCell>
                                     <TableCell>
                                         <div className="flex flex-col">
-                                            <span className="font-medium text-gray-900 dark:text-white">{orc.cliente_nome}</span>
-                                            <span className="text-xs text-gray-500">{orc.cliente_telefone}</span>
+                                            <span className="font-medium text-gray-900 dark:text-white">{formatarNome(orc.cliente_nome)}</span>
+                                            <span className="text-xs text-gray-500">{formatarTelefone(orc.cliente_telefone)}</span>
                                         </div>
                                     </TableCell>
                                     <TableCell className="text-sm text-gray-600 dark:text-gray-400">{new Date(orc.data_orcamento).toLocaleDateString('pt-BR')}</TableCell>

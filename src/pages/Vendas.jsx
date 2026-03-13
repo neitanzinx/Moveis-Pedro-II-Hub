@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { toast } from "sonner";
+import { formatarTelefone, formatarNome, capitalizar } from "@/utils/formatters";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -514,8 +515,8 @@ export default function Vendas() {
                                             <TableCell className="font-medium">#{venda.numero_pedido}</TableCell>
                                             <TableCell>
                                                 <div className="flex flex-col">
-                                                    <span className="font-medium text-gray-900 dark:text-white">{venda.cliente_nome}</span>
-                                                    <span className="text-xs text-gray-500">{venda.cliente_telefone}</span>
+                                                    <span className="font-medium text-gray-900 dark:text-white">{formatarNome(venda.cliente_nome)}</span>
+                                                    <span className="text-xs text-gray-500">{formatarTelefone(venda.cliente_telefone)}</span>
                                                 </div>
                                             </TableCell>
                                             <TableCell>
@@ -794,8 +795,8 @@ export default function Vendas() {
                                             <TableCell className="font-medium">#{venda.numero_pedido}</TableCell>
                                             <TableCell>
                                                 <div className="flex flex-col">
-                                                    <span className="font-medium text-gray-900 dark:text-white">{venda.cliente_nome}</span>
-                                                    <span className="text-xs text-gray-500">{venda.cliente_telefone}</span>
+                                                    <span className="font-medium text-gray-900 dark:text-white">{formatarNome(venda.cliente_nome)}</span>
+                                                    <span className="text-xs text-gray-500">{formatarTelefone(venda.cliente_telefone)}</span>
                                                 </div>
                                             </TableCell>
                                             <TableCell>

@@ -7,8 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import InventarioModal from "../components/estoque/InventarioModal";
+import { obterCampoEstoqueDaLoja, calcularEstoqueTotal } from "@/constants/productConstants";
+import { useLojas } from "@/hooks/useLojas";
 
 export default function Inventario() {
+  const { lojas: lojasAtivas = [] } = useLojas();
   const [user, setUser] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -42,13 +45,25 @@ export default function Inventario() {
 
   const aprovarMutation = useMutation({
     mutationFn: async ({ inventario }) => {
+      // Encontrar a loja correspondente para saber qual campo atualizar
+      const lojaObj = lojasAtivas.find(l => l.nome === inventario.loja);
+      const campoEstoque = obterCampoEstoqueDaLoja(lojaObj);
+
       // Aplicar ajustes de estoque
       for (const item of inventario.itens) {
         if (item.diferenca !== 0) {
           const produto = produtos.find(p => p.id === item.produto_id);
           if (produto) {
+            // Atualizar o campo específico da loja e recalcular o total
+            const itemAtualizado = {
+              ...produto,
+              [campoEstoque]: item.quantidade_contada
+            };
+            const novoTotal = calcularEstoqueTotal(itemAtualizado, lojasAtivas);
+
             await base44.entities.Produto.update(produto.id, {
-              quantidade_estoque: item.quantidade_contada
+              [campoEstoque]: item.quantidade_contada,
+              quantidade_estoque: novoTotal
             });
           }
         }

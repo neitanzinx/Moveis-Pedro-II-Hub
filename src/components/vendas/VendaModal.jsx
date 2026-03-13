@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
+import { formatarNome, formatarTelefone, formatarEndereco } from "@/utils/formatters";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import {
   Dialog,
@@ -90,8 +91,8 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
       setFormData({
         ...formData,
         cliente_id: novoClienteCriado.id,
-        cliente_nome: novoClienteCriado.nome_completo,
-        cliente_telefone: novoClienteCriado.telefone
+        cliente_nome: formatarNome(novoClienteCriado.nome_completo),
+        cliente_telefone: formatarTelefone(novoClienteCriado.telefone)
       });
       setShowClienteForm(false);
       setNovoCliente({ nome_completo: "", telefone: "", tipo_pessoa: "Física" });
@@ -180,8 +181,8 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
     setFormData({
       ...formData,
       cliente_id: clienteId,
-      cliente_nome: cliente?.nome_completo || "",
-      cliente_telefone: cliente?.telefone || ""
+      cliente_nome: formatarNome(cliente?.nome_completo || ""),
+      cliente_telefone: formatarTelefone(cliente?.telefone || "")
     });
   };
 
@@ -449,9 +450,9 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
             <span class="info-value">${(() => {
           if (vendaData.responsavel_id) {
             const u = users.find(user => user.id === vendaData.responsavel_id);
-            if (u && u.full_name) return u.full_name;
+            if (u && u.full_name) return formatarNome(u.full_name);
           }
-          return vendaData.responsavel_nome;
+          return formatarNome(vendaData.responsavel_nome);
         })()}</span>
           </div>` : ''}
         </div>
@@ -460,12 +461,12 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
           <h3 style="color: #2C2C2C; margin-bottom: 15px;">Dados do Cliente</h3>
           <div class="info-row">
             <span class="info-label">Nome:</span>
-            <span class="info-value">${cliente?.nome_completo || vendaData.cliente_nome}</span>
+            <span class="info-value">${formatarNome(cliente?.nome_completo || vendaData.cliente_nome)}</span>
           </div>
           ${cliente?.telefone ? `
           <div class="info-row">
             <span class="info-label">Telefone:</span>
-            <span class="info-value">${cliente.telefone}</span>
+            <span class="info-value">${formatarTelefone(cliente.telefone)}</span>
           </div>` : ''}
         </div>
 
@@ -559,7 +560,7 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
       infoPagamento += `\n*Restante a Pagar:* R$ ${vendaData.valor_restante.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
     }
 
-    const mensagem = `Olá *${vendaData.cliente_nome}*! 😁
+    const mensagem = `Olá *${formatarNome(vendaData.cliente_nome)}*! 😁
 
 Sua compra foi confirmada com sucesso! 🎉
 
@@ -568,9 +569,9 @@ Sua compra foi confirmada com sucesso! 🎉
 *Vendedor:* ${(() => {
         if (vendaData.responsavel_id) {
           const u = users.find(user => user.id === vendaData.responsavel_id);
-          if (u && u.full_name) return u.full_name;
+          if (u && u.full_name) return formatarNome(u.full_name);
         }
-        return vendaData.responsavel_nome || 'Não Informado';
+        return formatarNome(vendaData.responsavel_nome || 'Não Informado');
       })()}
 *Valor Total:* R$ ${vendaData.valor_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
 
@@ -702,9 +703,9 @@ _Móveis Pedro II - ${vendaData.loja}_`;
                 value={(() => {
                   if (formData.responsavel_id) {
                     const u = users.find(user => user.id === formData.responsavel_id);
-                    if (u && u.full_name) return u.full_name;
+                    if (u && u.full_name) return formatarNome(u.full_name);
                   }
-                  return formData.responsavel_nome;
+                  return formatarNome(formData.responsavel_nome);
                 })()}
                 disabled
               />
@@ -730,7 +731,7 @@ _Móveis Pedro II - ${vendaData.loja}_`;
                     <Label>Nome Completo *</Label>
                     <Input
                       value={novoCliente.nome_completo}
-                      onChange={(e) => setNovoCliente({ ...novoCliente, nome_completo: e.target.value })}
+                      onChange={(e) => setNovoCliente({ ...novoCliente, nome_completo: formatarNome(e.target.value) })}
                       placeholder="Nome do cliente"
                     />
                   </div>
@@ -738,7 +739,7 @@ _Móveis Pedro II - ${vendaData.loja}_`;
                     <Label>Telefone *</Label>
                     <Input
                       value={novoCliente.telefone}
-                      onChange={(e) => setNovoCliente({ ...novoCliente, telefone: e.target.value })}
+                      onChange={(e) => setNovoCliente({ ...novoCliente, telefone: formatarTelefone(e.target.value) })}
                       placeholder="(00) 00000-0000"
                     />
                   </div>
@@ -786,7 +787,7 @@ _Móveis Pedro II - ${vendaData.loja}_`;
                   <SelectContent>
                     {clientes.map(cliente => (
                       <SelectItem key={cliente.id} value={cliente.id}>
-                        {cliente.nome_completo} {cliente.telefone ? `- ${cliente.telefone}` : ''}
+                        {formatarNome(cliente.nome_completo)} {cliente.telefone ? `- ${formatarTelefone(cliente.telefone)}` : ''}
                       </SelectItem>
                     ))}
                   </SelectContent>

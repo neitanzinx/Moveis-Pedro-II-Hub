@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import {
     Plus, Trash2, Search, Save, Send, Package, Building2, AlertTriangle,
     Sparkles, Tag, Calendar, TrendingDown, Check, DollarSign, Mail,
-    MessageCircle, FileText, Copy, CheckCircle, X, Ruler
+    MessageCircle, MessageSquare, FileText, Copy, CheckCircle, X, Ruler
 } from "lucide-react";
 import { toast } from "sonner";
 import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
@@ -56,6 +56,7 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
     const [quantidade, setQuantidade] = useState(1);
     const [precoUnitario, setPrecoUnitario] = useState(0);
     const [precoTabela, setPrecoTabela] = useState(0);
+    const [foraTabela, setForaTabela] = useState(false);
 
     // Estado para cadastro de produtos novos
     const [produtoModalOpen, setProdutoModalOpen] = useState(false);
@@ -248,7 +249,7 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                 quantidade_pedida: quantidade,
                 preco_unitario: precoUnitario || 0,
                 preco_tabela: form.compra_promocional ? precoTabela : null,
-                fora_tabela: document.getElementById('fora-tabela-check')?.checked || false,
+                fora_tabela: foraTabela,
                 isNew: true
             };
         }
@@ -263,6 +264,7 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
         setQuantidade(1);
         setPrecoUnitario(0);
         setPrecoTabela(0);
+        setForaTabela(false);
     };
 
     const removerItem = (index) => {
@@ -372,7 +374,7 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
 
         const dadosSanitizados = {
             ...formParaDB,
-            status: pedido ? (formParaDB.status || pedido.status) : (status === 'Rascunho' ? 'NÃO FATURADO' : 'NÃO FATURADO'),
+            status: pedido ? (formParaDB.status || pedido.status) : (status === 'Rascunho' ? 'Rascunho' : 'NÃO FATURADO'),
             centro_custo_id: form.centro_custo_id || null,
             condicoes_pagamento: condicoesParaSalvar,
             valor_total: calcularTotal(),
@@ -916,6 +918,8 @@ export default function PedidoCompraModal({ open, onClose, pedido = null, fornec
                                         id="fora-tabela-check"
                                         className="w-5 h-5 accent-amber-500 rounded border-gray-300 ml-2"
                                         title="Marque se este item não está na tabela oficial de preços"
+                                        checked={foraTabela}
+                                        onChange={(e) => setForaTabela(e.target.checked)}
                                     />
                                 </div>
                                 <div className="col-span-2 flex items-end">

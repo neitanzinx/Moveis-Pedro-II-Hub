@@ -16,8 +16,11 @@ import {
     Truck
 } from "lucide-react";
 import { toast } from "sonner";
+import { calcularEstoqueTotal } from "@/constants/productConstants";
+import { useLojas } from "@/hooks/useLojas";
 
 export default function RecebimentoPedido({ open, onClose, pedido }) {
+    const { data: lojas = [] } = useLojas();
     const queryClient = useQueryClient();
     const [statusLocal, setStatusLocal] = useState(pedido?.status || '');
     const [originalStatus, setOriginalStatus] = useState(pedido?.status || '');
@@ -148,12 +151,17 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
 
                     if (produto) {
                         try {
-                            const estoqueAtual = produto.quantidade_estoque || 0;
                             const estoqueCdAtual = produto.estoque_cd || 0;
+                            const pAtualizado = {
+                                ...produto,
+                                estoque_cd: estoqueCdAtual + qtdRecebida
+                            };
+                            
+                            const novoTotal = calcularEstoqueTotal(pAtualizado, lojas);
 
                             await base44.entities.Produto.update(item.produto_id, {
-                                quantidade_estoque: estoqueAtual + qtdRecebida,
-                                estoque_cd: estoqueCdAtual + qtdRecebida
+                                quantidade_estoque: novoTotal,
+                                estoque_cd: pAtualizado.estoque_cd
                             });
 
                             // --- SINCRONIZAÇÃO COM ESTOQUE POR UNIDADE (estoque_loja) ---

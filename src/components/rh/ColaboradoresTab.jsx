@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { getZapApiUrl } from "@/utils/zapApiUrl";
+import { formatarTelefone, formatarNome } from "@/utils/formatters";
 import {
     Dialog,
     DialogContent,
@@ -437,7 +438,7 @@ export default function ColaboradoresTab() {
                                         </div>
                                         <div>
                                             <p className="font-semibold" style={{ color: '#07593f' }}>
-                                                {colaborador.nome_completo}
+                                                {formatarNome(colaborador.nome_completo)}
                                             </p>
                                             <div className="flex items-center gap-3 text-sm text-gray-500">
                                                 <span className="flex items-center gap-1">
@@ -454,7 +455,7 @@ export default function ColaboradoresTab() {
                                                 {colaborador.telefone && (
                                                     <span className="flex items-center gap-1">
                                                         <Phone className="w-3 h-3" />
-                                                        {colaborador.telefone}
+                                                        {formatarTelefone(colaborador.telefone)}
                                                     </span>
                                                 )}
                                                 {colaborador.email && (

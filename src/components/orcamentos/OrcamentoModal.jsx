@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Plus, Trash2, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { formatarTelefone, formatarNome } from "@/utils/formatters";
 
 
 
@@ -57,7 +58,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
         setSearchCliente(orcamento.cliente_nome);
       } else if (orcamento.cliente_id && clientes) {
         const cliente = clientes.find(c => c.id === orcamento.cliente_id);
-        if (cliente) setSearchCliente(cliente.nome_completo);
+        if (cliente) setSearchCliente(formatarNome(cliente.nome_completo));
       }
     } else {
       const numeroOrcamento = `ORC-${Math.floor(10000 + Math.random() * 90000)}`; // Fixed random number generation
@@ -239,8 +240,8 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                           onClick={() => handleClienteChange(cliente.id)}
                           className="w-full text-left px-4 py-3 hover:bg-gray-50 flex flex-col"
                         >
-                          <span className="font-medium text-green-900">{cliente.nome_completo}</span>
-                          <span className="text-xs text-gray-500">{cliente.cpf || 'CPF n/d'} • {cliente.telefone}</span>
+                          <span className="font-medium text-green-900">{formatarNome(cliente.nome_completo)}</span>
+                          <span className="text-xs text-gray-500">{cliente.cpf || 'CPF n/d'} • {formatarTelefone(cliente.telefone)}</span>
                         </button>
                       ))
                     ) : (

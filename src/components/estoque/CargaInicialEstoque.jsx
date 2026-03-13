@@ -13,7 +13,7 @@ import {
     Filter, Package, Loader2, Warehouse
 } from "lucide-react";
 import { toast } from "sonner";
-import { obterCampoEstoqueDaLoja } from "@/constants/productConstants";
+import { obterCampoEstoqueDaLoja, calcularEstoqueTotal } from "@/constants/productConstants";
 
 export default function CargaInicialEstoque({ onVoltar }) {
     const queryClient = useQueryClient();
@@ -167,7 +167,17 @@ export default function CargaInicialEstoque({ onVoltar }) {
             const batch = produtosParaSalvar.slice(i, i + batchSize);
             const promises = batch.map(async ({ id, qtd }) => {
                 try {
-                    await base44.entities.Produto.update(id, { [campoEstoque]: qtd });
+                    const p = produtos.find(item => item.id === id);
+                    const itemComQtdAtualizada = {
+                        ...p,
+                        [campoEstoque]: qtd
+                    };
+                    const novoTotal = calcularEstoqueTotal(itemComQtdAtualizada, lojasAtivas);
+
+                    await base44.entities.Produto.update(id, { 
+                        [campoEstoque]: qtd,
+                        quantidade_estoque: novoTotal
+                    });
                     saved++;
                 } catch (err) {
                     console.error(`Erro ao salvar produto ${id}:`, err);
@@ -186,10 +196,10 @@ export default function CargaInicialEstoque({ onVoltar }) {
             toast.success(`✅ Estoque atualizado para ${saved} produto(s) em "${getLojaDisplayName(lojaId)}"!`);
         }
 
-        // Invalidate queries so the rest of the app sees the new stock
-        queryClient.invalidateQueries(['produtos']);
-        queryClient.invalidateQueries(['produtos-carga-inicial']);
-        queryClient.invalidateQueries(['produtos-inventario']);
+        // Invalidate queries so the rest of the app sees the new stock (TanStack Query v5 syntax)
+        queryClient.invalidateQueries({ queryKey: ['produtos'] });
+        queryClient.invalidateQueries({ queryKey: ['produtos-carga-inicial'] });
+        queryClient.invalidateQueries({ queryKey: ['produtos-inventario'] });
     };
 
     // Pre-fill with existing stock values when selecting a store

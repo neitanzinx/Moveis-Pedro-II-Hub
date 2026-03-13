@@ -8,13 +8,19 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowUpCircle, ArrowDownCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { LOJAS_MOSTRUARIO, CAMPOS_ESTOQUE_LOJA } from "@/constants/productConstants";
+import { CAMPOS_ESTOQUE_LOJA, calcularEstoqueTotal } from "@/constants/productConstants";
+import { useLojas } from "@/hooks/useLojas";
 
-export default function MovimentacaoModal({ isOpen, onClose, produto }) {
+export default function MovimentacaoModal({ open, onOpenChange, produto, onSuccess }) {
+  const { data: lojasReal = [] } = useLojas();
   const [quantidade, setQuantidade] = useState("");
   const [tipo, setTipo] = useState("entrada");
   const [lojaId, setLojaId] = useState("cd");
   const [fornecedorId, setFornecedorId] = useState("");
+  
+  // Mapping open/onOpenChange to isOpen/onClose for compatibility with existing code
+  const isOpen = open;
+  const onClose = () => onOpenChange(false);
   const inputRef = useRef(null);
   const queryClient = useQueryClient();
 
@@ -49,11 +55,14 @@ export default function MovimentacaoModal({ isOpen, onClose, produto }) {
         ? currentLocalStock + qtd
         : currentLocalStock - qtd;
 
-      const novaQtdTotal = tipo === 'entrada'
-        ? (produto.quantidade_estoque || 0) + qtd
-        : (produto.quantidade_estoque || 0) - qtd;
+      // Recalcular total dinamicamente usando a lista de lojas real
+      const produtoAtualizadoLocalmente = {
+        ...produto,
+        [fieldName]: novaQtdLocal
+      };
+      const novaQtdTotal = calcularEstoqueTotal(produtoAtualizadoLocalmente, lojasReal);
 
-      const lojaInfo = LOJAS_MOSTRUARIO.find(l => l.id === lojaId);
+      const lojaInfo = lojasReal.find(l => l.id === lojaId);
       if (tipo === 'saida' && novaQtdLocal < 0) throw new Error(`Estoque em ${lojaInfo?.nome || lojaId} insuficiente (${currentLocalStock})`);
 
       const updates = {
@@ -118,7 +127,7 @@ export default function MovimentacaoModal({ isOpen, onClose, produto }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {LOJAS_MOSTRUARIO.map(loja => (
+                  {lojasReal.map(loja => (
                     <SelectItem key={loja.id} value={loja.id}>{loja.nome}</SelectItem>
                   ))}
                 </SelectContent>

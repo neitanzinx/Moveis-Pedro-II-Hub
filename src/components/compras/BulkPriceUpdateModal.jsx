@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { base44 } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -23,14 +23,17 @@ export default function BulkPriceUpdateModal({ open, onClose, fornecedores = [] 
     const [updateType, setUpdateType] = useState("percentage"); // percentage | fixed
     const [updateValue, setUpdateValue] = useState("");
 
-    // Busca produtos do fornecedor quando selecionado
-    const { data: produtos = [], isLoading: loadingProdutos } = useQuery({
+    const { data: produtosDoFornecedor = [], isLoading: loadingProdutos } = useQuery({
         queryKey: ['produtos-fornecedor', selectedFornecedorId],
-        queryFn: () => base44.entities.Produto.list(),
+        queryFn: async () => {
+            const resp = await base44.entities.Produto.search({
+                filters: { fornecedor_id: selectedFornecedorId },
+                limit: 1000
+            });
+            return resp.data;
+        },
         enabled: !!selectedFornecedorId
     });
-
-    const produtosDoFornecedor = produtos.filter(p => p.fornecedor_id === selectedFornecedorId);
 
     // Mutation de atualização
     const bulkUpdate = useMutation({

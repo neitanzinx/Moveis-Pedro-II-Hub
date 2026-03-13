@@ -3,7 +3,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { calcularPrecoFinalImportacao } from '@/utils/markupCalculator';
 import { base44 } from '@/api/base44Client';
 import { supabase } from '@/lib/supabase';
-import { useTenant, useLojas } from '@/contexts/TenantContext';
+import { useTenant } from '@/contexts/TenantContext';
+import { useLojas } from '@/hooks/useLojas';
 import {
     Dialog,
     DialogContent,
@@ -192,13 +193,6 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                 dynamicMapping[nomeNormalizado] = fieldName;
             }
         });
-
-        // === Mapeamentos especiais para compatibilidade com planilha atual ===
-        // Mega Store = Carangola (mesmo local)
-        dynamicMapping['mostruario loja mega store'] = 'estoque_carangola';
-        dynamicMapping['mostruario loja mega  store'] = 'estoque_carangola'; // typo com dois espaços
-        dynamicMapping['mega store'] = 'estoque_carangola';
-        dynamicMapping['mega  store'] = 'estoque_carangola';
 
         // Futura = placeholder (ignorar, mas ler para não quebrar importação)
         dynamicMapping['mostruario loja futura'] = '_ignorar';

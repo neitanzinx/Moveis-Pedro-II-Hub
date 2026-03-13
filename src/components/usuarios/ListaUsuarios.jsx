@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Edit, Trash2, Crown, Truck } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { formatarNome } from "@/utils/formatters";
 
 export default function ListaUsuarios({ usuarios, cargos, caminhoes, onEditar }) {
   const queryClient = useQueryClient();
@@ -48,7 +49,7 @@ export default function ListaUsuarios({ usuarios, cargos, caminhoes, onEditar })
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
                   <h3 className="font-bold text-gray-900 dark:text-white">
-                    {usuario.full_name}
+                    {formatarNome(usuario.full_name)}
                   </h3>
                   {usuario.role === 'admin' && (
                     <Crown className="w-4 h-4 text-yellow-500" />

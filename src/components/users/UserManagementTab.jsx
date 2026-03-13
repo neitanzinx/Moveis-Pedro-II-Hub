@@ -21,7 +21,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { CARGOS, LOJAS, getCargoConfig } from "@/config/cargos";
+import { CARGOS, getCargoConfig } from "@/config/cargos";
+import { useLojas } from "@/hooks/useLojas";
 import PermissionEditorModal from "./PermissionEditorModal";
 
 export default function UserManagementTab({ users = [], isLoading, currentUser }) {
@@ -35,6 +36,7 @@ export default function UserManagementTab({ users = [], isLoading, currentUser }
   const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false);
 
   const queryClient = useQueryClient();
+  const { data: lojasReal = [] } = useLojas();
 
   const updateUserMutation = useMutation({
     mutationFn: async ({ userId, updates, telefone, currentData }) => {
@@ -473,8 +475,8 @@ export default function UserManagementTab({ users = [], isLoading, currentUser }
                   >
                     <SelectTrigger><SelectValue placeholder="Selecione a loja" /></SelectTrigger>
                     <SelectContent>
-                      {LOJAS.map(l => (
-                        <SelectItem key={l} value={l}>{l}</SelectItem>
+                      {lojasReal.map(l => (
+                        <SelectItem key={l.id} value={l.nome}>{l.nome}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

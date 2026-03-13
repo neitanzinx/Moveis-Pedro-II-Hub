@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
+import { supabase, base44 } from "@/lib/supabase";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,19 +38,11 @@ export default function PedidosList({ onEdit, onView, onDelete, onReceber }) {
     const { data: statusCounts = {} } = useQuery({
         queryKey: ['pedidos-compra-counts'],
         queryFn: async () => {
-            // Busca apenas o campo status de todos os pedidos para contar
-            // Se houver muitos pedidos, idealmente seria um RPC ou count server-side agrupado
-            const { data } = await base44.entities.PedidoCompra.list('status'); // Assumindo que list suporta select se modificado, mas o padrão list traz tudo. 
-            // Como list traz tudo, vamos usar diretamente o supabase via createHandler se possível? 
-            // O createHandler.list traz tudo. Vamos assumir que não são milhões.
-            // Se for pesado, o ideal seria adicionar um método .countByStatus() no handler.
-            // Para manter simples e robusto por enquanto, vamos filtrar no front dessa lista completa (mas leve se fosse só status).
-            // Porém o .list() atual traz SELECT *.
-            // Melhor usar o .search com limit alto ou criar um método específico?
-            // Vamos usar o que temos. O .list() traz tudo.
+            const { data, error } = await supabase
+                .from('pedidos_compra')
+                .select('status');
 
-            // Refatoração segura: base44.entities.PedidoCompra.list() traz tudo.
-            // Para não pesar, vamos assumir que o volume de pedidos é gerenciável (< 5000).
+            if (error) throw error;
 
             const counts = {
                 todos: data.length,

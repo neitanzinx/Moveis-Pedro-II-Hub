@@ -296,16 +296,28 @@ export default function PedidosKanban({ onEdit, onView, onDelete, onReceber, ped
     });
 
     const updateStatusMutation = useMutation({
-        mutationFn: async ({ id, centro_custo_id }) => {
+        mutationFn: async ({ id, centro_custo_id, status }) => {
+            if (status) {
+                return await comprasService.updateStatus(id, status, { centro_custo_id });
+            }
             return await comprasService.moveCard(id, centro_custo_id);
         },
-        onMutate: async ({ id, centro_custo_id }) => {
+        onMutate: async ({ id, centro_custo_id, status }) => {
             await queryClient.cancelQueries(['pedidos-compra-kanban']);
             const previousData = queryClient.getQueryData(['pedidos-compra-kanban']);
 
             queryClient.setQueryData(['pedidos-compra-kanban'], old => {
                 if (!old) return old;
-                const newCards = old.cards.map(p => p.id === id ? { ...p, centro_custo_id } : p);
+                const newCards = old.cards.map(p => {
+                    if (String(p.id) === String(id)) {
+                        return { 
+                            ...p, 
+                            centro_custo_id: centro_custo_id || p.centro_custo_id,
+                            status: status || p.status 
+                        };
+                    }
+                    return p;
+                });
                 const newBoard = old.columns.map(col => ({
                     ...col,
                     cards: newCards.filter(c => c.centro_custo_id === col.centro_custo_id)
@@ -339,15 +351,18 @@ export default function PedidosKanban({ onEdit, onView, onDelete, onReceber, ped
 
     // Auto-apply filters when 'filter' prop changes
     React.useEffect(() => {
-        if (filter.type === 'status' && filter.value) {
-            const newFiltros = { ...filtrosStatus };
-            Object.keys(newFiltros).forEach(k => newFiltros[k] = (k === filter.value));
-            setFiltrosStatus(newFiltros);
-        } else if (filter.type === 'all') {
-            const newFiltros = { ...filtrosStatus };
-            Object.keys(newFiltros).forEach(k => newFiltros[k] = true);
-            setFiltrosStatus(newFiltros);
-        }
+        setFiltrosStatus(prev => {
+            if (filter.type === 'status' && filter.value) {
+                const newFiltros = { ...prev };
+                Object.keys(newFiltros).forEach(k => newFiltros[k] = (k === filter.value));
+                return newFiltros;
+            } else if (filter.type === 'all') {
+                const newFiltros = { ...prev };
+                Object.keys(newFiltros).forEach(k => newFiltros[k] = true);
+                return newFiltros;
+            }
+            return prev;
+        });
     }, [filter]);
 
     const boardComDimmer = useMemo(() => {
@@ -414,19 +429,21 @@ export default function PedidosKanban({ onEdit, onView, onDelete, onReceber, ped
         let toColumnId = over.id;
         const isOverCard = over.data.current?.type === 'Card';
         if (isOverCard) {
-            toColumnId = over.data.current.pedido.status_id;
+            toColumnId = over.data.current.pedido.centro_custo_id;
         }
 
-        if (activeCard && (activeCard.centro_custo_id !== toColumnId && toColumnId !== activeCard.status_id)) {
-            const targetCol = boardData.columns.find(c => c.id === toColumnId || c.centro_custo_id === toColumnId);
+        if (activeCard && (String(activeCard.centro_custo_id) !== String(toColumnId))) {
+            const targetCol = boardData.columns.find(c => String(c.id) === String(toColumnId) || String(c.centro_custo_id) === String(toColumnId));
 
-            if (targetCol?.tipo === 'estoque') {
+            const colTipo = targetCol?.tipo || targetCol?.centro_custo?.tipo;
+
+            if (colTipo === 'estoque') {
                 onReceber(activeCard);
                 return;
             }
 
-            if (targetCol?.tipo === 'entregue') {
-                updateStatusMutation.mutate({ id: pedidoId, status: 'Recebido' });
+            if (colTipo === 'entregue') {
+                updateStatusMutation.mutate({ id: pedidoId, status: 'ENTREGUE', centro_custo_id: toColumnId });
                 return;
             }
 

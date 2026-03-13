@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/api/base44Client';
+import { supabase } from "@/lib/supabase";
 import { format } from 'date-fns';
 import {
     Clock, Check, X, Eye, FileText, AlertTriangle,

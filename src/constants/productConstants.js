@@ -435,14 +435,15 @@ export function getMarkupPadraoPorGrupo(grupoId) {
 // LOJAS E MOSTRUÁRIOS
 // =====================================================
 
-// Lojas com mostruário (Mantido para fallback)
-export const LOJAS_MOSTRUARIO = [
-    { id: "cd", nome: "CD (Centro de Distribuição)", tipo: "estoque" },
-    { id: "mega_store", nome: "Mega Store", tipo: "mostruario" },
-    { id: "centro", nome: "Centro", tipo: "mostruario" },
-    { id: "ponte_branca", nome: "Ponte Branca", tipo: "mostruario" },
-    { id: "futura", nome: "Futura", tipo: "mostruario" },
-];
+// Lojas com mostruário (Mantido para fallback) - DEPRECATED: Use useLojas()
+// export const LOJAS_MOSTRUARIO = [
+//     { id: "cd", nome: "CD (Centro de Distribuição)", tipo: "estoque" },
+//     { id: "mega_store", nome: "Mega Store", tipo: "mostruario" },
+//     { id: "centro", nome: "Centro", tipo: "mostruario" },
+//     { id: "ponte_branca", nome: "Ponte Branca", tipo: "mostruario" },
+//     { id: "futura", nome: "Futura", tipo: "mostruario" },
+// ];
+export const LOJAS_MOSTRUARIO = [];
 
 /**
  * Mapeamento principal de ID da loja na constante hardcoded para o campo da tabela Produtos.
@@ -615,17 +616,26 @@ export function calcularPrecoVendaCompleto(produto) {
 }
 
 /**
- * Calcula o estoque total somando todas as localizações
+ * Calcula o estoque total somando todas as localizações dinamicamente
  * @param {Object} produto - Objeto do produto
+ * @param {Array} lojas - Lista de lojas (opcional, se não fornecida usa fallback hardcoded)
  * @returns {number} Estoque total
  */
-export function calcularEstoqueTotal(produto) {
-    return (
-        (produto.estoque_cd || 0) +
-        (produto.estoque_mostruario_mega_store || 0) +
-        (produto.estoque_mostruario_centro || 0) +
-        (produto.estoque_mostruario_ponte_branca || 0) +
-        (produto.estoque_mostruario_futura || 0)
-    );
+export function calcularEstoqueTotal(produto, lojas = []) {
+    if (!lojas || lojas.length === 0) {
+        // Fallback para campos originais se nenhuma loja for passada
+        return (
+            (produto.estoque_cd || 0) +
+            (produto.estoque_mostruario_mega_store || 0) +
+            (produto.estoque_mostruario_centro || 0) +
+            (produto.estoque_mostruario_ponte_branca || 0) +
+            (produto.estoque_mostruario_futura || 0)
+        );
+    }
+
+    return lojas.reduce((total, loja) => {
+        const campo = obterCampoEstoqueDaLoja(loja);
+        return total + (produto[campo] || 0);
+    }, 0);
 }
 

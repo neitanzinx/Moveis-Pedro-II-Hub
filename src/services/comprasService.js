@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { ApprovalEngine } from './ApprovalEngine';
 import { comprasFinanceiroService } from './comprasFinanceiroService';
 
@@ -191,15 +191,16 @@ export const comprasService = {
         });
     },
 
-    async updateStatus(ordemId, newStatusLabel) {
+    async updateStatus(ordemId, newStatusLabel, additionalUpdates = {}) {
         // Altera apenas o label visual de status (Não faturado, aprovado, etc)
         const result = await this.updateOrdem(ordemId, {
+            ...additionalUpdates,
             status: newStatusLabel,
             updated_at: new Date().toISOString()
         });
 
-        // Auto-gerar compromissos financeiros quando pedido é recebido
-        if (newStatusLabel === 'Recebido') {
+        // Auto-gerar compromissos financeiros quando pedido é recebido ou entregue
+        if (newStatusLabel === 'Recebido' || newStatusLabel === 'ENTREGUE') {
             try {
                 const jaExiste = await comprasFinanceiroService.existeCompromisso(ordemId);
                 if (!jaExiste) {

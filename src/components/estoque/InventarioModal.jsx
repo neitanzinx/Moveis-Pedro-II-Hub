@@ -13,6 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Trash2, Check, ChevronsUpDown, ScanBarcode, Search } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useLojas } from "@/hooks/useLojas";
+import { obterCampoEstoqueDaLoja } from "@/constants/productConstants";
 import {
   Command,
   CommandEmpty,
@@ -29,9 +31,12 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-const lojas = ["Depósito / CD", "Centro", "Carangola", "Ponte Branca"];
+// lojas constant removed to use dynamic data from useLojas
 
 export default function InventarioModal({ isOpen, onClose, onSave, produtos, isLoading, userLoja }) {
+  const { lojas: lojasData = [], isLoading: loadingLojas } = useLojas();
+  const lojasAtivas = lojasData; // useLojas already filters active stores
+
   const [formData, setFormData] = useState({
     numero_inventario: "",
     loja: userLoja || "",
@@ -108,14 +113,12 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
       return;
     }
 
-    const getEstoquePorLoja = (prod, loja) => {
-      switch (loja) {
-        case "Depósito / CD": return prod.estoque_cd || 0;
-        case "Centro": return prod.estoque_loja_centro || 0;
-        case "Carangola": return prod.estoque_loja_carangola || 0;
-        case "Ponte Branca": return prod.estoque_loja_ponte_branca || 0;
-        default: return prod.quantidade_estoque || 0;
-      }
+    const getEstoquePorLoja = (prod, lojaNome) => {
+      const lojaObj = lojasAtivas.find(l => l.nome === lojaNome);
+      if (!lojaObj) return prod.quantidade_estoque || 0;
+      
+      const campo = obterCampoEstoqueDaLoja(lojaObj);
+      return prod[campo] || 0;
     };
 
     const qtdSistema = getEstoquePorLoja(produto, formData.loja);
@@ -206,9 +209,13 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {lojas.map(loja => (
-                      <SelectItem key={loja} value={loja}>{loja}</SelectItem>
-                    ))}
+                    {loadingLojas ? (
+                      <div className="p-2 text-center text-xs text-gray-500">Carregando lojas...</div>
+                    ) : (
+                      lojasAtivas.map(loja => (
+                        <SelectItem key={loja.id} value={loja.nome}>{loja.nome}</SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </div>

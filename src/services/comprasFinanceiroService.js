@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase } from '@/lib/supabase';
 
 function handleResponse({ data, error }, customMessage) {
     if (error) {

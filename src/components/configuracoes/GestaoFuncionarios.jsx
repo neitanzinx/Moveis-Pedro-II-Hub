@@ -21,7 +21,8 @@ import {
     Users, Edit, Store, TrendingUp, Trash2
 } from "lucide-react";
 import { getZapApiUrl } from '../../utils/zapApiUrl';
-import { CARGOS, LOJAS, getCargoConfig } from "@/config/cargos";
+import { CARGOS, getCargoConfig } from "@/config/cargos";
+import { useLojas } from "@/hooks/useLojas";
 import { toast } from "sonner";
 
 import { supabase } from "@/lib/supabase";
@@ -44,8 +45,7 @@ export default function GestaoFuncionarios({ currentUser }) {
     const [editData, setEditData] = useState(null);
 
     const queryClient = useQueryClient();
-
-    // Buscar todos os usuários aprovados (funcionários)
+    const { data: lojasReal = [] } = useLojas();
     const { data: users = [], isLoading } = useQuery({
         queryKey: ['funcionarios-gestao'],
         queryFn: async () => {
@@ -899,8 +899,8 @@ export default function GestaoFuncionarios({ currentUser }) {
                                         <SelectValue placeholder="Selecione a loja" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {LOJAS.map(loja => (
-                                            <SelectItem key={loja} value={loja}>{loja}</SelectItem>
+                                        {lojasReal.map(loja => (
+                                            <SelectItem key={loja.id} value={loja.nome}>{loja.nome}</SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
@@ -984,8 +984,8 @@ export default function GestaoFuncionarios({ currentUser }) {
                                     >
                                         <SelectTrigger><SelectValue placeholder="Selecione a loja" /></SelectTrigger>
                                         <SelectContent>
-                                            {LOJAS.map(l => (
-                                                <SelectItem key={l} value={l}>{l}</SelectItem>
+                                            {lojasReal.map(l => (
+                                                <SelectItem key={l.id} value={l.nome}>{l.nome}</SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>

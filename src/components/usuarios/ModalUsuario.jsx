@@ -7,31 +7,17 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44, supabase } from "@/api/base44Client";
+import { useLojas } from "@/hooks/useLojas";
+import { formatarNome, formatarTelefone } from "@/utils/formatters";
 import { Truck, User, Mail, Phone, Building2, Briefcase, KeyRound, RotateCcw, Copy, Eye, EyeOff, Loader2, CheckCircle2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
-import { getCargoPrefix, CARGOS } from "@/config/cargos";
+import { getCargoPrefix, getCargoConfig, CARGOS } from "@/config/cargos";
+import { getZapApiUrl } from "@/utils/zapApiUrl";
 
-// Cargos que NÃO precisam de loja (trabalham para todas)
-const CARGOS_SEM_LOJA = ['Administrador', 'Gerente Geral', 'Financeiro', 'RH', 'Estoque', 'Logística', 'Agendamento', 'Entregador', 'Montador', 'Montador Externo'];
-
-// Lista de cargos disponíveis
-const CARGOS_DISPONIVEIS = [
-  { value: 'Administrador', label: 'Administrador' },
-  { value: 'Gerente Geral', label: 'Gerente Geral' },
-  { value: 'Gerente', label: 'Gerente de Loja' },
-  { value: 'Vendedor', label: 'Vendedor' },
-  { value: 'Estoque', label: 'Estoque' },
-  { value: 'Financeiro', label: 'Financeiro' },
-  { value: 'Logística', label: 'Logística' },
-  { value: 'Montador', label: 'Montador' },
-  { value: 'Entregador', label: 'Entregador' },
-  { value: 'Montador Externo', label: 'Montador Externo' },
-  { value: 'RH', label: 'RH' },
-  { value: 'Agendamento', label: 'Agendamento' },
-];
+// Cargos and store requirements are now driven by @/config/cargos
 
 // Função para gerar matrícula no padrão MP-XX0001
 async function gerarMatricula(setorCode) {
@@ -80,13 +66,10 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
 
   const queryClient = useQueryClient();
 
-  const { data: lojas = [] } = useQuery({
-    queryKey: ['lojas'],
-    queryFn: () => base44.entities.Loja.list('nome'),
-    select: (data) => data.filter(l => l.is_active !== false),
-  });
+  const { data: lojas = [] } = useLojas();
 
-  const precisaLoja = !CARGOS_SEM_LOJA.includes(dados.cargo);
+  const cargoConfig = getCargoConfig(dados.cargo);
+  const precisaLoja = cargoConfig?.requiresStore;
 
   const copyToClipboard = (text, label) => {
     navigator.clipboard.writeText(text);
@@ -366,7 +349,7 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
               </Label>
               <Input
                 value={dados.full_name}
-                onChange={(e) => setDados({ ...dados, full_name: e.target.value })}
+                onChange={(e) => setDados({ ...dados, full_name: formatarNome(e.target.value) })}
                 placeholder="João Silva"
                 className="mt-1"
               />
@@ -395,7 +378,7 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
               </Label>
               <Input
                 value={dados.telefone}
-                onChange={(e) => setDados({ ...dados, telefone: e.target.value })}
+                onChange={(e) => setDados({ ...dados, telefone: formatarTelefone(e.target.value) })}
                 placeholder="(27) 99999-9999"
                 className="mt-1"
               />
@@ -410,9 +393,12 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CARGOS_DISPONIVEIS.map((cargo) => (
+                  {CARGOS.filter(c => c.value !== 'Pendente Definição').map((cargo) => (
                     <SelectItem key={cargo.value} value={cargo.value}>
-                      {cargo.label}
+                      <div className="flex items-center gap-2">
+                        {cargo.icon && createElement(cargo.icon, { size: 14, className: "text-gray-400" })}
+                        {cargo.label}
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>

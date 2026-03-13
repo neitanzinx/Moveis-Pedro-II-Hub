@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { base44 } from '@/api/base44Client';
+import { supabase, base44 } from "@/lib/supabase";
 import { comprasService } from '@/services/comprasService';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -171,12 +170,8 @@ export default function CaixaDemandas({ onPedidoCriado }) {
         }
     });
 
-    const handleSelectAll = (checked) => {
-        if (checked) {
-            setSelectedItens(demandas.map(d => d.uniqueId));
-        } else {
-            setSelectedItens([]);
-        }
+    const handleSelectAll = (newSelected) => {
+        setSelectedItens(newSelected);
     };
 
     const handleSelectOne = (uniqueId) => {
@@ -259,7 +254,7 @@ export default function CaixaDemandas({ onPedidoCriado }) {
                     data_pedido: new Date().toISOString(),
                     status: 'Rascunho',
                     observacoes: 'Gerado via Caixa de Demandas',
-                    numero_pedido: `OC-${Math.floor(Date.now() / 1000)}` // Gera um número provisório
+                    numero_pedido: `OC-${Math.floor(Date.now() / 1000)}${criados}` // Gera um número único usando timestamp e índice
                 };
 
                 const vendaCriada = await criarPedidoMutation.mutateAsync({

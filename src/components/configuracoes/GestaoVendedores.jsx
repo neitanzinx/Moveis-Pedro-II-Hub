@@ -6,16 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Pencil, Trash2, UserCheck, UserX, MapPin, Loader2 } from "lucide-react";
 import VendedorModal from "./VendedorModal";
+import { useLojas } from "@/hooks/useLojas";
 
 export default function GestaoVendedores() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingVendedor, setEditingVendedor] = useState(null);
   const queryClient = useQueryClient();
 
-  const { data: vendedores = [], isLoading } = useQuery({
+  const { data: vendedores = [], isLoading: loadingVendedores } = useQuery({
     queryKey: ['vendedores'],
     queryFn: () => base44.entities.Vendedor.list('-created_date'),
   });
+
+  const { data: lojas = [], isLoading: loadingLojas } = useLojas();
 
   const createMutation = useMutation({
     mutationFn: (data) => base44.entities.Vendedor.create(data),
@@ -68,13 +71,18 @@ export default function GestaoVendedores() {
     });
   };
 
-  const vendedoresPorLoja = {
-    "Centro": vendedores.filter(v => v.loja === "Centro"),
-    "Carangola": vendedores.filter(v => v.loja === "Carangola"),
-    "Ponte Branca": vendedores.filter(v => v.loja === "Ponte Branca")
-  };
+  const vendedoresPorLoja = lojas.reduce((acc, loja) => {
+    acc[loja.nome] = vendedores.filter(v => v.loja === loja.nome);
+    return acc;
+  }, {});
 
-  if (isLoading) {
+  // Vendedores sem loja ou em lojas inativas/não listadas (opcional, mas bom para debug)
+  const vendedoresSemLoja = vendedores.filter(v => !lojas.some(l => l.nome === v.loja));
+  if (vendedoresSemLoja.length > 0) {
+    vendedoresPorLoja["Outros/Sem Loja"] = vendedoresSemLoja;
+  }
+
+  if (loadingVendedores || loadingLojas) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="w-8 h-8 animate-spin" style={{ color: '#07593f' }} />

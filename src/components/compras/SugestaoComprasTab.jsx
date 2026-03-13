@@ -1,13 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { base44 } from '@/api/base44Client';
+import { supabase, base44 } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
     Lightbulb, ShoppingCart, TrendingUp, AlertTriangle, ArrowRight,
@@ -263,16 +263,17 @@ export default function SugestaoComprasTab({ onPedidoCriado }) {
                         </div>
                         <div className="flex items-center gap-2">
                             <Filter className="w-4 h-4 text-gray-500" />
-                            <select
-                                className="text-sm border rounded p-1"
-                                value={filtroFornecedor}
-                                onChange={(e) => setFiltroFornecedor(e.target.value)}
-                            >
-                                <option value="todos">Todos Fornecedores</option>
-                                {fornecedores.map(f => (
-                                    <option key={f.id} value={f.id}>{f.nome_empresa || f.razao_social}</option>
-                                ))}
-                            </select>
+                            <Select value={filtroFornecedor} onValueChange={setFiltroFornecedor}>
+                                <SelectTrigger className="w-[200px] h-9">
+                                    <SelectValue placeholder="Filtrar Fornecedor" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="todos">Todos Fornecedores</SelectItem>
+                                    {fornecedores.map(f => (
+                                        <SelectItem key={f.id} value={f.id}>{f.nome_empresa || f.razao_social}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
                     </div>
                 </CardHeader>

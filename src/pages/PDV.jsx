@@ -29,6 +29,8 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import { adicionarDias } from "@/utils/dateUtils";
+import { formatarNome, formatarTelefone, formatarEndereco } from "@/utils/formatters";
+import { resolveStockField } from "@/utils/stockUtils";
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -90,12 +92,12 @@ const construirEnderecoEntrega = (cliente) => {
 
   if (!end.rua) return "Endereço a definir";
 
-  let endereco = `${end.rua}, ${end.numero || 's/n'}`;
-  if (end.complemento) endereco += ` - ${end.complemento}`;
-  if (end.bairro) endereco += ` - ${end.bairro}`;
-  if (end.cidade) endereco += `, ${end.cidade}`;
+  let endereco = `${formatarEndereco(end.rua)}, ${end.numero || 's/n'}`;
+  if (end.complemento) endereco += ` - ${formatarEndereco(end.complemento)}`;
+  if (end.bairro) endereco += ` - ${formatarEndereco(end.bairro)}`;
+  if (end.cidade) endereco += `, ${formatarEndereco(end.cidade)}`;
   if (end.estado) endereco += `/${end.estado}`;
-  if (end.ponto_referencia) endereco += ` (Ref: ${end.ponto_referencia})`;
+  if (end.ponto_referencia) endereco += ` (Ref: ${formatarEndereco(end.ponto_referencia)})`;
 
   return endereco;
 };
@@ -107,7 +109,7 @@ const criarLancamentosVenda = async (vendaData, taxas, vendaId) => {
 
     // 1. Receita Bruta da Venda
     await base44.entities.LancamentoFinanceiro.create({
-      descricao: `Venda #${vendaData.numero_pedido} - ${vendaData.cliente_nome}`,
+      descricao: `Venda #${vendaData.numero_pedido} - ${formatarNome(vendaData.cliente_nome)}`,
       valor: vendaData.valor_total + (vendaData.desconto || 0),
       tipo: 'receita',
       data_vencimento: hoje,
@@ -1154,12 +1156,20 @@ export default function PDV() {
     try {
       const vendaCriada = await criarVendaMutation.mutateAsync(vendaData);
 
+      const campoLoja = resolveStockField(configVenda.loja);
+
       for (const item of itens) {
         const prod = produtos.find(p => p.id === item.produto_id);
         if (prod && !item.is_encomenda) {
-          await base44.entities.Produto.update(prod.id, {
-            quantidade_estoque: prod.quantidade_estoque - item.quantidade
-          });
+          const updates = {
+            quantidade_estoque: Math.max(0, (prod.quantidade_estoque || 0) - item.quantidade)
+          };
+
+          if (campoLoja) {
+            updates[campoLoja] = Math.max(0, (prod[campoLoja] || 0) - item.quantidade);
+          }
+
+          await base44.entities.Produto.update(prod.id, updates);
         }
       }
 
