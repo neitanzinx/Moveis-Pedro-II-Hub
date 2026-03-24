@@ -26,6 +26,32 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 const TRACKING_TOKEN_SECRET = process.env.TRACKING_TOKEN_SECRET || SUPABASE_SERVICE_KEY || 'moveispedroii-tracking-secret';
 const TRACKING_TOKEN_TTL_SECONDS = Number(process.env.TRACKING_TOKEN_TTL_SECONDS || 7200);
+const OFFICIAL_TRACKING_BASE_URL = 'https://moveispedro2.com.br';
+const LOCAL_DEV_TRACKING_BASE_URL = 'http://localhost:5173';
+
+function isLocalhostUrl(url) {
+    try {
+        const parsed = new URL(url);
+        return parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+    } catch (error) {
+        return false;
+    }
+}
+
+function getTrackingBaseUrl() {
+    const configuredUrl = (process.env.PUBLIC_URL || '').trim();
+    const normalizedConfiguredUrl = configuredUrl.replace(/\/+$/, '');
+
+    if (process.env.NODE_ENV === 'production') {
+        return OFFICIAL_TRACKING_BASE_URL;
+    }
+
+    if (normalizedConfiguredUrl && isLocalhostUrl(normalizedConfiguredUrl)) {
+        return normalizedConfiguredUrl;
+    }
+
+    return LOCAL_DEV_TRACKING_BASE_URL;
+}
 
 function base64UrlEncode(input) {
     return Buffer.from(input)
@@ -1253,7 +1279,7 @@ app.post('/aviso-inicio-rota', async (req, res) => {
     console.log(`🚚 Iniciando rota com ${entregas.length} entregas`);
     res.json({ success: true }); // Responde rápido para liberar o front
 
-    const baseUrl = process.env.PUBLIC_URL || "https://moveispedro2.com.br";
+    const baseUrl = getTrackingBaseUrl();
 
     for (const entrega of entregas) {
         if (!entrega.cliente_telefone) continue;
@@ -1417,7 +1443,7 @@ app.post('/aviso-proxima-parada', async (req, res) => {
     }
 
     // URL da Landing Page (ajuste se o domínio for diferente)
-    const baseUrl = process.env.PUBLIC_URL || "https://moveispedro2.com.br";
+    const baseUrl = getTrackingBaseUrl();
     const trackingToken = createTrackingToken({
         entrega_id: entregaDb.id,
         numero_pedido: entregaDb.numero_pedido
@@ -2037,7 +2063,7 @@ app.post('/concluir-entrega', async (req, res) => {
                     .eq('id', proximaEntrega.id);
 
                 // 5. Disparar o aviso via Rota 4 (Internamente)
-                const baseUrl = process.env.PUBLIC_URL || "https://moveispedro2.com.br";
+                const baseUrl = getTrackingBaseUrl();
                 const trackingToken = createTrackingToken({
                     entrega_id: proximaEntrega.id,
                     numero_pedido: proximaEntrega.numero_pedido
