@@ -8,6 +8,7 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
@@ -22,6 +23,64 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+const TRACKING_TOKEN_SECRET = process.env.TRACKING_TOKEN_SECRET || SUPABASE_SERVICE_KEY || 'moveispedroii-tracking-secret';
+const TRACKING_TOKEN_TTL_SECONDS = Number(process.env.TRACKING_TOKEN_TTL_SECONDS || 7200);
+
+function base64UrlEncode(input) {
+    return Buffer.from(input)
+        .toString('base64')
+        .replace(/=/g, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+}
+
+function base64UrlDecode(input) {
+    const normalized = input.replace(/-/g, '+').replace(/_/g, '/');
+    const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+    return Buffer.from(normalized + padding, 'base64').toString('utf8');
+}
+
+function createTrackingToken(payload, ttlSeconds = TRACKING_TOKEN_TTL_SECONDS) {
+    const now = Math.floor(Date.now() / 1000);
+    const body = {
+        ...payload,
+        iat: now,
+        exp: now + Math.max(60, Number(ttlSeconds) || TRACKING_TOKEN_TTL_SECONDS)
+    };
+    const encoded = base64UrlEncode(JSON.stringify(body));
+    const signature = crypto.createHmac('sha256', TRACKING_TOKEN_SECRET).update(encoded).digest('base64url');
+    return `${encoded}.${signature}`;
+}
+
+function verifyTrackingToken(token) {
+    if (!token || typeof token !== 'string' || !token.includes('.')) {
+        throw new Error('Token inválido');
+    }
+
+    const [encoded, signature] = token.split('.');
+    const expected = crypto.createHmac('sha256', TRACKING_TOKEN_SECRET).update(encoded).digest('base64url');
+
+    if (!signature || signature.length !== expected.length) {
+        throw new Error('Assinatura inválida');
+    }
+
+    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+        throw new Error('Assinatura inválida');
+    }
+
+    const payload = JSON.parse(base64UrlDecode(encoded));
+    const now = Math.floor(Date.now() / 1000);
+    if (!payload.exp || payload.exp < now) {
+        throw new Error('Token expirado');
+    }
+
+    return payload;
+}
+
+const STATUS_ENTREGA_FINALIZADOS = new Set(['entregue', 'concluida', 'concluída', 'cancelada', 'cancelado', 'retirado', 'finalizada']);
+const STATUS_ENTREGA_ATIVOS = new Set(['próxima parada', 'proxima parada', 'a caminho', 'em rota']);
+const STATUS_ENTREGA_FILA = new Set(['próxima parada', 'proxima parada', 'a caminho', 'em rota', 'pendente']);
 
 // 🔐 Rotas de Autenticação de Funcionários
 const { setupEmployeeAuthRoutes } = require('./routes/authEmployee');
@@ -73,7 +132,7 @@ process.on('unhandledRejection', (reason, promise) => {
     ) {
         console.warn('⚠️ WhatsApp auth/retry warning (não crítico):', msg);
         // Tentar reconexão suave se possível
-        try { if (typeof whatsapp !== 'undefined') whatsapp.reconnect(`unhandled: ${msg}`); } catch (e) { }
+        try { if (typeof whatsapp !== 'undefined') whatsapp.reconnect(`unhandled: ${msg}`); } catch (e) { void e; }
     } else {
         console.error('🔥 CRITICAL ERROR (Unhandled Rejection):', reason);
     }
@@ -328,7 +387,7 @@ const whatsapp = {
                     break;
                 } catch (e) {
                     console.warn(`⏳ [CLEAN] Tentativa ${i + 1}/3 falhou (${e.message}).`);
-                    try { execSync(isWindows ? 'timeout /t 1 /nobreak >NUL' : 'sleep 1', { stdio: 'ignore' }); } catch (s) { }
+                    try { execSync(isWindows ? 'timeout /t 1 /nobreak >NUL' : 'sleep 1', { stdio: 'ignore' }); } catch (s) { void s; }
                 }
             }
             return deleted;
@@ -346,7 +405,7 @@ const whatsapp = {
                         console.log(`🧹 [CLEAN] Removendo arquivo de trava isolado detectado: ${f}`);
                         fs.unlinkSync(lockPath);
                     }
-                } catch (e) { }
+                } catch (e) { void e; }
             });
         }
 
@@ -886,9 +945,9 @@ function captureLog(type, args) {
     if (memoryLogs.length > MAX_LOGS) memoryLogs.pop();
 }
 
-console.log = (...args) => { changeLog: captureLog('info', args); originalConsoleLog.apply(console, args); };
-console.error = (...args) => { changeLog: captureLog('error', args); originalConsoleError.apply(console, args); };
-console.warn = (...args) => { changeLog: captureLog('warn', args); originalConsoleWarn.apply(console, args); };
+console.log = (...args) => { captureLog('info', args); originalConsoleLog.apply(console, args); };
+console.error = (...args) => { captureLog('error', args); originalConsoleError.apply(console, args); };
+console.warn = (...args) => { captureLog('warn', args); originalConsoleWarn.apply(console, args); };
 
 // --- ROTA DE STATUS DO WHATSAPP (PARA A INTERFACE) ---
 app.get('/whatsapp/status', async (req, res) => {
@@ -1078,9 +1137,25 @@ app.post('/disparar-confirmacoes', async (req, res) => {
                 }
             }
 
-            // ✅ MENSAGEM DE ENTREGA CONFIRMADA
-            const mensagem =
-                `Olá *${entrega.cliente_nome}*! 👋
+            const isReagendamento = entrega.is_reagendamento === true;
+
+            // ✅ MENSAGENS: confirmação normal ou ajuste de data/horário
+            const mensagem = isReagendamento
+                ? `Olá *${entrega.cliente_nome}*! 👋
+Aqui é da *Móveis Pedro II*.
+
+🔄 *Sua entrega foi ajustada.*
+
+📦 Pedido: #${entrega.numero_pedido}
+📅 Nova data: *${dataTexto}*
+🕐 Novo horário: *${horarioTexto}*
+
+Nossa equipe reorganizou a carga e esse é o novo agendamento da sua entrega.
+
+⚠️ *Lembre-se:* É necessário que tenha alguém *maior de idade* no local para receber e conferir os itens.
+
+_O horário pode ter pequenas variações devido ao trânsito._`
+                : `Olá *${entrega.cliente_nome}*! 👋
 Aqui é da *Móveis Pedro II*.
 
 🚚 *Sua entrega está confirmada!*
@@ -1178,6 +1253,8 @@ app.post('/aviso-inicio-rota', async (req, res) => {
     console.log(`🚚 Iniciando rota com ${entregas.length} entregas`);
     res.json({ success: true }); // Responde rápido para liberar o front
 
+    const baseUrl = process.env.PUBLIC_URL || "https://moveispedro2.com.br";
+
     for (const entrega of entregas) {
         if (!entrega.cliente_telefone) continue;
 
@@ -1185,12 +1262,23 @@ app.post('/aviso-inicio-rota', async (req, res) => {
         if (tel.length < 12) tel = '55' + tel;
         const chatId = `${tel}@c.us`;
 
+        // Gerar token de rastreio
+        const trackingToken = createTrackingToken({
+            entrega_id: entrega.id,
+            numero_pedido: entrega.numero_pedido
+        });
+        const linkRastreio = `${baseUrl}/rastreio?token=${encodeURIComponent(trackingToken)}`;
+
         const msg =
             `Bom dia, *${entrega.cliente_nome}*! 🚚
 
 O caminhão da *Móveis Pedro II* acabou de sair do depósito e iniciou a rota de entregas de hoje.
 
 📦 Seu pedido *#${entrega.numero_pedido}* está a caminho!
+
+👇 *Acompanhe a localização ao vivo:*
+${linkRastreio}
+
 Por favor, mantenha alguém no local para receber.
 
 Até breve!`;
@@ -1201,6 +1289,101 @@ Até breve!`;
         } catch (e) {
             console.error(`Erro ao enviar para ${entrega.cliente_nome}`);
         }
+    }
+});
+
+// --- ROTA API: VALIDAR TOKEN DE RASTREIO PÚBLICO ---
+app.get('/api/tracking/validate', async (req, res) => {
+    const token = req.query.token;
+
+    if (!token) {
+        return res.status(400).json({ error: 'token ausente' });
+    }
+
+    try {
+        const payload = verifyTrackingToken(token);
+        const entregaId = payload.entrega_id;
+
+        if (!entregaId) {
+            return res.status(400).json({ error: 'token inválido' });
+        }
+
+        const { data: entrega, error: entregaError } = await supabase
+            .from('entregas')
+            .select('*')
+            .eq('id', entregaId)
+            .single();
+
+        if (entregaError || !entrega) {
+            return res.status(404).json({ error: 'entrega não encontrada' });
+        }
+
+        const statusAtual = (entrega.status || '').toString().trim().toLowerCase();
+        if (STATUS_ENTREGA_FINALIZADOS.has(statusAtual)) {
+            return res.status(403).json({ error: 'rastreamento indisponível para entrega finalizada' });
+        }
+
+        if (!STATUS_ENTREGA_ATIVOS.has(statusAtual)) {
+            return res.status(403).json({ error: 'rastreamento disponível apenas quando o pedido é o próximo da rota' });
+        }
+
+        if (!entrega.caminhao_id) {
+            return res.status(403).json({ error: 'entrega sem caminhão ativo' });
+        }
+
+        const { data: rotaRaw, error: rotaError } = await supabase
+            .from('entregas')
+            .select('id, status, ordem_rota, caminhao_id')
+            .eq('caminhao_id', entrega.caminhao_id)
+            .order('ordem_rota', { ascending: true });
+
+        if (rotaError) {
+            return res.status(500).json({ error: 'falha ao validar sequência da rota' });
+        }
+
+        const filaAtiva = (rotaRaw || []).filter((item) => {
+            const st = (item.status || '').toString().trim().toLowerCase();
+            return STATUS_ENTREGA_FILA.has(st);
+        });
+
+        const proxima = filaAtiva[0];
+        if (!proxima || String(proxima.id) !== String(entrega.id)) {
+            return res.status(403).json({ error: 'token não autorizado para a parada atual' });
+        }
+
+        const { data: caminhao } = await supabase
+            .from('caminhoes')
+            .select('latitude, longitude, ultima_atualizacao')
+            .eq('id', entrega.caminhao_id)
+            .single();
+
+        const sanitized = {
+            id: entrega.id,
+            numero_pedido: entrega.numero_pedido,
+            cliente_nome: entrega.cliente_nome,
+            cliente_telefone: entrega.cliente_telefone,
+            endereco_entrega: entrega.endereco_entrega,
+            status: entrega.status,
+            data_agendada: entrega.data_agendada,
+            turno: entrega.turno,
+            caminhao_id: entrega.caminhao_id,
+            ordem_rota: entrega.ordem_rota,
+            data_realizada: entrega.data_realizada
+        };
+
+        return res.json({
+            ok: true,
+            entrega: sanitized,
+            paradasNaFrente: 0,
+            localizacaoMotorista: caminhao?.latitude && caminhao?.longitude ? {
+                lat: caminhao.latitude,
+                lng: caminhao.longitude,
+                ultima_atualizacao: caminhao.ultima_atualizacao || null
+            } : null,
+            expiresAt: payload.exp
+        });
+    } catch (error) {
+        return res.status(401).json({ error: error.message || 'token inválido' });
     }
 });
 
@@ -1216,9 +1399,30 @@ app.post('/aviso-proxima-parada', async (req, res) => {
     if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
     const chatId = `${tel}@c.us`;
 
+    const { data: entregaDb, error: entregaError } = await supabase
+        .from('entregas')
+        .select('id, numero_pedido, status')
+        .eq('id', id)
+        .single();
+
+    if (entregaError || !entregaDb) {
+        return res.status(404).json({ error: 'Entrega não encontrada' });
+    }
+
+    if ((entregaDb.status || '').toLowerCase() !== 'próxima parada') {
+        await supabase
+            .from('entregas')
+            .update({ status: 'Próxima parada' })
+            .eq('id', id);
+    }
+
     // URL da Landing Page (ajuste se o domínio for diferente)
-    const baseUrl = process.env.PUBLIC_URL || "https://moveispedroii.com.br";
-    const linkRastreio = `${baseUrl}/rastreio/${id}`;
+    const baseUrl = process.env.PUBLIC_URL || "https://moveispedro2.com.br";
+    const trackingToken = createTrackingToken({
+        entrega_id: entregaDb.id,
+        numero_pedido: entregaDb.numero_pedido
+    });
+    const linkRastreio = `${baseUrl}/rastreio?token=${encodeURIComponent(trackingToken)}`;
 
     const msg =
         `*Móveis Pedro II Informa:* 📍
@@ -1745,9 +1949,47 @@ app.post('/concluir-entrega', async (req, res) => {
     }
 
     try {
-        // 1. Marcar a atual como concluída no Supabase salvando os dados do front
+        // 0. Validar bloqueio por montagem interna pendente (por item)
+        const { data: entregaAlvo, error: entregaAlvoErr } = await supabase
+            .from('entregas')
+            .select('id, venda_id, numero_pedido')
+            .eq('id', id_concluida)
+            .single();
+
+        if (entregaAlvoErr || !entregaAlvo) {
+            throw entregaAlvoErr || new Error('Entrega não encontrada para conclusão');
+        }
+
+        let montagemPendenteQuery = supabase
+            .from('montagens_itens')
+            .select('id', { count: 'exact', head: true })
+            .eq('tipo_montagem', 'interna')
+            .neq('status', 'concluida');
+
+        if (entregaAlvo.numero_pedido && entregaAlvo.venda_id) {
+            montagemPendenteQuery = montagemPendenteQuery.or(`entrega_id.eq.${id_concluida},numero_pedido.eq.${entregaAlvo.numero_pedido},venda_id.eq.${entregaAlvo.venda_id}`);
+        } else if (entregaAlvo.numero_pedido) {
+            montagemPendenteQuery = montagemPendenteQuery.or(`entrega_id.eq.${id_concluida},numero_pedido.eq.${entregaAlvo.numero_pedido}`);
+        } else if (entregaAlvo.venda_id) {
+            montagemPendenteQuery = montagemPendenteQuery.or(`entrega_id.eq.${id_concluida},venda_id.eq.${entregaAlvo.venda_id}`);
+        } else {
+            montagemPendenteQuery = montagemPendenteQuery.eq('entrega_id', id_concluida);
+        }
+
+        const { count: pendentesCount, error: montagemPendenteErr } = await montagemPendenteQuery;
+
+        if (montagemPendenteErr) throw montagemPendenteErr;
+
+        if ((pendentesCount || 0) > 0) {
+            return res.status(409).json({
+                error: 'Montagem pendente',
+                message: 'Entregas com item de montagem interna pendente não podem ser concluídas.'
+            });
+        }
+
+        // 1. Marcar a atual como entregue no Supabase salvando os dados do front
         const updatePayload = {
-            status: 'Concluída',
+            status: 'Entregue',
             data_realizada: new Date().toISOString(),
             ...(req.body.update_data || {}) // Inclui fotos, assinatura, geolocalização
         };
@@ -1768,16 +2010,20 @@ app.post('/concluir-entrega', async (req, res) => {
 
         setTimeout(async () => {
             try {
-                // 3. Buscar a PRÓXIMA entrega da mesma rota/veículo
-                const { data: proximaEntrega, error: err2 } = await supabase
+                // 3. Buscar entregas candidatas da mesma rota/veiculo
+                const { data: candidatas, error: err2 } = await supabase
                     .from('entregas')
                     .select('*')
                     .eq('caminhao_id', entregaAtual.caminhao_id)
-                    .eq('status', 'Em rota') // Ou o status que você usa para pendentes na carga
                     .gt('ordem_rota', entregaAtual.ordem_rota)
                     .order('ordem_rota', { ascending: true })
-                    .limit(1)
-                    .single();
+                    .limit(20);
+
+                const statusElegiveis = new Set(['pendente', 'proxima parada', 'próxima parada', 'a caminho', 'em rota']);
+                const proximaEntrega = (candidatas || []).find((item) => {
+                    const status = (item.status || '').toString().trim().toLowerCase();
+                    return statusElegiveis.has(status);
+                });
 
                 if (err2 || !proximaEntrega) {
                     console.log("🏁 Fim da rota ou nenhum próximo cliente encontrado.");
@@ -1791,8 +2037,12 @@ app.post('/concluir-entrega', async (req, res) => {
                     .eq('id', proximaEntrega.id);
 
                 // 5. Disparar o aviso via Rota 4 (Internamente)
-                const baseUrl = process.env.PUBLIC_URL || "https://moveispedroii.com.br";
-                const linkRastreio = `${baseUrl}/rastreio/${proximaEntrega.numero_pedido}`;
+                const baseUrl = process.env.PUBLIC_URL || "https://moveispedro2.com.br";
+                const trackingToken = createTrackingToken({
+                    entrega_id: proximaEntrega.id,
+                    numero_pedido: proximaEntrega.numero_pedido
+                });
+                const linkRastreio = `${baseUrl}/rastreio?token=${encodeURIComponent(trackingToken)}`;
                 const tel = proximaEntrega.cliente_telefone.replace(/\D/g, '');
                 const chatId = (tel.length <= 11 ? '55' : '') + tel + '@c.us';
 

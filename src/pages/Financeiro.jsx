@@ -12,32 +12,33 @@ import CategoriasManager from "../components/financeiro/CategoriasManager";
 import RecorrentesManager from "../components/financeiro/RecorrentesManager";
 
 export default function Financeiro() {
-  const { user, loading } = useAuth();
+  const { user, loading, can } = useAuth();
   const [activeTab, setActiveTab] = useState("lancamentos");
   const [mesAno, setMesAno] = useState(new Date().toISOString().slice(0, 7));
+  const canViewFinanceiro = can('view_financeiro') || can('manage_financeiro');
 
   // 1. BLINDAGEM: queryFn assíncrona com fallback "|| []"
   const { data: lancamentos = [], isLoading } = useQuery({
     queryKey: ['lancamentos-financeiros'],
-    queryFn: async () => await base44.entities.LancamentoFinanceiro.list('-data_lancamento') || []
+    queryFn: async () => await base44.entities.LancamentoFinanceiro.list('-data_lancamento') || [],
+    enabled: !!user && canViewFinanceiro,
   });
 
   const { data: categorias = [] } = useQuery({
     queryKey: ['categorias-financeiras'],
-    queryFn: async () => await base44.entities.CategoriaFinanceira.list('nome') || []
+    queryFn: async () => await base44.entities.CategoriaFinanceira.list('nome') || [],
+    enabled: !!user && canViewFinanceiro,
   });
 
   const { data: vendas = [] } = useQuery({
     queryKey: ['vendas-financeiro'],
-    queryFn: async () => await base44.entities.Venda.list('-data_venda') || []
+    queryFn: async () => await base44.entities.Venda.list('-data_venda') || [],
+    enabled: !!user && canViewFinanceiro,
   });
 
   if (loading || !user) return <div className="flex h-screen items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600" /></div>;
 
-  const isAdmin = user.cargo === 'Administrador';
-  const isManager = user.cargo === 'Gerente';
-
-  if (!isAdmin && !isManager) {
+  if (!canViewFinanceiro) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
         <div className="text-center text-gray-500">

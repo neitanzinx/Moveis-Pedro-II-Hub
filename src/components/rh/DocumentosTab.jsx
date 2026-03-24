@@ -304,7 +304,7 @@ export default function DocumentosTab() {
                     <AlertDialogHeader>
                         <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Tem certeza que deseja excluir o documento "{confirmDelete?.titulo}"?
+                            Tem certeza que deseja excluir o documento &quot;{confirmDelete?.titulo}&quot;?
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>

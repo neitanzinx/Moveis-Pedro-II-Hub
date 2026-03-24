@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Warehouse, Users, ShoppingCart, Truck, Building2,
   FileText, DollarSign, UserCog, BarChart3, Receipt, MessageCircle, CreditCard,
-  Settings, CalendarDays, Tag, Smartphone, Wrench, PieChart, Package, FileSpreadsheet, Target, ScanBarcode
+  Settings, CalendarDays, Tag, Smartphone, Wrench, PieChart, Package, FileSpreadsheet, Target, ScanBarcode, TrendingUp
 } from "lucide-react";
 
 // Níveis de Acesso aos Dados
@@ -14,7 +14,7 @@ export const SCOPES = {
 // Regras por Cargo
 export const ROLE_RULES = {
   'Administrador': {
-    can: ['*'],
+    can: ['*'],  // Acesso total a TUDO (incluindo Compras, Vendas, etc)
     scope: SCOPES.ALL
   },
   'Gerente': {
@@ -24,7 +24,8 @@ export const ROLE_RULES = {
       'view_entregas', 'manage_entregas', 'view_assistencia', 'manage_assistencia',
       'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
-      'view_montagem', 'view_marketing', 'view_mostruario'
+      'view_montagem', 'view_marketing', 'view_mostruario',
+      'view_compras', 'create_oc', 'manage_compras', 'approve_oc'
     ],
     scope: SCOPES.STORE
   },
@@ -35,7 +36,8 @@ export const ROLE_RULES = {
       'view_entregas', 'manage_entregas', 'view_assistencia', 'manage_assistencia',
       'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
-      'view_montagem', 'view_marketing', 'view_mostruario'
+      'view_montagem', 'view_marketing', 'view_mostruario',
+      'view_compras', 'create_oc', 'manage_compras', 'send_oc', 'receive_oc'
     ],
     scope: SCOPES.ALL
   },
@@ -50,14 +52,14 @@ export const ROLE_RULES = {
   'Estoque': {
     can: [
       'view_estoque', 'manage_estoque', 'view_entregas', 'manage_entregas',
-      'view_montagem', 'view_produtos'
+      'view_montagem', 'view_produtos', 'view_compras', 'receive_oc'
     ],
     scope: SCOPES.ALL
   },
   'Financeiro': {
     can: [
       'view_financeiro', 'manage_financeiro', 'view_vendas',
-      'view_montagem', 'view_clientes'
+      'view_montagem', 'view_clientes', 'view_compras', 'approve_oc'
     ],
     scope: SCOPES.ALL
   },
@@ -90,6 +92,13 @@ export const ROLE_RULES = {
   'Montador Externo': {
     can: ['view_mobile_montador'],
     scope: SCOPES.OWN
+  },
+  'Comprador': {
+    can: [
+      'view_compras', 'create_oc', 'manage_compras', 'send_oc',
+      'view_produtos', 'view_fornecedores'
+    ],
+    scope: SCOPES.ALL
   }
 };
 
@@ -107,6 +116,7 @@ export const MENU_ITEMS = [
 
   { title: "Produtos", url: "/admin/Produtos", icon: Tag, permission: 'view_produtos', section: "Operacional" },
   { title: "Estoque", url: "/admin/Estoque", icon: Warehouse, permission: 'view_estoque', section: "Operacional" },
+  { title: "Compras", url: "/admin/Compras", icon: ShoppingCart, permission: 'view_compras', section: "Operacional" },
   { title: "Mostruário", url: "/admin/Mostruario", icon: Tag, permission: 'view_mostruario', section: "Operacional" },
   { title: "Logística", url: "/admin/LogisticaSemanal", icon: CalendarDays, permission: 'view_entregas', section: "Operacional" },
   { title: "Montagem", url: "/admin/Montagem", icon: Building2, permission: 'view_montagem', section: "Operacional", module: 'montagem' },
@@ -119,8 +129,6 @@ export const MENU_ITEMS = [
   { title: "RH", url: "/admin/RecursosHumanos", icon: UserCog, permission: 'view_rh', section: "Gestão", module: 'rh' },
   { title: "Visão Estratégica (BI)", url: "/admin/DashboardBI", icon: PieChart, permission: 'view_relatorios', section: "Gestão", module: 'bi_dashboard' },
   { title: "Exportação Contábil", url: "/admin/ExportacaoContabil", icon: FileSpreadsheet, permission: 'view_financeiro', section: "Gestão" },
-
-  { title: "Setor de Compras", url: "/admin/SetorCompras", icon: Package, permission: 'view_estoque', section: "Operacional" },
 
   { title: "WhatsApp", url: "/admin/CatalogoWhatsApp", icon: MessageCircle, permission: 'view_catalogo', section: "Ferramentas", module: 'catalogo_whatsapp' },
 

@@ -40,21 +40,43 @@ export default function AuditLogPage() {
 
   const { data: rawLogs = [], isLoading, isError } = useQuery({
     queryKey: ['audit-logs'],
-    queryFn: () => base44.entities.AuditLog.list('-timestamp', 200),
+    queryFn: () => base44.entities.AuditLog.list('-created_at'),
     refetchInterval: 10000,
     retry: 1 // Limit retries to avoid spamming on error
   });
+
+  const inferChanges = (log) => {
+    const directChanges = log.detalhes?.changes || log.changes;
+    if (directChanges && typeof directChanges === 'object' && !Array.isArray(directChanges)) {
+      return directChanges;
+    }
+
+    const oldData = log.old_data && typeof log.old_data === 'object' ? log.old_data : {};
+    const newData = log.new_data && typeof log.new_data === 'object' ? log.new_data : {};
+    const keys = new Set([...Object.keys(oldData), ...Object.keys(newData)]);
+
+    const normalized = {};
+    keys.forEach((key) => {
+      const before = oldData[key];
+      const after = newData[key];
+      if (JSON.stringify(before) !== JSON.stringify(after)) {
+        normalized[key] = { before, after };
+      }
+    });
+
+    return normalized;
+  };
 
   // Map database columns to expected format
   const logs = rawLogs.map(log => ({
     ...log,
     action: log.acao || log.action || 'UPDATE',
-    user_name: log.usuario || log.user_name || 'Unknown',
+    user_name: log.usuario || log.user_name || log.user_email || 'Unknown',
     user_email: log.user_email || '',
     user_cargo: log.user_cargo || '',
-    entity_type: log.tabela || log.entity_type || '',
-    entity_description: log.detalhes?.description || '',
-    changes: log.detalhes?.changes || log.changes || {},
+    entity_type: log.tabela || log.entity_type || log.table_name || '',
+    entity_description: log.detalhes?.description || log.entity_description || (log.table_name ? `Registro em ${log.table_name}` : ''),
+    changes: inferChanges(log),
     timestamp: log.created_at || log.timestamp,
     ip_address: log.ip_address || ''
   }));

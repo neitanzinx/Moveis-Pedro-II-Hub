@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useDraggable } from "@dnd-kit/core";
-import { Map, AlertTriangle, MessageCircle, Package, Truck, User, Wrench, Store, Sofa, CheckCircle, CalendarX, History, Settings } from "lucide-react";
+import { Map, AlertTriangle, MessageCircle, Package, Truck, User, Wrench, Store, Sofa, CheckCircle, CalendarX, History, Settings, Clock } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -38,7 +38,11 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
   let bgColor = "bg-white";
   let ringColor = "ring-gray-100";
 
-  if (isConfirmado) {
+  if (entrega.status === 'Aguardando Liberação') {
+    statusColor = "amber";
+    bgColor = "bg-amber-100";
+    ringColor = "ring-amber-200";
+  } else if (isConfirmado) {
     statusColor = "green";
     bgColor = "bg-emerald-100";
     ringColor = "ring-emerald-200";
@@ -90,6 +94,14 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
             {isConfirmado && (
               <Badge className="text-[8px] px-1 py-0 h-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-none border-0 flex items-center gap-0.5" title="Entrega Confirmada">
                 <CheckCircle className="w-2 h-2" />
+              </Badge>
+            )}
+
+            {/* Badge de Aguardando Liberação */}
+            {entrega.status === 'Aguardando Liberação' && (
+              <Badge className="text-[8px] px-1 py-0 h-4 bg-amber-600 hover:bg-amber-700 text-white font-bold shadow-none border-0 flex items-center gap-0.5" title="Aguardando Liberação">
+                <Clock className="w-2 h-2" />
+                Aguardando
               </Badge>
             )}
 

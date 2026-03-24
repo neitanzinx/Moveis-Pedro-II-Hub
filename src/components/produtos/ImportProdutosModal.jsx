@@ -161,7 +161,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
     const showFinancials = user?.cargo === 'Administrador';
 
     // Multi-Tenant: Carrega lojas dinâmicas
-    const { lojas } = useLojas();
+    const { data: lojas = [] } = useLojas();
     const { organization } = useTenant();
 
     // Gera mapeamento dinâmico de colunas baseado nas lojas cadastradas
@@ -337,6 +337,44 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         return v === 'sim' || v === 's' || v === 'true' || v === '1';
     };
 
+    // Numeric(5,2) aceita apenas valores entre -999.99 e 999.99
+    const sanitizeNumeric52 = (value, fallback = 0) => {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return fallback;
+        if (num > 999.99) return 999.99;
+        if (num < -999.99) return -999.99;
+        return num;
+    };
+
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    const isTransientNetworkError = (err) => {
+        const msg = `${err?.message || ''} ${err?.details || ''}`.toLowerCase();
+        return (
+            msg.includes('failed to fetch') ||
+            msg.includes('network') ||
+            msg.includes('err_failed') ||
+            msg.includes('timeout') ||
+            (!err?.code && msg.includes('typeerror'))
+        );
+    };
+
+    const withRetry = async (operation, maxAttempts = 4) => {
+        let lastErr;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return await operation();
+            } catch (err) {
+                lastErr = err;
+                if (!isTransientNetworkError(err) || attempt === maxAttempts) {
+                    throw err;
+                }
+                await sleep(250 * attempt);
+            }
+        }
+        throw lastErr;
+    };
+
     // Parse CSV
     const parseCSV = (text) => {
         const lines = text.trim().split('\n');
@@ -427,15 +465,15 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                 largura: parseNum(row.largura),
                 altura: parseNum(row.altura),
                 profundidade: parseNum(row.profundidade),
-                impostos_percentual: parseNum(row.impostos_percentual) || 0,
+                impostos_percentual: sanitizeNumeric52(parseNum(row.impostos_percentual), 0),
                 frete_custo: parseNum(row.frete_custo) || 0,
-                ipi_percentual: parseNum(row.ipi_percentual) || 0,
-                markup_grupo1_prontos: parseNum(row.markup_grupo1_prontos) || 0,
-                markup_grupo2_montagem: parseNum(row.markup_grupo2_montagem) || 0,
-                markup_grupo3_lustre: parseNum(row.markup_grupo3_lustre) || 0,
-                markup_aplicado: parseNum(row.markup_aplicado),
-                desconto_max_vendedor: parseNum(row.desconto_max_vendedor) || 5,
-                desconto_max_gerencial: parseNum(row.desconto_max_gerencial) || 15,
+                ipi_percentual: sanitizeNumeric52(parseNum(row.ipi_percentual), 0),
+                markup_grupo1_prontos: sanitizeNumeric52(parseNum(row.markup_grupo1_prontos), 0),
+                markup_grupo2_montagem: sanitizeNumeric52(parseNum(row.markup_grupo2_montagem), 0),
+                markup_grupo3_lustre: sanitizeNumeric52(parseNum(row.markup_grupo3_lustre), 0),
+                markup_aplicado: sanitizeNumeric52(parseNum(row.markup_aplicado), 0),
+                desconto_max_vendedor: sanitizeNumeric52(parseNum(row.desconto_max_vendedor), 5),
+                desconto_max_gerencial: sanitizeNumeric52(parseNum(row.desconto_max_gerencial), 15),
                 requer_montagem: parseBool(row.requer_montagem),
                 montagem_terceirizado: parseBool(row.montagem_terceirizado),
                 // Estoque dinâmico por loja
@@ -577,6 +615,9 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         setStep(3);
         setProgress(0);
 
+        let fornecedoresMap = {};
+        const normalizeFornecedor = (nome) => String(nome || '').trim().toLowerCase();
+
         try {
             // 1. Primeiro, criar fornecedores que não existem
             const fornecedoresNomes = [...new Set(
@@ -591,23 +632,41 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                 // Buscar fornecedores existentes
                 const fornecedoresExistentes = await base44.entities.Fornecedor.list();
                 const nomesExistentes = new Set(
-                    fornecedoresExistentes.map(f => (f.nome_empresa || '').toLowerCase().trim())
+                    fornecedoresExistentes.map(f => normalizeFornecedor(f.nome_empresa))
                 );
+
+                fornecedoresExistentes.forEach(f => {
+                    const chave = normalizeFornecedor(f.nome_empresa);
+                    if (chave) fornecedoresMap[chave] = f.id;
+                });
 
                 // Criar fornecedores novos
                 const novosFornecedores = fornecedoresNomes.filter(
-                    nome => !nomesExistentes.has(nome.toLowerCase().trim())
+                    nome => !nomesExistentes.has(normalizeFornecedor(nome))
                 );
 
                 for (const nomeFornecedor of novosFornecedores) {
                     try {
-                        await base44.entities.Fornecedor.create({
+                        const novoFornecedor = await base44.entities.Fornecedor.create({
                             nome_empresa: nomeFornecedor
                         });
+                        const chave = normalizeFornecedor(nomeFornecedor);
+                        if (chave && novoFornecedor?.id) {
+                            fornecedoresMap[chave] = novoFornecedor.id;
+                        }
                         console.log('[Import] Fornecedor criado:', nomeFornecedor);
                     } catch (err) {
                         console.warn('[Import] Erro ao criar fornecedor:', nomeFornecedor, err);
                     }
+                }
+
+                if (!novosFornecedores.length) {
+                    fornecedoresNomes.forEach(nome => {
+                        const chave = normalizeFornecedor(nome);
+                        if (!chave || fornecedoresMap[chave]) return;
+                        const existente = fornecedoresExistentes.find(f => normalizeFornecedor(f.nome_empresa) === chave);
+                        if (existente?.id) fornecedoresMap[chave] = existente.id;
+                    });
                 }
 
                 if (novosFornecedores.length > 0) {
@@ -624,8 +683,8 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         const failedProducts = [];
 
         // Processamento paralelo (workers) para acelerar múltiplas gravações
-        // Limite reduzido para 12 para evitar erros de conexão e rate-limit (ERR_FAILED / Failed to fetch)
-        const CONCURRENCY_LIMIT = 12;
+        // Limite conservador para evitar saturação de conexão durante importações massivas
+        const CONCURRENCY_LIMIT = 4;
 
         const worker = async () => {
             while (currentIndex < groupedProducts.length) {
@@ -633,6 +692,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
                 const index = currentIndex++;
                 const product = groupedProducts[index];
+                let codigoBarrasFinal = String(product?.codigo_barras || '').trim();
 
                 // Atualizar o array de exibição em tempo real (mantém max 3)
                 setCurrentlyProcessing(prev => {
@@ -653,7 +713,9 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                     }
 
                     // Gera SKU único e DETERMINÍSTICO
-                    const sku = product.codigo_barras || generateSKU(product.fornecedor_nome, product.modelo_referencia, product.cor);
+                    const rawSku = product.codigo_barras || generateSKU(product.fornecedor_nome, product.modelo_referencia, product.cor);
+                    const sku = String(rawSku || '').trim() || `SKU-${Date.now()}-${index}`;
+                    codigoBarrasFinal = sku;
 
                     // Detecta categoria e ambiente automaticamente se não fornecidos
                     const detected = detectCategoryAndAmbiente(product.nome);
@@ -676,6 +738,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                         categoria: categoria,
                         ambiente: ambiente,
                         fornecedor_nome: product.fornecedor_nome || '',
+                        fornecedor_id: fornecedoresMap[normalizeFornecedor(product.fornecedor_nome)] || null,
                         modelo_referencia: product.modelo_referencia || '',
                         material: product.material || '',
 
@@ -690,17 +753,17 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                         preco_custo: product.preco_custo || 0,
                         preco_venda: product.preco_venda || calcularPrecoFinalImportacao(product) || 0,
 
-                        impostos_percentual: product.impostos_percentual || 0,
+                        impostos_percentual: sanitizeNumeric52(product.impostos_percentual, 0),
                         frete_custo: product.frete_custo || 0,
-                        ipi_percentual: product.ipi_percentual || 0,
+                        ipi_percentual: sanitizeNumeric52(product.ipi_percentual, 0),
 
-                        markup_grupo1_prontos: product.markup_grupo1_prontos || null,
-                        markup_grupo2_montagem: product.markup_grupo2_montagem || null,
-                        markup_grupo3_lustre: product.markup_grupo3_lustre || null,
-                        markup_aplicado: product.markup_aplicado,
+                        markup_grupo1_prontos: sanitizeNumeric52(product.markup_grupo1_prontos, 0),
+                        markup_grupo2_montagem: sanitizeNumeric52(product.markup_grupo2_montagem, 0),
+                        markup_grupo3_lustre: sanitizeNumeric52(product.markup_grupo3_lustre, 0),
+                        markup_aplicado: sanitizeNumeric52(product.markup_aplicado, 0),
 
-                        desconto_max_vendedor: product.desconto_max_vendedor || 5,
-                        desconto_max_gerencial: product.desconto_max_gerencial || 15,
+                        desconto_max_vendedor: sanitizeNumeric52(product.desconto_max_vendedor, 5),
+                        desconto_max_gerencial: sanitizeNumeric52(product.desconto_max_gerencial, 15),
 
                         quantidade_estoque: totalEstoque,
                         estoque_minimo: 0,
@@ -718,19 +781,45 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                     };
 
                     let resultado;
-                    const { data: existente } = await supabase
-                        .from('produtos')
-                        .select('id')
-                        .eq('codigo_barras', produtoData.codigo_barras)
-                        .maybeSingle();
+                    const { data: existente } = await withRetry(async () => {
+                        return await supabase
+                            .from('produtos')
+                            .select('id')
+                            .eq('codigo_barras', produtoData.codigo_barras)
+                            .maybeSingle();
+                    });
 
                     if (existente && existente.id) {
-                        const { codigo_barras, id, ...updateData } = produtoData;
+                        const updateData = { ...produtoData };
                         delete updateData.codigo_barras;
                         delete updateData.id;
-                        resultado = await base44.entities.Produto.update(existente.id, updateData);
+                        resultado = await withRetry(async () => base44.entities.Produto.update(existente.id, updateData));
                     } else {
-                        resultado = await base44.entities.Produto.create(produtoData);
+                        try {
+                            resultado = await withRetry(async () => base44.entities.Produto.create(produtoData));
+                        } catch (createErr) {
+                            // Evita falha por condição de corrida quando o mesmo SKU é processado em paralelo
+                            if (createErr?.code === '23505' || String(createErr?.message || '').toLowerCase().includes('duplicate')) {
+                                const { data: duplicado } = await withRetry(async () => {
+                                    return await supabase
+                                        .from('produtos')
+                                        .select('id')
+                                        .eq('codigo_barras', produtoData.codigo_barras)
+                                        .maybeSingle();
+                                });
+
+                                if (duplicado?.id) {
+                                    const updateData = { ...produtoData };
+                                    delete updateData.codigo_barras;
+                                    delete updateData.id;
+                                    resultado = await withRetry(async () => base44.entities.Produto.update(duplicado.id, updateData));
+                                } else {
+                                    throw createErr;
+                                }
+                            } else {
+                                throw createErr;
+                            }
+                        }
                     }
 
                     try {
@@ -751,7 +840,20 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
                     imported++;
                 } catch (err) {
-                    console.error('Erro ao importar:', product.nome, err);
+                    console.error('Erro ao importar:', product.nome, {
+                        code: err?.code,
+                        message: err?.message,
+                        details: err?.details,
+                        hint: err?.hint,
+                        payload: {
+                            codigo_barras_original: product.codigo_barras,
+                            codigo_barras_final: codigoBarrasFinal,
+                            fornecedor_nome: product.fornecedor_nome,
+                            modelo_referencia: product.modelo_referencia,
+                            cor: product.cor
+                        },
+                        raw: err
+                    });
                     failed++;
                     failedProducts.push(product.nome);
                 }
@@ -759,7 +861,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                 setProgress(Math.round(((imported + failed) / total) * 100));
 
                 // Pequeno delay para evitar sobrecarregar o Supabase e o navegador
-                await new Promise(resolve => setTimeout(resolve, 50));
+                await sleep(90);
             }
         };
 
@@ -964,8 +1066,8 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                 {groupedProducts.slice(0, 200).map((product, index) => {
                                     // === CÁLCULO DE ESTOQUE TOTAL ===
                                     let estoqueTotal = 0;
-                                    lojas.forEach(loja => {
-                                        const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
+                                    (lojas || []).filter(l => l?.codigo).forEach(loja => {
+                                        const codigoNorm = (loja?.codigo || '').toLowerCase().replace(/\s+/g, '_');
                                         const fieldName = `estoque_${codigoNorm}`;
                                         estoqueTotal += (parseInt(product[fieldName]) || 0);
                                     });
@@ -982,8 +1084,8 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                         // Somar estoque das variações se existirem
                                         estoqueTotal = product.variacoes.reduce((sum, v) => {
                                             let estVar = 0;
-                                            lojas.forEach(loja => {
-                                                const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
+                                            (lojas || []).filter(l => l?.codigo).forEach(loja => {
+                                            const codigoNorm = (loja?.codigo || '').toLowerCase().replace(/\s+/g, '_');
                                                 const fieldName = `estoque_${codigoNorm}`;
                                                 estVar += (parseInt(v[fieldName]) || 0);
                                             });
@@ -1074,8 +1176,8 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                                             <tbody>
                                                                 {product.variacoes.map((v, i) => {
                                                                     let estVar = 0;
-                                                                    lojas.forEach(loja => {
-                                                                        const codigoNorm = loja.codigo.toLowerCase().replace(/\s+/g, '_');
+                                                                    (lojas || []).filter(l => l?.codigo).forEach(loja => {
+                                                    const codigoNorm = (loja?.codigo || '').toLowerCase().replace(/\s+/g, '_');
                                                                         const fieldName = `estoque_${codigoNorm}`;
                                                                         estVar += (parseInt(v[fieldName]) || 0);
                                                                     });

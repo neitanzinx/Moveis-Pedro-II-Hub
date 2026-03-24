@@ -126,38 +126,45 @@ function MetricCard({ icon: Icon, value, label, trend, trendValue, color, onClic
 }
 
 export default function RecursosHumanos() {
-  const { user, loading } = useAuth();
+  const { user, loading, can } = useAuth();
   const [activeTab, setActiveTab] = useState("colaboradores");
+  const canViewRH = can('view_rh') || can('manage_rh');
 
   // Fetch all HR data
   const { data: colaboradores = [], refetch: refetchColaboradores } = useQuery({
     queryKey: ['colaboradores'],
     queryFn: () => base44.entities.Colaborador.list(),
+    enabled: !!user && canViewRH,
   });
 
   const { data: ferias = [], refetch: refetchFerias } = useQuery({
     queryKey: ['ferias'],
     queryFn: () => base44.entities.Ferias.list('-data_inicio'),
+    enabled: !!user && canViewRH,
   });
 
   const { data: licencas = [] } = useQuery({
     queryKey: ['licencas'],
     queryFn: () => base44.entities.Licenca.list('-data_inicio'),
+    enabled: !!user && canViewRH,
   });
 
   const { data: vagas = [] } = useQuery({
     queryKey: ['vagas'],
     queryFn: () => base44.entities.Vaga.list(),
+    enabled: !!user && canViewRH,
   });
 
   const { data: folhas = [] } = useQuery({
     queryKey: ['folhas_pagamento'],
     queryFn: () => base44.entities.FolhaPagamento.list(),
+    enabled: !!user && canViewRH,
   });
 
   const { data: avaliacoes = [] } = useQuery({
     queryKey: ['avaliacoes_desempenho'],
     queryFn: () => base44.entities.AvaliacaoDesempenho.list(),
+    enabled: !!user && canViewRH,
   });
 
   // Calculate metrics and alerts
@@ -270,11 +277,7 @@ export default function RecursosHumanos() {
     );
   }
 
-  const isAdmin = user.cargo === 'Administrador';
-  const isRH = user.cargo === 'RH';
-  const isGestor = user.cargo === 'Gerente';
-
-  if (!isAdmin && !isRH && !isGestor) {
+  if (!canViewRH) {
     return (
       <div className="p-4 md:p-8">
         <div className="max-w-7xl mx-auto">

@@ -135,7 +135,8 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
     },
   });
 
-  const baixarPDF = () => {
+  const baixarPDF = (e) => {
+    if (e) e.stopPropagation();
     setBaixando(true);
 
     // Função para limpar nome do produto (remove prefixos internos)
@@ -399,7 +400,10 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => onLiberarEstoque(venda)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onLiberarEstoque(venda);
+                }}
                 className="w-full text-orange-600 hover:text-orange-700 hover:bg-orange-50 border-orange-300"
               >
                 <XCircle className="w-4 h-4 mr-2" />
@@ -486,7 +490,10 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
             <Button
               variant="outline"
               size="sm"
-              onClick={() => onEdit(venda)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(venda);
+              }}
               className="flex-1"
             >
               <Pencil className="w-4 h-4 mr-1" />
@@ -495,7 +502,10 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setShowCancelDialog(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowCancelDialog(true);
+              }}
               className="flex-1 text-orange-600 hover:text-orange-700 hover:border-orange-600"
             >
               <XCircle className="w-4 h-4 mr-1" />
@@ -504,7 +514,10 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
             <Button
               variant="outline"
               size="sm"
-              onClick={() => onDelete(venda.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(venda.id);
+              }}
               className="text-red-600 hover:text-red-700 hover:border-red-600"
             >
               <Trash2 className="w-4 h-4" />

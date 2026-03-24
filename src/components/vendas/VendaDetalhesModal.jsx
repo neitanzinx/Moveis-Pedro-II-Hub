@@ -48,6 +48,53 @@ export function VendaDetalhesModal({ venda, isOpen, onClose }) {
         return <Badge className={`${config.color} text-white`}>{config.label}</Badge>;
     };
 
+    // Extrair tipo_entrega dos itens (apenas itens com entrega)
+    const getTipoEntrega = () => {
+        if (!Array.isArray(venda.itens) || venda.itens.length === 0) return null;
+        const tipos = [...new Set(
+            venda.itens
+                .filter(i => i.tipo_entrega === 'entrega')
+                .map(i => i.tipo_entrega)
+                .filter(Boolean)
+        )];
+        return tipos.length > 0 ? 'Entrega' : null;
+    };
+
+    // Extrair tipo_montagem dos itens com detalhe
+    const getMontageDetail = () => {
+        if (!Array.isArray(venda.itens) || venda.itens.length === 0) return null;
+        
+        const itensComEntrega = venda.itens.filter(i => i.tipo_entrega === 'entrega');
+        if (itensComEntrega.length === 0) return null;
+        
+        const tiposMontagem = [
+            ...new Set(
+                itensComEntrega
+                    .filter(i => i.tipo_montagem)
+                    .map(i => i.tipo_montagem)
+            )
+        ];
+        
+        if (tiposMontagem.length === 0) return null;
+        if (tiposMontagem.length === 1) return tiposMontagem[0];
+        
+        // Se há múltiplos tipos, listar os produtos de cada tipo
+        const detalhes = {};
+        itensComEntrega.forEach(item => {
+            if (item.tipo_montagem) {
+                if (!detalhes[item.tipo_montagem]) {
+                    detalhes[item.tipo_montagem] = [];
+                }
+                detalhes[item.tipo_montagem].push(item.produto_nome);
+            }
+        });
+        
+        return detalhes; // Retornar objeto com tipos como chaves e produtos como valores
+    };
+
+    const tipoEntrega = getTipoEntrega();
+    const montageDetail = getMontageDetail();
+
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-6 overflow-hidden">
@@ -63,17 +110,21 @@ export function VendaDetalhesModal({ venda, isOpen, onClose }) {
                                     <Calendar className="h-4 w-4" />
                                     {format(new Date(venda.data_venda || venda.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
                                 </span>
-                                <span className="flex items-center gap-1">
-                                    <Store className="h-4 w-4" />
-                                    {venda.loja_nome || 'Loja não informada'}
-                                </span>
+                                {venda.loja_nome && (
+                                    <span className="flex items-center gap-1">
+                                        <Store className="h-4 w-4" />
+                                        {venda.loja_nome}
+                                    </span>
+                                )}
                             </div>
                         </div>
                         <div className="flex flex-col items-end gap-2">
                             {getStatusBadge(venda.status)}
-                            <span className="text-xs font-medium text-muted-foreground">
-                                Vendedor: {venda.vendedor_nome || 'Não informado'}
-                            </span>
+                            {venda.vendedor_nome && (
+                                <span className="text-xs font-medium text-muted-foreground">
+                                    Vendedor: {venda.vendedor_nome}
+                                </span>
+                            )}
                         </div>
                     </div>
                 </DialogHeader>
@@ -89,16 +140,22 @@ export function VendaDetalhesModal({ venda, isOpen, onClose }) {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-muted/30 p-4 rounded-xl border">
                                 <div>
                                     <p className="text-sm font-semibold">{venda.cliente_nome}</p>
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                        {venda.cliente_cpf_cnpj ? `CPF/CNPJ: ${venda.cliente_cpf_cnpj}` : 'Documento não informado'}
-                                    </p>
-                                    <p className="text-xs text-muted-foreground">{venda.cliente_telefone || 'Telefone não informado'}</p>
+                                    {venda.cliente_cpf_cnpj && (
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            CPF/CNPJ: {venda.cliente_cpf_cnpj}
+                                        </p>
+                                    )}
+                                    {venda.cliente_telefone && (
+                                        <p className="text-xs text-muted-foreground">{venda.cliente_telefone}</p>
+                                    )}
                                 </div>
                                 <div className="flex flex-col gap-1">
-                                    <div className="flex items-start gap-2 text-xs">
-                                        <MapPin className="h-3 w-3 mt-0.5 shrink-0 text-muted-foreground" />
-                                        <span>{venda.endereco_entrega || 'Endereço não informado'}</span>
-                                    </div>
+                                    {venda.endereco_entrega && (
+                                        <div className="flex items-start gap-2 text-xs">
+                                            <MapPin className="h-3 w-3 mt-0.5 shrink-0 text-muted-foreground" />
+                                            <span>{venda.endereco_entrega}</span>
+                                        </div>
+                                    )}
                                     {venda.ponto_referencia && (
                                         <p className="text-[10px] text-amber-600 font-medium ml-5">
                                             Ref: {venda.ponto_referencia}
@@ -202,26 +259,55 @@ export function VendaDetalhesModal({ venda, isOpen, onClose }) {
                                     <div className="grid grid-cols-2 gap-3">
                                         <div className="bg-muted/10 p-3 rounded-lg border flex flex-col gap-1">
                                             <span className="text-[10px] text-muted-foreground uppercase font-bold">Entrega</span>
-                                            <div className="flex items-center gap-2 text-sm font-medium">
-                                                <Truck className="h-4 w-4 text-blue-500" />
-                                                {venda.tipo_entrega || 'A combinar'}
-                                            </div>
-                                            {venda.data_entrega && (
-                                                <span className="text-xs text-muted-foreground">
-                                                    {format(new Date(venda.data_entrega), "dd/MM/yyyy", { locale: ptBR })}
-                                                </span>
+                                            {tipoEntrega ? (
+                                                <>
+                                                    <div className="flex items-center gap-2 text-sm font-medium">
+                                                        <Truck className="h-4 w-4 text-blue-500" />
+                                                        {tipoEntrega}
+                                                    </div>
+                                                    {venda.data_entrega && (
+                                                        <span className="text-xs text-muted-foreground">
+                                                            {format(new Date(venda.data_entrega), "dd/MM/yyyy", { locale: ptBR })}
+                                                        </span>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <span className="text-xs text-muted-foreground italic">Não preenchido</span>
                                             )}
                                         </div>
                                         <div className="bg-muted/10 p-3 rounded-lg border flex flex-col gap-1">
                                             <span className="text-[10px] text-muted-foreground uppercase font-bold">Montagem</span>
-                                            <div className="flex items-center gap-2 text-sm font-medium">
-                                                <Wrench className="h-4 w-4 text-orange-500" />
-                                                {venda.tipo_montagem || 'Sem montagem'}
-                                            </div>
-                                            {venda.data_montagem && (
-                                                <span className="text-xs text-muted-foreground">
-                                                    {format(new Date(venda.data_montagem), "dd/MM/yyyy", { locale: ptBR })}
-                                                </span>
+                                            {montageDetail ? (
+                                                <>
+                                                    {typeof montageDetail === 'string' ? (
+                                                        <>
+                                                            <div className="flex items-center gap-2 text-sm font-medium">
+                                                                <Wrench className="h-4 w-4 text-orange-500" />
+                                                                {montageDetail}
+                                                            </div>
+                                                            {venda.data_montagem && (
+                                                                <span className="text-xs text-muted-foreground">
+                                                                    {format(new Date(venda.data_montagem), "dd/MM/yyyy", { locale: ptBR })}
+                                                                </span>
+                                                            )}
+                                                        </>
+                                                    ) : (
+                                                        <div className="space-y-2 text-sm">
+                                                            {Object.entries(montageDetail).map(([tipo, produtos]) => (
+                                                                <div key={tipo} className="text-xs">
+                                                                    <p className="font-semibold text-orange-600">{tipo}:</p>
+                                                                    <ul className="ml-2 space-y-1">
+                                                                        {produtos.map((prod, idx) => (
+                                                                            <li key={idx} className="text-muted-foreground">• {prod}</li>
+                                                                        ))}
+                                                                    </ul>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <span className="text-xs text-muted-foreground italic">Não preenchido</span>
                                             )}
                                         </div>
                                     </div>

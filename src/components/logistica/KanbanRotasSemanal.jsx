@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { supabase } from "@/lib/supabase";
-import { DndContext, DragOverlay, pointerWithin, PointerSensor, useSensor, useSensors, useDroppable } from "@dnd-kit/core";
+import { DndContext, DragOverlay, rectIntersection, PointerSensor, useSensor, useSensors, useDroppable } from "@dnd-kit/core";
 import EntregaCard from "./EntregaCard";
 import AssistenciaCard from "./AssistenciaCard";
 import ModalDetalhesEntrega from "./ModalDetalhesEntrega";
@@ -48,12 +48,7 @@ function SlotTurno({ turno, caminhaoId, dataAtual, entregas, vendas, onClickEntr
       const hojeStr = new Date().toISOString().split('T')[0];
       if (dataAtual < hojeStr) return true;
 
-      // 2. Restrição Específica (Data Bloqueada)
-      if (activeEntrega.data_restricao === dataAtual) {
-        return true;
-      }
-
-      // 3. Preferências (Dias e Turnos - WHITELIST)
+      // 2. Preferências (Dias e Turnos - WHITELIST)
       if (activeEntrega.preferencias_entrega) {
         const { dias, turnos } = activeEntrega.preferencias_entrega;
 
@@ -105,10 +100,7 @@ function SlotTurno({ turno, caminhaoId, dataAtual, entregas, vendas, onClickEntr
     const hojeStr = new Date(hoje.getTime() - (hoje.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
     if (dataAtual < hojeStr) return true;
 
-    // 2. Restrição Específica
-    if (activeEntrega.data_restricao === dataAtual) return true;
-
-    // 3. Preferências
+    // 2. Preferências
     if (activeEntrega.preferencias_entrega) {
       const { dias, turnos } = activeEntrega.preferencias_entrega;
 
@@ -212,10 +204,7 @@ function DateTabVisual({ dia, index, isSelected, onClick, activeEntrega, onHover
     const hojeStr = new Date(hoje.getTime() - (hoje.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
     if (dia.id < hojeStr) return true;
 
-    // 2. Restrição Específica
-    if (activeEntrega.data_restricao === dia.id) return true;
-
-    // 3. Preferências (Dia da Semana - WHITELIST)
+    // 2. Preferências (Dia da Semana - WHITELIST)
     if (activeEntrega.preferencias_entrega?.dias?.length > 0) {
       const diasPermitidos = activeEntrega.preferencias_entrega.dias.map(d => Number(d));
       // SE NÃO ESTÁ NA LISTA -> BLOQUEADO
@@ -375,8 +364,6 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
   const [diaSelecionado, setDiaSelecionado] = useState(null); // null = nenhum dia selecionado
 
   // Estados para modais
-  const [modalMotivoAguardando, setModalMotivoAguardando] = useState(null);
-  const [motivoAguardando, setMotivoAguardando] = useState("");
 
   // Estados para disparo de notificações (por caminhão)
   const [modalDisparo, setModalDisparo] = useState(null); // { caminhao, entregas, naoNotificadas, jaNotificadas }
@@ -393,7 +380,6 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const { setNodeRef: setTriagemRef, isOver: isOverTriagem } = useDroppable({ id: 'triagem' });
-  const { setNodeRef: setAguardandoRef, isOver: isOverAguardando } = useDroppable({ id: 'aguardando' });
 
   const atualizarEntregaMutation = useMutation({
     mutationFn: async ({ id, data }) => {
@@ -460,6 +446,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
     const matchProduto = venda?.itens?.some(i => i.produto_nome?.toLowerCase().includes(termo));
     return matchCliente || matchPedido || matchProduto;
   });
+
 
   // Assistências não agendadas (sem data_visita ou caminhao_id) - aparecem na triagem
   const assistenciasNaoAgendadas = (assistencias || []).filter(a =>
@@ -682,7 +669,18 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
     // 2. Soltou em "Aguardando Liberação"
     if (overId === 'aguardando') {
-      setModalMotivoAguardando({ entregaId });
+      // Otimista: Mover para "Aguardando Liberação" na UI
+      queryClient.setQueryData(['entregas'], (oldData) =>
+        oldData.map(e => e.id === entregaId ? { ...e, status: 'Aguardando Liberação', data_agendada: null, turno: null, caminhao_id: null } : e)
+      );
+      try {
+        await atualizarEntregaMutation.mutateAsync({
+          id: entregaId,
+          data: { status: 'Aguardando Liberação', data_agendada: null, turno: null, caminhao_id: null }
+        });
+      } catch (error) {
+        queryClient.invalidateQueries({ queryKey: ['entregas'] });
+      }
       return;
     }
 
@@ -738,15 +736,6 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
         }
       }
 
-      // GUARDRAIL: Verificar se há restrição para esta data
-      if (entregaAtual.data_restricao === dataAlvo) {
-        toast.error(`AGENDAMENTO BLOQUEADO: Cliente não pode receber nesta data.`, {
-          description: `Motivo: ${entregaAtual.motivo_restricao || 'Não informado'}`,
-          duration: 5000
-        });
-        return;
-      }
-
       const caminhao = caminhoes.find(c => c.id === caminhaoId);
       const isDateChange = entregaAtual.data_agendada?.split('T')[0] !== dataAlvo;
 
@@ -760,6 +749,11 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
         status: 'Agendada',
         caminhao_id: caminhaoId
       };
+
+      // Se apenas o caminhão mudou, mantém confirmação já existente.
+      if (entregaAtual.status_confirmacao === 'Confirmada' && !isDateChange && !isShiftChange) {
+        updateData.status_confirmacao = 'Confirmada';
+      }
 
       console.log("🛠️ Drag Check:", {
         status: entregaAtual.status_confirmacao,
@@ -782,7 +776,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
       // Atualização otimista
       queryClient.setQueryData(['entregas'], (oldData) =>
-        oldData.map(e => e.id === entregaId ? { ...e, ...updateData } : e)
+        oldData.map(e => String(e.id) === String(entregaId) ? { ...e, ...updateData } : e)
       );
 
       try {
@@ -797,31 +791,6 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
     }
   };
 
-  const confirmarAguardando = async () => {
-    if (!modalMotivoAguardando || !motivoAguardando.trim()) {
-      toast.error("Informe o motivo");
-      return;
-    }
-
-    try {
-      await atualizarEntregaMutation.mutateAsync({
-        id: modalMotivoAguardando.entregaId,
-        data: {
-          status: 'Aguardando Liberação',
-          observacoes_internas: motivoAguardando,
-          data_agendada: null,
-          caminhao_id: null
-        }
-      });
-      toast.success("Entrega aguardando liberação");
-      queryClient.invalidateQueries({ queryKey: ['entregas'] });
-    } catch (error) {
-      toast.error("Erro ao atualizar");
-    }
-
-    setModalMotivoAguardando(null);
-    setMotivoAguardando("");
-  };
 
   const handleCardClick = (item, action) => {
     if (action === 'reagendar') {
@@ -917,7 +886,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
   return (
     <>
-      <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={rectIntersection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div className="h-full flex flex-col gap-4 p-4 rounded-2xl bg-gray-50">
 
           {/* --- TRIAGEM + AGUARDANDO --- */}
@@ -972,6 +941,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
                     </div>
                   ))}
 
+
                   {assistenciasNaoAgendadas.map(at => (
                     <div key={`at-${at.id}`} className="w-[220px] flex-shrink-0 h-full">
                       <AssistenciaCard assistencia={at} isColumn={false} />
@@ -988,17 +958,6 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
               </ScrollArea>
             </Card>
 
-            {/* Aguardando Liberação */}
-            <Card
-              ref={setAguardandoRef}
-              className={`w-[120px] flex flex-col items-center justify-center border-2 border-dashed transition-all ${isOverAguardando ? 'bg-amber-100 border-amber-500 scale-105 shadow-lg' : 'bg-white/60 border-gray-300 hover:border-amber-400'
-                }`}
-            >
-              <Clock className={`w-6 h-6 mb-1 ${isOverAguardando ? 'text-amber-600 animate-bounce' : 'text-gray-400'}`} />
-              <p className={`text-[9px] font-bold text-center px-2 ${isOverAguardando ? 'text-amber-800' : 'text-gray-500'}`}>
-                {isOverAguardando ? "Solte aqui" : "Aguardando\nLiberação"}
-              </p>
-            </Card>
           </div>
 
           {/* --- ABAS DE DIAS --- */}
@@ -1092,32 +1051,6 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
         />
       )}
 
-      {/* Modal Motivo Aguardando */}
-      <Dialog open={!!modalMotivoAguardando} onOpenChange={() => setModalMotivoAguardando(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
-              <Clock className="w-5 h-5" />
-              Motivo da Espera
-            </DialogTitle>
-            <DialogDescription>
-              Informe por que esta entrega está aguardando liberação.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            <Textarea
-              placeholder="Ex: Aguardando pagamento, peça em falta, cliente viajando..."
-              value={motivoAguardando}
-              onChange={(e) => setMotivoAguardando(e.target.value)}
-              rows={3}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setModalMotivoAguardando(null)}>Cancelar</Button>
-            <Button onClick={confirmarAguardando} className="bg-amber-600 hover:bg-amber-700">Confirmar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Modal Disparo de Confirmações - Por Caminhão */}
       <Dialog open={!!modalDisparo} onOpenChange={() => setModalDisparo(null)}>
@@ -1223,6 +1156,19 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
+            {modalReagendamento?.isMove && modalReagendamento?.novoAgendamento && (
+              <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm">
+                    <p className="font-semibold">Ao confirmar, o cliente sera notificado imediatamente sobre o ajuste de entrega.</p>
+                    <p className="mt-1">
+                      Nova previsao: <strong>{new Date(`${modalReagendamento.novoAgendamento.data_agendada}T12:00:00`).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</strong> no turno <strong>{modalReagendamento.novoAgendamento.turno}</strong>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             <Textarea
               placeholder="Ex: Cliente estará viajando, pediu para entregar próxima semana..."
               value={motivoReagendamento}
@@ -1232,7 +1178,35 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setModalReagendamento(null)}>Cancelar</Button>
-            <Button onClick={confirmarReagendamento} className="bg-red-600 hover:bg-red-700">Confirmar</Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={async () => {
+                  if (!motivoReagendamento.trim()) return toast.error("Informe o motivo");
+                  await atualizarEntregaMutation.mutateAsync({
+                    id: modalReagendamento.entrega.id,
+                    data: {
+                      status: 'Aguardando Liberação',
+                      observacoes: motivoReagendamento,
+                      data_agendada: null,
+                      turno: null,
+                      caminhao_id: null,
+                      ordem_rota: null
+                    }
+                  });
+                  toast.success("Entrega movida para Aguardando Liberação");
+                  setModalReagendamento(null);
+                  setMotivoReagendamento("");
+                  queryClient.invalidateQueries({ queryKey: ['entregas'] });
+                }}
+                className="bg-amber-600 hover:bg-amber-700 gap-1"
+              >
+                <Clock className="w-4 h-4" />
+                Reservar (Aguardando)
+              </Button>
+              <Button onClick={confirmarReagendamento} className="bg-red-600 hover:bg-red-700">
+                {modalReagendamento?.isMove ? 'Confirmar e Notificar Cliente' : 'Confirmar'}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

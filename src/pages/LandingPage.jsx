@@ -34,8 +34,8 @@ export default function LandingPage() {
                     </div>
                     <h1 className="text-3xl font-serif font-bold text-green-950">Estamos em Obras</h1>
                     <p className="text-stone-600 font-body leading-relaxed">
-                        Estamos preparando um novo site incrível para você. <br />
-                        Voltaremos em breve com muitas novidades!
+                        Estamos preparando um novo ambiente incrível para você, cliente. <br />
+                        A maior mudança em duas décadas de tradição. Aguardamos você em breve! 😉
                     </p>
                 </div>
 

@@ -6,7 +6,7 @@ import { Plus, Check, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import InventarioModal from "../components/estoque/InventarioModal";
+import InventarioModal from "../components/legacy_estoque/InventarioModal";
 import { obterCampoEstoqueDaLoja, calcularEstoqueTotal } from "@/constants/productConstants";
 import { useLojas } from "@/hooks/useLojas";
 

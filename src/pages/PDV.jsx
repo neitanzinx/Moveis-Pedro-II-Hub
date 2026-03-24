@@ -10,7 +10,14 @@ import BuscaProdutoAvancada from "../components/vendas/BuscaProdutoAvancada";
 import CarrinhoVenda from "../components/pdv/CarrinhoVenda";
 import SeletorCliente from "../components/pdv/SeletorCliente";
 import PainelPagamento from "../components/pdv/PainelPagamento";
-import { abrirNotaPedidoPDF, enviarWhatsApp, gerarNotaPedidoBase64, prepararNotaPedidoPDF, preencherEImprimirPDF } from "../components/vendas/NotaPedidoPDF";
+import {
+  abrirNotaPedidoPDF,
+  atualizarStatusNotaPedidoPDF,
+  gerarNotaPedidoBase64,
+  prepararNotaPedidoPDF,
+  preencherEImprimirPDF,
+  sinalizarErroNotaPedidoPDF
+} from "../components/vendas/NotaPedidoPDF";
 import { processarFidelidadeCompra } from "@/utils/fidelidadeEngine";
 import { ZAP_API_URL } from "@/utils/zapApiUrl";
 import { whatsappService } from "@/services/whatsappService";
@@ -29,8 +36,8 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import { adicionarDias } from "@/utils/dateUtils";
-import { formatarNome, formatarTelefone, formatarEndereco } from "@/utils/formatters";
-import { resolveStockField } from "@/utils/stockUtils";
+import { formatarNome, formatarEndereco } from "@/utils/formatters";
+import { getProductTotalStock, resolveStockField } from "@/utils/stockUtils";
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -100,6 +107,40 @@ const construirEnderecoEntrega = (cliente) => {
   if (end.ponto_referencia) endereco += ` (Ref: ${formatarEndereco(end.ponto_referencia)})`;
 
   return endereco;
+};
+
+const normalizarTexto = (valor = "") =>
+  valor
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+const formatarPrazoEntrega = (prazo) => {
+  if (!prazo) return "";
+  return `${prazo.quantidade_dias} dias ${prazo.tipo_dias === 'uteis' ? 'úteis' : 'corridos'}`;
+};
+
+const encontrarPrazoConfigurado = (prazos, valorSelecionado) => {
+  if (!valorSelecionado) return null;
+
+  const valorNormalizado = normalizarTexto(valorSelecionado);
+
+  return prazos.find((prazo) => {
+    const label = formatarPrazoEntrega(prazo);
+    return [prazo.identificador, prazo.titulo, label]
+      .filter(Boolean)
+      .some((valor) => normalizarTexto(valor) === valorNormalizado);
+  }) || null;
+};
+
+const obterPrazoEncomenda = (prazos) => {
+  if (!Array.isArray(prazos) || prazos.length === 0) return null;
+
+  return prazos.find((prazo) => normalizarTexto(prazo.identificador) === 'encomenda')
+    || prazos.find((prazo) => normalizarTexto(prazo.titulo).includes('encomenda'))
+    || [...prazos].sort((a, b) => (b.quantidade_dias || 0) - (a.quantidade_dias || 0))[0]
+    || null;
 };
 
 // --- FUNÇÃO PARA CRIAR LANÇAMENTOS FINANCEIROS AUTOMÁTICOS ---
@@ -200,6 +241,54 @@ const criarLancamentosVenda = async (vendaData, taxas, vendaId) => {
     console.error('❌ Erro ao criar lançamentos financeiros:', error);
   }
 };
+
+const medirDuracaoEtapa = async (nomeEtapa, operacao) => {
+  const inicio = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+  try {
+    return await operacao();
+  } finally {
+    const fim = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    console.log(`[PDV] ${nomeEtapa} concluido em ${Math.round(fim - inicio)}ms`);
+  }
+};
+
+const executarEmSegundoPlano = (nomeEtapa, operacao) => {
+  Promise.resolve()
+    .then(() => medirDuracaoEtapa(nomeEtapa, operacao))
+    .catch((erro) => {
+      console.error(`[PDV] Erro em ${nomeEtapa}:`, erro);
+    });
+};
+
+const resolverFornecedorDoItem = (item, produtos = [], fornecedores = []) => {
+  if (!item) return { fornecedor_id: null, fornecedor_nome: '' };
+
+  const produtoCadastro = produtos.find((produto) => produto.id === item.produto_id);
+  const fornecedorId = item.fornecedor_id || produtoCadastro?.fornecedor_id || null;
+
+  let fornecedorNome = item.fornecedor_nome || produtoCadastro?.fornecedor_nome || '';
+
+  if (!fornecedorNome && fornecedorId) {
+    fornecedorNome = fornecedores.find((fornecedor) => fornecedor.id === fornecedorId)?.nome_empresa || '';
+  }
+
+  return {
+    fornecedor_id: fornecedorId,
+    fornecedor_nome: fornecedorNome
+  };
+};
+
+const enriquecerItensEncomendaComFornecedor = (itens = [], produtos = [], fornecedores = []) =>
+  itens.map((item) => {
+    if (!item?.is_encomenda) return item;
+
+    const fornecedorResolvido = resolverFornecedorDoItem(item, produtos, fornecedores);
+    return {
+      ...item,
+      ...fornecedorResolvido
+    };
+  });
 
 // Componente de checkbox personalizado para Restrições
 const RestricaoCheckbox = ({ checked, onCheckedChange, label }) => (
@@ -399,7 +488,7 @@ export default function PDV() {
   const [desconto, setDesconto] = useState(initialState?.desconto || 0);
   const [observacoes, setObservacoes] = useState(initialState?.observacoes || "");
   const [pagamentoEntrega, setPagamentoEntrega] = useState(initialState?.pagamentoEntrega || { ativo: false, valor: 0, forma: "" });
-  const [preferenciasEntrega, setPreferenciasEntrega] = useState(initialState?.preferenciasEntrega || { dias: [], turnos: [], obs: "" });
+  const [preferenciasEntrega, setPreferenciasEntrega] = useState(initialState?.preferenciasEntrega || { dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
   const [aguardandoLiberacao, setAguardandoLiberacao] = useState(initialState?.aguardandoLiberacao || false);
   const [modalPreferenciasOpen, setModalPreferenciasOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -411,6 +500,7 @@ export default function PDV() {
 
   // Flag para bloquear o auto-save enquanto dados do orçamento estão sendo carregados
   const isLoadingOrcamentoRef = useRef(false);
+  const prevTodosItensSemEstoqueRef = useRef(false);
 
   // === DETECÇÃO DE ORÇAMENTO NO SESSIONSTORAGE ===
   // Este useEffect resolve o problema de SPA: quando o PDV já está montado
@@ -536,7 +626,10 @@ export default function PDV() {
 
   useEffect(() => {
     if (user && !initialState) {
-      setConfigVenda(prev => ({ ...prev, loja: user.loja || "Centro" }));
+      // Tenta setar a loja do usuário como padrão. 
+      // O texto "Centro" é apenas o último fallback caso o usuário não tenha loja definida.
+      const defaultLoja = user.loja || "Centro";
+      setConfigVenda(prev => ({ ...prev, loja: defaultLoja }));
     }
   }, [user]);
 
@@ -596,6 +689,11 @@ export default function PDV() {
     queryFn: () => base44.entities.Produto.list()
   });
 
+  const { data: lojas = [] } = useQuery({
+    queryKey: ['lojas'],
+    queryFn: () => base44.entities.Loja.list()
+  });
+
   const { data: clientes = [] } = useQuery({
     queryKey: ['clientes'],
     queryFn: () => base44.entities.Cliente.list()
@@ -619,6 +717,24 @@ export default function PDV() {
     queryFn: () => base44.entities.Fornecedor.list(),
     enabled: isOnline
   });
+
+  const montarAtualizacaoEstoqueProduto = (produto, quantidadeLocalAtualizada, lojaNome) => {
+    const campoLoja = resolveStockField(lojaNome);
+
+    if (!campoLoja) {
+      throw new Error('Nao foi possivel determinar a unidade de estoque do PDV.');
+    }
+
+    const produtoAtualizado = {
+      ...produto,
+      [campoLoja]: Math.max(0, quantidadeLocalAtualizada || 0)
+    };
+
+    return {
+      [campoLoja]: produtoAtualizado[campoLoja],
+      quantidade_estoque: getProductTotalStock(produtoAtualizado)
+    };
+  };
 
   const criarVendaMutation = useMutation({
     mutationFn: (data) => base44.entities.Venda.create(data)
@@ -644,8 +760,51 @@ export default function PDV() {
 
     for (const vendaOffline of vendasPendentes) {
       try {
-        const { offlineId, timestamp, ...dadosVenda } = vendaOffline;
-        await criarVendaMutation.mutateAsync(dadosVenda);
+        const { offlineId, ...dadosVenda } = vendaOffline;
+        delete dadosVenda.timestamp; // campo de metadado offline, não é campo da entidade Venda
+        const vendaCriada = await criarVendaMutation.mutateAsync(dadosVenda);
+
+        const itensVenda = dadosVenda.itens || [];
+        for (const item of itensVenda) {
+          if (item.is_encomenda || !item.produto_id) continue;
+
+          const produtoAtual = await base44.entities.Produto.getById(item.produto_id);
+          if (!produtoAtual) continue;
+
+          const campoLoja = resolveStockField(dadosVenda.loja);
+          const estoqueLocalAposVenda = Math.max(0, (produtoAtual[campoLoja] || 0) - (item.quantidade || 0));
+          const updates = montarAtualizacaoEstoqueProduto(produtoAtual, estoqueLocalAposVenda, dadosVenda.loja);
+
+          await base44.entities.Produto.update(item.produto_id, updates);
+        }
+
+        const itensEncomendaComFornecedor = enriquecerItensEncomendaComFornecedor(itensVenda, produtos, fornecedores);
+        const itensEncomenda = itensEncomendaComFornecedor.filter(i => i.is_encomenda);
+        const itensEncomendaInvalidos = itensEncomenda.filter(i => !i.fornecedor_id);
+        const itensEncomendaValidos = itensEncomenda.filter(i => i.fornecedor_id);
+
+        if (itensEncomendaInvalidos.length > 0) {
+          console.warn('[PDV] Encomendas offline sem fornecedor foram ignoradas na sincronizacao', itensEncomendaInvalidos);
+          toast.warning(`⚠️ ${itensEncomendaInvalidos.length} encomenda(s) sem fornecedor nao foram enviadas ao Compras. Conclua o cadastro dos produtos com fornecedor.`);
+        }
+
+        for (const item of itensEncomendaValidos) {
+          await base44.entities.SolicitacaoEncomenda.create({
+            venda_id: vendaCriada.id,
+            produto_id: item.produto_id,
+            produto_nome: item.produto_nome,
+            fornecedor_id: item.fornecedor_id || null,
+            fornecedor_nome: item.fornecedor_nome || '',
+            quantidade: item.quantidade,
+            cliente_nome: dadosVenda.cliente_nome,
+            numero_pedido: dadosVenda.numero_pedido,
+            loja: dadosVenda.loja,
+            loja_id: dadosVenda.loja_id || null,
+            vendedor_id: dadosVenda.responsavel_id || user?.id || null,
+            vendedor_nome: dadosVenda.responsavel_nome || user?.full_name || user?.email || null,
+            status: 'pendente'
+          });
+        }
 
         // Tenta enviar mensagem do robô também na sincronização
         if (dadosVenda.cliente_telefone) {
@@ -685,6 +844,12 @@ export default function PDV() {
 
     if (!produto) return;
 
+    const fornecedorResolvido = resolverFornecedorDoItem({
+      produto_id: produto.id,
+      fornecedor_id: produto.fornecedor_id,
+      fornecedor_nome: produto.fornecedor_nome
+    }, produtos, fornecedores);
+
     setItens(prev => {
       // For provisional products, we might want unique entries based on solicitacao_id to avoid merging different requests?
       // Or just merge if same ID? 
@@ -701,6 +866,8 @@ export default function PDV() {
         const newItens = [...prev];
         newItens[exists].quantidade += 1;
         newItens[exists].subtotal = newItens[exists].quantidade * newItens[exists].preco_unitario;
+        newItens[exists].fornecedor_id = newItens[exists].fornecedor_id || fornecedorResolvido.fornecedor_id;
+        newItens[exists].fornecedor_nome = newItens[exists].fornecedor_nome || fornecedorResolvido.fornecedor_nome;
         return newItens;
       }
 
@@ -725,7 +892,8 @@ export default function PDV() {
         detalhes_solicitacao: produto.detalhes_solicitacao,
         // Encomenda flag
         is_encomenda: produto.is_encomenda || false,
-        fornecedor_nome: produto.fornecedor_nome
+        fornecedor_id: fornecedorResolvido.fornecedor_id,
+        fornecedor_nome: fornecedorResolvido.fornecedor_nome
       }];
     });
   };
@@ -829,6 +997,38 @@ export default function PDV() {
     }
   };
 
+  const handleAtualizarEstoque = async (index, novaQuantidade, estoqueAposVenda) => {
+    try {
+      const item = itens[index];
+      const produtoId = item.produto_id || item.id;
+      const produtoAtual = produtos.find(produto => produto.id === produtoId);
+
+      if (!produtoAtual) {
+        throw new Error('Produto nao encontrado para atualizar o estoque.');
+      }
+
+      const updates = montarAtualizacaoEstoqueProduto(produtoAtual, estoqueAposVenda, configVenda.loja);
+
+      await base44.entities.Produto.update(produtoId, updates);
+
+      // Atualizar o item do carrinho com informações de quem e quando atualizou
+      setItens(prev => {
+        const newItens = [...prev];
+        newItens[index].estoque_atualizado_por = user?.full_name || user?.nome || 'Desconhecido';
+        newItens[index].estoque_atualizado_em = new Date().toISOString();
+        return newItens;
+      });
+
+      // Atualizar a lista de produtos em cache
+      queryClient.invalidateQueries(['produtos']);
+
+      return true;
+    } catch (error) {
+      console.error('Erro ao atualizar estoque:', error);
+      throw error;
+    }
+  };
+
   const handleToggleEntrega = (index, tipo) => {
     setItens(prev => {
       const newItens = [...prev];
@@ -905,45 +1105,32 @@ export default function PDV() {
     }
   };
 
-  const handleProporPreco = async (index, valorSugerido) => {
-    try {
-      const item = itens[index];
-      const produtoId = item.produto_id || item.id;
-
-      const payload = {
-        vendedor_id: user.id,
-        vendedor_nome: user.full_name,
-        loja: user.loja,
-        produto_id: produtoId,
-        produto_nome: item.produto_nome,
-        preco_sugerido: valorSugerido,
-        status: 'pendente'
-      };
-
-      const solicitacao = await base44.entities.SolicitacaoPreco.create(payload);
-
-      setItens(prev => {
-        const newItens = [...prev];
-        newItens[index].solicitacao_preco_id = solicitacao.id;
-        newItens[index].status_solicitacao_preco = 'pendente';
-        return newItens;
-      });
-
-      toast.success('Solicitação de preço enviada!', {
-        description: 'Aguardando aprovação do gerente.'
-      });
-
-    } catch (err) {
-      console.error('Erro ao solicitar preço:', err);
-      toast.error('Erro ao enviar solicitação de preço.');
-      throw err;
-    }
-  };
-
   const subtotal = itens.reduce((acc, item) => acc + item.subtotal, 0);
   const total = Math.max(0, subtotal - desconto);
   const totalPago = pagamentos.reduce((acc, p) => acc + p.valor, 0);
   const restante = Math.max(0, total - totalPago);
+
+  // Verdadeiro quando TODOS os itens são retirada na loja
+  // Usado para esconder campos irrelevantes (prazo, preferências, aguardar liberação)
+  const todosRetiram = itens.length > 0 && itens.every(i => i.tipo_entrega === 'retira');
+  const temEncomenda = itens.some(i => i.is_encomenda);
+  const todosItensSemEstoque = itens.length > 0 && itens.every(i => i.is_encomenda);
+  const conclusaoAutomatica = todosRetiram && !temEncomenda;
+  const prazoEncomendaConfigurado = obterPrazoEncomenda(prazosConfig);
+  const prazoEncomendaAutomatico = formatarPrazoEntrega(prazoEncomendaConfigurado);
+
+  useEffect(() => {
+    const entrouEmCarrinhoSemEstoque = todosItensSemEstoque && !prevTodosItensSemEstoqueRef.current;
+    prevTodosItensSemEstoqueRef.current = todosItensSemEstoque;
+
+    if (todosRetiram || !prazoEncomendaAutomatico || !todosItensSemEstoque) return;
+    if (!entrouEmCarrinhoSemEstoque && configVenda.prazo) return;
+
+    setConfigVenda((prev) => {
+      if (prev.prazo === prazoEncomendaAutomatico) return prev;
+      return { ...prev, prazo: prazoEncomendaAutomatico };
+    });
+  }, [todosItensSemEstoque, todosRetiram, prazoEncomendaAutomatico, configVenda.prazo]);
 
   // Helper: obter o tipo_montagem final para uso downstream
   const getTipoMontagemFinal = (item) => {
@@ -976,7 +1163,7 @@ export default function PDV() {
     }
     if (etapa === 2) {
       if (!clienteSelecionado) return 'Selecione um cliente';
-      if (!configVenda.prazo) return 'Defina o prazo de entrega';
+      if (!todosRetiram && !configVenda.prazo) return 'Defina o prazo de entrega';
     }
     return null;
   };
@@ -1011,7 +1198,7 @@ export default function PDV() {
     }
     if (etapa === 2) {
       if (!clienteSelecionado) return toast.warning("Selecione um cliente");
-      if (!configVenda.prazo) return toast.warning("Selecione o prazo de entrega");
+      if (!todosRetiram && !configVenda.prazo) return toast.warning("Selecione o prazo de entrega");
     }
     if (etapa < 3) setEtapa(etapa + 1);
   };
@@ -1047,7 +1234,7 @@ export default function PDV() {
       setLoading(false);
       return toast.error("A venda contém itens com preço inválido (R$ 0 ou indefinido). Solicite a revisão do preço a um supervisor .");
     }
-    if (!configVenda.prazo) {
+    if (!todosRetiram && !configVenda.prazo) {
       isProcessingRef.current = false;
       setLoading(false);
       return toast.warning("Selecione o prazo de entrega");
@@ -1079,8 +1266,12 @@ export default function PDV() {
 
 
     // 🖨️ ABRIR JANELA DE IMPRESSÃO AGORA (antes de qualquer operação async)
-    // Isso evita que o navegador bloqueie o popup
+    // O navegador só permite window.open() direto no evento de clique.
+    // Se movermos para depois das operações do banco, o popup é bloqueado.
     const printWindow = prepararNotaPedidoPDF();
+    const atualizarProgressoPedido = (step, progress, label = 'Finalizando pedido...') => {
+      atualizarStatusNotaPedidoPDF(printWindow, { label, step, progress });
+    };
 
     // Gerar número do pedido com fallback para evitar NaN
     // Gerar número do pedido sequencial (pula OFF e O-)
@@ -1113,16 +1304,42 @@ export default function PDV() {
         : pagamentoEntrega.forma || "")
       : "";
 
+    // --- MAPEAMENTO DE LOJA_ID ---
+    // Buscamos o ID da loja com base no nome selecionado em configVenda.loja
+    const lojaObj = (lojas || []).find(l => l.nome === configVenda.loja);
+    const lojaId = lojaObj?.id || user?.loja_id || null;
+
+    const itensComFornecedorResolvido = enriquecerItensEncomendaComFornecedor(itens, produtos, fornecedores);
+    const itensEncomenda = itensComFornecedorResolvido.filter(i => i.is_encomenda);
+    const itensEncomendaInvalidos = itensEncomenda.filter(i => !i.fornecedor_id);
+
+    if (itensEncomendaInvalidos.length > 0) {
+      const nomes = itensEncomendaInvalidos
+        .map(i => i.produto_nome)
+        .filter(Boolean)
+        .join(', ');
+
+      if (printWindow && !printWindow.closed) {
+        printWindow.close();
+      }
+
+      toast.error(`Fornecedor obrigatorio para encomenda. Conclua o cadastro do produto e informe o fornecedor para: ${nomes}`);
+      setLoading(false);
+      isProcessingRef.current = false;
+      return;
+    }
+
     const vendaData = {
       numero_pedido: novoNumero,
       data_venda: configVenda.data,
       loja: configVenda.loja,
+      loja_id: lojaId, // Adicionado campo vital para relatórios
       responsavel_id: user.id,
       responsavel_nome: user.full_name,
       cliente_id: clienteSelecionado.id,
       cliente_nome: clienteSelecionado.nome_completo,
       cliente_telefone: clienteSelecionado.telefone,
-      itens,
+      itens: itensComFornecedorResolvido,
       valor_total: total,
       desconto,
       pagamentos,
@@ -1135,7 +1352,9 @@ export default function PDV() {
       status: restante <= 0 ? "Pago" : "Pagamento Pendente",
       observacoes: observacoes,
       cupom_codigo: cupomAplicado?.codigo || null,
-      cupom_desconto: cupomAplicado ? desconto : 0
+      cupom_desconto: cupomAplicado ? desconto : 0,
+      triagem_realizada: todosRetiram,
+      data_triagem: todosRetiram ? new Date().toISOString() : null
     };
 
     if
@@ -1150,53 +1369,33 @@ export default function PDV() {
         toast.error("Erro crítico ao salvar venda offline. Tire foto da tela.");
       }
       setLoading(false);
+      isProcessingRef.current = false;
       return;
     }
 
     try {
-      const vendaCriada = await criarVendaMutation.mutateAsync(vendaData);
+      atualizarProgressoPedido('Salvando venda...', 18);
+      const vendaCriada = await medirDuracaoEtapa('criar venda', () =>
+        criarVendaMutation.mutateAsync(vendaData)
+      );
 
-      const campoLoja = resolveStockField(configVenda.loja);
+      atualizarProgressoPedido('Atualizando estoque...', 36);
+      const itensSemEncomenda = itens.filter(item => !item.is_encomenda);
+      const atualizarEstoquePromise = medirDuracaoEtapa('atualizar estoque', () =>
+        Promise.all(itensSemEncomenda.map(async (item) => {
+          const prod = produtos.find(p => p.id === item.produto_id);
+          if (!prod) return null;
 
-      for (const item of itens) {
-        const prod = produtos.find(p => p.id === item.produto_id);
-        if (prod && !item.is_encomenda) {
-          const updates = {
-            quantidade_estoque: Math.max(0, (prod.quantidade_estoque || 0) - item.quantidade)
-          };
+          const campoLoja = resolveStockField(configVenda.loja);
+          const estoqueLocalAposVenda = Math.max(0, (prod[campoLoja] || 0) - item.quantidade);
+          const updates = montarAtualizacaoEstoqueProduto(prod, estoqueLocalAposVenda, configVenda.loja);
 
-          if (campoLoja) {
-            updates[campoLoja] = Math.max(0, (prod[campoLoja] || 0) - item.quantidade);
-          }
-
-          await base44.entities.Produto.update(prod.id, updates);
-        }
-      }
-
-      // Criar solicitações de encomenda para itens por encomenda
-      const itensEncomenda = itens.filter(i => i.is_encomenda);
-      for (const item of itensEncomenda) {
-        try {
-          await base44.entities.SolicitacaoEncomenda.create({
-            venda_id: vendaCriada.id,
-            produto_id: item.produto_id,
-            produto_nome: item.produto_nome,
-            fornecedor_nome: item.fornecedor_nome || '',
-            quantidade: item.quantidade,
-            cliente_nome: clienteSelecionado.nome_completo,
-            numero_pedido: novoNumero,
-            status: 'pendente'
-          });
-        } catch (encErr) {
-          console.error('Erro ao criar solicitação de encomenda:', encErr);
-        }
-      }
-      if (itensEncomenda.length > 0) {
-        toast.info(`📦 ${itensEncomenda.length} item(ns) enviado(s) como encomenda ao Setor de Compras`);
-      }
+          return base44.entities.Produto.update(prod.id, updates);
+        }))
+      );
 
       // Calcular prazo de entrega com base na configuração
-      const prazoSelecionado = prazosConfig.find(p => p.titulo === configVenda.prazo);
+      const prazoSelecionado = encontrarPrazoConfigurado(prazosConfig, configVenda.prazo);
       const dias = prazoSelecionado ? prazoSelecionado.quantidade_dias : 15;
       const tipoDias = prazoSelecionado ? prazoSelecionado.tipo_dias : 'uteis';
       const limite = adicionarDias(configVenda.data, dias, tipoDias);
@@ -1212,75 +1411,147 @@ export default function PDV() {
           montado: false
         }));
 
-      const entregaCriada = await base44.entities.Entrega.create({
-        venda_id: vendaCriada.id,
-        numero_pedido: novoNumero,
-        cliente_nome: clienteSelecionado.nome_completo,
-        cliente_telefone: clienteSelecionado.telefone,
-        endereco_entrega: enderecoCompleto,
-        data_limite: todosRetiram ? new Date().toISOString().split('T')[0] : limite.toISOString().split('T')[0],
-        status: todosRetiram ? 'Retirado' : (aguardandoLiberacao ? "Aguardando Liberação" : "Pendente"),
-        tipo_entrega: todosRetiram ? 'Retirada' : undefined,
-        itens_montagem_interna: itensParaMontagemInterna,
-        item_mostruario: itens.some(i => i.origem === 'mostruario'),
-        pagamento_na_entrega: pagamentoEntrega.ativo,
-        valor_a_receber: pagamentoEntrega.ativo ? pagamentoEntrega.valor : 0,
-        forma_pagamento_entrega: pagamentoEntrega.ativo ? formaPagamentoEntregaStr : null,
-        preferencias_entrega: preferenciasEntrega
-      });
+      atualizarProgressoPedido('Criando entrega...', 56);
+      const entregaCriada = await medirDuracaoEtapa('criar entrega', () =>
+        base44.entities.Entrega.create({
+          venda_id: vendaCriada.id,
+          numero_pedido: novoNumero,
+          cliente_nome: clienteSelecionado.nome_completo,
+          cliente_telefone: clienteSelecionado.telefone,
+          endereco_entrega: enderecoCompleto,
+          data_limite: todosRetiram ? new Date().toISOString().split('T')[0] : limite.toISOString().split('T')[0],
+          prazo_entrega: configVenda.prazo,
+          status: todosRetiram
+            ? (conclusaoAutomatica && restante <= 0 ? 'Entregue' : 'Retirado')
+            : (aguardandoLiberacao ? 'Aguardando Liberação' : 'Pendente'),
+          tipo_montagem: itens.length === 1 ? getTipoMontagemFinal(itens[0]) : 'Múltiplos Itens',
+          montagem_status: (itens.some(i => {
+            const tf = getTipoMontagemFinal(i);
+            return tf === 'montado' || tf === 'montagem_cliente';
+          })) ? 'Pendente' : null,
+          itens_montagem_interna: itensParaMontagemInterna,
+          item_mostruario: itens.some(i => i.origem === 'mostruario'),
+          pagamento_na_entrega: pagamentoEntrega.ativo,
+          valor_a_receber: pagamentoEntrega.ativo ? pagamentoEntrega.valor : 0,
+          forma_pagamento_entrega: pagamentoEntrega.ativo ? formaPagamentoEntregaStr : null,
+          preferencias_entrega: preferenciasEntrega,
+          loja_id: lojaId,
+          vendedor_id: user.id
+        })
+      );
 
-      // Criar itens de montagem conforme o tipo selecionado
-      for (const item of itens) {
-        const tipoFinal = getTipoMontagemFinal(item);
-        if (tipoFinal === 'montagem_cliente') {
-          await base44.entities.MontagemItem.create({
-            entrega_id: entregaCriada.id,
-            venda_id: vendaCriada.id,
-            produto_id: item.produto_id,
-            produto_nome: item.produto_nome,
-            quantidade: item.quantidade,
-            tipo_montagem: 'terceirizada',
-            status: 'pendente',
-            cliente_nome: clienteSelecionado.nome_completo,
-            cliente_telefone: clienteSelecionado.telefone,
-            endereco: enderecoCompleto,
-            numero_pedido: novoNumero
-          });
-        } else if (tipoFinal === 'montado') {
-          await base44.entities.MontagemItem.create({
-            entrega_id: entregaCriada.id,
-            venda_id: vendaCriada.id,
-            produto_id: item.produto_id,
-            produto_nome: item.produto_nome,
-            quantidade: item.quantidade,
-            tipo_montagem: 'interna',
-            status: 'pendente',
-            cliente_nome: clienteSelecionado.nome_completo,
-            cliente_telefone: clienteSelecionado.telefone,
-            endereco: enderecoCompleto,
-            numero_pedido: novoNumero
-          });
-        }
-        // Se for 'retira' ou 'sem_montagem', não cria montagem
-      }
+      const montagensParaCriar = itens
+        .map((item) => {
+          const tipoFinal = getTipoMontagemFinal(item);
 
+          if (tipoFinal === 'montagem_cliente') {
+            return {
+              entrega_id: entregaCriada.id,
+              venda_id: vendaCriada.id,
+              produto_id: item.produto_id,
+              produto_nome: item.produto_nome,
+              quantidade: item.quantidade,
+              tipo_montagem: 'terceirizada',
+              status: 'pendente',
+              cliente_nome: clienteSelecionado.nome_completo,
+              cliente_telefone: clienteSelecionado.telefone,
+              endereco: enderecoCompleto,
+              numero_pedido: novoNumero
+            };
+          }
 
-      // Incrementar uso do cupom
-      if (cupomAplicado) {
-        await base44.entities.Cupom.update(cupomAplicado.id, {
-          quantidade_usada: (cupomAplicado.quantidade_usada || 0) + 1
+          if (tipoFinal === 'montado') {
+            return {
+              entrega_id: entregaCriada.id,
+              venda_id: vendaCriada.id,
+              produto_id: item.produto_id,
+              produto_nome: item.produto_nome,
+              quantidade: item.quantidade,
+              tipo_montagem: 'interna',
+              status: 'pendente',
+              cliente_nome: clienteSelecionado.nome_completo,
+              cliente_telefone: clienteSelecionado.telefone,
+              endereco: enderecoCompleto,
+              numero_pedido: novoNumero
+            };
+          }
+
+          return null;
+        })
+        .filter(Boolean);
+
+      atualizarProgressoPedido('Registrando itens de montagem...', 72);
+      const criarMontagensPromise = montagensParaCriar.length > 0
+        ? medirDuracaoEtapa('criar montagens', () =>
+          Promise.all(montagensParaCriar.map((payload) => base44.entities.MontagemItem.create(payload)))
+        )
+        : Promise.resolve([]);
+
+      await Promise.all([atualizarEstoquePromise, criarMontagensPromise]);
+
+      // Invalidar queries após TODAS as operações serem concluídas
+      atualizarProgressoPedido('Atualizando paineis...', 88);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['vendas'] }),
+        queryClient.invalidateQueries({ queryKey: ['produtos'] }),
+        queryClient.invalidateQueries({ queryKey: ['entregas'] }),
+        queryClient.invalidateQueries({ queryKey: ['montagens'] }),
+        queryClient.invalidateQueries({ queryKey: ['clientes'] }),
+        queryClient.invalidateQueries({ queryKey: ['lojas'] })
+      ]);
+
+      // 4. IMPRESSÃO
+      atualizarProgressoPedido('Preparando impressao...', 96);
+      preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, user.full_name);
+
+      toast.success("Venda finalizada com sucesso!");
+
+      if (itensEncomenda.length > 0) {
+        executarEmSegundoPlano('criar solicitações de encomenda', async () => {
+          const resultados = await Promise.allSettled(itensEncomenda.map((item) =>
+            base44.entities.SolicitacaoEncomenda.create({
+              venda_id: vendaCriada.id,
+              produto_id: item.produto_id,
+              produto_nome: item.produto_nome,
+              fornecedor_id: item.fornecedor_id || null,
+              fornecedor_nome: item.fornecedor_nome || '',
+              quantidade: item.quantidade,
+              cliente_nome: clienteSelecionado.nome_completo,
+              numero_pedido: novoNumero,
+              loja: configVenda.loja,
+              loja_id: lojaId,
+              vendedor_id: user?.id || null,
+              vendedor_nome: user?.full_name || user?.email || null,
+              status: 'pendente'
+            })
+          ));
+
+          const falhas = resultados.filter((resultado) => resultado.status === 'rejected');
+          if (falhas.length > 0) {
+            console.error('Erro ao criar solicitações de encomenda:', falhas);
+            toast.warning(`Venda concluida, mas ${falhas.length} encomenda(s) precisarao de revisao no Compras.`);
+          } else {
+            toast.info(`📦 ${itensEncomenda.length} item(ns) enviado(s) como encomenda ao Setor de Compras`);
+          }
+
+          await queryClient.invalidateQueries({ queryKey: ['solicitacoes_encomenda'] });
         });
       }
 
-      // Incrementar uso do token gerencial e registrar log
+      if (cupomAplicado) {
+        executarEmSegundoPlano('atualizar uso de cupom', async () => {
+          await base44.entities.Cupom.update(cupomAplicado.id, {
+            quantidade_usada: (cupomAplicado.quantidade_usada || 0) + 1
+          });
+        });
+      }
+
       if (tokenGerencial) {
-        try {
-          // Atualizar contador de usos
+        executarEmSegundoPlano('registrar uso de token gerencial', async () => {
           await base44.entities.TokenGerencial.update(tokenGerencial.id, {
             usos_realizados: (tokenGerencial.usos_realizados || 0) + 1
           });
 
-          // Registrar log de uso
           await base44.entities.LogUsoToken.create({
             token_id: tokenGerencial.id,
             venda_id: vendaCriada.id,
@@ -1294,44 +1565,27 @@ export default function PDV() {
               numero_pedido: novoNumero
             }
           });
-        } catch (logError) {
-          console.error('Erro ao registrar uso do token:', logError);
-          // Não impede a venda de continuar
-        }
+        });
       }
 
-      // --- LANÇAMENTOS FINANCEIROS AUTOMÁTICOS ---
-      await criarLancamentosVenda(vendaData, taxasFinanceiras, vendaCriada.id);
+      executarEmSegundoPlano('criar lançamentos financeiros', async () => {
+        await criarLancamentosVenda(vendaData, taxasFinanceiras, vendaCriada.id);
+        await queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
+      });
 
-      // --- MOTOR DE FIDELIDADE (Coroas) ---
-      try {
+      executarEmSegundoPlano('processar fidelidade', async () => {
         const resultadoFidelidade = await processarFidelidadeCompra(
           clienteSelecionado,
           total,
           vendaData.numero_pedido
         );
-        if (resultadoFidelidade.coroasGanhas > 0) {
+
+        if (resultadoFidelidade?.coroasGanhas > 0) {
           console.log(`👑 Cliente ganhou ${resultadoFidelidade.coroasGanhas} Coroas!`);
         }
-      } catch (fidErr) {
-        console.error('Erro no motor de fidelidade:', fidErr);
-        // Não impede a venda de continuar
-      }
 
-      // Invalidar queries após TODAS as operações serem concluídas
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['vendas'] }),
-        queryClient.invalidateQueries({ queryKey: ['produtos'] }),
-        queryClient.invalidateQueries({ queryKey: ['entregas'] }),
-        queryClient.invalidateQueries({ queryKey: ['clientes'] })
-      ]);
-
-      // 4. IMPRESSÃO IMEDIATA (UX Priorizada)
-      // Preenche e imprime a janela que já estava aberta. Não bloqueia a execução do React loop, 
-      // mas o window.print() do navegador pode pausar JS em algumas threads.
-      preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, user.full_name);
-
-      toast.success("Venda finalizada com sucesso!");
+        await queryClient.invalidateQueries({ queryKey: ['clientes'] });
+      });
 
       // Captura variáveis para o closure do timeout antes do resetForm
       const zapTelefone = clienteSelecionado.telefone;
@@ -1392,10 +1646,7 @@ export default function PDV() {
       }
 
     } catch (err) {
-      // ❌ Se der erro, fecha a janela que abriu
-      if (typeof printWindow !== 'undefined' && printWindow) {
-        printWindow.close();
-      }
+      sinalizarErroNotaPedidoPDF(printWindow, 'A venda nao foi concluida. Verifique a conexao e tente novamente.');
       console.error(err);
       toast.error("Erro ao finalizar venda online. Verifique sua conexão.");
     } finally {
@@ -1448,7 +1699,7 @@ export default function PDV() {
     setObservacoes("");
     setPagamentoEntrega({ ativo: false, valor: 0, forma: "" });
     setConfigVenda(prev => ({ ...prev, data: new Date().toISOString().split('T')[0], prazo: "" }));
-    setPreferenciasEntrega({ dias: [], turnos: [], obs: "" });
+    setPreferenciasEntrega({ dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
     setAguardandoLiberacao(false);
     setCupomAplicado(null);
     setEtapa(1);
@@ -1567,9 +1818,9 @@ export default function PDV() {
                   onToggleEntrega={handleToggleEntrega}
                   onToggleMontagem={handleToggleMontagem}
                   onSetMontagemPadrao={handleSetMontagemPadrao}
-                  onProporPreco={handleProporPreco}
                   onVincularImagem={handleVincularImagem}
                   onEditProduto={handleEditProdutoPDV}
+                  onAtualizarEstoque={handleAtualizarEstoque}
                 />
               </div>
             </div>
@@ -1610,67 +1861,82 @@ export default function PDV() {
                       onChange={e => setConfigVenda({ ...configVenda, data: e.target.value })}
                     />
                   </div>
-                  <div>
-                    <Label className="text-xs mb-1.5 block font-medium">
-                      Prazo de Entrega <span className="text-red-500">*</span>
-                    </Label>
-                    <Select
-                      value={configVenda.prazo}
-                      onValueChange={v => setConfigVenda({ ...configVenda, prazo: v })}
+                  {/* Prazo só aparece se houver pelo menos um item com entrega */}
+                  {!todosRetiram && (
+                    <div>
+                      <Label className="text-xs mb-1.5 block font-medium">
+                        Prazo de Entrega <span className="text-red-500">*</span>
+                      </Label>
+                      <Select
+                        value={configVenda.prazo}
+                        onValueChange={v => setConfigVenda({ ...configVenda, prazo: v })}
+                      >
+                        <SelectTrigger className={`h-10 text-sm ${!configVenda.prazo ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/20' : ''}`}>
+                          <SelectValue placeholder="Selecione..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {prazosConfig.map(p => {
+                            const label = formatarPrazoEntrega(p);
+                            return (
+                              <SelectItem key={p.id} value={label}>
+                                {label}
+                              </SelectItem>
+                            );
+                          })}
+                          <SelectItem value="Retirado na loja">Retirado na loja</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Badge informativo quando todos os itens são retirada */}
+                {todosRetiram && (
+                  <div className="mt-3 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-2 text-green-800 dark:text-green-300 text-sm">
+                    <Store className="w-4 h-4 shrink-0" />
+                    <span><strong>Retirada na loja</strong> — nenhuma configuração de entrega necessária.</span>
+                  </div>
+                )}
+
+                {/* Opção Aguardando Liberação — só para pedidos com entrega */}
+                {!todosRetiram && (
+                  <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800 rounded-lg flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        id="aguardar-liberacao"
+                        checked={aguardandoLiberacao}
+                        onCheckedChange={setAguardandoLiberacao}
+                      />
+                      <Label htmlFor="aguardar-liberacao" className="text-sm cursor-pointer text-blue-800 dark:text-blue-300">
+                        <strong>Aguardar Liberação</strong>
+                        <p className="text-xs opacity-70">Marque se o cliente pediu para segurar a entrega (ex: obra)</p>
+                      </Label>
+                    </div>
+                    {aguardandoLiberacao && <Badge className="bg-blue-500">Ativado</Badge>}
+                  </div>
+                )}
+
+                {/* Botão de Restrições de Entrega — só para pedidos com entrega */}
+                {!todosRetiram && (
+                  <div className="mt-4 pt-4 border-t border-gray-100 dark:border-neutral-800">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setModalPreferenciasOpen(true)}
+                      className={`w-full justify-between ${(preferenciasEntrega.dias.length > 0 || preferenciasEntrega.turnos.length > 0 || preferenciasEntrega.obs) ? 'border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800' : ''}`}
                     >
-                      <SelectTrigger className={`h-10 text-sm ${!configVenda.prazo ? 'border-orange-400 bg-orange-50 dark:bg-orange-900/20' : ''}`}>
-                        <SelectValue placeholder="Selecione..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {prazosConfig.map(p => {
-                          const label = `${p.quantidade_dias} dias ${p.tipo_dias === 'uteis' ? 'úteis' : 'corridos'}`;
-                          return (
-                            <SelectItem key={p.id} value={label}>
-                              {label}
-                            </SelectItem>
-                          );
-                        })}
-                        <SelectItem value="Retirado na loja">Retirado na loja</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      <span className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4" />
+                        Preferências de Entrega / Restrições
+                      </span>
+                      {(preferenciasEntrega.dias.length > 0 || preferenciasEntrega.turnos.length > 0 || preferenciasEntrega.obs) && (
+                        <Badge variant="secondary" className="bg-amber-200 text-amber-800 border-amber-300 hover:bg-amber-200">
+                          Definido
+                        </Badge>
+                      )}
+                    </Button>
                   </div>
-                </div>
-
-                {/* Opção Aguardando Liberação */}
-                <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800 rounded-lg flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Checkbox
-                      id="aguardar-liberacao"
-                      checked={aguardandoLiberacao}
-                      onCheckedChange={setAguardandoLiberacao}
-                    />
-                    <Label htmlFor="aguardar-liberacao" className="text-sm cursor-pointer text-blue-800 dark:text-blue-300">
-                      <strong>Aguardar Liberação</strong>
-                      <p className="text-xs opacity-70">Marque se o cliente pediu para segurar a entrega (ex: obra)</p>
-                    </Label>
-                  </div>
-                  {aguardandoLiberacao && <Badge className="bg-blue-500">Ativado</Badge>}
-                </div>
-
-                {/* Botão de Restrições de Entrega */}
-                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-neutral-800">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setModalPreferenciasOpen(true)}
-                    className={`w-full justify-between ${(preferenciasEntrega.dias.length > 0 || preferenciasEntrega.turnos.length > 0 || preferenciasEntrega.obs) ? 'border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800' : ''}`}
-                  >
-                    <span className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4" />
-                      Preferências de Entrega / Restrições
-                    </span>
-                    {(preferenciasEntrega.dias.length > 0 || preferenciasEntrega.turnos.length > 0 || preferenciasEntrega.obs) && (
-                      <Badge variant="secondary" className="bg-amber-200 text-amber-800 border-amber-300 hover:bg-amber-200">
-                        Definido
-                      </Badge>
-                    )}
-                  </Button>
-                </div>
+                )}
 
                 {/* Modal de Preferências */}
                 <Dialog open={modalPreferenciasOpen} onOpenChange={setModalPreferenciasOpen}>
@@ -1708,7 +1974,7 @@ export default function PDV() {
                       <div className="space-y-3">
                         <Label>Turnos Permitidos</Label>
                         <div className="grid grid-cols-2 gap-2">
-                          {['Manhã', 'Tarde'].map((turno) => (
+                          {['Manhã', 'Tarde', 'Comercial'].map((turno) => (
                             <RestricaoCheckbox
                               key={turno}
                               label={turno}
@@ -1769,7 +2035,7 @@ export default function PDV() {
                 setObservacoes={setObservacoes}
                 pagamentoEntrega={pagamentoEntrega}
                 setPagamentoEntrega={setPagamentoEntrega}
-                disabled={!clienteSelecionado || itens.length === 0 || !configVenda.prazo}
+                disabled={!clienteSelecionado || itens.length === 0 || (!todosRetiram && !configVenda.prazo)}
                 cupomAplicado={cupomAplicado}
                 setCupomAplicado={setCupomAplicado}
                 cliente={clienteSelecionado}

@@ -534,10 +534,11 @@ export default function DashboardGerente() {
             switch (periodo) {
                 case 'hoje':
                     return dataVendaStr === hojeIso;
-                case 'semana':
+                case 'semana': {
                     const inicioSemana = new Date(hoje);
                     inicioSemana.setDate(hoje.getDate() - hoje.getDay());
                     return d >= inicioSemana;
+                }
                 case 'mes':
                     return d.getMonth() === hoje.getMonth() && d.getFullYear() === hoje.getFullYear();
                 default:

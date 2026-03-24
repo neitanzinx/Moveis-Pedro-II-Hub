@@ -20,7 +20,7 @@ export default function AcoesVendedoresWidget() {
 
     const { data: rawLogs = [], isLoading, isError } = useQuery({
         queryKey: ['acoes-vendedores'],
-        queryFn: () => base44.entities.AuditLog.list('-timestamp', 100),
+        queryFn: () => base44.entities.AuditLog.list('-created_at'),
         refetchInterval: 15000,
     });
 
@@ -31,7 +31,7 @@ export default function AcoesVendedoresWidget() {
             if (!lojaAtual) return [];
             const { data, error } = await supabase
                 .from('public_users')
-                .select('email, full_name, cargo')
+                .select('id, email, full_name, cargo')
                 .eq('loja', lojaAtual);
             if (error) throw error;
             return data || [];
@@ -39,11 +39,29 @@ export default function AcoesVendedoresWidget() {
         enabled: !!getUserLoja()
     });
 
+    const normalizedLogs = rawLogs.map((log) => {
+        const resolvedUser = storeUsers.find((u) =>
+            (log.user_id && String(u.id) === String(log.user_id)) ||
+            (log.user_email && u.email === log.user_email)
+        );
+
+        return {
+            ...log,
+            action: log.acao || log.action || 'UPDATE',
+            user_name: log.usuario || log.user_name || resolvedUser?.full_name || '',
+            user_email: log.user_email || resolvedUser?.email || '',
+            user_cargo: log.user_cargo || resolvedUser?.cargo || '',
+            entity_type: log.tabela || log.entity_type || log.table_name || '',
+            entity_description: log.entity_description || log.detalhes?.description || '',
+            timestamp: log.created_at || log.timestamp,
+        };
+    });
+
     const storeUserEmails = storeUsers.map(u => u.email).filter(Boolean);
     const storeUserNames = storeUsers.map(u => u.full_name).filter(Boolean);
 
     // Filtrar apenas vendedores da mesma loja
-    const vendedorLogs = rawLogs.filter(log => {
+    const vendedorLogs = normalizedLogs.filter(log => {
         const cargoLog = (log.user_cargo || log.cargo || '').toLowerCase();
         const isVendedor = cargoLog.includes('vendedor');
 

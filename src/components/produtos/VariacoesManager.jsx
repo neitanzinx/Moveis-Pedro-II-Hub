@@ -159,7 +159,7 @@ export default function VariacoesManager({
                         <Package className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                         <p className="text-gray-500 mb-2">Nenhuma variação cadastrada</p>
                         <p className="text-sm text-gray-400">
-                            Clique em "Adicionar Variação" para criar opções de cor, tamanho ou tecido
+                            Clique em &quot;Adicionar Variação&quot; para criar opções de cor, tamanho ou tecido
                         </p>
                     </CardContent>
                 </Card>
@@ -236,7 +236,7 @@ export default function VariacoesManager({
                                                         />
                                                         {corCustom && !CORES_PADRAO.some(c => c.nome.toLowerCase().includes(corCustom.toLowerCase())) && (
                                                             <p className="text-[10px] text-green-600 mt-1">
-                                                                ↵ Enter para salvar "{corCustom}" como cor personalizada
+                                                                ↵ Enter para salvar &quot;{corCustom}&quot; como cor personalizada
                                                             </p>
                                                         )}
                                                     </div>
@@ -327,7 +327,7 @@ export default function VariacoesManager({
                                                         {corCustom && !coresAgrupadas.some(g => g.cores.some(c => c.nome.toLowerCase().includes(corCustom.toLowerCase()))) && !corCustom.toLowerCase().endsWith('com') && (
                                                             <div className="p-4 text-center text-gray-500">
                                                                 <p className="text-sm">Nenhuma cor encontrada</p>
-                                                                <p className="text-[10px]">Pressione Enter para criar "{corCustom}"</p>
+                                                                <p className="text-[10px]">Pressione Enter para criar &quot;{corCustom}&quot;</p>
                                                             </div>
                                                         )}
                                                     </div>

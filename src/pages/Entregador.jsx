@@ -173,6 +173,20 @@ export default function Entregador() {
         refetchInterval: rotaIniciada ? 10000 : 60000
     });
 
+    // Montagens Internas pendentes por ITEM do pedido
+    const { data: montagensItensPendentes = [] } = useQuery({
+        queryKey: ['montagens-itens-internas-pendentes'],
+        queryFn: async () => {
+            const todas = await base44.entities.MontagemItem.list('-created_at');
+            return todas.filter(m => {
+                const tipo = (m.tipo_montagem || '').toLowerCase();
+                const status = (m.status || '').toLowerCase();
+                return tipo === 'interna' && status !== 'concluida';
+            });
+        },
+        refetchInterval: rotaIniciada ? 10000 : 60000
+    });
+
     // Agrupar entregas por turno
     const entregasPorTurno = {
         'Manhã': todasEntregas.filter(e => e.turno === 'Manhã'),
@@ -284,7 +298,7 @@ export default function Entregador() {
                         toast.info("Rascunho da sua última assinatura foi recuperado.");
                     }
                 }
-            } catch (e) { }
+            } catch (e) { void e; }
         }
         return () => {
             if (gpsInterval.current) {
@@ -377,6 +391,7 @@ export default function Entregador() {
                     if (venda?.itens) {
                         const vendaItens = typeof venda.itens === 'string' ? JSON.parse(venda.itens) : venda.itens;
                         vendaItens.forEach(item => {
+                            const bloqueadoMontagem = temMontagemPendente(entrega);
                             itens.push({
                                 id: `${entrega.id}-${item.produto_id || item.id}`,
                                 pedido: venda.numero_pedido || entrega.numero_pedido,
@@ -386,7 +401,8 @@ export default function Entregador() {
                                 quantidade: item.quantidade || 1,
                                 cor: item.cor,
                                 codigo: item.codigo_barras || item.sku,
-                                detalhes: item.detalhes || item.descricao || item.observacao
+                                detalhes: item.detalhes || item.descricao || item.observacao,
+                                bloqueado_montagem: bloqueadoMontagem
                             });
                         });
                     }
@@ -416,6 +432,20 @@ export default function Entregador() {
         console.log('iniciarRota chamado');
         if (!caminhaoSelecionado || !turnoSelecionado) {
             toast.error("Selecione caminhão e turno primeiro.");
+            return;
+        }
+
+        const entregasComMontagemPendente = entregasRota.filter(temMontagemPendente);
+        if (entregasComMontagemPendente.length > 0) {
+            const pedidos = entregasComMontagemPendente
+                .slice(0, 3)
+                .map(e => `#${e.numero_pedido}`)
+                .join(', ');
+            const sufixo = entregasComMontagemPendente.length > 3 ? ', ...' : '';
+
+            toast.error(
+                `Rota bloqueada: há ${entregasComMontagemPendente.length} pedido(s) com montagem pendente (${pedidos}${sufixo}).`
+            );
             return;
         }
 
@@ -457,10 +487,18 @@ export default function Entregador() {
                 }
             }
 
-            await whatsappService.notifyRouteStart(entregasRota);
+            // Notificar apenas o PRIMEIRO cliente que o caminhão saiu do depósito
+            if (entregasRota.length > 0) {
+                await whatsappService.notifyRouteStart([entregasRota[0]]);
+            }
 
             setRotaIniciada(true);
             setEtapa('rota');
+            
+            // Refetch para garantir que o useEffect de avisarProximo() tenha dados frescos
+            // Especialmente crítico com 1 pedido (issue de timing)
+            await refetch();
+            
             iniciarRastreamento();
 
             // Item 3: Cache do checklist deletado/limpo apenas quando iniciarReta for sucesso (200 OK do DB implícito pelos updates acima)
@@ -495,8 +533,8 @@ export default function Entregador() {
         console.log('avisarProximo chamado para:', entrega.id);
         setEnviando(true);
         try {
-            // Usar IP da VPS se estiver em localhost, senão usa a origin atual
-            const origin = window.location.hostname === 'localhost' ? 'http://191.101.234.247' : window.location.origin;
+            // Força o uso do domínio oficial para o link de rastreio enviado ao cliente
+            const origin = 'https://moveispedro2.com.br';
             const linkRastreio = `${origin}/rastreio/${entrega.numero_pedido}`;
             const telefone = entrega.cliente_telefone;
             console.log('Telefone:', telefone, 'Link:', linkRastreio);
@@ -544,7 +582,7 @@ export default function Entregador() {
     };
 
     const primeiraPendenteId = entregasRota.find(e => e.status !== 'Entregue')?.id;
-    
+
     // Efeito para automatizar o envio de "Próxima parada"
     useEffect(() => {
         if (rotaIniciada && primeiraPendenteId) {
@@ -555,8 +593,66 @@ export default function Entregador() {
         }
     }, [rotaIniciada, primeiraPendenteId, entregasRota, enviando]);
 
+    const normalizarNumeroPedido = (valor) => (valor || '').toString().replace(/\D/g, '');
+
+    const contarItensMontagemInterna = (entrega) => {
+        const itens = entrega?.itens_montagem_interna;
+        if (Array.isArray(itens)) return itens.length;
+
+        if (typeof itens === 'string') {
+            try {
+                const parsed = JSON.parse(itens);
+                return Array.isArray(parsed) ? parsed.length : 0;
+            } catch (e) {
+                void e;
+                return 0;
+            }
+        }
+
+        return 0;
+    };
+
+    const statusMontagemConcluida = (status) => {
+        const statusNorm = (status || '')
+            .toString()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .trim();
+        return statusNorm === 'concluida';
+    };
+
+    // Verifica bloqueio por item: se qualquer item de montagem interna estiver pendente
+    const temMontagemPendente = (entrega) => {
+        const entregaId = entrega?.id?.toString();
+        const vendaId = entrega?.venda_id?.toString();
+        const numeroPedidoNorm = normalizarNumeroPedido(entrega?.numero_pedido);
+
+        const pendentePorMontagemItem = montagensItensPendentes.some(m => {
+            const itemEntregaId = m?.entrega_id?.toString();
+            const itemVendaId = m?.venda_id?.toString();
+            const itemNumeroPedidoNorm = normalizarNumeroPedido(m?.numero_pedido);
+
+            if (entregaId && itemEntregaId && itemEntregaId === entregaId) return true;
+            if (vendaId && itemVendaId && itemVendaId === vendaId) return true;
+            if (numeroPedidoNorm && itemNumeroPedidoNorm && itemNumeroPedidoNorm === numeroPedidoNorm) return true;
+            return false;
+        });
+
+        // Fallback: se a entrega tem itens de montagem interna e status ainda não está concluído,
+        // mantém o bloqueio mesmo quando algum vínculo do item estiver inconsistente.
+        const totalItensInternos = contarItensMontagemInterna(entrega);
+        const pendentePorStatusDaEntrega = totalItensInternos > 0 && !statusMontagemConcluida(entrega?.montagem_status);
+
+        return pendentePorMontagemItem || pendentePorStatusDaEntrega;
+    };
+
     // Iniciar processo de finalizar entrega (abre assinatura)
     const iniciarFinalizacao = (entrega) => {
+        if (temMontagemPendente(entrega)) {
+            toast.error('Montagem Pendente: Conclua a montagem interna antes de entregar.');
+            return;
+        }
         setModalAssinatura(entrega);
     };
 
@@ -828,6 +924,11 @@ export default function Entregador() {
         }
     };
 
+    const itensBloqueadosChecklist = itensChecklist.filter(item => item.bloqueado_montagem).length;
+    const itensSelecionaveisChecklist = itensChecklist.filter(item => !item.bloqueado_montagem);
+    const conferidosSelecionaveisChecklist = itensSelecionaveisChecklist.filter(item => itensConferidos.has(item.id)).length;
+    const podeIniciarChecklist = itensBloqueadosChecklist === 0 && conferidosSelecionaveisChecklist === itensSelecionaveisChecklist.length;
+
 
     const copiarLink = async () => {
         if (!linkPagamentoData?.link_pagamento) return;
@@ -1063,28 +1164,43 @@ export default function Entregador() {
                         <div className="flex-1 overflow-y-auto space-y-2 pr-2">
                             {itensChecklist.map((item, idx) => {
                                 const conferido = itensConferidos.has(item.id);
+                                const bloqueadoMontagem = item.bloqueado_montagem;
                                 return (
                                     <div
                                         key={item.id}
-                                        onClick={() => toggleItemConferido(item.id)}
-                                        className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${conferido
-                                            ? 'bg-green-50 border-green-400'
-                                            : 'bg-white border-gray-200 hover:border-blue-300'
+                                        onClick={() => {
+                                            if (bloqueadoMontagem) return;
+                                            toggleItemConferido(item.id);
+                                        }}
+                                        className={`p-3 rounded-lg border-2 transition-all ${bloqueadoMontagem
+                                            ? 'bg-gray-100 border-gray-300 opacity-60 cursor-not-allowed'
+                                            : conferido
+                                                ? 'bg-green-50 border-green-400 cursor-pointer'
+                                                : 'bg-white border-gray-200 hover:border-blue-300 cursor-pointer'
                                             }`}
                                     >
                                         <div className="flex items-start gap-3">
-                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${conferido ? 'bg-green-500 text-white' : 'bg-gray-200'
+                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${bloqueadoMontagem
+                                                ? 'bg-gray-300 text-gray-600'
+                                                : conferido ? 'bg-green-500 text-white' : 'bg-gray-200'
                                                 }`}>
-                                                {conferido ? <Check className="w-4 h-4" /> : <span className="text-xs text-gray-500">{idx + 1}</span>}
+                                                {bloqueadoMontagem
+                                                    ? <AlertTriangle className="w-4 h-4" />
+                                                    : conferido ? <Check className="w-4 h-4" /> : <span className="text-xs text-gray-500">{idx + 1}</span>}
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <p className="font-medium text-gray-900 leading-tight">{item.produto}</p>
+                                                <p className={`font-medium leading-tight ${bloqueadoMontagem ? 'text-gray-500' : 'text-gray-900'}`}>{item.produto}</p>
                                                 <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-500">
                                                     <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Ped #{item.pedido}</span>
                                                     <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-medium">Qtd: {item.quantidade}</span>
                                                     {item.cor && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">{item.cor}</span>}
                                                     {item.codigo && <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">Cód: {item.codigo}</span>}
                                                 </div>
+                                                {bloqueadoMontagem && (
+                                                    <p className="text-xs text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded px-2 py-1 font-medium">
+                                                        Item bloqueado: montagem interna pendente.
+                                                    </p>
+                                                )}
                                                 {item.detalhes && (
                                                     <p className="text-xs text-gray-600 mt-2 bg-gray-50 p-2 rounded border border-gray-100 italic">
                                                         {item.detalhes}
@@ -1100,8 +1216,8 @@ export default function Entregador() {
                         <div className="pt-4 border-t space-y-2">
                             <div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-500">Conferidos:</span>
-                                <span className={`font-bold ${itensConferidos.size === itensChecklist.length ? 'text-green-600' : 'text-gray-700'}`}>
-                                    {itensConferidos.size} / {itensChecklist.length}
+                                <span className={`font-bold ${podeIniciarChecklist ? 'text-green-600' : 'text-gray-700'}`}>
+                                    {conferidosSelecionaveisChecklist} / {itensSelecionaveisChecklist.length}
                                 </span>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
@@ -1116,16 +1232,18 @@ export default function Entregador() {
                                         setModalChecklist(false);
                                         iniciarRota();
                                     }}
-                                    disabled={itensConferidos.size < itensChecklist.length}
+                                    disabled={!podeIniciarChecklist}
                                     className="bg-green-600 hover:bg-green-700"
                                 >
                                     <Navigation className="w-4 h-4 mr-1" />
                                     Iniciar Rota
                                 </Button>
                             </div>
-                            {itensConferidos.size < itensChecklist.length && (
+                            {!podeIniciarChecklist && (
                                 <p className="text-xs text-center text-amber-600">
-                                    Confira todos os itens para iniciar
+                                    {itensBloqueadosChecklist > 0
+                                        ? `Há ${itensBloqueadosChecklist} item(ns) bloqueado(s) por montagem pendente.`
+                                        : 'Confira todos os itens para iniciar'}
                                 </p>
                             )}
                         </div>
@@ -1168,113 +1286,122 @@ export default function Entregador() {
                     const temPagamento = entrega.pagamento_na_entrega || entrega.valor_a_receber > 0;
                     const isProxima = entrega.id === primeiraPendenteId;
 
-                        return (
-                            <Card key={entrega.id} className={`border-0 shadow-sm ${isProxima ? 'ring-2 ring-blue-500' : ''} ${entrega.status === 'Entregue' ? 'opacity-50' : ''}`}>
-                                {isProxima && (
-                                    <div className="bg-blue-600 text-white text-[10px] font-bold px-3 py-1 text-center">
-                                        PRÓXIMA PARADA
-                                    </div>
-                                )}
-                                {entrega.status === 'Entregue' && (
-                                    <div className="bg-green-600 text-white text-[10px] font-bold px-3 py-1 text-center">
-                                        ✓ ENTREGUE
-                                    </div>
-                                )}
+                    return (
+                        <Card key={entrega.id} className={`border-0 shadow-sm ${isProxima ? 'ring-2 ring-blue-500' : ''} ${entrega.status === 'Entregue' ? 'opacity-50' : ''}`}>
+                            {isProxima && (
+                                <div className="bg-blue-600 text-white text-[10px] font-bold px-3 py-1 text-center">
+                                    PRÓXIMA PARADA
+                                </div>
+                            )}
+                            {entrega.status === 'Entregue' && (
+                                <div className="bg-green-600 text-white text-[10px] font-bold px-3 py-1 text-center">
+                                    ✓ ENTREGUE
+                                </div>
+                            )}
 
-                                {/* Badge de pagamento */}
-                                {temPagamento && entrega.status !== 'Entregue' && (
-                                    <div className="bg-amber-500 text-white text-[10px] font-bold px-3 py-1 text-center flex items-center justify-center gap-1">
-                                        <DollarSign className="w-3 h-3" />
-                                        RECEBER: R$ {(entrega.valor_a_receber || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        {entrega.forma_pagamento_entrega && ` (${entrega.forma_pagamento_entrega})`}
-                                    </div>
-                                )}
+                            {/* Badge de pagamento */}
+                            {temPagamento && entrega.status !== 'Entregue' && (
+                                <div className="bg-amber-500 text-white text-[10px] font-bold px-3 py-1 text-center flex items-center justify-center gap-1">
+                                    <DollarSign className="w-3 h-3" />
+                                    RECEBER: R$ {(entrega.valor_a_receber || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    {entrega.forma_pagamento_entrega && ` (${entrega.forma_pagamento_entrega})`}
+                                </div>
+                            )}
 
-                                <CardContent className="p-4">
-                                    {/* Header */}
-                                    <div className="flex justify-between items-center mb-2">
-                                        <Badge variant="outline" className="text-sm font-bold">
-                                            #{ordemCongelada.length > 0 ? ordemCongelada.indexOf(entrega.id) + 1 : index + 1}
-                                        </Badge>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs text-gray-400">Pedido</span>
-                                            <span className="font-bold text-sm">#{entrega.numero_pedido}</span>
+                            <CardContent className="p-4">
+                                {/* Header */}
+                                <div className="flex justify-between items-center mb-2">
+                                    <Badge variant="outline" className="text-sm font-bold">
+                                        #{ordemCongelada.length > 0 ? ordemCongelada.indexOf(entrega.id) + 1 : index + 1}
+                                    </Badge>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs text-gray-400">Pedido</span>
+                                        <span className="font-bold text-sm">#{entrega.numero_pedido}</span>
+                                    </div>
+                                </div>
+
+                                {/* Endereço em Destaque */}
+                                <div className="bg-gray-50 rounded-lg p-3 mb-3 border border-gray-100">
+                                    <div className="flex items-start gap-2">
+                                        <MapPin className="w-5 h-5 mt-0.5 text-red-500 flex-shrink-0" />
+                                        <div className="flex-1">
+                                            <p className="font-bold text-gray-800 leading-tight">{entrega.endereco_entrega}</p>
+                                            <a
+                                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(entrega.endereco_entrega || '')}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-xs text-blue-600 hover:underline mt-1 inline-block"
+                                            >
+                                                Abrir no Maps →
+                                            </a>
                                         </div>
                                     </div>
+                                </div>
 
-                                    {/* Endereço em Destaque */}
-                                    <div className="bg-gray-50 rounded-lg p-3 mb-3 border border-gray-100">
-                                        <div className="flex items-start gap-2">
-                                            <MapPin className="w-5 h-5 mt-0.5 text-red-500 flex-shrink-0" />
-                                            <div className="flex-1">
-                                                <p className="font-bold text-gray-800 leading-tight">{entrega.endereco_entrega}</p>
-                                                <a
-                                                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(entrega.endereco_entrega || '')}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-xs text-blue-600 hover:underline mt-1 inline-block"
-                                                >
-                                                    Abrir no Maps →
-                                                </a>
+                                {/* Cliente */}
+                                <p className="text-sm text-gray-500 mb-3">
+                                    <span className="text-xs text-gray-400">Cliente:</span> {entrega.cliente_nome}
+                                </p>
+
+                                {/* Tentativas anteriores */}
+                                {entrega.tentativas > 0 && (
+                                    <div className="bg-red-50 border border-red-200 rounded p-2 mb-3 text-xs text-red-700">
+                                        ⚠️ Tentativa {entrega.tentativas + 1} - {entrega.observacoes_entrega}
+                                    </div>
+                                )}
+
+                                {entrega.status !== 'Entregue' && (
+                                    <div className="space-y-2">
+                                        {/* Aviso de Montagem Pendente */}
+                                        {temMontagemPendente(entrega) && (
+                                            <div className="bg-amber-50 border border-amber-300 rounded p-2 text-xs text-amber-700 flex items-start gap-2">
+                                                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                                                <span><strong>Montagem Pendente:</strong> Conclua a montagem interna antes de entregar.</span>
                                             </div>
+                                        )}
+                                        {/* Botões principais */}
+                                        <div className="grid grid-cols-1 gap-2">
+                                            <Button
+                                                size="sm"
+                                                disabled={temMontagemPendente(entrega)}
+                                                className={`${temMontagemPendente(entrega) ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
+                                                onClick={() => iniciarFinalizacao(entrega)}
+                                                title={temMontagemPendente(entrega) ? 'Montagem interna pendente' : 'Entregar pedido'}
+                                            >
+                                                <PenTool className="w-4 h-4 mr-1" /> Entregar
+                                            </Button>
                                         </div>
-                                    </div>
 
-                                    {/* Cliente */}
-                                    <p className="text-sm text-gray-500 mb-3">
-                                        <span className="text-xs text-gray-400">Cliente:</span> {entrega.cliente_nome}
-                                    </p>
+                                        {/* Botão de falha */}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="w-full border-red-300 text-red-600 hover:bg-red-50"
+                                            onClick={() => iniciarFalhaEntrega(entrega)}
+                                        >
+                                            <X className="w-4 h-4 mr-1" /> Não consegui entregar
+                                        </Button>
 
-                                    {/* Tentativas anteriores */}
-                                    {entrega.tentativas > 0 && (
-                                        <div className="bg-red-50 border border-red-200 rounded p-2 mb-3 text-xs text-red-700">
-                                            ⚠️ Tentativa {entrega.tentativas + 1} - {entrega.observacoes_entrega}
-                                        </div>
-                                    )}
-
-                                    {entrega.status !== 'Entregue' && (
-                                        <div className="space-y-2">
-                                            {/* Botões principais */}
-                                            <div className="grid grid-cols-1 gap-2">
-                                                <Button
-                                                    size="sm"
-                                                    className="bg-green-600 hover:bg-green-700"
-                                                    onClick={() => iniciarFinalizacao(entrega)}
-                                                >
-                                                    <PenTool className="w-4 h-4 mr-1" /> Entregar
-                                                </Button>
-                                            </div>
-
-                                            {/* Botão de falha */}
+                                        {/* Botão de confirmar pagamento (simplificado) */}
+                                        {temPagamento && (
                                             <Button
                                                 variant="outline"
                                                 size="sm"
-                                                className="w-full border-red-300 text-red-600 hover:bg-red-50"
-                                                onClick={() => iniciarFalhaEntrega(entrega)}
+                                                className="w-full border-amber-400 text-amber-700 hover:bg-amber-50"
+                                                onClick={() => {
+                                                    setModalConfirmaPagamento(entrega);
+                                                    setPagamentoStatus('pago');
+                                                    setMotivoPendente("");
+                                                }}
                                             >
-                                                <X className="w-4 h-4 mr-1" /> Não consegui entregar
+                                                <DollarSign className="w-4 h-4 mr-1" /> Confirmar Pagamento
                                             </Button>
-
-                                            {/* Botão de confirmar pagamento (simplificado) */}
-                                            {temPagamento && (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="w-full border-amber-400 text-amber-700 hover:bg-amber-50"
-                                                    onClick={() => {
-                                                        setModalConfirmaPagamento(entrega);
-                                                        setPagamentoStatus('pago');
-                                                        setMotivoPendente("");
-                                                    }}
-                                                >
-                                                    <DollarSign className="w-4 h-4 mr-1" /> Confirmar Pagamento
-                                                </Button>
-                                            )}
-                                        </div>
-                                    )}
-                                </CardContent>
-                            </Card>
-                        );
+                                        )}
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    );
                 })}
 
                 {/* Assistências Técnicas */}
@@ -1872,10 +1999,12 @@ export default function Entregador() {
                     <div className="flex-1 overflow-y-auto space-y-2 pr-2">
                         {itensChecklist.map((item, idx) => {
                             const conferido = itensConferidos.has(item.id);
+                            const bloqueadoMontagem = item.bloqueado_montagem;
                             return (
                                 <div
                                     key={item.id}
                                     onClick={() => {
+                                        if (bloqueadoMontagem) return;
                                         const conferido = itensConferidos.has(item.id);
                                         const novo = new Set(itensConferidos);
                                         if (conferido) novo.delete(item.id);
@@ -1883,23 +2012,34 @@ export default function Entregador() {
                                         _setItensConferidos(novo);
                                         localStorage.setItem(`checklist_cache_${dataSelecionada}_${caminhaoSelecionado}`, JSON.stringify(Array.from(novo)));
                                     }}
-                                    className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${conferido
-                                        ? 'bg-green-50 border-green-400'
-                                        : 'bg-white border-gray-200 hover:border-blue-300'
+                                    className={`p-3 rounded-lg border-2 transition-all ${bloqueadoMontagem
+                                        ? 'bg-gray-100 border-gray-300 opacity-60 cursor-not-allowed'
+                                        : conferido
+                                            ? 'bg-green-50 border-green-400 cursor-pointer'
+                                            : 'bg-white border-gray-200 hover:border-blue-300 cursor-pointer'
                                         }`}
                                 >
                                     <div className="flex items-start gap-3">
-                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${conferido ? 'bg-green-500 text-white' : 'bg-gray-200'
+                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${bloqueadoMontagem
+                                            ? 'bg-gray-300 text-gray-600'
+                                            : conferido ? 'bg-green-500 text-white' : 'bg-gray-200'
                                             }`}>
-                                            {conferido ? <Check className="w-4 h-4" /> : <span className="text-xs text-gray-500">{idx + 1}</span>}
+                                            {bloqueadoMontagem
+                                                ? <AlertTriangle className="w-4 h-4" />
+                                                : conferido ? <Check className="w-4 h-4" /> : <span className="text-xs text-gray-500">{idx + 1}</span>}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <p className="font-medium text-gray-900 truncate">{item.produto}</p>
+                                            <p className={`font-medium truncate ${bloqueadoMontagem ? 'text-gray-500' : 'text-gray-900'}`}>{item.produto}</p>
                                             <div className="flex flex-wrap gap-2 mt-1 text-xs text-gray-500">
                                                 <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Ped #{item.pedido}</span>
                                                 <span>Qtd: {item.quantidade}</span>
                                                 {item.cor && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">{item.cor}</span>}
                                             </div>
+                                            {bloqueadoMontagem && (
+                                                <p className="text-xs text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded px-2 py-1 font-medium">
+                                                    Item bloqueado: montagem interna pendente.
+                                                </p>
+                                            )}
                                             <p className="text-xs text-gray-400 mt-1 truncate">Cliente: {item.cliente}</p>
                                         </div>
                                     </div>
@@ -1910,8 +2050,8 @@ export default function Entregador() {
                     <div className="pt-4 border-t space-y-2">
                         <div className="flex items-center justify-between text-sm">
                             <span className="text-gray-500">Conferidos:</span>
-                            <span className={`font-bold ${itensConferidos.size === itensChecklist.length ? 'text-green-600' : 'text-gray-700'}`}>
-                                {itensConferidos.size} / {itensChecklist.length}
+                            <span className={`font-bold ${podeIniciarChecklist ? 'text-green-600' : 'text-gray-700'}`}>
+                                {conferidosSelecionaveisChecklist} / {itensSelecionaveisChecklist.length}
                             </span>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
@@ -1926,16 +2066,18 @@ export default function Entregador() {
                                     setModalChecklist(false);
                                     iniciarRota();
                                 }}
-                                disabled={itensConferidos.size < itensChecklist.length}
+                                disabled={!podeIniciarChecklist}
                                 className="bg-green-600 hover:bg-green-700"
                             >
                                 <Navigation className="w-4 h-4 mr-1" />
                                 Iniciar Rota
                             </Button>
                         </div>
-                        {itensConferidos.size < itensChecklist.length && (
+                        {!podeIniciarChecklist && (
                             <p className="text-xs text-center text-amber-600">
-                                Confira todos os itens para iniciar
+                                {itensBloqueadosChecklist > 0
+                                    ? `Há ${itensBloqueadosChecklist} item(ns) bloqueado(s) por montagem pendente.`
+                                    : 'Confira todos os itens para iniciar'}
                             </p>
                         )}
                     </div>

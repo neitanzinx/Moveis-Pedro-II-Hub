@@ -212,10 +212,12 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
     if (!produto) return;
 
     const subtotal = produto.preco_venda * quantidade;
+    const produtoNomeComCor = produto.cor ? `${produto.nome} - Cor: ${produto.cor}` : produto.nome;
 
     const novoItem = {
       produto_id: produto.id,
-      produto_nome: produto.nome,
+      produto_nome: produtoNomeComCor,
+      produto_cor: produto.cor || '',
       produto_categoria: produto.categoria || "Geral",
       quantidade: quantidade,
       preco_unitario: produto.preco_venda,

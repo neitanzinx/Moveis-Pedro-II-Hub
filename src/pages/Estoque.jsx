@@ -1,47 +1,43 @@
-import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { useQuery } from "@tanstack/react-query";
+import { base44 } from "@/api/base44Client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Package, AlertTriangle, ArrowRightLeft,
-  ClipboardCheck, Building2, Plus, Loader2, Upload, Truck, ScanBarcode
+  Package, ArrowRightLeft,
+  ClipboardCheck, Truck, ScanBarcode
 } from "lucide-react";
 
 // Tab Components
-import EstoqueTab from "../components/estoque/EstoqueTab";
-import BipagemTab from "../components/estoque/BipagemTab";
-
-import TransferenciasTab from "../components/estoque/TransferenciasTab";
-import InventarioTab from "../components/estoque/InventarioTab";
-import RecebimentosTab from "../components/estoque/RecebimentosTab";
+import EstoqueTab from "../components/legacy_estoque/EstoqueTab";
+import BipagemTab from "../components/legacy_estoque/BipagemTab";
+import TransferenciasTab from "../components/legacy_estoque/TransferenciasTab";
+import InventarioTab from "../components/legacy_estoque/InventarioTab";
+import RecebimentosTab from "../components/legacy_estoque/RecebimentosTab";
+import { comprasService } from '@/services/comprasService';
 
 export default function Estoque() {
   const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState("estoque");
 
   const { data: produtos = [] } = useQuery({
-    queryKey: ['produtos'],
+    queryKey: ['produtos-estoque-count'],
     queryFn: () => base44.entities.Produto.list(),
   });
-
-
 
   const { data: transferencias = [] } = useQuery({
     queryKey: ['transferencias-estoque'],
     queryFn: () => base44.entities.TransferenciaEstoque.list(),
   });
 
-
   const transferenciasPendentes = transferencias.filter(t => t.status === 'Pendente').length;
 
   const { data: pedidos = [] } = useQuery({
     queryKey: ['pedidos-compra-recebimento-count'],
     queryFn: async () => {
-      const { data } = await base44.entities.PedidoCompra.search({ limit: 100 });
-      return data.filter(p => ['Enviado', 'Confirmado', 'Em Conferência', 'Parcialmente Recebido'].includes(p.status));
+      const data = await comprasService.listOcs('-created_at');
+      return (data || []).filter(p => ['Pedido Enviado', 'Parcialmente Recebido'].includes(p.status));
     }
   });
   const pedidosPendentes = pedidos.length;
@@ -49,10 +45,7 @@ export default function Estoque() {
   if (loading || !user) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-green-600" />
-          <p className="text-sm text-gray-500">Carregando...</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-700" />
       </div>
     );
   }
@@ -65,28 +58,13 @@ export default function Estoque() {
     { id: "inventario", label: "Inventário", icon: ClipboardCheck },
   ];
 
-  const handleNovoProduto = () => {
-    window.dispatchEvent(new CustomEvent('estoque-header-action', { detail: 'estoque' }));
-  };
-
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      {/* Header simples */}
-      <div className="flex justify-between items-center">
+    <div className="p-4 md:p-8 space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Estoque</h1>
-          <p className="text-sm text-gray-500">Gerencie produtos, movimentacoes e estoque</p>
+          <h1 className="text-3xl font-bold text-gray-900">Gestão de Estoque</h1>
+          <p className="text-gray-500">Controle total de entradas, saídas e transferências</p>
         </div>
-
-        {activeTab === "estoque" && (
-          <Button
-            onClick={handleNovoProduto}
-            className="bg-green-700 hover:bg-green-800 text-white font-medium"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Novo Produto
-          </Button>
-        )}
       </div>
 
       {/* Tabs */}

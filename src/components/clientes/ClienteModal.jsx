@@ -235,9 +235,9 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
         telefone: formatarTelefone(data.ddd_telefone_1 ? data.ddd_telefone_1 + (data.telefone_1 || "") : prev.telefone),
         email: data.email || prev.email,
         cep: data.cep?.replace(/\D/g, '') || "",
-        endereco: formatarTexto(data.logradouro || ""),
+        endereco: formatarEndereco(data.logradouro || ""),
         numero: data.numero || "",
-        complemento: formatarTexto(data.complemento || ""),
+        complemento: formatarEndereco(data.complemento || ""),
         bairro: formatarEndereco(data.bairro || ""),
         cidade: formatarEndereco(data.municipio || ""),
         estado: data.uf || "",
@@ -266,7 +266,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
   const atualizarContato = (index, campo, valor) => {
     const novosContatos = [...formData.contatos];
     if (campo === 'nome') {
-      novosContatos[index][campo] = formatarTexto(valor);
+      novosContatos[index][campo] = formatarNome(valor);
     } else if (campo === 'telefone') {
       novosContatos[index][campo] = formatarTelefone(valor);
     } else {

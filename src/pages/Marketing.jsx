@@ -938,7 +938,7 @@ export default function Marketing() {
                                         {/* De-Por Toggle */}
                                         <div className="flex items-center justify-between p-3 bg-amber-50 rounded-lg border border-amber-200">
                                             <div>
-                                                <p className="font-medium text-amber-800">Exibir "De - Por"</p>
+                                                <p className="font-medium text-amber-800">Exibir &quot;De - Por&quot;</p>
                                                 <p className="text-xs text-amber-600">Mostra preço riscado + preço atual</p>
                                             </div>
                                             <Switch
@@ -949,7 +949,7 @@ export default function Marketing() {
 
                                         {showDePor && selectedProducts.length > 0 && (
                                             <div className="space-y-2 p-3 bg-gray-50 rounded-lg">
-                                                <p className="text-xs font-medium text-gray-600 mb-2">Preço "De" para cada produto:</p>
+                                                <p className="text-xs font-medium text-gray-600 mb-2">Preço &quot;De&quot; para cada produto:</p>
                                                 {selectedProducts.map(p => (
                                                     <div key={p.id} className="flex items-center gap-2 text-sm">
                                                         <span className="flex-1 truncate">{p.nome}</span>

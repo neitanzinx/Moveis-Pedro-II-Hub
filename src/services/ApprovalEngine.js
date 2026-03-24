@@ -11,52 +11,22 @@ export const ApprovalEngine = {
      * @param {Array} items - List of items in the order.
      * @returns {Array} List of required levels { nivel: number, label: string }.
      */
-    calculateLevels(total, items = []) {
-        const levels = [];
-
-        // Rule: FORA DA TABELA flag in any item
-        const hasForaTabela = items.some(item => item.fora_tabela);
-        if (hasForaTabela) {
-            levels.push({ nivel: 2, label: 'Eduardo (Obrigatório - Fora da Tabela)' });
-            // If it's fora da tabela, Eduardo is the primary approver. 
-            // We might still need the manager if value > 5k, let's see logic below.
-        }
-
-        if (total < 5000) {
-            // Auto-approved unless fora_tabela
-            if (levels.length === 0) return [];
-        } else if (total >= 5000 && total <= 20000) {
-            // Comprador + Gerente (Level 1)
-            // Eduardo (cópia) -> Notification only (handled by notifyCC)
-            if (!levels.find(l => l.nivel === 1)) {
-                levels.push({ nivel: 1, label: 'Gerente' });
-            }
-        } else if (total > 20000) {
-            // Comprador + Gerente (Level 1) + Eduardo (Level 2)
-            // Diretor (Cópia) -> Notification only
-            if (!levels.find(l => l.nivel === 1)) {
-                levels.push({ nivel: 1, label: 'Gerente' });
-            }
-            if (!levels.find(l => l.nivel === 2)) {
-                levels.push({ nivel: 2, label: 'Eduardo' });
-            }
-        }
-
-        // Sort levels to ensure correct sequence
-        return levels.sort((a, b) => a.nivel - b.nivel);
+    calculateLevels(total, items = [], isPromotional = false) {
+        // No approvals required as per user instruction
+        return [];
     },
 
     /**
      * Initializes the approval process for an OC.
      */
-    async startApprovalFlow(ocId, total, items) {
-        const levels = this.calculateLevels(total, items);
+    async startApprovalFlow(ocId, total, items, isPromotional = false) {
+        const levels = this.calculateLevels(total, items, isPromotional);
 
         if (levels.length === 0) {
             // Auto-approve
             await supabase.from('compras_ordens').update({
                 aprovacao_status: 'APROVADO',
-                status: 'APROVADO', // Sync with existing visual status
+                status: 'Aguardando Envio', // Matches standard column name
                 aprovacao_nivel_atual: 0
             }).eq('id', ocId);
             return { status: 'APROVADO' };
@@ -75,7 +45,7 @@ export const ApprovalEngine = {
         // Update OC to blocked status
         await supabase.from('compras_ordens').update({
             aprovacao_status: 'PENDENTE',
-            status: 'NÃO FATURADO', // Blocked visual status
+            status: 'Aguardando Envio', // Blocked visual status
             aprovacao_nivel_atual: levels[0].nivel
         }).eq('id', ocId);
 
@@ -136,7 +106,7 @@ export const ApprovalEngine = {
             // All levels approved!
             await supabase.from('compras_ordens').update({
                 aprovacao_status: 'APROVADO',
-                status: 'APROVADO'
+                status: 'Pedido Enviado'
             }).eq('id', ocId);
             return { status: 'APROVADO' };
         }

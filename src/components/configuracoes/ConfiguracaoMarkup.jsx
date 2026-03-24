@@ -28,19 +28,6 @@ export default function ConfiguracaoMarkup() {
     const { user } = useAuth();
     const isAdmin = user?.cargo === 'Administrador';
 
-    if (!isAdmin) {
-        return (
-            <div className="flex items-center justify-center p-12">
-                <Alert className="max-w-md border-red-200 bg-red-50">
-                    <AlertTitle className="text-red-800">Acesso Restrito</AlertTitle>
-                    <AlertDescription className="text-red-700">
-                        Você não tem permissão para acessar esta configuração.
-                    </AlertDescription>
-                </Alert>
-            </div>
-        );
-    }
-
     const { settings, updateSettings, isLoading: loadingSettings } = useTenant();
     const [margens, setMargens] = useState({});
     const [salvando, setSalvando] = useState(false);
@@ -162,6 +149,19 @@ export default function ConfiguracaoMarkup() {
         acc[cat] = produtos.filter(p => p.categoria === cat).length;
         return acc;
     }, {});
+
+    if (!isAdmin) {
+        return (
+            <div className="flex items-center justify-center p-12">
+                <Alert className="max-w-md border-red-200 bg-red-50">
+                    <AlertTitle className="text-red-800">Acesso Restrito</AlertTitle>
+                    <AlertDescription className="text-red-700">
+                        Você não tem permissão para acessar esta configuração.
+                    </AlertDescription>
+                </Alert>
+            </div>
+        );
+    }
 
     if (loadingSettings) {
         return (

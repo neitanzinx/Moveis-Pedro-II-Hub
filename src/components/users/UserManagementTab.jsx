@@ -83,7 +83,7 @@ export default function UserManagementTab({ users = [], isLoading, currentUser }
             changes,
             timestamp: new Date().toISOString()
           });
-        } catch (e) { }
+        } catch (e) { void e; }
       }
     },
     onSuccess: () => {
@@ -102,7 +102,7 @@ export default function UserManagementTab({ users = [], isLoading, currentUser }
         const montadores = await base44.entities.Montador.list();
         const montador = montadores.find(m => m.usuario_id === userId);
         if (montador) await base44.entities.Montador.delete(montador.id);
-      } catch (e) { }
+      } catch (e) { void e; }
       await base44.entities.User.delete(userId);
     },
     onSuccess: () => {

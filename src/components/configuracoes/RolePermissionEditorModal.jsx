@@ -13,13 +13,12 @@ import { getCargoConfig } from "@/config/cargos";
  * Exibe mini-preview do sidebar com toggle de permissoes
  */
 export default function RolePermissionEditorModal({ cargo, currentPermissions = [], onSave, onClose, isSaving = false }) {
-    if (!cargo) return null;
-
-    const cargoConfig = getCargoConfig(cargo);
-    const roleRules = ROLE_RULES[cargo] || ROLE_RULES['Vendedor'];
+    const safeCargo = cargo || 'Vendedor';
+    const cargoConfig = getCargoConfig(safeCargo);
+    const roleRules = ROLE_RULES[safeCargo] || ROLE_RULES['Vendedor'];
 
     // Se for admin, nao pode editar (tem acesso total)
-    const isAdmin = cargo === 'Administrador';
+    const isAdmin = safeCargo === 'Administrador';
 
     // Estado das permissoes - inicia com as atuais ou do ROLE_RULES
     const initialPermissions = currentPermissions.length > 0
@@ -71,6 +70,8 @@ export default function RolePermissionEditorModal({ cargo, currentPermissions = 
             opacity: 0.4
         };
     };
+
+    if (!cargo) return null;
 
     return (
         <Dialog open onOpenChange={onClose}>

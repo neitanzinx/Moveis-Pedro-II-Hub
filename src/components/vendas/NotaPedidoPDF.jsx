@@ -1,5 +1,42 @@
-import React from "react";
 import { EMPRESA } from "@/config/empresa";
+import html2pdf from 'html2pdf.js';
+
+const clampProgress = (value) => {
+  const numericValue = Number(value);
+  if (Number.isNaN(numericValue)) return 0;
+  return Math.max(0, Math.min(100, numericValue));
+};
+
+const atualizarUIProgresso = (printWindow, {
+  label,
+  step,
+  progress,
+  error = false
+} = {}) => {
+  if (!printWindow || printWindow.closed) return;
+
+  const doc = printWindow.document;
+  const cardEl = doc.getElementById('progress-card');
+  const labelEl = doc.getElementById('progress-label');
+  const stepEl = doc.getElementById('progress-step');
+  const barEl = doc.getElementById('progress-bar');
+
+  if (!cardEl || !labelEl || !stepEl || !barEl) return;
+
+  if (typeof label === 'string') {
+    labelEl.textContent = label;
+  }
+
+  if (typeof step === 'string') {
+    stepEl.textContent = step;
+  }
+
+  if (typeof progress !== 'undefined') {
+    barEl.style.width = `${clampProgress(progress)}%`;
+  }
+
+  cardEl.dataset.state = error ? 'error' : 'loading';
+};
 
 // URL da logo e cache em localStorage para uso offline
 const LOGO_URL = EMPRESA.logo_url;
@@ -10,7 +47,7 @@ const getLogoSrc = () => {
   try {
     const cached = localStorage.getItem(LOGO_CACHE_KEY);
     if (cached) return cached;
-  } catch (e) { }
+  } catch (e) { void e; }
   return LOGO_URL;
 };
 
@@ -34,13 +71,13 @@ if (typeof window !== 'undefined') {
           reader.onloadend = () => {
             try {
               localStorage.setItem(LOGO_CACHE_KEY, reader.result);
-            } catch (e) { }
+            } catch (e) { void e; }
           };
           reader.readAsDataURL(blob);
         })
         .catch(() => { });
     }
-  } catch (e) { }
+  } catch (e) { void e; }
 }
 
 // PDF PARA O CLIENTE (limpo e elegante)
@@ -294,19 +331,119 @@ export function prepararNotaPedidoPDF() {
     console.error('Popup bloqueado pelo navegador');
     return null;
   }
-  // Mostra loading enquanto processa
   printWindow.document.write(`
     <html>
-    <head><title>Gerando Nota...</title></head>
-    <body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial;">
-      <div style="text-align:center;">
-        <div style="font-size:24px;color:#07593f;margin-bottom:10px;">⏳</div>
-        <p>Gerando nota do pedido...</p>
+    <head>
+      <title>Gerando Nota...</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: 100vh;
+          font-family: 'Segoe UI', Arial, sans-serif;
+          background: #f9fafb;
+          color: #374151;
+        }
+        .card {
+          text-align: center;
+          padding: 40px 48px;
+          background: white;
+          border-radius: 16px;
+          box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+          min-width: 320px;
+          border: 1px solid #e5e7eb;
+          transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .logo {
+          font-size: 20px;
+          font-weight: 700;
+          color: #07593f;
+          margin-bottom: 24px;
+          letter-spacing: -0.3px;
+        }
+        .spinner {
+          width: 40px;
+          height: 40px;
+          border: 3px solid #e5e7eb;
+          border-top-color: #07593f;
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+          margin: 0 auto 20px;
+        }
+        .card[data-state="error"] {
+          border-color: #fecaca;
+          box-shadow: 0 8px 30px rgba(185, 28, 28, 0.12);
+        }
+        .card[data-state="error"] .spinner {
+          border-color: #fee2e2;
+          border-top-color: #dc2626;
+        }
+        .card[data-state="error"] .label {
+          color: #b91c1c;
+        }
+        .card[data-state="error"] .step {
+          color: #991b1b;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        .label {
+          font-size: 14px;
+          color: #6b7280;
+          margin-bottom: 20px;
+        }
+        .bar-track {
+          width: 100%;
+          height: 6px;
+          background: #e5e7eb;
+          border-radius: 99px;
+          overflow: hidden;
+        }
+        .bar-fill {
+          height: 100%;
+          width: 14%;
+          background: linear-gradient(90deg, #07593f, #10b981);
+          border-radius: 99px;
+          transition: width 0.25s ease, background 0.2s ease;
+        }
+        .card[data-state="error"] .bar-fill {
+          background: linear-gradient(90deg, #dc2626, #f87171);
+        }
+        .step {
+          font-size: 11px;
+          color: #9ca3af;
+          margin-top: 12px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="card" id="progress-card" data-state="loading">
+        <div class="logo">Móveis Pedro II</div>
+        <div class="spinner"></div>
+        <p class="label" id="progress-label">Finalizando pedido...</p>
+        <div class="bar-track">
+          <div class="bar-fill" id="progress-bar"></div>
+        </div>
+        <p class="step" id="progress-step">Salvando venda...</p>
       </div>
     </body>
     </html>
   `);
   return printWindow;
+}
+
+export function atualizarStatusNotaPedidoPDF(printWindow, status) {
+  atualizarUIProgresso(printWindow, status);
+}
+
+export function sinalizarErroNotaPedidoPDF(printWindow, mensagem = 'Nao foi possivel concluir o pedido.') {
+  atualizarUIProgresso(printWindow, {
+    label: 'Nao foi possivel finalizar o pedido',
+    step: mensagem,
+    error: true
+  });
 }
 
 /**
@@ -319,6 +456,12 @@ export function preencherEImprimirPDF(printWindow, venda, cliente, vendedor) {
     abrirNotaPedidoPDF(venda, cliente, vendedor);
     return;
   }
+
+  atualizarUIProgresso(printWindow, {
+    label: 'Pedido concluido',
+    step: 'Preparando impressao...',
+    progress: 100
+  });
 
   const html = gerarNotaPedidoHTML(venda, cliente, vendedor);
   printWindow.document.open();
@@ -382,9 +525,6 @@ export function enviarWhatsApp(telefone, numeroPedido, valorTotal, nomeCliente, 
  */
 export async function gerarNotaPedidoBase64(venda, cliente, vendedor) {
   try {
-    // Importação dinâmica do html2pdf
-    const html2pdf = (await import('html2pdf.js')).default;
-
     const htmlContent = gerarNotaPedidoHTML(venda, cliente, vendedor);
 
     // Criar container temporário 
@@ -408,15 +548,16 @@ export async function gerarNotaPedidoBase64(venda, cliente, vendedor) {
     appRoot.appendChild(container);
 
     // Aguardar renderização e carregamento de imagens
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // 300ms é suficiente — era 1000ms antes (melhoria de performance)
+    await new Promise(resolve => setTimeout(resolve, 300));
 
     // Configurações do PDF OTIMIZADAS
     const opt = {
       margin: [10, 10, 10, 10],
       filename: `Pedido_${venda.numero_pedido}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
+      image: { type: 'jpeg', quality: 0.85 }, // era 0.98 — qualidade ainda ótima, muito mais rápido
       html2canvas: {
-        scale: 2,
+        scale: 1.5,           // era 2 — ainda nítido, mas processa bem mais rápido
         useCORS: true,
         letterRendering: true,
         scrollY: 0,

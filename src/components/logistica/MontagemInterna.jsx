@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import { whatsappService } from "@/services/whatsappService";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/lib/supabase";
 
 export default function MontagemInterna() {
   const queryClient = useQueryClient();
@@ -239,14 +240,28 @@ export default function MontagemInterna() {
   // Auto-atribuir montagem ao usuário logado (para montadores)
   const autoAtribuirMontador = async (montagem) => {
     try {
-      await updateMutation.mutateAsync({
-        id: montagem.id,
-        data: {
+      const { data, error } = await supabase
+        .from('montagens_itens')
+        .update({
           montador_id: user.id?.toString(),
-          montador_nome: user.full_name || user.email
-        }
-      });
+          montador_nome: user.full_name || user.email,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', montagem.id)
+        .is('montador_id', null)
+        .neq('status', 'concluida')
+        .select('id');
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        toast.warning('Esta montagem acabou de ser atribuida para outro montador.');
+        queryClient.invalidateQueries({ queryKey: ['montagens-internas-todas'] });
+        return;
+      }
+
       toast.success(`Montagem atribuída a você (${user.full_name?.split(' ')[0] || 'Montador'})`);
+      queryClient.invalidateQueries({ queryKey: ['montagens-internas-todas'] });
     } catch (error) {
       console.error('Erro ao auto-atribuir montador:', error);
       toast.error('Erro ao atribuir montagem');
@@ -1101,7 +1116,7 @@ export default function MontagemInterna() {
 
               {montadoresInternos.length === 0 && (
                 <p className="text-sm text-orange-600 mt-2">
-                  ⚠️ Nenhum montador interno encontrado. Verifique se há colaboradores com o cargo "Montador", "Logística" ou "Estoque".
+                  ⚠️ Nenhum montador interno encontrado. Verifique se há colaboradores com o cargo &quot;Montador&quot;, &quot;Logística&quot; ou &quot;Estoque&quot;.
                 </p>
               )}
             </div>

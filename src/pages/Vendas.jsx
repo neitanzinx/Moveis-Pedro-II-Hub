@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
+import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { formatarTelefone, formatarNome, capitalizar } from "@/utils/formatters";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -57,8 +58,9 @@ export default function Vendas() {
 
     // Estados para Preferências de Entrega
     const [modalPreferencias, setModalPreferencias] = useState(null); // { entregaId, preferencias }
-    const [preferenciasTemp, setPreferenciasTemp] = useState({ dias: [], turnos: [], obs: "" });
+    const [preferenciasTemp, setPreferenciasTemp] = useState({ dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
     const [modalTransferencia, setModalTransferencia] = useState(null); // { vendaId }
+    const [modalLiberarEntrega, setModalLiberarEntrega] = useState(null); // { entregaId, pedido }
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -223,6 +225,66 @@ export default function Vendas() {
                 }
             }
 
+            // 7. Cancelar ou sinalizar pedidos de compra (encomendas)
+            try {
+                // 7.1 Cancelar solicitações pendentes
+                const { data: solicitacoes } = await supabase
+                    .from('solicitacoes_encomenda')
+                    .select('*')
+                    .eq('venda_id', venda.id);
+
+                if (solicitacoes && solicitacoes.length > 0) {
+                    for (const sol of solicitacoes) {
+                        if (sol.status === 'pendente') {
+                            await supabase
+                                .from('solicitacoes_encomenda')
+                                .update({ status: 'cancelada', observacoes: (sol.observacoes || '') + ' [VENDA CANCELADA]' })
+                                .eq('id', sol.id);
+                        } else {
+                            await supabase
+                                .from('solicitacoes_encomenda')
+                                .update({ status: 'cancelada_retida_cd', observacoes: (sol.observacoes || '') + ' [VENDA CANCELADA - ENVIAR PARA CD]' })
+                                .eq('id', sol.id);
+                        }
+                    }
+                }
+
+                // 7.2 Sinalizar itens nas ordens de compra e alertar o comprador
+                const { data: itensCompra } = await supabase
+                    .from('compras_oc_itens')
+                    .select('id, ordem_compra_id, observacao_item')
+                    .eq('venda_id', venda.id);
+
+                if (itensCompra && itensCompra.length > 0) {
+                    const ordensNotificadas = new Set();
+                    for (const item of itensCompra) {
+                        await supabase
+                            .from('compras_oc_itens')
+                            .update({ 
+                                observacao_item: '[VENDA CANCELADA - ENVIAR PARA CD] ' + (item.observacao_item || '')
+                            })
+                            .eq('id', item.id);
+                            
+                        if (!ordensNotificadas.has(item.ordem_compra_id)) {
+                            ordensNotificadas.add(item.ordem_compra_id);
+                            // Criar notificação no histórico da ordem alertando a logística / compras
+                            await supabase
+                                .from('compras_comunicacoes')
+                                .insert([{
+                                    ordem_compra_id: item.ordem_compra_id,
+                                    tipo: 'SISTEMA',
+                                    remetente: 'Sistema Vendas',
+                                    destinatario: 'Setor de Compras',
+                                    conteudo: { mensagem: `ATENÇÃO: A Venda #${venda.numero_pedido} foi CANCELADA. O item desta venda deve ser redirecionado para o CD quando chegar.` },
+                                    data_envio: new Date().toISOString()
+                                }]);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('Erro ao cancelar/sinalizar encomendas:', err);
+            }
+
             return {
                 vendaId: venda.id,
                 lancamentosCancelados: lancamentosVenda.length,
@@ -237,7 +299,9 @@ export default function Vendas() {
             queryClient.invalidateQueries({ queryKey: ['entregas'] });
             queryClient.invalidateQueries({ queryKey: ['montagens'] });
             queryClient.invalidateQueries({ queryKey: ['assistencias'] });
-            toast.success("Venda cancelada! Entregas, montagens, assistências e lançamentos também foram cancelados.");
+            queryClient.invalidateQueries({ queryKey: ['solicitacoes-pdv'] });
+            queryClient.invalidateQueries({ queryKey: ['pedidos-compra-dashboard'] });
+            toast.success("Venda cancelada! Entregas, montagens, assistências, lançamentos e encomendas vinculadas também foram sinalizados.");
         }
     });
 
@@ -305,6 +369,12 @@ export default function Vendas() {
             dataOriginal: modalReagendamento.dataAgendada,
             turnoOriginal: modalReagendamento.turno
         });
+    };
+
+    const confirmarLiberarEntrega = () => {
+        if (!modalLiberarEntrega) return;
+        liberarEntregaMutation.mutate(modalLiberarEntrega.entregaId);
+        setModalLiberarEntrega(null);
     };
 
     const handleCancelarVenda = async (venda) => {
@@ -588,7 +658,10 @@ export default function Vendas() {
                                                             <Button
                                                                 variant="ghost"
                                                                 size="icon"
-                                                                onClick={() => abrirModalNfe(venda)}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    abrirModalNfe(venda);
+                                                                }}
                                                                 title="Emitir NFe"
                                                             >
                                                                 <Receipt className="w-4 h-4 text-green-600" />
@@ -596,7 +669,8 @@ export default function Vendas() {
                                                         )
                                                     )}
 
-                                                    <Button variant="ghost" size="icon" onClick={() => {
+                                                    <Button variant="ghost" size="icon" onClick={(e) => {
+                                                        e.stopPropagation();
                                                         const clienteCompleto = clientes.find(c => c.id === venda.cliente_id) || { nome_completo: venda.cliente_nome, telefone: venda.cliente_telefone };
 
                                                         // Resolver nome do vendedor
@@ -616,7 +690,10 @@ export default function Vendas() {
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"
-                                                            onClick={() => handleCancelarVenda(venda)}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleCancelarVenda(venda);
+                                                            }}
                                                             disabled={cancelarVendaMutation.isPending}
                                                             title="Cancelar Venda"
                                                         >
@@ -632,7 +709,8 @@ export default function Vendas() {
                                                                 <Button
                                                                     variant="ghost"
                                                                     size="icon"
-                                                                    onClick={() => {
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
                                                                         setModalReagendamento({
                                                                             vendaId: venda.id,
                                                                             entregaId: entregaAgendada.id,
@@ -666,9 +744,10 @@ export default function Vendas() {
                                                                     variant="ghost"
                                                                     size="icon"
                                                                     onClick={() => {
-                                                                        if (confirm(`Liberar entrega do pedido #${venda.numero_pedido}? Ele voltará para a Triagem da logística.`)) {
-                                                                            liberarEntregaMutation.mutate(entregaAguardando.id);
-                                                                        }
+                                                                        setModalLiberarEntrega({
+                                                                            entregaId: entregaAguardando.id,
+                                                                            pedido: venda.numero_pedido
+                                                                        });
                                                                     }}
                                                                     disabled={liberarEntregaMutation.isPending}
                                                                     title="Liberar para Entrega"
@@ -689,7 +768,7 @@ export default function Vendas() {
                                                                     variant="ghost"
                                                                     size="icon"
                                                                     onClick={() => {
-                                                                        const prefs = entrega.preferencias_entrega || { dias: [], turnos: [], obs: "" };
+                                                                        const prefs = entrega.preferencias_entrega || { dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" };
                                                                         setPreferenciasTemp(prefs);
                                                                         setModalPreferencias({ entregaId: entrega.id });
                                                                     }}
@@ -932,17 +1011,17 @@ export default function Vendas() {
                         <div className="space-y-3">
                             <Label>Dias da Semana Permitidos</Label>
                             <div className="grid grid-cols-3 gap-2">
-                                {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((dia, idx) => (
+                                {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((dia, idx) => (
                                     <div key={idx} className="flex items-center space-x-2">
                                         <Checkbox
                                             id={`venda-dia-${idx}`}
-                                            checked={preferenciasTemp.dias?.includes(idx + 1)}
+                                            checked={preferenciasTemp.dias?.includes(idx)}
                                             onCheckedChange={(checked) => {
                                                 setPreferenciasTemp(prev => ({
                                                     ...prev,
                                                     dias: checked
-                                                        ? [...(prev.dias || []), idx + 1]
-                                                        : (prev.dias || []).filter(d => d !== idx + 1)
+                                                        ? [...(prev.dias || []), idx]
+                                                        : (prev.dias || []).filter(d => d !== idx)
                                                 }));
                                             }}
                                         />
@@ -1002,6 +1081,46 @@ export default function Vendas() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Modal de Liberar Entrega */}
+            <Dialog open={!!modalLiberarEntrega} onOpenChange={(open) => !open && setModalLiberarEntrega(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-amber-600">
+                            <Unlock className="w-5 h-5" />
+                            Liberar Entrega para Logística
+                        </DialogTitle>
+                        <DialogDescription>
+                            Você está liberando a entrega para a triagem da logística.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <p className="text-sm text-gray-700 mb-4">
+                            <strong>Pedido:</strong> #{modalLiberarEntrega?.pedido}
+                        </p>
+                        <p className="text-sm text-gray-600">
+                            Após confirmar, o pedido voltará para a fila de triagem da logística e poderá ser agendado para entrega.
+                        </p>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setModalLiberarEntrega(null)}>
+                            Cancelar
+                        </Button>
+                        <Button
+                            onClick={confirmarLiberarEntrega}
+                            disabled={liberarEntregaMutation.isPending}
+                            className="bg-amber-600 hover:bg-amber-700"
+                        >
+                            {liberarEntregaMutation.isPending ? (
+                                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Liberando...</>
+                            ) : (
+                                <><Unlock className="w-4 h-4 mr-2" />Confirmar e Liberar</>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             {/* Modal de Transferência de Montagem */}
             <TransferirMontagemModal
                 isOpen={!!modalTransferencia}
@@ -1099,108 +1218,69 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
     }
 
     const badges = [];
+    const pushBadge = (key, className, Icon, label) => {
+        badges.push(
+            <Badge key={key} className={`${className} gap-1 w-fit whitespace-nowrap`}>
+                <Icon className="w-3 h-3" />
+                {label}
+            </Badge>
+        );
+    };
 
     // 0. Pre-calculating delivery info to avoid conflicting statuses
     const entregasVenda = entregas.filter(e => e.numero_pedido === venda.numero_pedido);
     const temDataEntrega = entregasVenda.some(e => e.data_agendada);
+    const triagemPendente = !venda.triagem_realizada && !temDataEntrega;
+    const pagamentoPendente = venda.status === 'Pagamento Pendente';
 
     // 1. Verificação de Triagem
-    if (!venda.triagem_realizada && !temDataEntrega) {
-        badges.push(
-            <Badge key="triagem" className="bg-orange-100 text-orange-700 border border-orange-200 gap-1 w-fit">
-                <ClipboardList className="w-3 h-3" />
-                Pendente Triagem
-            </Badge>
-        );
+    if (triagemPendente) {
+        pushBadge('triagem', 'bg-orange-100 text-orange-700 border border-orange-200', ClipboardList, 'Pendente Triagem');
     }
 
     // 2. Verificação de Entrega
+    // Se a triagem ainda não foi realizada e não existe data, não mostramos status de entrega/montagem.
+    if (!triagemPendente) {
+        // Se não tem entregas criadas
+        if (entregasVenda.length === 0) {
+            // Verificar se todos os itens são do tipo 'retira' (Cliente Retira)
+            const todosRetira = venda.itens?.every(item => item.tipo_entrega === 'retira');
 
-    // Se não tem entregas criadas
-    if (entregasVenda.length === 0) {
-        // Verificar se todos os itens são do tipo 'retira' (Cliente Retira)
-        const todosRetira = venda.itens?.every(item => item.tipo_montagem === 'retira');
-
-        if (todosRetira && venda.itens?.length > 0) {
-            badges.push(
-                <Badge key="retira" className="bg-purple-100 text-purple-700 border border-purple-200 gap-1 w-fit">
-                    <UserCheck className="w-3 h-3" />
-                    Cliente Retira
-                </Badge>
-            );
-        } else if (venda.status === 'Pagamento Pendente') {
-            badges.push(
-                <Badge key="pgto" className="bg-gray-100 text-gray-600 border border-gray-200 gap-1 w-fit">
-                    <Clock className="w-3 h-3" />
-                    Aguardando Pgto
-                </Badge>
-            );
-        } else if (venda.triagem_realizada) {
-            // SÓ mostra Aguardando Expedição se a triagem já foi feita!
-            // E se não for Pagamento Pendente ou Cliente Retira.
-            badges.push(
-                <Badge key="processando" className="bg-yellow-100 text-yellow-700 border border-yellow-200 gap-1 w-fit">
-                    <Package className="w-3 h-3" />
-                    Aguardando Expedição
-                </Badge>
-            );
-        }
-    } else {
-        // Tem entregas
-        const entrega = entregasVenda[0]; // Pega a principal (simplificação)
-        const dataEntrega = entrega.data_agendada ? new Date(entrega.data_agendada).toLocaleDateString('pt-BR') : null;
-
-        if (entrega.tipo_entrega === 'Retirada') {
-            if (entrega.status === 'Entregue') {
-                badges.push(
-                    <Badge key="retirado" className="bg-green-100 text-green-700 border border-green-200 gap-1 w-fit">
-                        <CheckCircle className="w-3 h-3" />
-                        Retirado
-                    </Badge>
-                );
-            } else {
-                badges.push(
-                    <Badge key="retirada_pendente" className="bg-purple-100 text-purple-700 border border-purple-200 gap-1 w-fit">
-                        <UserCheck className="w-3 h-3" />
-                        Aguardando Retirada
-                    </Badge>
-                );
+            if (todosRetira && venda.itens?.length > 0) {
+                pushBadge('retira', 'bg-purple-100 text-purple-700 border border-purple-200', UserCheck, 'Cliente Retira');
+            } else if (venda.triagem_realizada && !pagamentoPendente) {
+                // SÓ mostra Aguardando Expedição se a triagem já foi feita e o pagamento não está pendente.
+                pushBadge('processando', 'bg-yellow-100 text-yellow-700 border border-yellow-200', Package, 'Aguardando Expedição');
             }
         } else {
-            // Entrega Comum
-            if (entrega.status === 'Entregue') {
-                badges.push(
-                    <Badge key="entregue" className="bg-green-100 text-green-700 border border-green-200 gap-1 w-fit">
-                        <CheckCircle className="w-3 h-3" />
-                        Entregue
-                    </Badge>
-                );
-            } else if (entrega.status === 'Em Rota') {
-                badges.push(
-                    <Badge key="em_rota" className="bg-blue-100 text-blue-700 border border-blue-200 gap-1 w-fit">
-                        <Truck className="w-3 h-3" />
-                        Em Rota
-                    </Badge>
-                );
-            } else {
-                const hojeIso = new Date().toLocaleDateString('en-CA');
-                const dataEntregaIso = entrega.data_agendada ? entrega.data_agendada.split('T')[0] : null;
-                const isAtrasada = dataEntregaIso && dataEntregaIso < hojeIso;
+            // Tem entregas
+            const entrega = entregasVenda[0]; // Pega a principal (simplificação)
+            const dataEntrega = entrega.data_agendada ? new Date(entrega.data_agendada).toLocaleDateString('pt-BR') : null;
 
-                if (isAtrasada) {
-                    badges.push(
-                        <Badge key="ent_atrasada" className="bg-red-100 text-red-700 border border-red-200 gap-1 w-fit">
-                            <AlertTriangle className="w-3 h-3" />
-                            Atrasada: {dataEntrega}
-                        </Badge>
-                    );
+            const todosRetira = venda.itens?.every(item => item.tipo_entrega === 'retira');
+
+            if (todosRetira) {
+                if (entrega.status === 'Entregue') {
+                    pushBadge('retirado', 'bg-green-100 text-green-700 border border-green-200', CheckCircle, 'Concluido');
                 } else {
-                    badges.push(
-                        <Badge key="ent_pendente" className="bg-amber-100 text-amber-700 border border-amber-200 gap-1 w-fit">
-                            <Truck className="w-3 h-3" />
-                            Entrega: {dataEntrega || 'A Agendar'}
-                        </Badge>
-                    );
+                    pushBadge('retirada_pendente', 'bg-purple-100 text-purple-700 border border-purple-200', UserCheck, 'Aguardando Retirada');
+                }
+            } else {
+                // Entrega Comum
+                if (entrega.status === 'Entregue') {
+                    pushBadge('entregue', 'bg-green-100 text-green-700 border border-green-200', CheckCircle, 'Entregue');
+                } else if (entrega.status === 'Em Rota') {
+                    pushBadge('em_rota', 'bg-blue-100 text-blue-700 border border-blue-200', Truck, 'Em Rota');
+                } else {
+                    const hojeIso = new Date().toLocaleDateString('en-CA');
+                    const dataEntregaIso = entrega.data_agendada ? entrega.data_agendada.split('T')[0] : null;
+                    const isAtrasada = dataEntregaIso && dataEntregaIso < hojeIso;
+
+                    if (isAtrasada) {
+                        pushBadge('ent_atrasada', 'bg-red-100 text-red-700 border border-red-200', AlertTriangle, `Atrasada: ${dataEntrega}`);
+                    } else {
+                        pushBadge('ent_pendente', 'bg-amber-100 text-amber-700 border border-amber-200', Truck, `Entrega: ${dataEntrega || 'A Agendar'}`);
+                    }
                 }
             }
         }
@@ -1209,25 +1289,15 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
     // 3. Verificação de Montagem
     const temMontagem = venda.itens?.some(i => ['Montado', 'Montagem Externa', 'Montagem no Local', 'interna', 'terceirizada'].includes(i.tipo_entrega) || ['interna', 'terceirizada', 'Montagem Externa'].includes(i.tipo_montagem));
 
-    if (temMontagem) {
+    if (temMontagem && !triagemPendente && !pagamentoPendente) {
         const montagensVenda = montagens.filter(m => m.numero_pedido === venda.numero_pedido);
         const todasConcluidas = montagensVenda.length > 0 && montagensVenda.every(m => m.status === 'concluida');
 
         if (todasConcluidas) {
-            badges.push(
-                <Badge key="montado" className="bg-green-100 text-green-700 border border-green-200 gap-1 w-fit">
-                    <Wrench className="w-3 h-3" />
-                    Montado
-                </Badge>
-            );
+            pushBadge('montado', 'bg-green-100 text-green-700 border border-green-200', Wrench, 'Montado');
         } else {
             // Se tem itens de montagem criados ou se a venda requer montagem
-            badges.push(
-                <Badge key="mont_pendente" className="bg-amber-100 text-amber-700 border border-amber-200 gap-1 w-fit">
-                    <Wrench className="w-3 h-3" />
-                    Montagem Pendente
-                </Badge>
-            );
+            pushBadge('mont_pendente', 'bg-amber-100 text-amber-700 border border-amber-200', Wrench, 'Montagem Pendente');
         }
     }
 

@@ -54,12 +54,12 @@ export default function Layout({ children, currentPageName }) {
         const { data: ordens } = await supabase
           .from('compras_ordens')
           .select('status, updated_at, created_at, devolutiva')
-          .or('status.eq.NÃO FATURADO,status.eq.APROVADO')
+          .or('status.eq.Aguardando Envio,status.eq.Pedido Enviado')
           .is('deleted_at', null);
 
         const criticos = (ordens || []).filter(o => {
-          if (o.status === 'NÃO FATURADO') return true;
-          if (o.status === 'APROVADO' && !o.devolutiva) {
+          if (o.status === 'Aguardando Envio') return true;
+          if (o.status === 'Pedido Enviado' && !o.devolutiva) {
             const horas = differenceInHours(new Date(), new Date(o.updated_at || o.created_at));
             return horas > 24;
           }

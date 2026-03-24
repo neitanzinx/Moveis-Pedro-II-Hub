@@ -169,7 +169,7 @@ export default function RecorrentesManager({ lancamentos }) {
             </h4>
             <p className="text-sm" style={{ color: '#8B8B8B' }}>
               Os lançamentos recorrentes são verificados e gerados automaticamente quando você acessa esta página.
-              Novos lançamentos são criados com status "Pendente" para revisão.
+              Novos lançamentos são criados com status &quot;Pendente&quot; para revisão.
             </p>
           </div>
         </div>

@@ -183,7 +183,7 @@ export default function ConfiguracaoPagSeguro() {
                             <ol className="list-decimal ml-4 mt-1 text-sm space-y-1">
                                 <li>Acesse <a href="https://dev.pagbank.uol.com.br" target="_blank" rel="noopener noreferrer" className="underline">dev.pagbank.uol.com.br</a></li>
                                 <li>Faça login com sua conta PagBank</li>
-                                <li>Vá em "Credenciais" no menu</li>
+                                <li>Vá em &quot;Credenciais&quot; no menu</li>
                                 <li>Copie o Token de Sandbox ou Produção</li>
                             </ol>
                         </AlertDescription>

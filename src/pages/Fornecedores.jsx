@@ -9,13 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
-import BulkPriceUpdateModal from "@/components/compras/BulkPriceUpdateModal";
 import FornecedorModal from "@/components/cadastros/FornecedorModal";
 
 export default function Fornecedores() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isBulkUpdateOpen, setIsBulkUpdateOpen] = useState(false);
   const [editingFornecedor, setEditingFornecedor] = useState(null);
   const [showDuplicatas, setShowDuplicatas] = useState(false);
   const [duplicatas, setDuplicatas] = useState([]);
@@ -218,14 +216,6 @@ export default function Fornecedores() {
             Detectar Duplicatas
           </Button>
           <Button
-            variant="outline"
-            onClick={() => setIsBulkUpdateOpen(true)}
-            className="gap-2 text-blue-700 border-blue-200 hover:bg-blue-50"
-          >
-            <TrendingUp className="w-4 h-4" />
-            Reajuste em Massa
-          </Button>
-          <Button
             onClick={() => {
               setEditingFornecedor(null);
               setIsModalOpen(true);
@@ -407,15 +397,6 @@ export default function Fornecedores() {
         fornecedor={editingFornecedor}
         onSuccess={handleSuccess}
       />
-
-      {/* Modal de Reajuste em Massa */}
-      {isBulkUpdateOpen && (
-        <BulkPriceUpdateModal
-          open={isBulkUpdateOpen}
-          onClose={() => setIsBulkUpdateOpen(false)}
-          fornecedores={fornecedores || []}
-        />
-      )}
     </div>
   );
 }

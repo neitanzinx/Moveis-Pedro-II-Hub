@@ -365,7 +365,7 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                         setShowForm(true);
                       }}
                     >
-                      Criar novo cliente com o nome "{formatarNome(busca)}"
+                      Criar novo cliente com o nome &quot;{formatarNome(busca)}&quot;
                     </Button>
                   </div>
                 )}

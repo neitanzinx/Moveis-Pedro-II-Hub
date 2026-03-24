@@ -1,467 +1,755 @@
-import { supabase } from '@/lib/supabase';
-import { ApprovalEngine } from './ApprovalEngine';
-import { comprasFinanceiroService } from './comprasFinanceiroService';
+import { base44 } from "@/api/base44Client";
+import { supabase } from "@/lib/supabase";
 
-// Helper function to handle Supabase errors consistently
-const handleResponse = ({ data, error }, customMessage) => {
-    if (error) {
-        console.error(`Error in comprasService: ${customMessage}`, error);
-        throw new Error(error.message);
-    }
-    return data;
-};
+const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000001';
+
+function mergeOcMetadata(currentMetadata = {}, incomingMetadata = {}, lojaId = null) {
+  return {
+    ...currentMetadata,
+    ...incomingMetadata,
+    loja_id: incomingMetadata.loja_id || lojaId || currentMetadata.loja_id || null,
+  };
+}
+
+async function validarFornecedorDosItensOc(fornecedorId, itens = []) {
+  if (!fornecedorId || !Array.isArray(itens) || itens.length === 0) {
+    return;
+  }
+
+  const produtoIds = [...new Set(
+    itens
+      .map((item) => item.produto_id)
+      .filter(Boolean)
+  )];
+
+  if (produtoIds.length === 0) {
+    return;
+  }
+
+  const { data: produtos = [], error } = await supabase
+    .from('produtos')
+    .select('id, nome, fornecedor_id')
+    .in('id', produtoIds);
+
+  if (error) {
+    throw new Error(`Erro ao validar fornecedor dos itens: ${error.message}`);
+  }
+
+  const produtosFornecedorDivergente = produtos.filter((produto) => {
+    if (!produto?.id) return false;
+    if (!produto?.fornecedor_id) return false;
+    return String(produto.fornecedor_id) !== String(fornecedorId);
+  });
+
+  if (produtosFornecedorDivergente.length > 0) {
+    const nomes = produtosFornecedorDivergente
+      .map((produto) => produto.nome)
+      .filter(Boolean)
+      .join(', ');
+
+    throw new Error(`A OC só pode conter itens do fornecedor selecionado. Produtos divergentes: ${nomes}`);
+  }
+}
+
+/**
+ * Serviço centralizado para operações de Compras
+ * Padrão: Usa Base44 SDK para CRUD + lógica de automação
+ * Inclui: Approval Workflow + Partial Receipts
+ */
 
 export const comprasService = {
-    // ------------------------------------------------------------------
-    // METADATA / CONFIGURATIONS
-    // ------------------------------------------------------------------
+  /**
+   * Lista todas as OCs com opção de ordenação
+   * @param {string} orderBy - Campo para ordenação (ex: '-data_pedido')
+   * @returns {Promise<Array>}
+   */
+  async listOcs(orderBy = '-created_at') {
+    try {
+      const ocs = await base44.entities.ComprasOrden.filter({ deleted_at: null }, orderBy);
+      return ocs || [];
+    } catch (error) {
+      console.error('Erro ao listar OCs:', error);
+      throw error;
+    }
+  },
 
-    async getCentrosCusto(tipo = null) {
-        let query = supabase
-            .from('compras_centro_custos')
-            .select('*')
-            .eq('ativo', true)
-            .order('ordem_index');
+  /**
+   * Busca uma OC pelo ID com seus itens relacionados
+   * @param {string} ocId - UUID da OC
+   * @returns {Promise<Object>}
+   */
+  async getOcDetalhes(ocId) {
+    try {
+      const oc = await base44.entities.ComprasOrden.get(ocId);
+      
+      // Buscar itens da OC
+      const { data: itens } = await supabase
+        .from('compras_oc_itens')
+        .select('*')
+        .eq('ordem_compra_id', ocId);
+      
+      return {
+        ...oc,
+        itens: itens || []
+      };
+    } catch (error) {
+      console.error('Erro ao buscar detalhes da OC:', error);
+      throw error;
+    }
+  },
 
-        if (tipo) {
-            query = query.eq('tipo', tipo);
-        }
+  /**
+   * Cria uma nova OC (Ordem de Compra)
+   * @param {Object} data - { fornecedor_id, itens, centro_custo_id, data_previsao_entrega, observacoes }
+   * @returns {Promise<Object>} OC criada
+   */
+  async createOc(data) {
+    try {
+      const {
+        fornecedor_id,
+        fornecedor_nome,
+        itens = [], // Array de { produto_id, quantidade_pedida, preco_unitario }
+        centro_custo_id,
+        data_previsao_entrega,
+        observacoes,
+        loja_id,
+        metadata = {}
+      } = data;
 
-        return handleResponse(await query, 'fetching centros de custo');
-    },
+      if (!fornecedor_id || itens.length === 0) {
+        throw new Error('Fornecedor e itens são obrigatórios');
+      }
 
-    async getWorkflows() {
-        // Agora as colunas do Kanban são baseadas nesta tabela que sincroniza com Centros de Custo
-        return handleResponse(
-            await supabase
-                .from('compras_workflows')
-                .select(`
-                    *,
-                    centro_custo:centro_custo_id (id, nome, cor, tipo)
-                `)
-                .eq('ativo', true)
-                .order('ordem_index'),
-            'fetching kanban columns'
-        );
-    },
+      await validarFornecedorDosItensOc(fornecedor_id, itens);
 
-    // ------------------------------------------------------------------
-    // PURCHASE ORDERS (ORDENS DE COMPRA)
-    // ------------------------------------------------------------------
+      // Calcular valor total
+      const valor_total = itens.reduce((sum, item) => 
+        sum + (item.quantidade_pedida * item.preco_unitario), 0
+      );
 
-    async getBoard() {
-        // Status priority map for sorting (Swimlanes)
-        const statusPriority = {
-            'NÃO FATURADO': 1,
-            'APROVADO': 2,
-            'CONFIRMADO': 3,
-            'COM PREVISÃO DE CHEGADA': 4,
-            'EM TRANSPORTE': 5,
-            'ENTREGUE': 6,
-            'Cancelado': 99
-        };
+      // Gerar número do pedido
+      const numeroOc = await this._gerarNumeroPedido();
 
-        // Get dynamic columns (Workflows linked to Cost Centers)
-        const columns = await this.getWorkflows();
+      // Criar OC em status Rascunho com approval_status Pendente
+      const novaOc = await base44.entities.ComprasOrden.create({
+        numero_pedido: numeroOc,
+        fornecedor_id,
+        fornecedor_nome,
+        centro_custo_id,
+        data_previsao_entrega,
+        observacoes,
+        valor_total,
+        status: 'Rascunho',
+        approval_status: 'Pendente',
+        metadata: mergeOcMetadata({}, metadata, loja_id),
+        data_pedido: new Date().toISOString().split('T')[0]
+      });
 
-        // Get active cards with their status labels and center costs
-        const cards = handleResponse(
-            await supabase
-                .from('compras_ordens')
-                .select(`
-                    *,
-                    centro_custo:centro_custo_id (id, nome, cor, tipo),
-                    fornecedor:fornecedor_id (id, nome),
-                    itens:compras_oc_itens (id, produto_nome, quantidade_pedida)
-                `)
-                .is('deleted_at', null)
-                .order('updated_at', { ascending: false }),
-            'fetching board cards'
-        );
-
-        // Sort cards by status priority, then by update date
-        const sortedCards = [...cards].sort((a, b) => {
-            const pA = statusPriority[a.status] || 50;
-            const pB = statusPriority[b.status] || 50;
-            if (pA !== pB) return pA - pB;
-            return new Date(b.updated_at) - new Date(a.updated_at);
+      // Criar itens da OC
+      for (const item of itens) {
+        await base44.entities.ComprasOcItem.create({
+          ordem_compra_id: novaOc.id,
+          produto_id: item.produto_id,
+          produto_nome: item.produto_nome,
+          descricao_personalizada: item.descricao_personalizada || null,
+          quantidade_pedida: item.quantidade_pedida,
+          preco_unitario: item.preco_unitario,
+          preco_tabela: item.preco_tabela,
+          quantidade_recebida: 0,
+          status_recebimento: 'Pendente'
         });
+      }
 
-        // Group cards by their Cost Center Column
-        const board = columns.map(col => ({
-            ...col,
-            cards: sortedCards.filter(card => card.centro_custo_id === col.centro_custo_id)
-        }));
+      // Atualizar SolicitacaoEncomenda se existir (vincular)
+      if (data.solicitacoes_encomenda_ids) {
+        for (const solicId of data.solicitacoes_encomenda_ids) {
+          await supabase
+            .from('solicitacoes_encomenda')
+            .update({
+              ordem_id: novaOc.id,
+              status: 'em_compra',
+            })
+            .eq('id', solicId);
+        }
+      }
 
-        return { columns, cards: sortedCards, board };
-    },
+      return novaOc;
+    } catch (error) {
+      console.error('Erro ao criar OC:', error);
+      throw error;
+    }
+  },
 
-    async getOrdens(options = {}) {
-        const { limit = 100, status } = options;
-        let query = supabase
-            .from('compras_ordens')
-            .select(`
-                *,
-                centro_custo:centro_custo_id (id, nome, cor),
-                fornecedor:fornecedor_id (id, nome)
-            `)
-            .is('deleted_at', null)
-            .order('created_at', { ascending: false });
+  /**
+   * Submete uma OC para Aprovação
+   * Transição: Rascunho → Aguardando Aprovação
+   * @param {string} ocId - UUID da OC
+   * @returns {Promise<Object>}
+   */
+  async submitForApproval(ocId) {
+    try {
+      const oc = await base44.entities.ComprasOrden.get(ocId);
+      
+      if (oc.status !== 'Rascunho') {
+        throw new Error(`Só é possível enviar OCs em status "Rascunho" para aprovação. Status atual: ${oc.status}`);
+      }
 
-        if (status) {
-            query = query.eq('status', status);
+      return await base44.entities.ComprasOrden.update(ocId, {
+        status: 'Aguardando Aprovacao',
+        approval_status: 'Pendente',
+        updated_at: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Erro ao enviar OC para aprovação:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Aprova uma OC
+   * Transição: Aguardando Aprovação → Aguardando Envio
+   * @param {string} ocId - UUID da OC
+   * @param {Object} data - { comments? }
+   * @returns {Promise<Object>}
+   */
+  async approveOc(ocId, data = {}) {
+    try {
+      const oc = await base44.entities.ComprasOrden.get(ocId);
+      
+      if (oc.status !== 'Aguardando Aprovacao') {
+        throw new Error(`Só é possível aprovar OCs em status "Aguardando Aprovação". Status atual: ${oc.status}`);
+      }
+
+      // Aqui você pode adicionar lógica para obter o ID do usuário aprovador
+      // Para agora, deixamos como null - a aplicação React passará o user_id
+      const approvedBy = data.approved_by || null;
+
+      return await base44.entities.ComprasOrden.update(ocId, {
+        status: 'Aguardando Envio',
+        approval_status: 'Aprovado',
+        approved_by: approvedBy,
+        approval_date: new Date().toISOString(),
+        approval_comments: data.comments || '',
+        updated_at: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Erro ao aprovar OC:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Rejeita uma OC
+   * Transição: Aguardando Aprovação → Rascunho (para revisão)
+   * @param {string} ocId - UUID da OC
+   * @param {Object} data - { comments }
+   * @returns {Promise<Object>}
+   */
+  async rejectOc(ocId, data = {}) {
+    try {
+      const oc = await base44.entities.ComprasOrden.get(ocId);
+      
+      if (oc.status !== 'Aguardando Aprovacao') {
+        throw new Error(`Só é possível rejeitar OCs em status "Aguardando Aprovação". Status atual: ${oc.status}`);
+      }
+
+      const rejectedBy = data.rejected_by || null;
+
+      return await base44.entities.ComprasOrden.update(ocId, {
+        status: 'Rascunho', // Volta para rascunho para revisão
+        approval_status: 'Rejeitado',
+        approved_by: rejectedBy,
+        approval_date: new Date().toISOString(),
+        approval_comments: data.comments || '',
+        updated_at: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Erro ao rejeitar OC:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Atualiza o status de uma OC com validação de transição
+   * Estados válidos: Rascunho, Aguardando Aprovacao, Aguardando Envio, Pedido Enviado, 
+   *                  Parcialmente Recebido, Recebido, Cancelada
+   * @param {string} ocId - UUID da OC
+   * @param {string} novoStatus - Novo status
+   * @returns {Promise<Object>}
+   */
+  async updateOcStatus(ocId, novoStatus) {
+    try {
+      const statusValidos = [
+        'Rascunho',
+        'Aguardando Aprovacao',
+        'Aguardando Envio',
+        'Pedido Enviado',
+        'Parcialmente Recebido',
+        'Recebido',
+        'Cancelada'
+      ];
+      
+      if (!statusValidos.includes(novoStatus)) {
+        throw new Error(`Status inválido: ${novoStatus}`);
+      }
+
+      const oc = await base44.entities.ComprasOrden.get(ocId);
+      
+      // Validar transição de estado
+      const transicoes = {
+        'Rascunho': ['Aguardando Aprovacao', 'Pedido Enviado', 'Cancelada'],
+        'Aguardando Aprovacao': ['Aguardando Envio', 'Rascunho', 'Cancelada'],
+        'Aguardando Envio': ['Pedido Enviado', 'Rascunho', 'Cancelada'],
+        'Pedido Enviado': ['Parcialmente Recebido', 'Recebido', 'Cancelada'],
+        'Parcialmente Recebido': ['Recebido', 'Cancelada'],
+        'Recebido': ['Cancelada'],
+        'Cancelada': []
+      };
+
+      if (!transicoes[oc.status]?.includes(novoStatus)) {
+        throw new Error(`Transição inválida de ${oc.status} para ${novoStatus}`);
+      }
+
+      return await base44.entities.ComprasOrden.update(ocId, {
+        status: novoStatus,
+        updated_at: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Erro ao atualizar status da OC:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Registra um recebimento de OC (com suporte a recebimentos parciais)
+   * Atualiza estoque, histórico de recebimento e cria lançamento financeiro
+   * @param {string} ocId - UUID da OC
+   * @param {Object} dadosRecebimento - { itens_recebidos[{ item_id, quantidade_recebida }], chave_nfe?, observacoes? }
+   * @returns {Promise<Object>}
+   */
+  async receberOc(ocId, dadosRecebimento) {
+    try {
+      const { itens_recebidos = [], chave_nfe, observacoes } = dadosRecebimento;
+
+      const oc = await base44.entities.ComprasOrden.get(ocId);
+
+      if (oc.status !== 'Pedido Enviado' && oc.status !== 'Parcialmente Recebido') {
+        throw new Error(`Só é possível receber OCs em status "Pedido Enviado" ou "Parcialmente Recebido". Status atual: ${oc.status}`);
+      }
+
+      if (!itens_recebidos || itens_recebidos.length === 0) {
+        throw new Error('Nenhum item foi selecionado para recebimento');
+      }
+
+      // 1. Criar registro de recebimento no histórico
+      const { data: { session } } = await supabase.auth.getSession();
+      const receivedBy = session?.user?.id || oc?.created_by || oc?.responsavel_id || DEFAULT_TENANT_ID;
+      const tenantId = oc.tenant_id || oc.metadata?.tenant_id || DEFAULT_TENANT_ID;
+
+      const { data: recebimentoData, error: recebimentoError } = await supabase
+        .from('compras_recebimentos_historico')
+        .insert({
+          tenant_id: tenantId,
+          ordem_compra_id: ocId,
+          numero_oc: oc.numero_pedido,
+          numero_nfe: chave_nfe || null,
+          observacoes: observacoes || null,
+          recebido_por: receivedBy
+        })
+        .select()
+        .single();
+
+      if (recebimentoError) {
+        throw new Error(`Erro ao criar registro de recebimento: ${recebimentoError.message}`);
+      }
+
+      const recebimentoId = recebimentoData.id;
+      const produtosProcessados = new Set();
+
+      // 2. Processar cada item recebido: atualizar item, estoque e criar histórico
+      let totalItensProcessados = 0;
+      const lojaId = oc.metadata?.loja_id || null; // null = sem loja definida (fallback direto no produto)
+      const produtosIncrementosDiretos = new Map(); // Acumula qtd quando lojaId é desconhecido
+
+      for (const itemRecebido of itens_recebidos) {
+        const { item_id, quantidade_recebida } = itemRecebido;
+
+        if (!quantidade_recebida || quantidade_recebida <= 0) continue;
+
+        // Buscar dados do item OC
+        const { data: itemOc, error: itemError } = await supabase
+          .from('compras_oc_itens')
+          .select('*')
+          .eq('id', item_id)
+          .single();
+
+        if (itemError) {
+          console.warn(`Aviso: Item ${item_id} não encontrado, pulando...`);
+          continue;
         }
 
-        if (limit) {
-            query = query.limit(limit);
+        if (!itemOc?.produto_id) continue;
+
+        // Calcular novo status de recebimento do item
+        const quantidadeRecebidaAnterior = itemOc.quantidade_recebida || 0;
+        const quantidadeRecebidaTotal = quantidadeRecebidaAnterior + quantidade_recebida;
+        let statusRecebimentoItem = 'Pendente';
+
+        if (quantidadeRecebidaTotal >= itemOc.quantidade_pedida) {
+          statusRecebimentoItem = 'Completo';
+        } else if (quantidadeRecebidaTotal > 0) {
+          statusRecebimentoItem = 'Parcial';
         }
 
-        return handleResponse(await query, 'fetching ordens');
-    },
+        // Atualizar item OC com nova quantidade e status
+        await supabase
+          .from('compras_oc_itens')
+          .update({
+            quantidade_recebida: quantidadeRecebidaTotal,
+            status_recebimento: statusRecebimentoItem
+          })
+          .eq('id', item_id);
 
-    async getOrdemById(id) {
-        return handleResponse(
-            await supabase
-                .from('compras_ordens')
-                .select(`
-          *,
-          centro_custo:centro_custo_id (id, nome, cor),
-          fornecedor:fornecedor_id (id, nome),
-          itens:compras_oc_itens (*),
-          comunicacoes:compras_comunicacoes (*),
-          aprovacoes:compras_aprovacoes (*, user:user_id(email, raw_user_meta_data)),
-          aprovacoes_novas:aprovacoes_oc (*, user:aprovador_id(email, raw_user_meta_data))
-        `)
-                .eq('id', id)
-                .single(),
-            `fetching ordem ${id}`
-        );
-    },
+        // Registrar detalhe do recebimento para auditoria
+        await supabase
+          .from('compras_recebimentos_itens')
+          .insert({
+            recebimento_id: recebimentoId,
+            oc_item_id: item_id,
+            quantidade_recebida: quantidade_recebida,
+            preco_unitario: itemOc.preco_unitario,
+            observacao_item: null
+          });
 
-    async createOrdem(ordemData, itensData = []) {
-        // 1. Create the main O.C.
-        const novaOrdem = handleResponse(
-            await supabase
-                .from('compras_ordens')
-                .insert([ordemData])
-                .select()
-                .single(),
-            'creating ordem'
-        );
-
-        // 2. Create the associated items (if any)
-        if (itensData.length > 0) {
-            const itensToInsert = itensData.map(item => ({
-                ...item,
-                ordem_compra_id: novaOrdem.id
-            }));
-
-            handleResponse(
-                await supabase
-                    .from('compras_oc_itens')
-                    .insert(itensToInsert),
-                'creating ordem itens'
-            );
-        }
-
-        // 3. Start Approval Flow
-        await ApprovalEngine.startApprovalFlow(novaOrdem.id, novaOrdem.valor_total, itensData);
-
-        return novaOrdem;
-    },
-
-    async updateOrdem(id, updateData) {
-        updateData.updated_at = new Date().toISOString();
-        return handleResponse(
-            await supabase
-                .from('compras_ordens')
-                .update(updateData)
-                .eq('id', id)
-                .select()
-                .single(),
-            `updating ordem ${id}`
-        );
-    },
-
-    async moveCard(ordemId, newCentroCustoId) {
-        // No novo modelo, mover entre colunas altera o CENTRO DE CUSTO (Vendedor/Setor)
-        return this.updateOrdem(ordemId, {
-            centro_custo_id: newCentroCustoId,
-            updated_at: new Date().toISOString()
-        });
-    },
-
-    async updateStatus(ordemId, newStatusLabel, additionalUpdates = {}) {
-        // Altera apenas o label visual de status (Não faturado, aprovado, etc)
-        const result = await this.updateOrdem(ordemId, {
-            ...additionalUpdates,
-            status: newStatusLabel,
-            updated_at: new Date().toISOString()
-        });
-
-        // Auto-gerar compromissos financeiros quando pedido é recebido ou entregue
-        if (newStatusLabel === 'Recebido' || newStatusLabel === 'ENTREGUE') {
-            try {
-                const jaExiste = await comprasFinanceiroService.existeCompromisso(ordemId);
-                if (!jaExiste) {
-                    const ordem = await this.getOrdemById(ordemId);
-                    if (ordem) {
-                        const parcelas = ordem.qtd_parcelas || 1;
-                        await comprasFinanceiroService.gerarCompromissoPedido(ordem, parcelas);
-                    }
-                }
-            } catch (err) {
-                console.error('Erro ao gerar compromisso financeiro:', err);
-                // Não bloqueia a atualização de status
-            }
-        }
-
-        return result;
-    },
-
-    async softDeleteOrdem(id) {
-        return handleResponse(
-            await supabase
-                .from('compras_ordens')
-                .update({ deleted_at: new Date().toISOString() })
-                .eq('id', id),
-            `soft deleting ordem ${id}`
-        );
-    },
-
-    // ------------------------------------------------------------------
-    // COMMUNICATIONS & APPROVALS
-    // ------------------------------------------------------------------
-
-    async addComunicacao(comunicacaoData) {
-        return handleResponse(
-            await supabase
-                .from('compras_comunicacoes')
-                .insert([comunicacaoData])
-                .select()
-                .single(),
-            'adding comunicacao'
-        );
-    },
-
-    async getComunicacaoHistorico(ordemCompraId) {
-        return handleResponse(
-            await supabase
-                .from('compras_comunicacoes_historico')
-                .select(`
-                    *,
-                    usuario:usuario_id (email)
-                `)
-                .eq('ordem_compra_id', ordemCompraId)
-                .order('created_at', { ascending: false }),
-            `fetching communication history for OC ${ordemCompraId}`
-        );
-    },
-
-    async logComunicacaoChange(ordemCompraId, campo, valorAntigo, valorNovo, usuarioId) {
-        return handleResponse(
-            await supabase
-                .from('compras_comunicacoes_historico')
-                .insert([{
-                    ordem_compra_id: ordemCompraId,
-                    campo,
-                    valor_antigo: valorAntigo?.toString(),
-                    valor_novo: valorNovo?.toString(),
-                    usuario_id: usuarioId
-                }]),
-            `logging communication change for OC ${ordemCompraId}`
-        );
-    },
-
-    // --- MARKUP CONFIGS ---
-
-    async getMarkupConfig(fornecedorId) {
-        const { data, error } = await supabase
-            .from('compras_markup_configs')
-            .select('*')
-            .eq('fornecedor_id', fornecedorId)
-            .limit(1)
-            .maybeSingle();
-
-        if (error) {
-            console.error('Error fetching markup config', error);
-            return null;
-        }
-        return data;
-    },
-
-    async saveMarkupConfig(config) {
-        const { id, ...data } = config;
-        if (id) {
-            return handleResponse(
-                await supabase
-                    .from('compras_markup_configs')
-                    .update(data)
-                    .eq('id', id)
-                    .select()
-                    .single(),
-                'updating markup config'
-            );
-        } else {
-            return handleResponse(
-                await supabase
-                    .from('compras_markup_configs')
-                    .insert([data])
-                    .select()
-                    .single(),
-                'creating markup config'
-            );
-        }
-    },
-
-    calcularPrecoVenda(custo, config, valorPedido = 0) {
-        if (!config || !config.regras) {
-            return {
-                custoOriginal: custo,
-                custoAposRegras: custo,
-                precoVenda: custo,
-                detalhamento: ['Nenhuma regra de markup configurada']
-            };
-        }
-
-        let base = custo;
-        const detalhamento = [];
-
-        // Aplica sequência de regras
-        for (const regra of config.regras) {
-            const fator = regra.tipo === 'desconto' ? -1 : 1;
-            const valorAnterior = base;
-            base = base * (1 + (fator * regra.valor / 100));
-            detalhamento.push(`${regra.descricao}: R$ ${valorAnterior.toFixed(2)} → R$ ${base.toFixed(2)} (${regra.tipo === 'desconto' ? '-' : '+'}${regra.valor}%)`);
-        }
-
-        // Verifica bônus por valor
-        if (config.bonus_valor && valorPedido > (config.bonus_valor.minimo || 0)) {
-            const valorAnterior = base;
-            base = base * (1 - (config.bonus_valor.desconto_extra || 0) / 100);
-            detalhamento.push(`Bônus valor (> R$ ${config.bonus_valor.minimo}): R$ ${valorAnterior.toFixed(2)} → R$ ${base.toFixed(2)} (-${config.bonus_valor.desconto_extra}%)`);
-        }
-
-        const precoVenda = base * (config.multiplicador_final || 1);
-        detalhamento.push(`Multiplicador final: x${config.multiplicador_final || 1} → Preço de Venda: R$ ${precoVenda.toFixed(2)}`);
-
-        return {
-            custoOriginal: custo,
-            custoAposRegras: base,
-            precoVenda: Math.round(precoVenda * 100) / 100,
-            detalhamento
-        };
-    },
-
-    // --- APPROVALS ---
-
-    async getAprovacoesDaOrdem(ordemId) {
-        return handleResponse(
-            await supabase
-                .from('compras_aprovacoes')
-                .select(`
-                    id, 
-                    status, 
-                    comentarios, 
-                    created_at, 
-                    processed_at,
-                    user_id,
-                    users:public_users!compras_aprovacoes_user_id_fkey(full_name, avatar_url)
-                `)
-                .eq('ordem_compra_id', ordemId)
-                .order('created_at', { ascending: false }),
-            `fetching approvals for ordem ${ordemId}`
-        );
-    },
-
-    async requestApproval(ordemId, userId) {
-        return handleResponse(
-            await supabase
-                .from('compras_aprovacoes')
-                .insert([{
-                    ordem_compra_id: ordemId,
-                    user_id: userId,
-                    status: 'pendente'
-                }])
-                .select()
-                .single(),
-            `requesting approval for ordem ${ordemId}`
-        );
-    },
-
-    async respondApproval(aprovacaoId, status, comentarios) {
-        return handleResponse(
-            await supabase
-                .from('compras_aprovacoes')
-                .update({
-                    status,
-                    comentarios,
-                    processed_at: new Date().toISOString()
-                })
-                .eq('id', aprovacaoId)
-                .select()
-                .single(),
-            `responding to approval ${aprovacaoId}`
-        );
-    },
-
-    // --- SELLER / CENTER COST MANAGEMENT ---
-
-    async upsertCentroCusto(ccData) {
-        let response;
-        if (ccData.id) {
-            response = await supabase
-                .from('compras_centro_custos')
-                .update(ccData)
-                .eq('id', ccData.id)
-                .select()
-                .single();
-        } else {
-            response = await supabase
-                .from('compras_centro_custos')
-                .insert([ccData])
-                .select()
-                .single();
-        }
-
-        const data = handleResponse(response, 'saving centro de custo');
-
-        // Sync workflow column automatically
-        await this.syncWorkflowColumn(data);
-
-        return data;
-    },
-
-    async syncWorkflowColumn(cc) {
-        // Checks if a column exists for this center cost, if not, create it
-        const { data: existing } = await supabase
-            .from('compras_workflows')
-            .select('id')
-            .eq('centro_custo_id', cc.id)
+        // Atualizar estoque
+        if (lojaId) {
+          // Loja conhecida: atualiza estoque_loja e reagrega por produto
+          const { data: estoque } = await supabase
+            .from('estoque_loja')
+            .select('quantidade')
+            .eq('produto_id', itemOc.produto_id)
+            .eq('loja_id', lojaId)
             .single();
 
-        const nomeColuna = cc.tipo === 'vendedor' ? `ENCOMENDAS DE CLIENTES - ${cc.nome}` : cc.nome;
+          if (estoque) {
+            await supabase
+              .from('estoque_loja')
+              .update({
+                quantidade: (estoque.quantidade || 0) + quantidade_recebida,
+                ultimo_recebimento: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('produto_id', itemOc.produto_id)
+              .eq('loja_id', lojaId);
+          } else {
+            await supabase
+              .from('estoque_loja')
+              .insert({
+                produto_id: itemOc.produto_id,
+                loja_id: lojaId,
+                quantidade: quantidade_recebida,
+                tenant_id: tenantId,
+                ultimo_recebimento: new Date().toISOString(),
+              });
+          }
 
-        if (existing) {
-            return await supabase
-                .from('compras_workflows')
-                .update({
-                    nome: nomeColuna,
-                    tipo: cc.tipo,
-                    ativo: cc.ativo,
-                    ordem_index: cc.ordem_index
-                })
-                .eq('id', existing.id);
+          produtosProcessados.add(itemOc.produto_id);
         } else {
-            return await supabase
-                .from('compras_workflows')
-                .insert([{
-                    centro_custo_id: cc.id,
-                    nome: nomeColuna,
-                    tipo: cc.tipo,
-                    ordem_index: cc.ordem_index,
-                    ativo: cc.ativo
-                }]);
+          // Loja desconhecida: acumula para atualização direta em produtos.quantidade_estoque
+          produtosIncrementosDiretos.set(
+            itemOc.produto_id,
+            (produtosIncrementosDiretos.get(itemOc.produto_id) || 0) + quantidade_recebida
+          );
         }
+
+        totalItensProcessados++;
+      }
+
+      // Reagregar quantidade_estoque a partir de estoque_loja (quando loja é conhecida)
+      for (const produtoId of produtosProcessados) {
+        const { data: estoquesProduto, error: estoqueProdutoError } = await supabase
+          .from('estoque_loja')
+          .select('quantidade')
+          .eq('produto_id', produtoId);
+
+        if (estoqueProdutoError) {
+          console.warn('Erro ao recalcular estoque agregado do produto:', estoqueProdutoError);
+          continue;
+        }
+
+        const quantidadeTotal = (estoquesProduto || []).reduce(
+          (sum, estoqueItem) => sum + (estoqueItem.quantidade || 0),
+          0
+        );
+
+        await base44.entities.Produto.update(produtoId, {
+          quantidade_estoque: quantidadeTotal,
+        });
+      }
+
+      // Atualização direta quando loja é desconhecida (evita registrar em loja fantasma)
+      for (const [produtoId, qtdRecebida] of produtosIncrementosDiretos) {
+        const produto = await base44.entities.Produto.getById(produtoId);
+        if (produto) {
+          await base44.entities.Produto.update(produtoId, {
+            quantidade_estoque: (produto.quantidade_estoque || 0) + qtdRecebida,
+          });
+        }
+      }
+
+
+      // 3. Verificar se OC foi completamente recebida
+      const { data: todosItensOc } = await supabase
+        .from('compras_oc_itens')
+        .select('quantidade_pedida, quantidade_recebida')
+        .eq('ordem_compra_id', ocId);
+
+      const todosCompletados = todosItensOc?.every(item => item.quantidade_recebida >= item.quantidade_pedida);
+      const novoStatusOc = todosCompletados ? 'Recebido' : 'Parcialmente Recebido';
+
+      // 4. Atualizar status da OC
+      await base44.entities.ComprasOrden.update(ocId, {
+        status: novoStatusOc,
+        updated_at: new Date().toISOString()
+      });
+
+      await supabase
+        .from('solicitacoes_encomenda')
+        .update({
+          status: todosCompletados ? 'recebida' : 'recebida_parcial',
+          observacoes: observacoes || null,
+        })
+        .eq('ordem_id', ocId);
+
+      // 4.5. Registrar histórico de preços para cada item recebido
+      for (const itemRecebido of itens_recebidos) {
+        const { item_id } = itemRecebido;
+        const { data: itemOc } = await supabase
+          .from('compras_oc_itens')
+          .select('produto_id, preco_unitario')
+          .eq('id', item_id)
+          .single();
+
+        if (itemOc?.produto_id) {
+          const produto = await base44.entities.Produto.getById(itemOc.produto_id);
+          if (produto) {
+            // Buscar último preço registrado (se houver) para comparar
+            const { data: ultimoPrecoDados } = await supabase
+              .from('historico_precos')
+              .select('preco_novo')
+              .eq('produto_id', itemOc.produto_id)
+              .eq('fornecedor_id', oc.fornecedor_id)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single();
+
+            const precoCusto = itemOc.preco_unitario || 0;
+            const precoAnterior = ultimoPrecoDados?.preco_novo || precoCusto;
+            const deltaPercentual = precoAnterior > 0 ? ((precoCusto - precoAnterior) / precoAnterior) * 100 : 0;
+
+            // Inserir no histórico de preços
+            await supabase
+              .from('historico_precos')
+              .insert({
+                tenant_id: tenantId,
+                produto_id: itemOc.produto_id,
+                produto_nome: produto.nome || 'Sem nome',
+                fornecedor_id: oc.fornecedor_id,
+                fornecedor_nome: oc.fornecedor_nome,
+                ordem_compra_id: ocId,
+                numero_oc: oc.numero_pedido,
+                motivo: 'recebimento_oc',
+                preco_anterior: precoAnterior,
+                preco_novo: precoCusto,
+                delta_percentual: Math.round(deltaPercentual * 100) / 100,
+                created_at: new Date().toISOString()
+              });
+          }
+        }
+      }
+
+      // 5. Criar Lançamento Financeiro automaticamente (apenas se completamente recebido)
+      if (todosCompletados) {
+        const dataVencimento = new Date(oc.data_pedido);
+        dataVencimento.setDate(dataVencimento.getDate() + (oc.prazo_pagamento || 30));
+
+        const { data: categoriasCompra } = await supabase
+          .from('categorias_financeiras')
+          .select('id, nome')
+          .eq('nome', 'Compras de Estoque')
+          .single();
+
+        const lancamentoPayload = {
+          tipo: 'DESPESA',
+          descricao: `Compra OC #${oc.numero_pedido}`,
+          valor: oc.valor_total,
+          data_vencimento: dataVencimento.toISOString().split('T')[0],
+          data_lancamento: new Date().toISOString().split('T')[0],
+          status: 'Pendente',
+          observacao: `Lançamento gerado automaticamente pelo recebimento da OC ${oc.numero_pedido}.`
+        };
+
+        if (categoriasCompra?.id) {
+          lancamentoPayload.categoria_id = categoriasCompra.id;
+          lancamentoPayload.categoria_nome = categoriasCompra.nome;
+        }
+
+        await base44.entities.LancamentoFinanceiro.create(lancamentoPayload);
+      }
+
+      return {
+        success: true,
+        message: `${totalItensProcessados} item(ns) recebido(s). Status: ${novoStatusOc}`,
+        novoStatus: novoStatusOc
+      };
+    } catch (error) {
+      console.error('Erro ao receber OC:', error);
+      throw error;
     }
+  },
+
+  /**
+   * Cancela uma OC
+   * @param {string} ocId - UUID da OC
+   * @param {string} motivo - Motivo do cancelamento
+   * @returns {Promise<Object>}
+   * @throws {Error} Se OC já foi recebida e contabilizou estoque
+   */
+  async cancelOc(ocId, motivo = '') {
+    try {
+      // Buscar OC para verificar seu status
+      const oc = await base44.entities.ComprasOrden.read(ocId);
+
+      // Validação: Não permite cancelar OCs que já foram recebidas
+      if (oc.status === 'Recebido' || oc.status === 'Parcialmente Recebido') {
+        throw new Error(
+          `Não é possível cancelar uma OC que já foi recebida e teve a quantidade contabilizada no estoque. Status atual: ${oc.status}`
+        );
+      }
+
+      return await base44.entities.ComprasOrden.update(ocId, {
+        status: 'Cancelada',
+        observacoes: `Cancelada: ${motivo}`,
+        deleted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Erro ao cancelar OC:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Edita uma OC (apenas se status = Rascunho)
+   * @param {string} ocId - UUID da OC
+   * @param {Object} dados - Dados a atualizar
+   * @returns {Promise<Object>}
+   */
+  async editarOc(ocId, dados) {
+    try {
+      const oc = await base44.entities.ComprasOrden.get(ocId);
+      
+      if (!['Rascunho', 'Aguardando Envio'].includes(oc.status)) {
+        throw new Error('Só é possível editar OCs em status "Rascunho" ou "Aguardando Envio"');
+      }
+
+      if (dados.itens) {
+        await validarFornecedorDosItensOc(dados.fornecedor_id || oc.fornecedor_id, dados.itens);
+      }
+
+      return await base44.entities.ComprasOrden.update(ocId, {
+        ...dados,
+        updated_at: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Erro ao editar OC:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Atualiza campos de acompanhamento da OC mesmo após envio ao fornecedor
+   * @param {string} ocId
+   * @param {Object} dados
+   * @returns {Promise<Object>}
+   */
+  async updateOcTracking(ocId, dados) {
+    try {
+      const oc = await base44.entities.ComprasOrden.get(ocId);
+      const metadataAtual = oc.metadata || {};
+      const metadataNova = mergeOcMetadata(
+        metadataAtual,
+        {
+          pedido_faturado: dados.pedido_faturado,
+          data_faturamento: dados.data_faturamento || null,
+          vendedor_id: dados.metadata?.vendedor_id || metadataAtual.vendedor_id || null,
+          vendedor_nome: dados.metadata?.vendedor_nome || metadataAtual.vendedor_nome || null,
+          origem: dados.metadata?.origem || metadataAtual.origem || null,
+        },
+        dados.loja_id || metadataAtual.loja_id || null
+      );
+
+      return await base44.entities.ComprasOrden.update(ocId, {
+        fornecedor_id: dados.fornecedor_id,
+        fornecedor_nome: dados.fornecedor_nome,
+        centro_custo_id: dados.centro_custo_id,
+        data_previsao_entrega: dados.data_previsao_entrega,
+        observacoes: dados.observacoes,
+        metadata: metadataNova,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Erro ao atualizar acompanhamento da OC:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Deleta uma OC (soft delete, apenas Rascunho)
+   * @param {string} ocId - UUID da OC
+   * @returns {Promise<void>}
+   */
+  async deleteOc(ocId) {
+    try {
+      const oc = await base44.entities.ComprasOrden.get(ocId);
+      
+      if (oc.status !== 'Rascunho') {
+        throw new Error('Só é possível deletar OCs em status "Rascunho"');
+      }
+
+      // Deletar itens associados
+      await supabase
+        .from('compras_oc_itens')
+        .delete()
+        .eq('ordem_compra_id', ocId);
+
+      // Soft delete da OC
+      return await base44.entities.ComprasOrden.update(ocId, {
+        deleted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Erro ao deletar OC:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Gera número único de pedido (sequencial)
+   * @returns {Promise<string>}
+   */
+  async _gerarNumeroPedido() {
+    try {
+      const { count } = await supabase
+        .from('compras_ordens')
+        .select('*', { count: 'exact', head: true });
+      
+      const ano = new Date().getFullYear();
+      const numero = String((count || 0) + 1).padStart(5, '0');
+      return `OC-${ano}-${numero}`;
+    } catch (error) {
+      console.error('Erro ao gerar número de pedido:', error);
+      return `OC-${Date.now()}`;
+    }
+  }
 };

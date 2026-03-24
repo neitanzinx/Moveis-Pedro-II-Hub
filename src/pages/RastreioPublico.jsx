@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
+import { getZapApiUrl } from "@/utils/zapApiUrl";
 import MapaRota from "@/components/entregador/MapaRota";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +10,7 @@ import { Truck, MapPin, Package, AlertCircle, Clock, Smartphone, Hash } from "lu
 export default function RastreioPublico({ idProp }) {
     const params = useParams();
     const idUrlOriginal = idProp || params.id || (window.location.pathname.split('/').pop() !== 'rastreio' ? window.location.pathname.split('/').pop() : null);
+    const tokenUrl = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('token') : null;
 
     const [termoBusca, setTermoBusca] = useState("");
     const [confirmacaoTelefone, setConfirmacaoTelefone] = useState("");
@@ -97,12 +99,52 @@ export default function RastreioPublico({ idProp }) {
         }
     }
 
+    async function validarTokenRastreio(token) {
+        setErro(null);
+        setLoading(true);
+
+        try {
+            const apiUrl = getZapApiUrl();
+            const response = await fetch(`${apiUrl}/api/tracking/validate?token=${encodeURIComponent(token)}`);
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok || !data?.ok || !data?.entrega) {
+                throw new Error(data?.error || 'Link de rastreio inválido ou expirado');
+            }
+
+            setEntrega(data.entrega);
+            setParadasNaFrente(typeof data.paradasNaFrente === 'number' ? data.paradasNaFrente : 0);
+
+            if (data.localizacaoMotorista?.lat && data.localizacaoMotorista?.lng) {
+                setLocalizacaoMotorista({
+                    lat: data.localizacaoMotorista.lat,
+                    lng: data.localizacaoMotorista.lng
+                });
+            }
+
+            setEtapa('detalhes');
+        } catch (err) {
+            console.error('Erro ao validar token de rastreio:', err);
+            setErro(err.message || 'Link de rastreio inválido ou expirado.');
+            setEtapa('busca');
+        } finally {
+            setLoading(false);
+        }
+    }
+
     // Efeito para auto-preencher se houver ID na URL
     useEffect(() => {
-        if (idUrlOriginal && etapa === "busca" && !entrega) {
+        if (etapa !== "busca" || entrega) return;
+
+        if (tokenUrl) {
+            validarTokenRastreio(tokenUrl);
+            return;
+        }
+
+        if (idUrlOriginal) {
             handleBuscarPedido(null, idUrlOriginal);
         }
-    }, [idUrlOriginal]);
+    }, [idUrlOriginal, tokenUrl, etapa, entrega]);
 
     // Verificação do telefone
     async function handleConfirmarTelefone(e) {

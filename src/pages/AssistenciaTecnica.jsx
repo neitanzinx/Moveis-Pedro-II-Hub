@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { base44, supabase } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -264,7 +264,7 @@ export default function AssistenciaTecnica() {
                     <Button
                         variant="outline"
                         onClick={() => {
-                            const origin = window.location.hostname === 'localhost' ? 'http://191.101.234.247' : window.location.origin;
+                            const origin = window.location.hostname === 'localhost' ? 'https://moveispedro2.com.br' : window.location.origin;
                             const link = `${origin}/assistencia/auto`;
                             navigator.clipboard.writeText(link);
                             toast.success("Link copiado para a área de transferência!");

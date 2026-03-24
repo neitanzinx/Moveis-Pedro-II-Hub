@@ -464,8 +464,8 @@ export const CAMPOS_ESTOQUE_LOJA = {
 const slugify = (text) => {
     return text.toString().toLowerCase()
         .replace(/\s+/g, '_')           // Substitui espaços por underscores
-        .replace(/[^\w\-]+/g, '')       // Remove caracteres não-alfanuméricos
-        .replace(/\-\-+/g, '_')         // Substitui múltiplos - por _
+        .replace(/[^\w-]+/g, '')        // Remove caracteres não-alfanuméricos
+        .replace(/--+/g, '_')            // Substitui múltiplos - por _
         .replace(/^-+/, '')             // Remove _ do começo
         .replace(/-+$/, '');            // Remove _ do fim
 };

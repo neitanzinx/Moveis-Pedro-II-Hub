@@ -15,10 +15,12 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { base44 } from "@/api/base44Client";
 
-export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntrega, onToggleMontagem, onProporPreco, onVincularImagem, onEditProduto }) {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedItem, setSelectedItem] = useState(null);
-  const [tempPrice, setTempPrice] = useState("");
+export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntrega, onToggleMontagem, onVincularImagem, onEditProduto, onAtualizarEstoque }) {
+  // Estado para o dialog de atualizar estoque
+  const [atualizarEstoqueOpen, setAtualizarEstoqueOpen] = useState(false);
+  const [itemParaEstoque, setItemParaEstoque] = useState(null);
+  const [novaQuantidadeEstoque, setNovaQuantidadeEstoque] = useState("");
+  const [atualizandoEstoque, setAtualizandoEstoque] = useState(false);
 
   // Vincular Imagem State
   const [vincularImagemOpen, setVincularImagemOpen] = useState(false);
@@ -27,10 +29,38 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
   const [uploading, setUploading] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
 
-  const handleOpenModal = (index, currentPrice) => {
-    setSelectedItem({ index, currentPrice });
-    setTempPrice(currentPrice ? currentPrice.toString().replace('.', ',') : "");
-    setIsModalOpen(true);
+  const handleOpenAtualizarEstoque = (index, item) => {
+    setItemParaEstoque({ index, ...item });
+    setNovaQuantidadeEstoque("");
+    setAtualizarEstoqueOpen(true);
+  };
+
+  const handleAtualizarEstoque = async () => {
+    const novaQtd = parseInt(novaQuantidadeEstoque);
+    if (isNaN(novaQtd) || novaQtd < 0) {
+      toast.error("Informe uma quantidade válida");
+      return;
+    }
+
+    setAtualizandoEstoque(true);
+    try {
+      // Calcular o estoque após a venda
+      const qtdVenda = itemParaEstoque.quantidade;
+      const estoqueAposVenda = novaQtd - qtdVenda;
+
+      if (onAtualizarEstoque) {
+        await onAtualizarEstoque(itemParaEstoque.index, novaQtd, estoqueAposVenda);
+      }
+
+      toast.success(`Estoque atualizado! Após a venda: ${estoqueAposVenda} un.`);
+      setAtualizarEstoqueOpen(false);
+      setNovaQuantidadeEstoque("");
+    } catch (error) {
+      console.error("Erro ao atualizar estoque:", error);
+      toast.error("Erro ao atualizar estoque");
+    } finally {
+      setAtualizandoEstoque(false);
+    }
   };
 
   const handleOpenVincularImagem = (index, item) => {
@@ -74,13 +104,6 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
     }
   };
 
-  const handleConfirmProposal = () => {
-    const numericPrice = parseFloat(tempPrice.replace(',', '.'));
-    if (!isNaN(numericPrice) && selectedItem) {
-      onProporPreco(selectedItem.index, numericPrice);
-      setIsModalOpen(false);
-    }
-  };
   if (itens.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-200 dark:border-neutral-800 rounded-xl p-8 h-full min-h-[300px]">
@@ -145,6 +168,13 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                   <div className="w-8 h-8 bg-green-50 dark:bg-green-900/20 rounded-full flex items-center justify-center text-green-700 dark:text-green-400 font-bold text-sm">
                     {item.quantidade}
                   </div>
+                  {item.estoque_atualizado_em && (
+                    <div className="mt-2 text-[10px] bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300 px-2 py-1 rounded border border-blue-200 dark:border-blue-800 whitespace-nowrap">
+                      <p className="font-semibold">Estoque definido</p>
+                      <p>{item.estoque_atualizado_por}</p>
+                      <p>{new Date(item.estoque_atualizado_em).toLocaleString('pt-BR')}</p>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
@@ -162,32 +192,12 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                   </div>
                   <div className="flex items-center gap-2 text-xs text-gray-500">
                     {(!item.preco_unitario || item.preco_unitario <= 0) ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-red-500 font-bold flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3" /> Preço não definido
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-6 px-2 text-xs border-amber-200 text-amber-600 hover:bg-amber-50"
-                          onClick={() => handleOpenModal(index, item.preco_unitario)}
-                          disabled={item.status_solicitacao_preco === 'pendente'}
-                        >
-                          {item.status_solicitacao_preco === 'pendente' ? 'Solicitado' : 'Propor Preço'}
-                        </Button>
-                      </div>
+                      <span className="text-red-500 font-bold flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> Preço não definido - Use editar
+                      </span>
                     ) : (
                       <div className="flex items-center gap-2">
                         <span>Unit: R$ {item.preco_unitario?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-5 w-5 p-0 text-gray-400 hover:text-amber-600"
-                          onClick={() => handleOpenModal(index, item.preco_unitario)}
-                          disabled={item.status_solicitacao_preco === 'pendente'}
-                        >
-                          <Package className="w-3 h-3" />
-                        </Button>
 
                         {item.status_solicitacao_preco === 'pendente' && (
                           <Badge variant="outline" className="text-xs bg-amber-50 text-amber-600 border-amber-200 animate-pulse">
@@ -209,6 +219,18 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                 <p className="font-bold text-gray-800 dark:text-gray-200 w-24 text-right">
                   R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </p>
+
+                {item.is_encomenda && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
+                    onClick={() => handleOpenAtualizarEstoque(index, item)}
+                    title="Atualizar quantidade em estoque"
+                  >
+                    <Package className="w-4 h-4" />
+                  </Button>
+                )}
 
                 {onEditProduto && (
                   <Button
@@ -327,51 +349,6 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
         );
       })}
 
-      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
-              <AlertTriangle className="w-5 h-5" />
-              Proposta de Preço
-            </DialogTitle>
-            <DialogDescription className="text-gray-500 pt-2">
-              Este produto está sem valor definido. Informe o preço correto para que a <strong>gerência</strong> possa validar e liberar a venda.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="py-4 space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="price-proposal">Preço de Venda (R$)</Label>
-              <Input
-                id="price-proposal"
-                type="text"
-                placeholder="0,00"
-                value={tempPrice}
-                onChange={(e) => setTempPrice(e.target.value)}
-                className="text-lg font-bold"
-                autoFocus
-              />
-            </div>
-            <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800 rounded-lg">
-              <p className="text-xs text-blue-800 dark:text-blue-300">
-                <strong>Informação:</strong> O valor inserido atualizará o cadastro do produto após a aprovação do gerente.
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
-            <Button
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-              onClick={handleConfirmProposal}
-              disabled={!tempPrice || isNaN(parseFloat(tempPrice.replace(',', '.')))}
-            >
-              Enviar para Aprovação
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Modal Vincular Imagem */}
       <Dialog open={vincularImagemOpen} onOpenChange={setVincularImagemOpen}>
         <DialogContent className="sm:max-w-[425px]">
@@ -438,6 +415,73 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
             >
               {savingImage ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}
               Salvar Imagem
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Atualizar Estoque */}
+      <Dialog open={atualizarEstoqueOpen} onOpenChange={setAtualizarEstoqueOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-green-600">
+              <Package className="w-5 h-5" />
+              Atualizar Estoque
+            </DialogTitle>
+            <DialogDescription className="text-gray-600 pt-2">
+              Produto: <strong>{itemParaEstoque?.produto_nome}</strong>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="nova-qtd-estoque" className="text-sm font-medium">
+                Quantidade em Estoque
+              </Label>
+              <Input
+                id="nova-qtd-estoque"
+                type="number"
+                placeholder="0"
+                value={novaQuantidadeEstoque}
+                onChange={(e) => setNovaQuantidadeEstoque(e.target.value)}
+                className="text-lg font-bold"
+                autoFocus
+                min="0"
+              />
+            </div>
+
+            {novaQuantidadeEstoque && !isNaN(parseInt(novaQuantidadeEstoque)) && (
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-lg space-y-2">
+                <p className="text-xs text-gray-600 dark:text-gray-300">
+                  <strong>Quantidade inserida:</strong> {parseInt(novaQuantidadeEstoque)} un.
+                </p>
+                <p className="text-xs text-gray-600 dark:text-gray-300">
+                  <strong>Quantidade de venda:</strong> {itemParaEstoque?.quantidade} un.
+                </p>
+                <p className="text-sm font-bold text-green-600 dark:text-green-400 border-t pt-2">
+                  Estoque após a venda: {parseInt(novaQuantidadeEstoque) - (itemParaEstoque?.quantidade || 0)} un.
+                </p>
+              </div>
+            )}
+
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-lg">
+              <p className="text-xs text-amber-800 dark:text-amber-300">
+                <strong>Informação:</strong> Insira a quantidade real de unidades em estoque. O sistema subtrairá automaticamente a quantidade que está sendo vendida e atualizará o cadastro.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAtualizarEstoqueOpen(false)} disabled={atualizandoEstoque}>
+              Cancelar
+            </Button>
+            <Button
+              className="bg-green-600 hover:bg-green-700 text-white"
+              onClick={handleAtualizarEstoque}
+              disabled={!novaQuantidadeEstoque || isNaN(parseInt(novaQuantidadeEstoque)) || atualizandoEstoque}
+            >
+              {atualizandoEstoque ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}
+              Confirmar Atualização
             </Button>
           </DialogFooter>
         </DialogContent>

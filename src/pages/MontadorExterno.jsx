@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
     Calendar, MapPin, Phone, User, Clock, Package,
     CheckCircle, AlertCircle, Navigation, MessageCircle,
-    Wrench, CalendarDays, ListTodo, ExternalLink, LogOut, XCircle, Search
+    Wrench, CalendarDays, ListTodo, ExternalLink, LogOut, XCircle, Search, ShoppingBag
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -23,6 +23,7 @@ import {
     DialogFooter,
 } from "@/components/ui/dialog";
 import { whatsappService } from "@/services/whatsappService";
+import { supabase } from "@/lib/supabase";
 
 export default function MontadorExterno() {
     // Estado para busca na aba "Minhas"
@@ -103,6 +104,25 @@ export default function MontadorExterno() {
         },
         enabled: !!montador || user?.cargo === 'Administrador'
     });
+    
+    // Buscar todas as vendas para associar vendedor e data
+    const { data: vendas = [] } = useQuery({
+        queryKey: ['vendas-resumo'],
+        queryFn: () => base44.entities.Venda.list(),
+        enabled: !!user,
+        staleTime: 1000 * 60 * 5 // 5 minutos de cache
+    });
+
+    const getVendaInfo = (vendaId) => {
+        if (!vendaId || !vendas?.length) return { vendedor: 'Lojista', data: '-' };
+        const idBusca = String(vendaId);
+        const venda = vendas.find(v => String(v.id) === idBusca);
+        if (!venda) return { vendedor: 'Lojista', data: '-' };
+        return {
+            vendedor: venda.responsavel_nome || 'Lojista',
+            data: venda.data_venda ? new Date(venda.data_venda).toLocaleDateString('pt-BR') : '-'
+        };
+    };
 
     const updateMutation = useMutation({
         mutationFn: ({ id, data }) => base44.entities.MontagemItem.update(id, data),
@@ -146,17 +166,43 @@ export default function MontadorExterno() {
         try {
             console.log("Agendando montagem:", selectedMontagem.id, "para montador:", montadorData.id);
 
-            await updateMutation.mutateAsync({
-                id: selectedMontagem.id,
-                data: {
-                    montador_id: montadorData.id,
-                    montador_nome: montadorData.nome,
-                    montador_telefone: montadorData.telefone,
-                    data_agendada: agendamentoData.data,
-                    horario_agendado: agendamentoData.horario,
-                    status: 'agendada'
+            const payloadAgendamento = {
+                montador_id: montadorData.id,
+                montador_nome: montadorData.nome,
+                montador_telefone: montadorData.telefone,
+                data_agendada: agendamentoData.data,
+                horario_agendado: agendamentoData.horario,
+                status: 'agendada'
+            };
+
+            if (!selectedMontagem.montador_id) {
+                const { data, error } = await supabase
+                    .from('montagens_itens')
+                    .update(payloadAgendamento)
+                    .eq('id', selectedMontagem.id)
+                    .is('montador_id', null)
+                    .eq('status', 'pendente')
+                    .select('id');
+
+                if (error) throw error;
+
+                if (!data || data.length === 0) {
+                    toast.warning('Esta montagem acabou de ser pega por outro montador.');
+                    queryClient.invalidateQueries({ queryKey: ['montagens-disponiveis'] });
+                    queryClient.invalidateQueries({ queryKey: ['minhas-montagens'] });
+                    setAgendamentoModal(false);
+                    setSelectedMontagem(null);
+                    return;
                 }
-            });
+            } else {
+                await updateMutation.mutateAsync({
+                    id: selectedMontagem.id,
+                    data: payloadAgendamento
+                });
+            }
+
+            queryClient.invalidateQueries({ queryKey: ['montagens-disponiveis'] });
+            queryClient.invalidateQueries({ queryKey: ['minhas-montagens'] });
 
             // Enviar mensagem ao cliente VIA BOT
             const dataFormatada = new Date(agendamentoData.data + 'T12:00:00').toLocaleDateString('pt-BR', {
@@ -439,7 +485,7 @@ export default function MontadorExterno() {
                         Você não possui permissão de Montador Externo.
                     </p>
                     <p className="text-sm text-gray-500 mb-6">
-                        Se você é montador, faça um novo cadastro selecionando "Montador Externo" como cargo.
+                        Se você é montador, faça um novo cadastro selecionando &quot;Montador Externo&quot; como cargo.
                     </p>
                     <Button
                         variant="outline"
@@ -573,8 +619,18 @@ export default function MontadorExterno() {
                                             >
                                                 <MapPin className="w-4 h-4 flex-shrink-0" />
                                                 <span className="text-left line-clamp-2">{montagem.endereco}</span>
-                                                <ExternalLink className="w-3 h-3 ml-auto" />
                                             </button>
+                                        </div>
+
+                                         <div className="flex items-center gap-4 text-[11px] text-gray-500 mb-4 bg-white/50 p-2 rounded-lg">
+                                            <div className="flex items-center gap-1">
+                                                <ShoppingBag className="w-3 h-3 text-orange-400" />
+                                                <span className="font-medium text-gray-700">{getVendaInfo(montagem.venda_id).vendedor}</span>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <Calendar className="w-3 h-3 text-orange-400" />
+                                                <span>{getVendaInfo(montagem.venda_id).data}</span>
+                                            </div>
                                         </div>
 
                                         <Button
@@ -607,12 +663,14 @@ export default function MontadorExterno() {
                                 const filtrar = (lista) => {
                                     if (!searchTerm) return lista;
                                     const termo = searchTerm.toLowerCase();
-                                    return lista.filter(m =>
-                                        m.cliente_nome?.toLowerCase().includes(termo) ||
-                                        m.numero_pedido?.toString().includes(termo) ||
-                                        m.produto_nome?.toLowerCase().includes(termo) ||
-                                        m.endereco?.toLowerCase().includes(termo)
-                                    );
+                                    return lista.filter(m => {
+                                        const vendaInfo = getVendaInfo(m.venda_id);
+                                        return m.cliente_nome?.toLowerCase().includes(termo) ||
+                                            m.numero_pedido?.toString().includes(termo) ||
+                                            m.produto_nome?.toLowerCase().includes(termo) ||
+                                            m.endereco?.toLowerCase().includes(termo) ||
+                                            vendaInfo.vendedor.toLowerCase().includes(termo);
+                                    });
                                 };
 
                                 const proximas = filtrar(minhasMontagens.filter(m => m.status !== 'concluida'));
@@ -644,6 +702,18 @@ export default function MontadorExterno() {
                                                                 <Badge className={getStatusBadge(montagem.status).className}>
                                                                     {getStatusBadge(montagem.status).label}
                                                                 </Badge>
+                                                            </div>
+
+                                                            {/* Info da Venda */}
+                                                            <div className="flex items-center gap-4 text-[10px] text-gray-500 mb-3 px-1">
+                                                                <div className="flex items-center gap-1">
+                                                                    <ShoppingBag className="w-3 h-3 text-blue-400" />
+                                                                    <span className="font-medium text-gray-700">{getVendaInfo(montagem.venda_id).vendedor}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1">
+                                                                    <Calendar className="w-3 h-3 text-blue-400" />
+                                                                    <span>Venda: {getVendaInfo(montagem.venda_id).data}</span>
+                                                                </div>
                                                             </div>
 
                                                             <div className="bg-blue-50 rounded-lg p-3 mb-3">
@@ -758,8 +828,19 @@ export default function MontadorExterno() {
                                                                     Concluída
                                                                 </Badge>
                                                             </div>
-                                                            <div className="flex items-center gap-2 text-xs text-gray-500">
-                                                                <User className="w-3 h-3" /> {montagem.cliente_nome}
+                                                            <div className="flex items-center gap-4 text-[10px] text-gray-500 mt-2">
+                                                                <div className="flex items-center gap-1">
+                                                                    <User className="w-3 h-3" />
+                                                                    <span>{montagem.cliente_nome}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1">
+                                                                    <ShoppingBag className="w-3 h-3" />
+                                                                    <span>{getVendaInfo(montagem.venda_id).vendedor}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1">
+                                                                    <Calendar className="w-3 h-3" />
+                                                                    <span>{getVendaInfo(montagem.venda_id).data}</span>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     ))}
@@ -801,6 +882,14 @@ export default function MontadorExterno() {
                                                 <p className="text-sm text-gray-500 truncate">
                                                     {montagem.horario_agendado} • {montagem.cliente_nome}
                                                 </p>
+                                                <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-1">
+                                                    <span className="flex items-center gap-0.5">
+                                                        <ShoppingBag className="w-2.5 h-2.5" />
+                                                        {getVendaInfo(montagem.venda_id).vendedor}
+                                                    </span>
+                                                    <span>•</span>
+                                                    <span>Venda: {getVendaInfo(montagem.venda_id).data}</span>
+                                                </div>
                                             </div>
                                             <Badge className={`${getStatusBadge(montagem.status).className} text-xs`}>
                                                 {getStatusBadge(montagem.status).label}
@@ -826,6 +915,16 @@ export default function MontadorExterno() {
                                 <p className="font-bold text-gray-900">{selectedMontagem.produto_nome}</p>
                                 <p className="text-sm text-gray-600">{selectedMontagem.cliente_nome}</p>
                                 <p className="text-sm text-gray-500">{selectedMontagem.endereco}</p>
+                                <div className="flex items-center gap-4 mt-2 pt-2 border-t border-orange-100 text-[11px] text-orange-700">
+                                    <div className="flex items-center gap-1">
+                                        <ShoppingBag className="w-3 h-3" />
+                                        <span>Venda por: <strong>{getVendaInfo(selectedMontagem.venda_id).vendedor}</strong></span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <Calendar className="w-3 h-3" />
+                                        <span>Data: <strong>{getVendaInfo(selectedMontagem.venda_id).data}</strong></span>
+                                    </div>
+                                </div>
                             </div>
 
                             <div>

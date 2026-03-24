@@ -28,7 +28,7 @@ async function checkAuditLogTable() {
 
     // Tenta inserir um log dummy
     const { data: { user }, error: authError } = await supabase.auth.signInWithPassword({
-        email: 'admin@moveispedroii.com.br', // Need credentials or assume anon is allowed by policy? Policy says "FOR ALL TO authenticated". 
+        email: 'admin@moveispedro2.com.br', // Need credentials or assume anon is allowed by policy? Policy says "FOR ALL TO authenticated". 
         // I don't have password. Checking if anon works implies "authenticated" or "anon" depending on policy.
         // My policy said "FOR ALL TO authenticated". So Anon won't work if I don't sign in.
         // But I don't have the password.

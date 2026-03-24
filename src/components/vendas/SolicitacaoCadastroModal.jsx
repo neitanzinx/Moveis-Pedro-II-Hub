@@ -10,6 +10,7 @@ import { base44, supabase } from "@/api/base44Client";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { CATEGORIAS, AMBIENTES, MATERIAIS } from "@/constants/productConstants";
+import FurnitureColorPicker from "@/components/produtos/FurnitureColorPicker";
 
 export default function SolicitacaoCadastroModal({ isOpen, onClose, onProdutoSolicitado, user, initialParentProduct = null }) {
     const [loading, setLoading] = useState(false);
@@ -33,6 +34,7 @@ export default function SolicitacaoCadastroModal({ isOpen, onClose, onProdutoSol
         ambiente: '',
         fornecedor_id: '',
         cor: '',
+        cor_hex: '',
         tecido: '',
         material: '',
         altura: '',
@@ -281,11 +283,12 @@ Dimensões: ${medidasFormatted}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div className="space-y-2">
                             <Label>Cor</Label>
-                            <Input
-                                name="cor"
+                            <FurnitureColorPicker
                                 value={formData.cor}
-                                onChange={handleChange}
-                                placeholder="Ex: Off White"
+                                hexValue={formData.cor_hex}
+                                onChange={(val) => setFormData(prev => ({ ...prev, cor: val }))}
+                                onHexChange={(hex) => setFormData(prev => ({ ...prev, cor_hex: hex }))}
+                                placeholder="Selecione a cor por nomenclatura"
                             />
                         </div>
                         <div className="space-y-2">

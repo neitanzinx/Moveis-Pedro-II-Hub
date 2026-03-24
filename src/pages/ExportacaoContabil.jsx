@@ -133,7 +133,7 @@ export default function ExportacaoContabil() {
                     downloadFn = BlingExporter.downloadXML;
                     break;
 
-                case 'sped':
+                case 'sped': {
                     const vendasPeriodo = filtrarPorPeriodo(vendas, 'data_venda');
                     const lancamentosPeriodo = filtrarPorPeriodo(lancamentos, 'data_lancamento');
                     const mes = periodoInicio.split('-')[1];
@@ -162,6 +162,7 @@ export default function ExportacaoContabil() {
                     }
                     downloadFn = SPEDExporter.downloadTXT;
                     break;
+                }
             }
 
             if (conteudo && downloadFn) {

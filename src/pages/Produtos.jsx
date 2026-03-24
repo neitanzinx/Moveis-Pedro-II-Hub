@@ -45,8 +45,8 @@ import ImportProdutosModal from "@/components/produtos/ImportProdutosModal";
 import { formatPrice } from "@/utils/productFormatters";
 import { getColorHex } from "@/components/produtos/FurnitureColorPicker";
 import { CATEGORIAS } from "@/constants/productConstants";
-import ProductQualityBadge from "@/components/produtos/ProductQualityBadge";
-import GeradorEtiquetasModal from "@/components/estoque/GeradorEtiquetasModal";
+import ProductIncompleteIndicator from "@/components/produtos/ProductIncompleteIndicator";
+import GeradorEtiquetasModal from "@/components/legacy_estoque/GeradorEtiquetasModal";
 import { Printer } from "lucide-react";
 
 export default function Produtos() {
@@ -89,8 +89,7 @@ export default function Produtos() {
       const productToEdit = produtos.find(p => String(p.id) === String(highlightId));
       if (productToEdit) {
         setPendingReturnUrl(returnUrl ? decodeURIComponent(returnUrl) : null);
-        setFocusField(focus);
-        handleEdit(productToEdit);
+        openEditModal(productToEdit, focus);
 
         // Remove params to avoid reopening on refresh
         setSearchParams(params => {
@@ -205,46 +204,48 @@ export default function Produtos() {
 
   const totalPages = Math.ceil(filteredProdutos.length / itemsPerPage);
 
-  const handleEdit = (produto) => {
-    // Edição direta - sem lógica de pai/filho
-    setEditingProduto({ ...produto, nomeDisplay: produto.nome }); // Mantém compatibilidade se forms usarem nomeDisplay
+  const openEditModal = (produto, nextFocusField = null) => {
+    setFocusField(nextFocusField);
+    setEditingProduto({ ...produto, nomeDisplay: produto.nome });
     setIsModalOpen(true);
   };
 
+  const handleEdit = (produto) => {
+    // Edição direta - sem lógica de pai/filho
+    openEditModal(produto, null);
+  };
+
   const handleQuickSave = async (data) => {
+    const precoNovo = parseFloat(data.preco_venda) || 0;
+    const precoAntigo = editingProduto?.preco_venda || 0;
+
+    await base44.entities.Produto.update(editingProduto.id, data);
+
+    // --- REGISTRAR HISTÓRICO DE PREÇOS ---
     try {
-      const precoNovo = parseFloat(data.preco_venda) || 0;
-      const precoAntigo = editingProduto?.preco_venda || 0;
-
-      await base44.entities.Produto.update(editingProduto.id, data);
-
-      // --- REGISTRAR HISTÓRICO DE PREÇOS ---
-      try {
-        if (editingProduto?.id && precoNovo !== precoAntigo) {
-          await base44.entities.HistoricoPrecos?.create?.({
-            organization_id: organization?.id || '00000000-0000-0000-0000-000000000001',
-            produto_id: editingProduto.id,
-            preco_antigo: precoAntigo,
-            preco_novo: precoNovo,
-            tipo: 'venda',
-            motivo: 'Edição Rápida',
-            usuario_nome: user?.nome || 'Sistema'
-          });
-        }
-      } catch (histErr) {
-        console.warn('Não foi possível registrar histórico de preços (Quick Edit):', histErr);
+      if (editingProduto?.id && precoNovo !== precoAntigo) {
+        await base44.entities.HistoricoPrecos?.create?.({
+          organization_id: organization?.id || '00000000-0000-0000-0000-000000000001',
+          produto_id: editingProduto.id,
+          preco_antigo: precoAntigo,
+          preco_novo: precoNovo,
+          tipo: 'venda',
+          motivo: 'Edição Rápida',
+          usuario_nome: user?.nome || 'Sistema'
+        });
       }
-
-      queryClient.invalidateQueries({ queryKey: ['produtos'] });
-      setIsQuickEditOpen(false);
-      setEditingProduto(null);
-    } catch (error) {
-      throw error;
+    } catch (histErr) {
+      console.warn('Não foi possível registrar histórico de preços (Quick Edit):', histErr);
     }
+
+    queryClient.invalidateQueries({ queryKey: ['produtos'] });
+    setIsQuickEditOpen(false);
+    setEditingProduto(null);
   };
 
   const handleNew = () => {
     setEditingProduto(null);
+    setFocusField(null);
     setIsModalOpen(true);
   };
 
@@ -257,6 +258,7 @@ export default function Produtos() {
       codigo_barras: null,
     };
     setEditingProduto(copy);
+    setFocusField(null);
     setIsModalOpen(true);
   };
 
@@ -566,13 +568,6 @@ export default function Produtos() {
                   )}
                 </div>
 
-                {/* Quality Badge (Right) */}
-                <div className="absolute top-1.5 right-1.5 flex flex-col items-end gap-1 z-10 pointer-events-none">
-                  <div className="scale-75 origin-top-right">
-                    <ProductQualityBadge product={produto} showLabel={false} />
-                  </div>
-                </div>
-
                 {/* Quick Edit Button (Overlay) */}
                 {canEdit && (
                   <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20 flex gap-1">
@@ -593,9 +588,16 @@ export default function Produtos() {
                       <p className="text-[10px] font-bold text-green-700 uppercase tracking-wider">{produto.categoria}</p>
                     </div>
 
-                    <h3 className="text-sm font-bold text-gray-900 leading-snug line-clamp-2" title={`${produto.nome} ${produto.modelo_referencia || ''}`}>
-                      {produto.nome} <span className="text-gray-500 font-normal">{produto.modelo_referencia}</span>
-                    </h3>
+                    <div className="flex items-start gap-2">
+                      <h3 className="text-sm font-bold text-gray-900 leading-snug line-clamp-2" title={`${produto.nome} ${produto.modelo_referencia || ''}`}>
+                        {produto.nome} <span className="text-gray-500 font-normal">{produto.modelo_referencia}</span>
+                      </h3>
+                      <ProductIncompleteIndicator
+                        produto={produto}
+                        canEdit={canEdit}
+                        onSelectMissing={(missingItem) => openEditModal(produto, missingItem.focusField)}
+                      />
+                    </div>
 
                     {produto.fornecedor_nome && (
                       <p className="text-[11px] text-gray-400 truncate clamp-1">{produto.fornecedor_nome}</p>
@@ -693,9 +695,11 @@ export default function Produtos() {
                         {produto.ativo === false && (
                           <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">Inativo</Badge>
                         )}
-                        <div className="scale-75 origin-left">
-                          <ProductQualityBadge product={produto} showLabel={false} />
-                        </div>
+                        <ProductIncompleteIndicator
+                          produto={produto}
+                          canEdit={canEdit}
+                          onSelectMissing={(missingItem) => openEditModal(produto, missingItem.focusField)}
+                        />
                       </div>
                       <p className="text-sm text-gray-500 mb-2">
                         {produto.categoria}
@@ -815,6 +819,7 @@ export default function Produtos() {
         onClose={() => {
           setIsModalOpen(false);
           setEditingProduto(null);
+          setFocusField(null);
         }}
         onSave={handleSave}
         produto={editingProduto}

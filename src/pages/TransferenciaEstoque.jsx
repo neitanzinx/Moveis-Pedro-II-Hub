@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Plus, ArrowRight, Check, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import TransferenciaModal from "../components/estoque/TransferenciaModal";
+import TransferenciaModal from "../components/legacy_estoque/TransferenciaModal";
 
 export default function TransferenciaEstoque() {
   const [user, setUser] = useState(null);

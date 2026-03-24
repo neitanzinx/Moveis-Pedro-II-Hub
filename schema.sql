@@ -386,11 +386,20 @@ CREATE TABLE inventarios (
 -- Table: alertas_recompra
 CREATE TABLE alertas_recompra (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id uuid DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.tenants(id),
     produto_id uuid REFERENCES produtos(id),
+    produto_nome varchar(255),
+    fornecedor_id uuid REFERENCES fornecedores(id),
+    loja_id uuid,
+    estoque_minimo integer DEFAULT 10,
+    estoque_ideal integer DEFAULT 20,
+    habilitado boolean DEFAULT true,
     mensagem text,
     lido boolean DEFAULT false,
     status text,
-    created_at timestamptz DEFAULT now()
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now(),
+    deleted_at timestamptz
 );
 
 -- Table: notificacoes

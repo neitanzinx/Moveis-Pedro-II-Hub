@@ -535,7 +535,7 @@ export default function EmitirNFeModal({ isOpen, onClose, venda, cliente }) {
                                         {erros.map((erro, i) => {
                                             // Extract product_id from item errors if available
                                             // Tenta extrair o índice do item (suporta itens[0] ou itens.0)
-                                            const itemMatch = erro.campo?.match(/itens[\[\.](\d+)[\]\.]?/);
+                                            const itemMatch = erro.campo?.match(/itens(?:\[|\.)(\d+)(?:\]|\.)?/);
                                             const itemIndex = itemMatch ? parseInt(itemMatch[1]) : null;
                                             const itemObj = (itemIndex !== null && venda?.itens) ? venda.itens[itemIndex] : null;
                                             const produtoId = itemObj?.produto_id; // Sempre usar produto_id para o catálogo

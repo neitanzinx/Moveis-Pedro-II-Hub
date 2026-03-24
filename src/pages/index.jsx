@@ -20,11 +20,11 @@ const GerenciamentoUsuarios = lazy(() => import("./GerenciamentoUsuarios.jsx"));
 const Financeiro = lazy(() => import("./Financeiro.jsx"));
 const Montagem = lazy(() => import("./Montagem.jsx"));
 const Fornecedores = lazy(() => import("./Fornecedores.jsx"));
+const Compras = lazy(() => import("./Compras.jsx"));
 const RecursosHumanos = lazy(() => import("./RecursosHumanos.jsx"));
 const RelatoriosAvancados = lazy(() => import("./RelatoriosAvancados.jsx"));
 const TransferenciaEstoque = lazy(() => import("./TransferenciaEstoque.jsx"));
 const Inventario = lazy(() => import("./Inventario.jsx"));
-const AlertasRecompra = lazy(() => import("./AlertasRecompra.jsx"));
 const Estoque = lazy(() => import("./Estoque.jsx"));
 const ModoReuniao = lazy(() => import("./ModoReuniao.jsx"));
 const PDV = lazy(() => import("./PDV.jsx"));
@@ -35,8 +35,6 @@ const Marketing = lazy(() => import("./Marketing.jsx"));
 const MontadorExterno = lazy(() => import("./MontadorExterno.jsx"));
 const CadastroMobile = lazy(() => import("./CadastroMobile.jsx"));
 const ExportacaoContabil = lazy(() => import("./ExportacaoContabil.jsx"));
-const SetorCompras = lazy(() => import("./SetorCompras.jsx"));
-
 const DashboardBI = lazy(() => import("./DashboardBI.jsx"));
 const DashboardGerente = lazy(() => import("./DashboardGerente.jsx"));
 const AvaliacaoNPS = lazy(() => import("./AvaliacaoNPS.jsx"));
@@ -48,8 +46,8 @@ const EntradaEstoque = lazy(() => import("./EntradaEstoque.jsx"));
 // ============================================================================
 import LandingPage from "./LandingPage.jsx";
 import LandingVIP from "./LandingVIP.jsx";
-import ClienteAuth from "./ClienteAuth.jsx";
-import ClienteDashboard from "./ClienteDashboard.jsx";
+import ClienteAuth from "./cliente/ClienteAuth.jsx";
+import ClienteDashboard from "./cliente/ClienteDashboard.jsx";
 import AutoAtendimento from "./AutoAtendimento.jsx";
 import RastreioPublico from "./RastreioPublico.jsx";
 
@@ -74,11 +72,10 @@ import { useAuth } from "@/hooks/useAuth";
 const PAGES = {
     Dashboard, Produtos, Clientes, Vendas, Orcamentos, AssistenciaTecnica,
     Configuracoes, SelecaoVendedor, RelatorioComissoes,
-    BoasVindas, GerenciamentoUsuarios, Financeiro, Montagem, Fornecedores,
-    RecursosHumanos, RelatoriosAvancados, TransferenciaEstoque, Inventario,
-    AlertasRecompra, Estoque, ModoReuniao, PDV, CatalogoWhatsApp,
+    BoasVindas, GerenciamentoUsuarios, Financeiro, Montagem, Fornecedores, Compras,
+    Inventario, Estoque, ModoReuniao, PDV, CatalogoWhatsApp,
     LogisticaSemanal, Entregador, Marketing, MontadorExterno,
-    ExportacaoContabil, SetorCompras, DashboardBI, DashboardGerente, Mostruario,
+    ExportacaoContabil, DashboardBI, DashboardGerente, Mostruario,
     EntradaEstoque
 };
 
@@ -262,12 +259,12 @@ function PagesContent() {
                         <Route path="/admin/AssistenciaTecnica" element={<AssistenciaTecnica />} />
                         <Route path="/admin/TransferenciaEstoque" element={<TransferenciaEstoque />} />
                         <Route path="/admin/Inventario" element={<Inventario />} />
-                        <Route path="/admin/AlertasRecompra" element={<AlertasRecompra />} />
                         <Route path="/admin/Entregador" element={<Entregador />} />
                         <Route path="/admin/MontadorExterno" element={<MontadorExterno />} />
                         <Route path="/admin/Mostruario" element={<Mostruario />} />
                         <Route path="/admin/Produtos" element={<Produtos />} />
                         <Route path="/admin/Fornecedores" element={<Fornecedores />} />
+                        <Route path="/admin/Compras" element={<Compras />} />
                         <Route path="/admin/Entrada" element={<EntradaEstoque />} />
 
                         {/* Gestão e Financeiro */}
@@ -277,8 +274,6 @@ function PagesContent() {
                         <Route path="/admin/RecursosHumanos" element={<RecursosHumanos />} />
                         <Route path="/admin/Marketing" element={<Marketing />} />
                         <Route path="/admin/ExportacaoContabil" element={<ExportacaoContabil />} />
-                        <Route path="/admin/SetorCompras" element={<SetorCompras />} />
-                        <Route path="/admin/setorcompras" element={<SetorCompras />} />
                         <Route path="/admin/DashboardBI" element={<DashboardBI />} />
                         <Route path="/admin/DashboardGerente" element={<DashboardGerente />} />
 

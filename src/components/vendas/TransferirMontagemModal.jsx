@@ -173,7 +173,7 @@ export default function TransferirMontagemModal({ isOpen, onClose, venda, user }
                                 <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                                 <p>
                                     Itens já atribuídos a um montador interno não podem ser transferidos diretamente.
-                                    Vá para "Montagem Interna" e remova a atribuição primeiro.
+                                    Vá para &quot;Montagem Interna&quot; e remova a atribuição primeiro.
                                 </p>
                             </div>
                         </div>

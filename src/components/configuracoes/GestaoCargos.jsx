@@ -62,7 +62,7 @@ export default function GestaoCargos() {
                 </CardHeader>
                 <CardContent>
                     <p className="text-gray-500 mb-6">
-                        Gerencie os cargos e suas permissoes. Clique em "Editar Permissoes" para modificar o acesso.
+                        Gerencie os cargos e suas permissoes. Clique em &quot;Editar Permissoes&quot; para modificar o acesso.
                     </p>
 
                     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -153,7 +153,7 @@ export default function GestaoCargos() {
             <Alert className="bg-blue-50 border-blue-200">
                 <Info className="w-4 h-4 text-blue-600" />
                 <AlertDescription className="text-blue-800">
-                    <strong>Sobre os Cargos:</strong> Cada cargo pode ter permissoes customizadas. Clique em "Editar Permissoes" para ajustar o acesso dos usuarios desse cargo.
+                    <strong>Sobre os Cargos:</strong> Cada cargo pode ter permissoes customizadas. Clique em &quot;Editar Permissoes&quot; para ajustar o acesso dos usuarios desse cargo.
                 </AlertDescription>
             </Alert>
 

@@ -3,14 +3,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Search, Unlock, Clock, MapPin, Package } from "lucide-react";
+import { Search, Unlock, Clock, MapPin, Package, Loader2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { base44 } from "@/api/base44Client";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { toast } from "sonner";
 
 export default function AguardandoLiberacao({ entregas, vendas }) {
   const { user } = useAuth();
   const [search, setSearch] = useState("");
+  const [modalLiberarEntrega, setModalLiberarEntrega] = useState(null); // { entregaId, pedido }
   const queryClient = useQueryClient();
 
   const liberarEntregaMutation = useMutation({
@@ -22,9 +25,18 @@ export default function AguardandoLiberacao({ entregas, vendas }) {
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entregas'] });
-      alert("Pedido liberado! Ele voltou para a Triagem.");
+      toast.success("Entrega liberada! O pedido voltou para a Triagem.");
+      setModalLiberarEntrega(null);
+    },
+    onError: () => {
+      toast.error("Erro ao liberar entrega.");
     }
   });
+
+  const confirmarLiberarEntrega = () => {
+    if (!modalLiberarEntrega) return;
+    liberarEntregaMutation.mutate(modalLiberarEntrega.entregaId);
+  };
 
   const entregasFiltradas = entregas.filter(e => {
     const termo = search.toLowerCase();
@@ -62,10 +74,14 @@ export default function AguardandoLiberacao({ entregas, vendas }) {
             const venda = (vendas || []).find(v => v.id === entrega.venda_id);
             const itens = venda?.itens?.map(i => `${i.quantidade}x ${i.produto_nome}`).join(', ');
 
-            // Apenas o vendedor da venda ou admin pode liberar
-            const podeLiberar = user?.cargo === 'Administrador' || venda?.responsavel_id === user?.id;
+            // Apenas o vendedor da venda, Logística ou admin pode liberar
+            const isAdmin = user?.cargo === 'Administrador';
+            const isLogistica = user?.cargo === 'Logística';
+            const isVendedorDaVenda = venda?.responsavel_id === user?.id;
+            const isGerenteDaLoja = user?.cargo === 'Gerente' && venda?.loja === user?.loja;
 
-            if (!podeLiberar) return null;
+            const podeLiberar = isAdmin || isLogistica || isVendedorDaVenda || isGerenteDaLoja;
+
 
             return (
               <Card key={entrega.id} className="hover:shadow-md transition-all border-l-4 border-l-amber-400">
@@ -89,18 +105,26 @@ export default function AguardandoLiberacao({ entregas, vendas }) {
                     <span className="truncate">{entrega.endereco_entrega}</span>
                   </div>
 
-                  <Button
-                    className="w-full bg-green-600 hover:bg-green-700 gap-2"
-                    onClick={() => {
-                      if (confirm(`Liberar entrega do pedido #${entrega.numero_pedido}? Ele voltará para a Triagem.`)) {
-                        liberarEntregaMutation.mutate(entrega.id);
-                      }
-                    }}
-                    disabled={liberarEntregaMutation.isPending}
-                  >
-                    <Unlock className="w-4 h-4" />
-                    Entrega Liberada
-                  </Button>
+                  {podeLiberar ? (
+                    <Button
+                      className="w-full bg-green-600 hover:bg-green-700 gap-2"
+                      onClick={() => {
+                        setModalLiberarEntrega({
+                          entregaId: entrega.id,
+                          pedido: entrega.numero_pedido
+                        });
+                      }}
+                      disabled={liberarEntregaMutation.isPending}
+                    >
+                      <Unlock className="w-4 h-4" />
+                      Entrega Liberada
+                    </Button>
+                  ) : (
+                    <div className="text-[10px] text-gray-400 italic bg-gray-50 px-3 py-2 rounded border border-gray-100 flex items-center gap-2">
+                      <Clock className="w-3.5 h-3.5" />
+                      Aguardando Liberação do Vendedor/Gerente
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )
@@ -112,6 +136,45 @@ export default function AguardandoLiberacao({ entregas, vendas }) {
           </div>
         )}
       </div>
+
+      {/* Modal de Liberar Entrega */}
+      <Dialog open={!!modalLiberarEntrega} onOpenChange={(open) => !open && setModalLiberarEntrega(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-green-600">
+              <Unlock className="w-5 h-5" />
+              Confirmar Liberação de Entrega
+            </DialogTitle>
+            <DialogDescription>
+              Autorizar que a logística processe esta entrega.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-gray-700 mb-4">
+              <strong>Pedido:</strong> #{modalLiberarEntrega?.pedido}
+            </p>
+            <p className="text-sm text-gray-600">
+              Após confirmar, o pedido voltará para a fila de triagem da logística e poderá ser agendado para entrega.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModalLiberarEntrega(null)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={confirmarLiberarEntrega}
+              disabled={liberarEntregaMutation.isPending}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {liberarEntregaMutation.isPending ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Liberando...</>
+              ) : (
+                <><Unlock className="w-4 h-4 mr-2" />Confirmar Liberação</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

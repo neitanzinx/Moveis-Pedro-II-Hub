@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useLojas } from "@/hooks/useLojas";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -126,6 +126,7 @@ function RankingCard({ position, name, value, percentage, color }) {
 
 export default function RelatoriosAvancados() {
   const { user, loading: authLoading, can } = useAuth();
+  const queryClient = useQueryClient();
   const isAdmin = user?.cargo === 'Administrador';
   const [filtros, setFiltros] = useState({
     dataInicio: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
@@ -2120,7 +2121,7 @@ export default function RelatoriosAvancados() {
                             </div>
                           </div>
                           {a.comentario && (
-                            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 italic">"{a.comentario}"</p>
+                            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 italic">&quot;{a.comentario}&quot;</p>
                           )}
                         </div>
                       ))}

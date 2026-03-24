@@ -140,7 +140,7 @@ export default function ProdutoCadastroCompleto({
     const [activeTab, setActiveTab] = useState('geral');
 
     // Multi-Tenant: Carrega lojas dinâmicas e configurações
-    const { lojas } = useLojas();
+    const { data: lojas = [] } = useLojas();
     const { settings, organization } = useTenant();
     const { user } = useAuth();
     const showFinancials = user?.cargo === 'Administrador';
@@ -155,6 +155,20 @@ export default function ProdutoCadastroCompleto({
         queryKey: ['produtos-para-duplicata'],
         queryFn: () => base44.entities.Produto.list()
     });
+
+    const coresCatalogo = useMemo(() => {
+        const setCores = new Set();
+        (produtosExistentes || []).forEach((p) => {
+            const corRaw = String(p?.cor || '').trim();
+            if (!corRaw) return;
+            corRaw
+                .split('/')
+                .map((c) => c.trim())
+                .filter(Boolean)
+                .forEach((c) => setCores.add(c));
+        });
+        return Array.from(setCores).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    }, [produtosExistentes]);
 
     // Inicializa com produto existente (modo edição)
     useEffect(() => {
@@ -185,7 +199,6 @@ export default function ProdutoCadastroCompleto({
                 profundidade: produto.profundidade?.toString() || '',
                 cfop: produto.cfop || '',
                 fotos: produto.fotos || [],
-                temVariacoes: produto.temVariacoes || false,
                 variacoes: produto.variacoes || [],
             });
             setErrors({});
@@ -209,6 +222,7 @@ export default function ProdutoCadastroCompleto({
                 'origem_mercadoria': 'fiscal',
                 'peso_bruto': 'fiscal',
                 'peso_liquido': 'fiscal',
+                'volumes': 'fiscal',
                 'altura_embalagem': 'fiscal',
                 'largura_embalagem': 'fiscal',
                 'profundidade_embalagem': 'fiscal',
@@ -223,8 +237,10 @@ export default function ProdutoCadastroCompleto({
                 'cor': 'caracteristicas',
                 'material': 'caracteristicas',
                 'nome': 'geral',
+                'codigo_barras': 'geral',
                 'categoria': 'geral',
-                'fornecedor_id': 'geral'
+                'fornecedor_id': 'geral',
+                'fotos': 'fotos'
             };
 
             const targetTab = fieldToTab[focusField];
@@ -317,7 +333,7 @@ export default function ProdutoCadastroCompleto({
         const fornecedor = fornecedores?.find(f => f.id.toString() === value);
         setFormData(prev => ({
             ...prev,
-            fornecedor_id: parseInt(value),
+            fornecedor_id: value,
             fornecedor_nome: fornecedor?.nome || fornecedor?.nome_empresa || ''
         }));
     };
@@ -459,7 +475,6 @@ export default function ProdutoCadastroCompleto({
             estoque_ideal: formData.estoque_ideal ? parseInt(formData.estoque_ideal) : 0,
             cor: formData.cor || null,
             cor_hex: formData.cor_hex || null,
-            temVariacoes: formData.temVariacoes || false,
             variacoes: formData.variacoes || [],
             fotos: formData.fotos,
             codigo_barras: formData.codigo_barras || null,
@@ -635,6 +650,8 @@ export default function ProdutoCadastroCompleto({
                                                     hexValue={formData.cor_hex}
                                                     onChange={(val) => handleChange('cor', val)}
                                                     onHexChange={(hex) => handleChange('cor_hex', hex)}
+                                                    customOptions={coresCatalogo}
+                                                    placeholder="Selecione a cor por nomenclatura"
                                                 />
                                             </div>
                                             <div>

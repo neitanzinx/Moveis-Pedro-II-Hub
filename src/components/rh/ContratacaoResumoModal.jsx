@@ -65,6 +65,13 @@ export default function ContratacaoResumoModal({ colaborador, onClose, onGenerat
     const totalBeneficios = resumo.beneficios_empresa;
     const totalBruto = salarioBase + totalBeneficios;
     const totalLiquido = resumo.salario_liquido;
+    const valeTransporte = Number(colaborador.vale_transporte) || 0;
+    const valeAlimentacao = Number(colaborador.vale_alimentacao) || 0;
+    const valeRefeicao = Number(colaborador.vale_refeicao) || 0;
+    const planoSaude = Number(colaborador.plano_saude) || 0;
+    const planoOdontologico = Number(colaborador.plano_odontologico) || 0;
+    const bonusMensal = Number(colaborador.bonus_mensal) || 0;
+    const outrosBeneficios = Number(colaborador.outros_beneficios) || 0;
 
     const diaPagamento = colaborador.dia_pagamento || 5;
     const tipoPagamento = colaborador.tipo_pagamento || 'Mensal';

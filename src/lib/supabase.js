@@ -5,20 +5,25 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 // Criar cliente com configurações que garantem persistência de autenticação
-export const supabase = createClient(supabaseUrl, supabaseKey, {
-    auth: {
-        persistSession: true, // Persiste a sessão no localStorage
-        autoRefreshToken: true, // Atualiza automaticamente o token
-        detectSessionInUrl: true, // Detecta sessão na URL (útil para email confirmations)
-        storage: window.localStorage, // Usa localStorage explicitamente
-        storageKey: 'moveis-pedro-ii-auth-token', // Chave única para evitar conflitos
-    },
-    global: {
-        headers: {
-            'x-client-info': 'moveis-pedro-ii-web',
+// Singleton para garantir que só exista uma instância do cliente Supabase no browser
+if (!window.__supabase_instance) {
+    window.__supabase_instance = createClient(supabaseUrl, supabaseKey, {
+        auth: {
+            persistSession: true, // Persiste a sessão no localStorage
+            autoRefreshToken: true, // Atualiza automaticamente o token
+            detectSessionInUrl: true, // Detecta sessão na URL (útil para email confirmations)
+            storage: window.localStorage, // Usa localStorage explicitamente
+            storageKey: 'moveis-pedro-ii-auth-token', // Chave única para evitar conflitos
         },
-    },
-});
+        global: {
+            headers: {
+                'x-client-info': 'moveis-pedro-ii-web',
+            },
+        },
+    });
+}
+
+export const supabase = window.__supabase_instance;
 
 // Listener para refresh automático de sessão quando estiver prestes a expirar
 supabase.auth.onAuthStateChange(async (event, session) => {
@@ -113,7 +118,11 @@ const tableMap = {
     HistoricoPrecos: 'historico_precos',
     ContaPagarCompras: 'compras_contas_pagar',
     SolicitacaoPreco: 'solicitacoes_preco',
-    SolicitacaoEncomenda: 'solicitacoes_encomenda'
+    SolicitacaoEncomenda: 'solicitacoes_encomenda',
+    ComprasOrden: 'compras_ordens',
+    ComprasOcItem: 'compras_oc_itens',
+    ComprasCentroCusto: 'compras_centro_custos',
+    ComprasWorkflow: 'compras_workflows'
 };
 
 // O Adaptador Mágico (Handler)
@@ -236,6 +245,14 @@ const createHandler = (tableName) => ({
         const { data, error } = await supabase.from(tableName).select('*').eq('id', id).single();
         if (error) {
             console.error(`Erro Supabase (GetById ${id} em ${tableName}):`, error);
+            throw error;
+        }
+        return data;
+    },
+    get: async (id) => {
+        const { data, error } = await supabase.from(tableName).select('*').eq('id', id).single();
+        if (error) {
+            console.error(`Erro Supabase (Get ${id} em ${tableName}):`, error);
             throw error;
         }
         return data;
@@ -387,7 +404,9 @@ const createHandler = (tableName) => ({
             // Aplicar filtros
             if (filters && typeof filters === 'object') {
                 Object.entries(filters).forEach(([key, value]) => {
-                    if (value !== undefined && value !== null) {
+                    if (value === null) {
+                        query = query.is(key, null);
+                    } else if (value !== undefined) {
                         query = query.eq(key, value);
                     }
                 });

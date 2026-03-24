@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea"; // Added Textarea
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Package, MapPin, User, Phone, Wrench, Save, RefreshCw, Ban } from "lucide-react"; // Added RefreshCw, Ban
+import { Package, MapPin, User, Phone, Wrench, Save, RefreshCw, Ban, Clock } from "lucide-react"; // Added RefreshCw, Ban, Clock
 import { toast } from "sonner"; // Added toast
 
 export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
@@ -318,7 +318,7 @@ export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
                       </span>
                     </div>
                     <p className="text-gray-600 dark:text-gray-400 text-xs italic">
-                      "{hist.motivo || 'Sem motivo registrado'}"
+                      &quot;{hist.motivo || 'Sem motivo registrado'}&quot;
                     </p>
                   </div>
                 ))}
@@ -330,18 +330,47 @@ export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
           )}
 
           {/* Ações */}
-          <div className="flex gap-2 justify-end pt-4 border-t">
-            <Button variant="outline" onClick={onClose}>
-              Cancelar
-            </Button>
+          <div className="flex gap-2 justify-between pt-4 border-t">
             <Button
-              onClick={salvarMontagem}
-              className="bg-green-600 hover:bg-green-700 gap-2"
+              variant="outline"
+              className="text-amber-600 border-amber-200 hover:bg-amber-50 gap-2 font-bold"
+              onClick={async () => {
+                const motivo = prompt("Qual o motivo para aguardar liberação?");
+                if (!motivo) return;
+
+                await atualizarEntregaMutation.mutateAsync({
+                  id: entrega.id,
+                  data: {
+                    status: 'Aguardando Liberação',
+                    observacoes: motivo,
+                    data_agendada: null,
+                    turno: null,
+                    caminhao_id: null,
+                    ordem_rota: null
+                  }
+                });
+                toast.success("Entrega movida para Aguardando Liberação");
+                onClose();
+              }}
               disabled={atualizarEntregaMutation.isPending}
             >
-              <Save className="w-4 h-4" />
-              {atualizarEntregaMutation.isPending ? "Salvando..." : "Salvar"}
+              <Clock className="w-4 h-4" />
+              Mover para Aguardando
             </Button>
+
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={onClose}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={salvarMontagem}
+                className="bg-green-600 hover:bg-green-700 gap-2"
+                disabled={atualizarEntregaMutation.isPending}
+              >
+                <Save className="w-4 h-4" />
+                {atualizarEntregaMutation.isPending ? "Salvando..." : "Salvar"}
+              </Button>
+            </div>
           </div>
         </div>
       </DialogContent>

@@ -130,8 +130,6 @@ export default function SolicitacoesCadastroWidget() {
             descricao: req.observacoes || '',
             preco_venda: req.preco_sugerido || 0,
             ativo: true,
-            // [NOVO] Pre-fill variations
-            temVariacoes: !!req.cor || !!req.tecido,
             variacoes: (req.cor || req.tecido) ? [{
                 id: Date.now().toString(),
                 nome: `${req.cor || ''} ${req.tecido || ''}`.trim(),
@@ -171,7 +169,6 @@ export default function SolicitacoesCadastroWidget() {
 
         const productWithNewVariation = {
             ...parent,
-            temVariacoes: true,
             variacoes: [...(parent.variacoes || []), novaVariacao]
         };
 
@@ -247,9 +244,9 @@ export default function SolicitacoesCadastroWidget() {
                     let updateData = {};
 
                     // Logic for Variations
-                    if (args.targetVariationId && targetProd.variacoes?.length > 0) {
+                    if (targetVariationId && targetProd.variacoes?.length > 0) {
                         const updatedVariacoes = targetProd.variacoes.map(v => {
-                            if (v.id === args.targetVariationId) {
+                            if (v.id === targetVariationId) {
                                 // Defaulting to CD deduction for now as we don't track origin store of the request explicitly yet
                                 const currentStock = parseInt(v.estoque_cd) || 0;
                                 return { ...v, estoque_cd: Math.max(0, currentStock - quantitySold) };

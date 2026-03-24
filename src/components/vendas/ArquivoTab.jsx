@@ -40,10 +40,11 @@ export default function ArquivoTab() {
         staleTime: 0
     });
 
-    // Filtrar entregas finalizadas (Entregue ou Retirada)
-    const entregasFinalizadas = entregas.filter(e =>
-        e.status === 'Entregue' || e.tipo_entrega === 'Retirada'
-    );
+    // Filtrar entregas finalizadas (status canonico ou legado)
+    const entregasFinalizadas = entregas.filter((e) => {
+        const status = (e.status || '').toLowerCase();
+        return status === 'entregue' || status === 'retirado' || status === 'concluida' || status === 'concluída';
+    });
 
     // Combinar com dados da venda
     const pedidosArquivados = entregasFinalizadas.map(entrega => {

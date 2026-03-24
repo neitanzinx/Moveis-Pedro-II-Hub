@@ -1,11 +1,10 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import { Check, ChevronDown, Plus, X } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
+import { Check, ChevronDown, Plus } from 'lucide-react';
 
 // Paleta de cores de móveis comuns no Brasil
 const CORES_MOVEIS = [
@@ -115,114 +114,70 @@ export default function FurnitureColorPicker({
     value,
     hexValue,
     onChange,
-    onHexChange,
-    placeholder = "Selecione ou digite uma cor"
+    onHexChange = () => { },
+    placeholder = "Selecione uma cor",
+    customOptions = [],
+    allowCreate = true
 }) {
     const [open, setOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
-    const [isDual, setIsDual] = useState(false);
-    const [activeSelector, setActiveSelector] = useState('primary'); // 'primary' or 'secondary'
 
-    // Parse values
-    // Parse values robustly
-    const splitValue = value ? value.split(/\s*\/\s*/) : [''];
-    const primaryName = splitValue[0] || '';
-    const secondaryName = splitValue[1] || '';
+    const normalize = (str) => String(str || '').trim().toLowerCase();
 
-    const primaryHex = hexValue ? hexValue.split(',')[0] : getColorHex(primaryName);
-    const secondaryHex = hexValue && hexValue.includes(',') ? hexValue.split(',')[1] : (secondaryName ? getColorHex(secondaryName) : '#FFFFFF');
-
-    // Initialize isDual based on regex check
-    useEffect(() => {
-        if (value && /\s*\/\s*/.test(value)) {
-            setIsDual(true);
-        }
-    }, [value]);
-
-    const handleToggleDual = (checked) => {
-        setIsDual(checked);
-        if (!checked) {
-            // Revert to single color (keep primary)
-            onChange(primaryName);
-            onHexChange(primaryHex);
-            setActiveSelector('primary');
-        } else {
-            // Initialize secondary if empty
-            if (!secondaryName) {
-                const initialSecondary = "Branco";
-                const initialSecondaryHex = "#FFFFFF";
-                onChange(`${primaryName || ''} / ${initialSecondary}`);
-                onHexChange(`${primaryHex || '#CCCCCC'},${initialSecondaryHex}`);
-                setActiveSelector('secondary'); // Focus on secondary immediately
-            }
-        }
-    };
-
-    // Agrupa cores por categoria
+    // Base da lista: paleta interna + nomes extras vindos do banco/importacao
     const groupedColors = useMemo(() => {
         const groups = {};
         CORES_MOVEIS.forEach(cor => {
-            if (!groups[cor.grupo]) {
-                groups[cor.grupo] = [];
-            }
+            if (!groups[cor.grupo]) groups[cor.grupo] = [];
             groups[cor.grupo].push(cor);
         });
-        return groups;
-    }, []);
 
-    // Filtra cores pelo termo de busca
+        const known = new Set(CORES_MOVEIS.map(c => normalize(c.nome)));
+        const extras = (customOptions || [])
+            .map(nome => String(nome || '').trim())
+            .filter(Boolean)
+            .filter(nome => !known.has(normalize(nome)));
+
+        if (extras.length > 0) {
+            groups.Customizadas = extras.map(nome => ({
+                nome,
+                hex: getColorHex(nome),
+                grupo: 'Customizadas'
+            }));
+        }
+
+        return groups;
+    }, [customOptions]);
+
     const filteredGroups = useMemo(() => {
         if (!searchTerm) return groupedColors;
 
         const filtered = {};
         Object.entries(groupedColors).forEach(([grupo, cores]) => {
-            const matched = cores.filter(c =>
-                c.nome.toLowerCase().includes(searchTerm.toLowerCase())
-            );
-            if (matched.length > 0) {
-                filtered[grupo] = matched;
-            }
+            const matched = cores.filter(c => normalize(c.nome).includes(normalize(searchTerm)));
+            if (matched.length > 0) filtered[grupo] = matched;
         });
         return filtered;
     }, [groupedColors, searchTerm]);
 
-    // Atualiza a cor selecionada
-    const handleSelectColor = (cor) => {
-        if (!isDual) {
-            onChange(cor.nome);
-            onHexChange(cor.hex);
-            setOpen(false);
-        } else {
-            if (activeSelector === 'primary') {
-                onChange(`${cor.nome} / ${secondaryName || 'Branco'}`);
-                onHexChange(`${cor.hex},${secondaryHex || '#FFFFFF'}`);
-                setActiveSelector('secondary'); // Auto-advance
-            } else {
-                onChange(`${primaryName || 'Branco'} / ${cor.nome}`);
-                onHexChange(`${primaryHex || '#FFFFFF'},${cor.hex}`);
-                setOpen(false); // Close after second selection
-            }
-        }
+    const knownNames = useMemo(() => {
+        return new Set(
+            Object.values(groupedColors)
+                .flat()
+                .map(c => normalize(c.nome))
+        );
+    }, [groupedColors]);
+
+    const canCreate = allowCreate && searchTerm.trim().length > 1 && !knownNames.has(normalize(searchTerm));
+
+    const handleSelectColor = (colorName) => {
+        const nextName = String(colorName || '').trim();
+        const nextHex = getColorHex(nextName);
+        onChange(nextName);
+        onHexChange(nextHex);
+        setOpen(false);
         setSearchTerm('');
     };
-
-    // Quando digita uma cor, tenta encontrar o hex correspondente
-    const handleInputChange = (e) => {
-        const newValue = e.target.value;
-        // Manual typing only supported for single color mode or complex manual handling
-        // For simplicity, we'll suggest using the picker for dual colors
-        onChange(newValue);
-
-        if (!newValue.includes('/')) {
-            const hex = getColorHex(newValue);
-            if (hex !== '#CCCCCC') {
-                onHexChange(hex);
-            }
-        }
-    };
-
-    // Cor atual para preview
-    const currentHex = hexValue || getColorHex(value) || '#CCCCCC';
 
     return (
         <div className="space-y-2">
@@ -230,89 +185,59 @@ export default function FurnitureColorPicker({
                 <PopoverTrigger asChild>
                     <div className="relative">
                         <div
-                            className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-6 rounded-md border shadow-sm flex overflow-hidden"
+                            className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-6 rounded-md border shadow-sm"
+                            style={{ backgroundColor: hexValue || getColorHex(value) }}
                         >
-                            <div style={{ backgroundColor: primaryHex, flex: 1 }} />
-                            {isDual && <div style={{ backgroundColor: secondaryHex, flex: 1 }} />}
                         </div>
                         <Input
                             value={value}
-                            onChange={handleInputChange}
+                            onChange={(e) => onChange(e.target.value)}
                             placeholder={placeholder}
                             className="pl-14 pr-10 cursor-pointer text-ellipsis"
                             onClick={() => setOpen(true)}
-                            readOnly={isDual} // Prevent manual mess-up in dual mode
                         />
                         <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     </div>
                 </PopoverTrigger>
                 <PopoverContent className="w-80 p-0" align="start">
                     <div className="p-3 border-b space-y-3">
-                        <div
-                            className="flex items-center justify-between"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <Label htmlFor="dual-mode" className="text-sm cursor-pointer">Combinar duas cores</Label>
-                            <Switch
-                                id="dual-mode"
-                                checked={isDual}
-                                onCheckedChange={handleToggleDual}
-                            />
-                        </div>
-
-                        {isDual && (
-                            <div className="flex gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setActiveSelector('primary')}
-                                    className={cn(
-                                        "flex-1 p-2 rounded border flex items-center justify-between gap-2 text-xs",
-                                        activeSelector === 'primary' ? "ring-2 ring-green-500 bg-green-50" : "bg-gray-50"
-                                    )}
-                                >
-                                    <div className="w-4 h-4 rounded border" style={{ backgroundColor: primaryHex }} />
-                                    <span className="truncate flex-1 text-left">{primaryName || 'Selecione'}</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setActiveSelector('secondary')}
-                                    className={cn(
-                                        "flex-1 p-2 rounded border flex items-center justify-between gap-2 text-xs",
-                                        activeSelector === 'secondary' ? "ring-2 ring-green-500 bg-green-50" : "bg-gray-50"
-                                    )}
-                                >
-                                    <div className="w-4 h-4 rounded border" style={{ backgroundColor: secondaryHex }} />
-                                    <span className="truncate flex-1 text-left">{secondaryName || 'Selecione'}</span>
-                                </button>
-                            </div>
-                        )}
-
                         <Input
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder={isDual ? `Buscar cor ${activeSelector === 'primary' ? 'principal' : 'secundária'}...` : "Buscar cor..."}
+                            placeholder="Buscar nome da cor..."
                             className="h-9"
                             autoFocus
                         />
+
+                        {canCreate && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="w-full justify-start"
+                                onClick={() => handleSelectColor(searchTerm)}
+                            >
+                                <Plus className="w-4 h-4 mr-2" />
+                                Cadastrar nova cor: &quot;{searchTerm.trim()}&quot;
+                            </Button>
+                        )}
                     </div>
+
                     <div className="max-h-[300px] overflow-y-auto p-2">
                         {Object.entries(filteredGroups).map(([grupo, cores]) => (
                             <div key={grupo} className="mb-3">
                                 <Label className="text-xs text-gray-500 px-2 mb-1 block">
                                     {grupo}
                                 </Label>
-                                <div className="grid grid-cols-4 gap-1">
+                                <div className="space-y-1">
                                     {cores.map((cor) => {
-                                        const isSelected = isDual
-                                            ? (activeSelector === 'primary' ? primaryName === cor.nome : secondaryName === cor.nome)
-                                            : value?.toLowerCase() === cor.nome.toLowerCase();
+                                        const isSelected = normalize(value) === normalize(cor.nome);
                                         return (
                                             <button
                                                 key={cor.nome}
                                                 type="button"
-                                                onClick={() => handleSelectColor(cor)}
+                                                onClick={() => handleSelectColor(cor.nome)}
                                                 className={cn(
-                                                    "flex flex-col items-center p-2 rounded-lg hover:bg-gray-100 transition-colors",
+                                                    "w-full flex items-center gap-2 p-2 rounded-lg hover:bg-gray-100 transition-colors text-left",
                                                     isSelected && "bg-green-50 ring-2 ring-green-500"
                                                 )}
                                                 title={cor.nome}
@@ -323,19 +248,9 @@ export default function FurnitureColorPicker({
                                                         cor.hex === '#FFFFFF' && "border-gray-300"
                                                     )}
                                                     style={{ backgroundColor: cor.hex }}
-                                                >
-                                                    {isSelected && (
-                                                        <Check className={cn(
-                                                            "w-4 h-4 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
-                                                            cor.hex === '#FFFFFF' || cor.hex === '#FAF9F6' || cor.hex === '#F5F5DC' || cor.hex === '#D3D3D3'
-                                                                ? "text-gray-800"
-                                                                : "text-white"
-                                                        )} />
-                                                    )}
-                                                </div>
-                                                <span className="text-xs mt-1 text-center leading-tight truncate w-full">
-                                                    {cor.nome}
-                                                </span>
+                                                />
+                                                <span className="text-sm flex-1 truncate">{cor.nome}</span>
+                                                {isSelected && <Check className="w-4 h-4 text-green-700" />}
                                             </button>
                                         );
                                     })}
@@ -350,39 +265,9 @@ export default function FurnitureColorPicker({
                         )}
                     </div>
 
-                    {/* Cor customizada */}
-
-
-                    {/* Cor customizada - apenas mostrar se não for dual por enquanto, ou adaptar depois */}
-                    {
-                        !isDual && (
-                            <div className="p-3 border-t bg-gray-50">
-                                <Label className="text-xs text-gray-500 mb-2 block">
-                                    Cor personalizada
-                                </Label>
-                                <div className="flex gap-2 items-center">
-                                    <input
-                                        type="color"
-                                        value={primaryHex || '#CCCCCC'}
-                                        onChange={(e) => {
-                                            onHexChange(e.target.value);
-                                            // Optional: clear text name or set as custom
-                                        }}
-                                        className="w-10 h-10 rounded cursor-pointer border-0"
-                                    />
-                                    <Input
-                                        value={hexValue || primaryHex}
-                                        onChange={(e) => onHexChange(e.target.value)}
-                                        placeholder="#FFFFFF"
-                                        className="flex-1 h-9 font-mono text-sm"
-                                    />
-                                </div>
-                            </div>
-                        )
-                    }
-                </PopoverContent >
-            </Popover >
-        </div >
+                </PopoverContent>
+            </Popover>
+        </div>
     );
 }
 

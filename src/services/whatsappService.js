@@ -140,14 +140,40 @@ _Móveis Pedro II_`;
      * @param {string} linkRastreio
      */
     sendDeliveryNextStop: async (telefone, entrega, linkRastreio) => {
-        const nomeCliente = entrega.cliente_nome?.split(' ')[0] || 'Cliente';
-        const msg = `Olá ${nomeCliente}! 🚚\n\n` +
-            `Sua entrega é a próxima!\n` +
-            `Estamos a caminho do endereço: ${entrega.endereco_entrega}\n\n` +
-            `Acompanhe a chegada do caminhão em tempo real:\n${linkRastreio}\n\n` +
-            `Por favor, deixe alguém responsável para receber.`;
+        if (!entrega?.id) return false;
 
-        return whatsappService.sendMessage(telefone, msg);
+        if (!navigator.onLine) {
+            await saveToOfflineQueue('sendDeliveryNextStop', [telefone, entrega, linkRastreio]);
+            toast.info('Sem internet: aviso de próxima parada salvo para envio posterior.');
+            return true;
+        }
+
+        try {
+            const response = await fetch(`${API_URL}/aviso-proxima-parada`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: entrega.id,
+                    telefone: telefone || entrega.cliente_telefone,
+                    nome: entrega.cliente_nome
+                })
+            });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.error || 'Falha ao enviar próxima parada');
+            }
+
+            return true;
+        } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                await saveToOfflineQueue('sendDeliveryNextStop', [telefone, entrega, linkRastreio]);
+                toast.info('Servidor inacessível: aviso de próxima parada salvo para envio posterior.');
+                return true;
+            }
+            console.error('Erro ao enviar próxima parada:', error);
+            return false;
+        }
     },
 
     /**

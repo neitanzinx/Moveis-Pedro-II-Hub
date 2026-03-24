@@ -15,13 +15,11 @@ import { getCargoConfig } from "@/config/cargos";
  * Exibe mini-preview do sidebar com toggle de permissoes
  */
 export default function PermissionEditorModal({ user, onSave, onClose, isSaving = false }) {
-    if (!user) return null;
-
-    const cargo = user.cargo || 'Vendedor';
+    const cargo = user?.cargo || 'Vendedor';
     const cargoConfig = getCargoConfig(cargo);
 
     // Estado inicial das custom_permissions
-    const initialCustom = user.custom_permissions || { inherit: true, allowed: [], denied: [] };
+    const initialCustom = user?.custom_permissions || { inherit: true, allowed: [], denied: [] };
 
     const [inherit, setInherit] = useState(initialCustom.inherit !== false);
     const [allowed, setAllowed] = useState(initialCustom.allowed || []);
@@ -170,6 +168,8 @@ export default function PermissionEditorModal({ user, onSave, onClose, isSaving 
     };
 
     const countCustom = allowed.length + denied.length;
+
+    if (!user) return null;
 
     return (
         <Dialog open onOpenChange={onClose}>

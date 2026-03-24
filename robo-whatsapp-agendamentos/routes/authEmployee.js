@@ -398,7 +398,7 @@ function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
                         `📋 *Matrícula:* ${user.matricula}\n` +
                         `🔑 *Nova Senha:* ${senhaTemp}\n\n` +
                         `⚠️ _No primeiro acesso você deverá criar uma nova senha._\n\n` +
-                        `Acesse: ${process.env.FRONTEND_URL || 'https://moveispedroii.com.br'}/login`;
+                        `Acesse: ${process.env.FRONTEND_URL || 'https://moveispedro2.com.br'}/login`;
 
                     await whatsappClient.sendMessage(`${telefoneWhatsApp}@c.us`, mensagem);
                     whatsappEnviado = true;

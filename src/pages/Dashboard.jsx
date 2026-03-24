@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "../hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ShoppingCart, DollarSign, Package, Users, TrendingUp, ArrowUpRight, ArrowDownRight, Activity, Calendar, Loader2 } from "lucide-react";
@@ -19,7 +19,10 @@ const fetchSafe = async (fn) => {
 };
 
 export default function Dashboard() {
-  const { user, loading } = useAuth();
+  const auth = useAuth();
+
+  const user = auth?.user;
+  const loading = auth?.loading;
   const [periodo, setPeriodo] = useState("30");
 
   // Queries com fallback para array vazio []
@@ -153,6 +156,16 @@ export default function Dashboard() {
 
     return result;
   }, [vendas, clientes, user, periodo]);
+
+  if (!auth) {
+    console.error("[Dashboard] Auth context is null! Path:", window.location.pathname);
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="animate-spin h-8 w-8 text-red-600" />
+        <p className="ml-2">Erro de autenticação. Recarregando...</p>
+      </div>
+    );
+  }
 
   if (loading || !user) {
     return (
