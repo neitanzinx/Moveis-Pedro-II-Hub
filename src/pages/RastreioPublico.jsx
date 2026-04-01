@@ -62,6 +62,42 @@ export default function RastreioPublico({ idProp }) {
         return v.replace(/(\d{2})(\d{5})(\d{0,4})/, "($1) $2-$3");
     }
 
+    const normalizarStatus = (status) => (status || "")
+        .toString()
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+
+    const escolherEntregaMaisRelevante = (entregas = []) => {
+        if (!Array.isArray(entregas) || entregas.length === 0) return null;
+
+        const pesoStatus = (statusNorm, caminhaoId) => {
+            if (["proxima parada", "em rota", "a caminho", "proximo"].includes(statusNorm)) return 5;
+            if (["agendada", "agendado", "pendente"].includes(statusNorm) && caminhaoId) return 4;
+            if (["agendada", "agendado", "pendente"].includes(statusNorm)) return 3;
+            if (["entregue", "finalizada"].includes(statusNorm)) return 2;
+            if (["cancelada", "cancelado"].includes(statusNorm)) return 1;
+            return 0;
+        };
+
+        return [...entregas].sort((a, b) => {
+            const statusA = normalizarStatus(a.status);
+            const statusB = normalizarStatus(b.status);
+            const pesoA = pesoStatus(statusA, a.caminhao_id);
+            const pesoB = pesoStatus(statusB, b.caminhao_id);
+            if (pesoA !== pesoB) return pesoB - pesoA;
+
+            const dataA = a.data_agendada ? new Date(a.data_agendada).getTime() : 0;
+            const dataB = b.data_agendada ? new Date(b.data_agendada).getTime() : 0;
+            if (dataA !== dataB) return dataB - dataA;
+
+            const idA = Number(a.id) || 0;
+            const idB = Number(b.id) || 0;
+            return idB - idA;
+        })[0];
+    };
+
     // Busca inicial pelo número do pedido ou ID
     async function handleBuscarPedido(e, searchId = null) {
         if (e) e.preventDefault();
@@ -73,23 +109,44 @@ export default function RastreioPublico({ idProp }) {
         setPesquisando(true);
 
         try {
-            // Se foi passado um ID da URL, busca direto pelo ID (Primary Key)
-            // Se foi digitado na tela, busca pelo numero_pedido
-            const query = searchId 
-                ? supabase.from("entregas").select("*").eq("id", searchId)
-                : supabase.from("entregas").select("*").eq("numero_pedido", searchValue);
+            let entregaEncontrada = null;
 
-            const { data, error } = await query
-                .order('id', { ascending: false })
-                .limit(1)
-                .single();
+            if (searchId) {
+                const { data, error } = await supabase
+                    .from("entregas")
+                    .select("*")
+                    .eq("id", searchValue)
+                    .single();
 
-            if (error || !data) {
+                if (error || !data) {
+                    setErro("Pedido não encontrado. Verifique o número digitado.");
+                    return;
+                }
+
+                entregaEncontrada = data;
+            } else {
+                const { data, error } = await supabase
+                    .from("entregas")
+                    .select("*")
+                    .eq("numero_pedido", searchValue)
+                    .order('data_agendada', { ascending: false, nullsFirst: false })
+                    .order('id', { ascending: false })
+                    .limit(50);
+
+                if (error || !data || data.length === 0) {
+                    setErro("Pedido não encontrado. Verifique o número digitado.");
+                    return;
+                }
+
+                entregaEncontrada = escolherEntregaMaisRelevante(data);
+            }
+
+            if (!entregaEncontrada) {
                 setErro("Pedido não encontrado. Verifique o número digitado.");
                 return;
             }
 
-            setEntrega(data);
+            setEntrega(entregaEncontrada);
             setEtapa("confirmacao");
         } catch (err) {
             console.error("Erro na busca:", err);
@@ -171,13 +228,13 @@ export default function RastreioPublico({ idProp }) {
 
     async function processarEntregaEncontrada(dadosEntrega) {
         const statusNormalizado = (dadosEntrega.status || "").trim().toLowerCase();
-        const statusAtivos = ["a caminho", "em rota", "próxima parada", "próximo"];
+        const statusComRota = ["a caminho", "em rota", "próxima parada", "proxima parada", "próximo", "proximo", "pendente", "agendada", "agendado"];
 
-        if (["entregue", "cancelada", "cancelado", "pendente", "agendada", "agendado", "finalizada"].includes(statusNormalizado)) {
+        if (["entregue", "cancelada", "cancelado", "finalizada"].includes(statusNormalizado)) {
             return;
         }
 
-        if (!statusAtivos.includes(statusNormalizado)) {
+        if (!statusComRota.includes(statusNormalizado) && !dadosEntrega.caminhao_id) {
             return;
         }
 
@@ -418,6 +475,13 @@ export default function RastreioPublico({ idProp }) {
                         </button>
                         {(() => {
                             const statusAtualLow = (entrega.status || "").trim().toLowerCase();
+                            const statusAtualNorm = statusAtualLow
+                                .normalize('NFD')
+                                .replace(/[\u0300-\u036f]/g, '');
+                            const entregaConcluida = ["entregue", "finalizada"].includes(statusAtualNorm);
+                            const entregaCancelada = ["cancelada", "cancelado"].includes(statusAtualNorm);
+                            const entregaAgendadaOuPendente = ["pendente", "agendada", "agendado"].includes(statusAtualNorm);
+                            const rotaAtiva = typeof paradasNaFrente === 'number' && paradasNaFrente >= 0;
                             return (
                                 <Card className="shadow-lg">
                                     <CardHeader className="pb-4 border-b">
@@ -429,19 +493,21 @@ export default function RastreioPublico({ idProp }) {
                                             <Badge
                                                 className="text-white px-3 py-1 shadow-sm"
                                                 style={{
-                                                    backgroundColor: statusAtualLow === "entregue" ? "#10b981" :
-                                                        (statusAtualLow === "cancelada" || statusAtualLow === "cancelado") ? "#ef4444" :
-                                                            statusAtualLow === "pendente" || statusAtualLow === "agendada" || statusAtualLow === "agendado" ? "#f59e0b" :
+                                                    backgroundColor: entregaConcluida ? "#10b981" :
+                                                        entregaCancelada ? "#ef4444" :
+                                                            (entregaAgendadaOuPendente && !rotaAtiva) ? "#f59e0b" :
                                                                 organizacao.primary_color
                                                 }}
                                             >
-                                                {statusAtualLow === 'entregue' ? 'Entrega Concluída' : entrega.status}
+                                                {entregaConcluida ? 'Entrega Concluída' :
+                                                    rotaAtiva && paradasNaFrente === 0 ? 'Próxima parada' :
+                                                        rotaAtiva ? 'Em rota' : entrega.status}
                                             </Badge>
                                         </div>
                                     </CardHeader>
                                     <CardContent className="space-y-6 pt-6">
 
-                                        {statusAtualLow === "entregue" || statusAtualLow === "finalizada" ? (
+                                        {entregaConcluida ? (
                                             <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-xl flex flex-col items-center justify-center text-center space-y-3">
                                                 <div className="bg-emerald-100 p-3 rounded-full">
                                                     <Package className="w-8 h-8 text-emerald-600" />
@@ -451,19 +517,19 @@ export default function RastreioPublico({ idProp }) {
                                                     <p className="text-sm text-emerald-600 mt-1">Seu pedido foi entregue com sucesso.</p>
                                                 </div>
                                             </div>
-                                        ) : (["cancelada", "cancelado", "pendente", "agendada", "agendado"].includes(statusAtualLow)) ? (
+                                        ) : (entregaCancelada || (entregaAgendadaOuPendente && !rotaAtiva)) ? (
                                             <div className="bg-amber-50 border border-amber-200 p-6 rounded-xl flex flex-col items-center justify-center text-center space-y-3">
                                                 <div className="bg-amber-100 p-3 rounded-full">
                                                     <Clock className="w-8 h-8 text-amber-600" />
                                                 </div>
                                                 <div>
                                                     <h3 className="text-amber-800 font-bold text-lg">
-                                                        {["agendada", "agendado"].includes(statusAtualLow) ? "Entrega Agendada" :
-                                                            ["cancelado", "cancelada"].includes(statusAtualLow) ? "Entrega Cancelada" :
+                                                        {["agendada", "agendado"].includes(statusAtualNorm) ? "Entrega Agendada" :
+                                                            ["cancelado", "cancelada"].includes(statusAtualNorm) ? "Entrega Cancelada" :
                                                                 `Entrega ${entrega.status}`}
                                                     </h3>
                                                     <p className="text-sm text-amber-600 mt-1">
-                                                        {["agendada", "agendado"].includes(statusAtualLow) ? "Seu pedido está agendado e aguardando o início da rota." :
+                                                        {["agendada", "agendado"].includes(statusAtualNorm) ? "Seu pedido está agendado e aguardando o início da rota." :
                                                             "Sua entrega não está na rota de hoje ou foi cancelada."}
                                                     </p>
                                                 </div>

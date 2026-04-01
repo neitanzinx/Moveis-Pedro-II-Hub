@@ -144,6 +144,9 @@ export default function FotoEntregaCapture({
                 tipo: fotos.length === 0 ? 'principal' : 'adicional'
             }]);
 
+            // Fecha a câmera após cada captura para mostrar preview e botão de confirmação.
+            // O usuário pode tocar em "Adicionar" para tirar mais fotos.
+            pararCamera();
             toast.success(`Foto ${fotos.length + 1} capturada!`);
         } catch (e) {
             console.error("Erro no toDataURL", e);

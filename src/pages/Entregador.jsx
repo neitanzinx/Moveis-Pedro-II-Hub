@@ -610,6 +610,12 @@ export default function Entregador() {
             console.log('Mensagem enviada?', sent);
 
             if (sent) {
+                // Marcar no cache imediatamente (antes da mutação async) para evitar
+                // que o useEffect re-dispare avisarProximo antes do refetch completar
+                queryClient.setQueryData(['entregas-dia', dataSelecionada], (oldData) => {
+                    if (!oldData) return oldData;
+                    return oldData.map(e => e.id === entrega.id ? { ...e, whatsapp_enviado: true } : e);
+                });
                 // Marcar cliente como notificado no banco usando updateEntrega
                 await updateEntrega.mutateAsync({
                     id: entrega.id,
@@ -845,6 +851,13 @@ export default function Entregador() {
                     console.error("Falha ao chamar automação do robô, tentando fallback direto no banco...");
                     await updateEntrega.mutateAsync({ id: entrega.id, data: updateData });
                 }
+
+                // Atualizar cache imediatamente para que o useEffect detecte a próxima entrega
+                // assim que setEnviando(false) rodar no finally, mesmo se o robô estiver offline
+                queryClient.setQueryData(['entregas-dia', dataSelecionada], (oldData) => {
+                    if (!oldData) return oldData;
+                    return oldData.map(e => e.id === entrega.id ? { ...e, status: 'Entregue' } : e);
+                });
 
                 toast.success("Entrega finalizada!");
                 sessionStorage.removeItem('rascunho_entrega');
@@ -1678,17 +1691,9 @@ export default function Entregador() {
                             maxFotos={3}
                             onComplete={salvarFotosEntrega}
                             onCancel={() => {
-                                // Perguntar se quer continuar sem foto
-                                if (confirm('Continuar sem foto? (Não recomendado)')) {
-                                    const entrega = modalFotoEntrega;
-                                    setModalFotoEntrega(null);
-                                    // Se tem pagamento, ir para comprovante
-                                    if (entrega.pagamento_na_entrega || entrega.valor_a_receber > 0) {
-                                        setModalComprovante(entrega);
-                                    } else {
-                                        finalizarEntrega(entrega, entrega.assinatura_url, null);
-                                    }
-                                }
+                                // Foto é obrigatória: voltar não deve avançar entrega sem confirmação.
+                                setModalFotoEntrega(null);
+                                toast.info('Capture e confirme ao menos 1 foto para finalizar a entrega.');
                             }}
                         />
                     </div>
