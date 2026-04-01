@@ -30,6 +30,15 @@ export default function FotoEntregaCapture({
     const [uploading, setUploading] = useState(false);
     const [geolocalizacao, setGeolocalizacao] = useState(null);
 
+    // Garante limpeza do stream ao desmontar o componente ou trocar stream
+    React.useEffect(() => {
+        return () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        };
+    }, [stream]);
+
     // Capturar GPS ao iniciar
     React.useEffect(() => {
         if (navigator.geolocation) {
@@ -425,7 +434,10 @@ export default function FotoEntregaCapture({
             {onCancel && (
                 <Button
                     variant="ghost"
-                    onClick={onCancel}
+                    onClick={() => {
+                        pararCamera();
+                        onCancel();
+                    }}
                     className="w-full"
                     disabled={uploading}
                 >
