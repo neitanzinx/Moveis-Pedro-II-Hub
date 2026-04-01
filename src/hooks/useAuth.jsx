@@ -1,8 +1,19 @@
 import { useState, useEffect, createContext, useContext } from "react";
 import { base44, supabase } from "@/api/base44Client";
-import { ROLE_RULES, SCOPES } from "@/config/permissions";
+import { ROLE_RULES, SCOPES, userCan, getUserRoles, getHighestScope, hasRole, getUserEffectivePermissions } from "@/config/permissions";
 
 const AuthContext = createContext(null);
+
+function normalizeUserRoles(user) {
+  const roles = getUserRoles(user);
+  return {
+    ...user,
+    cargos: roles,
+    // Preserva cargo legado; não sobrescreve com default de roles para não
+    // dar cargo a clientes sem cargo atribuído.
+    cargo: user?.cargo || null
+  };
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -44,11 +55,9 @@ export function AuthProvider({ children }) {
           console.error('Erro ao buscar perfil:', profileError);
         }
 
-        // Mescla dados da sessão com dados do perfil
+        // Mescla dados da sessão com dados do perfil e normaliza cargos
         const fullUser = u ? { ...sessionUser, ...u } : sessionUser;
-        const cargo = fullUser.cargo || null;
-
-        return { ...fullUser, cargo };
+        return normalizeUserRoles(fullUser);
       } catch (err) {
         console.error('Erro ao carregar perfil Supabase:', err);
         return sessionUser;
@@ -62,7 +71,8 @@ export function AuthProvider({ children }) {
       if (!cachedUser) return null;
 
       try {
-        const parsedUser = JSON.parse(cachedUser);
+        // Valida que o cache é JSON v\u00e1lido antes de prosseguir (cache corrompido = limpar e sair)
+        JSON.parse(cachedUser);
 
         // Verificar se ainda tem sessão Supabase ativa
         const { data: { session } } = await supabase.auth.getSession();
@@ -96,11 +106,11 @@ export function AuthProvider({ children }) {
         // Atualizar cache com dados atualizados
         localStorage.setItem('employee_user', JSON.stringify(userProfile));
 
-        return {
+        return normalizeUserRoles({
           ...session.user,
           ...userProfile,
           full_name: userProfile.full_name || userProfile.matricula
-        };
+        });
       } catch (e) {
         console.error("Erro ao verificar auth de funcionário:", e);
         localStorage.removeItem('employee_user');
@@ -126,18 +136,25 @@ export function AuthProvider({ children }) {
         const employeeUser = await checkEmployeeAuth();
 
         if (employeeUser && mounted) {
-          console.log('[Auth] ✅ Funcionário autenticado:', employeeUser.full_name, '- Cargo:', employeeUser.cargo);
+          console.log('[Auth] ✅ Funcionário autenticado:', employeeUser.full_name, '- Cargos:', employeeUser.cargos?.join(', ') || employeeUser.cargo);
           setAuthType('employee');
           setUser(employeeUser);
 
-          // Buscar permissões do cargo
+          // Buscar permissões dos cargos
           try {
             const rolePermissions = await base44.entities.RolePermission.list();
-            const cargoEncontrado = rolePermissions.find(c => c.cargo === employeeUser.cargo);
-            if (cargoEncontrado?.permissions) {
+            const roles = getUserRoles(employeeUser);
+            const permissions = Array.from(new Set(
+              rolePermissions
+                .filter(c => roles.includes(c.cargo))
+                .flatMap(c => Array.isArray(c.permissions) ? c.permissions : [])
+            ));
+
+            if (permissions.length > 0) {
+              const roleScopes = roles.map(role => ROLE_RULES[role]?.scope).filter(Boolean);
               setCargoPermissoes({
-                can: cargoEncontrado.permissions,
-                scope: ROLE_RULES[employeeUser.cargo]?.scope || 'own'
+                can: permissions,
+                scope: getHighestScope(roleScopes)
               });
             }
           } catch (e) {
@@ -159,19 +176,26 @@ export function AuthProvider({ children }) {
         const fullProfile = await loadSupabaseProfile(supabaseUser);
 
         if (fullProfile) {
-          console.log('[Auth] Supabase user encontrado:', fullProfile.email, '- Cargo:', fullProfile.cargo || 'Nenhum');
+          console.log('[Auth] Supabase user encontrado:', fullProfile.email, '- Cargos:', fullProfile.cargos?.join(', ') || fullProfile.cargo || 'Nenhum');
           setAuthType('supabase');
           setUser(fullProfile);
 
-          // Buscar permissões do cargo se existir
-          if (fullProfile.cargo) {
+          // Buscar permissões dos cargos se existir
+          if (fullProfile.cargos?.length || fullProfile.cargo) {
             try {
               const rolePermissions = await base44.entities.RolePermission.list();
-              const cargoEncontrado = rolePermissions.find(c => c.cargo === fullProfile.cargo);
-              if (cargoEncontrado?.permissions) {
+              const roles = getUserRoles(fullProfile);
+              const permissions = Array.from(new Set(
+                rolePermissions
+                  .filter(c => roles.includes(c.cargo))
+                  .flatMap(c => Array.isArray(c.permissions) ? c.permissions : [])
+              ));
+
+              if (permissions.length > 0) {
+                const roleScopes = roles.map(role => ROLE_RULES[role]?.scope).filter(Boolean);
                 setCargoPermissoes({
-                  can: cargoEncontrado.permissions,
-                  scope: ROLE_RULES[fullProfile.cargo]?.scope || 'own'
+                  can: permissions,
+                  scope: getHighestScope(roleScopes)
                 });
               }
             } catch (e) {
@@ -239,10 +263,12 @@ export function AuthProvider({ children }) {
   // Verifica permissão - primeiro tenta banco, depois fallback hardcoded
   const can = (permission) => {
     if (!user) return false;
-    if (!user.cargo) return false;
+
+    const roles = getUserRoles(user);
+    if (!roles.length) return false;
 
     // Se cargo é Administrador no banco OU tem permissão especial '*'
-    if (user.cargo === 'Administrador') return true;
+    if (hasRole(user, 'Administrador')) return true;
 
     // Tenta usar permissões do banco primeiro
     if (cargoPermissoes?.can) {
@@ -250,11 +276,8 @@ export function AuthProvider({ children }) {
       return cargoPermissoes.can.includes(permission);
     }
 
-    // Fallback para regras hardcoded
-    const rules = ROLE_RULES[user.cargo];
-    if (!rules) return false;
-    if (rules.can.includes('*')) return true;
-    return rules.can.includes(permission);
+    // Fallback para regras hardcoded multi-cargo
+    return userCan(user, permission);
   };
 
   // Pega o escopo (all, store, own)
@@ -267,13 +290,12 @@ export function AuthProvider({ children }) {
     }
 
     // Fallback
-    const rules = ROLE_RULES[user.cargo];
-    return rules ? rules.scope : SCOPES.OWN;
+    return getUserEffectivePermissions(user).scope;
   };
 
   // Verifica se usuario e Gerente
   const isGerente = () => {
-    return user?.cargo === 'Gerente';
+    return hasRole(user, 'Gerente');
   };
 
   // Pega a loja do usuario (Prioridade: Loja fixa do user -> Loja selecionada pelo Admin)

@@ -10,6 +10,18 @@ const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'moveis-pedro-ii-jwt-secret-2026';
 const JWT_EXPIRES_IN = '24h';
 
+function normalizeUserRoles(user) {
+    const fromArray = Array.isArray(user?.cargos)
+        ? user.cargos.filter((role) => typeof role === 'string' && role.trim())
+        : [];
+
+    if (user?.cargo && !fromArray.includes(user.cargo)) {
+        fromArray.unshift(user.cargo);
+    }
+
+    return fromArray;
+}
+
 // Validação de complexidade de senha para funcionários
 // Mínimo 6 caracteres, 1 maiúscula, 1 número
 function validarSenhaComplexidade(senha) {
@@ -110,6 +122,7 @@ function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
                 {
                     id: user.id,
                     matricula: user.matricula,
+                    cargos: normalizeUserRoles(user),
                     cargo: user.cargo,
                     loja: user.loja
                 },
@@ -131,6 +144,7 @@ function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
                 user: {
                     id: user.id,
                     full_name: user.full_name,
+                    cargos: normalizeUserRoles(user),
                     cargo: user.cargo,
                     matricula: user.matricula,
                     loja: user.loja,
@@ -456,7 +470,7 @@ function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
             // Buscar dados atualizados
             const { data: user, error } = await supabase
                 .from('public_users')
-                .select('id, full_name, email, cargo, matricula, loja, ativo')
+                .select('id, full_name, email, cargo, cargos, matricula, loja, ativo')
                 .eq('id', decoded.id)
                 .single();
 
@@ -469,7 +483,10 @@ function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
 
             res.json({
                 success: true,
-                user
+                user: {
+                    ...user,
+                    cargos: normalizeUserRoles(user)
+                }
             });
 
         } catch (error) {

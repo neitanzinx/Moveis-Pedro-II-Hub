@@ -28,6 +28,7 @@ import { supabase } from "@/lib/supabase";
 import { differenceInHours } from "date-fns";
 import { useConnectionStatus } from "@/hooks/useConnectionStatus";
 import { Activity, Wifi, WifiOff, MessageCircleOff } from "lucide-react";
+import { hasAnyRole } from "@/config/permissions";
 
 export default function Layout({ children, currentPageName }) {
   const location = useLocation();
@@ -41,7 +42,7 @@ export default function Layout({ children, currentPageName }) {
       if (!user) return null;
 
       let count = 0;
-      if (user.cargo === 'Financeiro' || user.cargo === 'Administrador') {
+      if (hasAnyRole(user, ['Financeiro', 'Administrador'])) {
         const { count: pendingApps } = await supabase
           .from('compras_aprovacoes')
           .select('*', { count: 'exact', head: true })
@@ -49,7 +50,7 @@ export default function Layout({ children, currentPageName }) {
         count += (pendingApps || 0);
       }
 
-      if (user.cargo === 'Estoque' || user.cargo === 'Gerente Geral' || user.cargo === 'Administrador') {
+      if (hasAnyRole(user, ['Estoque', 'Gerente Geral', 'Administrador'])) {
         // Não faturados ou sem resposta > 24h
         const { data: ordens } = await supabase
           .from('compras_ordens')

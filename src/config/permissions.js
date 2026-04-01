@@ -11,6 +11,12 @@ export const SCOPES = {
   OWN: 'own'        // Vê só o seu (Vendedor)
 };
 
+const SCOPE_PRIORITY = {
+  [SCOPES.OWN]: 1,
+  [SCOPES.STORE]: 2,
+  [SCOPES.ALL]: 3
+};
+
 // Regras por Cargo
 export const ROLE_RULES = {
   'Administrador': {
@@ -95,6 +101,57 @@ export const ROLE_RULES = {
   }
 };
 
+function normalizeRoleValue(value) {
+  if (typeof value !== 'string') return null;
+  const role = value.trim();
+  return role || null;
+}
+
+// Retorna a lista de cargos do usuário sem fallback. Retorna [] se o usuário
+// não tiver cargo atribuído (ex: clientes Supabase). Não confundir com
+// getUserEffectivePermissions que aplica fallback para Vendedor nas regras de acesso.
+export function getUserRoles(user) {
+  const fromArray = Array.isArray(user?.cargos)
+    ? user.cargos.map(normalizeRoleValue).filter(Boolean)
+    : [];
+
+  const legacyRole = normalizeRoleValue(user?.cargo);
+
+  if (legacyRole && !fromArray.includes(legacyRole)) {
+    fromArray.unshift(legacyRole);
+  }
+
+  return Array.from(new Set(fromArray));
+}
+
+export function hasRole(user, role) {
+  const roleValue = normalizeRoleValue(role);
+  if (!roleValue) return false;
+  return getUserRoles(user).includes(roleValue);
+}
+
+export function hasAnyRole(user, roles) {
+  if (!Array.isArray(roles) || roles.length === 0) return false;
+  return roles.some((role) => hasRole(user, role));
+}
+
+export function getPrimaryRole(user) {
+  return getUserRoles(user)[0] || 'Vendedor';
+}
+
+export function getHighestScope(scopes = []) {
+  if (!Array.isArray(scopes) || scopes.length === 0) {
+    return SCOPES.OWN;
+  }
+
+  return scopes.reduce((highest, current) => {
+    const normalizedCurrent = current || SCOPES.OWN;
+    return (SCOPE_PRIORITY[normalizedCurrent] || 0) > (SCOPE_PRIORITY[highest] || 0)
+      ? normalizedCurrent
+      : highest;
+  }, SCOPES.OWN);
+}
+
 // Menu Lateral Configurado
 // ATENÇÃO: Links em PascalCase para bater com o nome dos arquivos (Limitação da plataforma)
 // NOTA: A propriedade 'module' indica qual feature flag controla a visibilidade do item
@@ -141,19 +198,21 @@ export const MENU_ITEMS = [
 export function getUserEffectivePermissions(user) {
   if (!user) return { permissions: [], scope: SCOPES.OWN };
 
-  const cargo = user.cargo || 'Vendedor';
-  const roleRules = ROLE_RULES[cargo] || ROLE_RULES['Vendedor'];
+  const roles = getUserRoles(user);
+  const roleRulesList = roles.map((role) => ROLE_RULES[role]).filter(Boolean);
+  const fallbackRules = ROLE_RULES['Vendedor'];
+  const effectiveRoleRules = roleRulesList.length > 0 ? roleRulesList : [fallbackRules];
 
   // Administrador tem acesso total
-  if (roleRules.can.includes('*')) {
+  if (effectiveRoleRules.some((rules) => rules.can.includes('*'))) {
     return {
       permissions: ['*'],
       scope: SCOPES.ALL
     };
   }
 
-  // Pega permissoes base do cargo
-  let basePermissions = [...roleRules.can];
+  // Pega permissoes base da uniao de cargos
+  let basePermissions = Array.from(new Set(effectiveRoleRules.flatMap((rules) => rules.can)));
 
   // Aplica custom_permissions se existir
   const custom = user.custom_permissions;
@@ -180,7 +239,7 @@ export function getUserEffectivePermissions(user) {
 
   return {
     permissions: basePermissions,
-    scope: roleRules.scope
+    scope: getHighestScope(effectiveRoleRules.map((rules) => rules.scope))
   };
 }
 
@@ -254,15 +313,16 @@ export function getAllPermissions() {
 export function getPermissionStates(user) {
   if (!user) return {};
 
-  const cargo = user.cargo || 'Vendedor';
-  const roleRules = ROLE_RULES[cargo] || ROLE_RULES['Vendedor'];
+  const roles = getUserRoles(user);
+  const roleRulesList = roles.map((role) => ROLE_RULES[role]).filter(Boolean);
+  const effectiveRoleRules = roleRulesList.length > 0 ? roleRulesList : [ROLE_RULES['Vendedor']];
   const custom = user.custom_permissions || { inherit: true, allowed: [], denied: [] };
   const allPerms = getAllPermissions();
 
   const states = {};
 
   allPerms.forEach(perm => {
-    const fromRole = roleRules.can.includes('*') || roleRules.can.includes(perm);
+    const fromRole = effectiveRoleRules.some((rules) => rules.can.includes('*') || rules.can.includes(perm));
     const inAllowed = Array.isArray(custom.allowed) && custom.allowed.includes(perm);
     const inDenied = Array.isArray(custom.denied) && custom.denied.includes(perm);
 

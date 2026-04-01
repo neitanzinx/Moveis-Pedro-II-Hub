@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ROLE_RULES, SCOPES } from "@/config/permissions";
+import { SCOPES, getUserRoles, hasRole, userCan, getUserEffectivePermissions } from "@/config/permissions";
 
 // API URL baseada no ambiente
 const API_URL = import.meta.env.VITE_ZAP_API_URL || '';
@@ -43,8 +43,11 @@ export function useEmployeeAuth() {
                 const data = await response.json();
 
                 if (data.success && data.user) {
+                    const roles = getUserRoles(data.user);
                     setUser({
                         ...data.user,
+                        cargos: roles,
+                        cargo: data.user.cargo || roles[0] || null,
                         full_name: data.user.full_name || data.user.matricula
                     });
                 } else {
@@ -78,10 +81,11 @@ export function useEmployeeAuth() {
     // Verificar permissão
     const can = useCallback((permission) => {
         if (!user) return false;
-        if (!user.cargo) return false;
+        const roles = getUserRoles(user);
+        if (!roles.length) return false;
 
         // Administrador pode tudo
-        if (user.cargo === 'Administrador') return true;
+        if (hasRole(user, 'Administrador')) return true;
 
         // Usar permissões do cargo se disponíveis
         if (cargoPermissoes?.can) {
@@ -89,11 +93,8 @@ export function useEmployeeAuth() {
             return cargoPermissoes.can.includes(permission);
         }
 
-        // Fallback para regras hardcoded
-        const rules = ROLE_RULES[user.cargo];
-        if (!rules) return false;
-        if (rules.can.includes('*')) return true;
-        return rules.can.includes(permission);
+        // Fallback para regras hardcoded multi-cargo
+        return userCan(user, permission);
     }, [user, cargoPermissoes]);
 
     // Pegar o escopo (all, store, own)
@@ -104,13 +105,12 @@ export function useEmployeeAuth() {
             return cargoPermissoes.scope;
         }
 
-        const rules = ROLE_RULES[user.cargo];
-        return rules ? rules.scope : SCOPES.OWN;
+        return getUserEffectivePermissions(user).scope;
     }, [user, cargoPermissoes]);
 
     // Verificar se é Gerente
     const isGerente = useCallback(() => {
-        return user?.cargo === 'Gerente';
+        return hasRole(user, 'Gerente');
     }, [user]);
 
     // Pegar a loja do usuário

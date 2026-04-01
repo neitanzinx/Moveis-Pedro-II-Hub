@@ -53,6 +53,7 @@ import AutoAtendimento from "./AutoAtendimento.jsx";
 import RastreioPublico from "./RastreioPublico.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation, Navigate } from 'react-router-dom';
+import { hasAnyRole, getUserRoles } from "@/config/permissions";
 
 // ============================================================================
 // COMPONENTE DE LOADING - Exibido enquanto páginas lazy são carregadas
@@ -161,7 +162,7 @@ function PagesContent() {
     if (location.pathname === '/login') {
         // Se já está logado como funcionário E tem cargo válido (qualquer cargo não vazio), redireciona
         // MAS APENAS se NÃO for primeiro acesso. Se for primeiro acesso, deixa renderizar o LoginFuncionario para trocar senha.
-        if (user && user.cargo && !user.primeiro_acesso) {
+        if (user && getUserRoles(user).length > 0 && !user.primeiro_acesso) {
             const params = new URLSearchParams(location.search);
             const redirect = params.get('redirect');
             return <Navigate to={redirect || "/admin/Dashboard"} replace />;
@@ -184,15 +185,22 @@ function PagesContent() {
         }
 
         // Bloquear clientes (usuários sem cargo)
-        if (!user.cargo) {
-            console.warn('[Router] Usuário sem cargo válido tentando acessar /admin:', user.email, '- Cargo:', user.cargo);
+        if (getUserRoles(user).length === 0) {
+            console.warn('[Router] Usuário sem cargo válido tentando acessar /admin:', user.email, '- Cargos:', user.cargos || user.cargo);
             // Redirecionar para login de funcionário (não área cliente)
             return <Navigate to="/login" replace />;
         }
 
         // ===== RESTRICAO POR CARGO =====
+        // Restrições de navegação mobile-only (Entregador, Montador, Montador Externo) só se
+        // aplicam quando TODOS os cargos do usuário são mobile-only. Se o usuário tiver
+        // qualquer cargo não-mobile (ex: Vendedor, Gerente), acessa o sistema completo.
+        const MOBILE_ONLY_ROLES = ['Entregador', 'Montador', 'Montador Externo'];
+        const userRoles = getUserRoles(user);
+        const isMobileOnlyUser = userRoles.length > 0 && userRoles.every(role => MOBILE_ONLY_ROLES.includes(role));
+
         // Montador Externo só pode acessar /admin/MontadorExterno
-        if (user.cargo === 'Montador Externo') {
+        if (isMobileOnlyUser && hasAnyRole(user, ['Montador Externo'])) {
             if (!location.pathname.toLowerCase().includes('montadorexterno')) {
                 return <Navigate to="/admin/MontadorExterno" replace />;
             }
@@ -204,7 +212,7 @@ function PagesContent() {
         }
 
         // Entregador só pode acessar /admin/Entregador
-        if (user.cargo === 'Entregador') {
+        if (isMobileOnlyUser && hasAnyRole(user, ['Entregador'])) {
             if (!location.pathname.toLowerCase().includes('entregador')) {
                 return <Navigate to="/admin/Entregador" replace />;
             }
@@ -215,9 +223,11 @@ function PagesContent() {
             );
         }
 
-        // Logística deve acessar /admin/LogisticaSemanal por padrão, mas pode navegar
-        if (user.cargo === 'Logística') {
-            // Se estiver na raiz do admin ou tentando ir pro dashboard, manda pro semanal
+        // Logística: soft redirect para LogisticaSemanal quando não tem outros cargos de gestão
+        const NON_LOGISTICS_ROLES = ['Administrador', 'Gerente', 'Gerente Geral', 'Financeiro', 'RH', 'Comprador'];
+        const hasOnlyLogisticsRoles = userRoles.every(role => role === 'Logística' || MOBILE_ONLY_ROLES.includes(role));
+        const hasNonLogisticsRole = userRoles.some(role => NON_LOGISTICS_ROLES.includes(role));
+        if (hasAnyRole(user, ['Logística']) && hasOnlyLogisticsRoles && !hasNonLogisticsRole) {
             if (location.pathname === '/admin' || location.pathname === '/admin/Dashboard') {
                 return <Navigate to="/admin/LogisticaSemanal" replace />;
             }
@@ -225,7 +235,7 @@ function PagesContent() {
         }
 
         // Montador Interno só pode acessar /admin/Montagem
-        if (user.cargo === 'Montador') {
+        if (isMobileOnlyUser && hasAnyRole(user, ['Montador'])) {
             if (!location.pathname.toLowerCase().includes('montagem')) {
                 return <Navigate to="/admin/Montagem" replace />;
             }

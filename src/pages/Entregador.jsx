@@ -196,15 +196,14 @@ export default function Entregador() {
         refetchInterval: rotaIniciada ? 10000 : 60000
     });
 
-    // Montagens Internas pendentes por ITEM do pedido
-    const { data: montagensItensPendentes = [] } = useQuery({
+    // Montagens Internas por ITEM do pedido
+    const { data: montagensItensInternas = [] } = useQuery({
         queryKey: ['montagens-itens-internas-pendentes'],
         queryFn: async () => {
             const todas = await base44.entities.MontagemItem.list('-created_at');
             return todas.filter(m => {
                 const tipo = (m.tipo_montagem || '').toLowerCase();
-                const status = (m.status || '').toLowerCase();
-                return tipo === 'interna' && status !== 'concluida';
+                return tipo === 'interna';
             });
         },
         refetchInterval: rotaIniciada ? 10000 : 60000
@@ -439,12 +438,13 @@ export default function Entregador() {
                     if (venda?.itens) {
                         const vendaItens = typeof venda.itens === 'string' ? JSON.parse(venda.itens) : venda.itens;
                         vendaItens.forEach(item => {
-                            const bloqueadoMontagem = temMontagemPendente(entrega);
+                            const bloqueadoMontagem = itemTemMontagemPendente(entrega, item);
                             itens.push({
                                 id: `${entrega.id}-${item.produto_id || item.id}`,
                                 pedido: venda.numero_pedido || entrega.numero_pedido,
                                 entrega_id: entrega.id,
                                 cliente: entrega.cliente_nome,
+                                produto_id: item.produto_id || item.id,
                                 produto: item.nome || item.produto_nome,
                                 quantidade: item.quantidade || 1,
                                 cor: item.cor,
@@ -671,29 +671,70 @@ export default function Entregador() {
         return statusNorm === 'concluida';
     };
 
-    // Verifica bloqueio por item: se qualquer item de montagem interna estiver pendente
-    const temMontagemPendente = (entrega) => {
+    const normalizarTextoComparacao = (valor) => (valor || '')
+        .toString()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const getMontagensInternasRelacionadas = (entrega) => {
         const entregaId = entrega?.id?.toString();
         const vendaId = entrega?.venda_id?.toString();
         const numeroPedidoNorm = normalizarNumeroPedido(entrega?.numero_pedido);
 
-        const pendentePorMontagemItem = montagensItensPendentes.some(m => {
-            const itemEntregaId = m?.entrega_id?.toString();
-            const itemVendaId = m?.venda_id?.toString();
-            const itemNumeroPedidoNorm = normalizarNumeroPedido(m?.numero_pedido);
+        return montagensItensInternas.filter((montagem) => {
+            const itemEntregaId = montagem?.entrega_id?.toString();
+            const itemVendaId = montagem?.venda_id?.toString();
+            const itemNumeroPedidoNorm = normalizarNumeroPedido(montagem?.numero_pedido);
 
             if (entregaId && itemEntregaId && itemEntregaId === entregaId) return true;
             if (vendaId && itemVendaId && itemVendaId === vendaId) return true;
             if (numeroPedidoNorm && itemNumeroPedidoNorm && itemNumeroPedidoNorm === numeroPedidoNorm) return true;
             return false;
         });
+    };
+
+    // Verifica bloqueio por item: se qualquer item de montagem interna estiver pendente
+    const temMontagemPendente = (entrega) => {
+        const montagensRelacionadas = getMontagensInternasRelacionadas(entrega);
+
+        if (montagensRelacionadas.length > 0) {
+            return montagensRelacionadas.some((montagem) => !statusMontagemConcluida(montagem?.status));
+        }
 
         // Fallback: se a entrega tem itens de montagem interna e status ainda não está concluído,
-        // mantém o bloqueio mesmo quando algum vínculo do item estiver inconsistente.
+        // mantém o bloqueio apenas quando ainda não existem registros de montagem para confrontar.
         const totalItensInternos = contarItensMontagemInterna(entrega);
         const pendentePorStatusDaEntrega = totalItensInternos > 0 && !statusMontagemConcluida(entrega?.montagem_status);
 
-        return pendentePorMontagemItem || pendentePorStatusDaEntrega;
+        return pendentePorStatusDaEntrega;
+    };
+
+    const itemTemMontagemPendente = (entrega, itemVenda) => {
+        const montagensPendentes = getMontagensInternasRelacionadas(entrega)
+            .filter((montagem) => !statusMontagemConcluida(montagem?.status));
+
+        if (montagensPendentes.length === 0) return false;
+
+        const itemProdutoId = itemVenda?.produto_id?.toString();
+        const itemNome = normalizarTextoComparacao(itemVenda?.nome || itemVenda?.produto_nome);
+
+        return montagensPendentes.some((montagem) => {
+            const montagemProdutoId = montagem?.produto_id?.toString();
+            const montagemNome = normalizarTextoComparacao(montagem?.produto_nome);
+
+            if (itemProdutoId && montagemProdutoId) {
+                return itemProdutoId === montagemProdutoId;
+            }
+
+            if (itemNome && montagemNome) {
+                return itemNome === montagemNome;
+            }
+
+            return false;
+        });
     };
 
     // Iniciar processo de finalizar entrega (abre assinatura)

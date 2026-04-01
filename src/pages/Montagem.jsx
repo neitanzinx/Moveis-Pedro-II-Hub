@@ -2,6 +2,7 @@ import React from "react";
 import { AlertCircle } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import MontagemInterna from "../components/logistica/MontagemInterna";
+import { hasAnyRole } from "@/config/permissions";
 
 export default function Montagem() {
   const { user, loading } = useAuth();
@@ -13,9 +14,9 @@ export default function Montagem() {
     user?.role === 'admin' ||
     ['administrador', 'admin', 'adm'].includes(cargoNormalizado) ||
     cargoNormalizado.includes('master');
-  const isEstoque = user.cargo === 'Estoque';
-  const isLogistica = user.cargo === 'Logística';
-  const isMontador = user.cargo === 'Montador';
+  const isEstoque = hasAnyRole(user, ['Estoque']);
+  const isLogistica = hasAnyRole(user, ['Logística']);
+  const isMontador = hasAnyRole(user, ['Montador']);
 
   if (!isAdmin && !isEstoque && !isLogistica && !isMontador) {
     return (
