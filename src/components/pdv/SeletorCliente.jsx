@@ -62,7 +62,7 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
   const [buscandoCep, setBuscandoCep] = useState(false);
   const [buscandoCepEntrega, setBuscandoCepEntrega] = useState(false);
   const queryClient = useQueryClient();
-  const { getUserLoja } = useAuth();
+  const { getUserLoja, can } = useAuth();
 
   const criarClienteMutation = useMutation({
     mutationFn: (data) => {
@@ -245,15 +245,17 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
           >
             <X className="w-3 h-3" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute top-1 right-8 h-6 w-6 text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
-            onClick={() => setEditModalOpen(true)}
-            title="Editar cliente"
-          >
-            <Edit className="w-3 h-3" />
-          </Button>
+          {can('manage_clientes') && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute top-1 right-8 h-6 w-6 text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={() => setEditModalOpen(true)}
+              title="Editar cliente"
+            >
+              <Edit className="w-3 h-3" />
+            </Button>
+          )}
           <div className="flex items-center gap-2">
             <p className="font-bold text-green-800 dark:text-green-400 truncate flex items-center gap-2">
               {formatarNome(clienteSelecionado.nome_completo)}

@@ -2,11 +2,36 @@ import React from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Edit, Trash2, Users, DollarSign, Truck, Shield } from "lucide-react";
+import { Edit, Trash2, Users, DollarSign, Truck, Shield, Download } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 
-export default function GerenciamentoCargos({ cargos, onEditar }) {
+const CARGO_CATEGORY_BY_NAME = {
+  "Administrador": "Admin",
+  "Gerente": "Gestão",
+  "Gerente Geral": "Gestão",
+  "Vendedor": "Vendas",
+  "Estoque": "Operacional",
+  "Logística": "Operacional",
+  "Financeiro": "Gestão",
+  "RH": "Gestão",
+  "Entregador": "Operacional",
+  "Montador": "Operacional",
+  "Montador Externo": "Operacional",
+};
+
+function inferCategoria(cargo) {
+  if (cargo?.categoria) return cargo.categoria;
+  return CARGO_CATEGORY_BY_NAME[cargo?.nome] || "Sem Categoria";
+}
+
+function getPermissoesList(cargo) {
+  if (Array.isArray(cargo?.permissoes)) return cargo.permissoes;
+  if (cargo?.permissoes && Array.isArray(cargo.permissoes.can)) return cargo.permissoes.can;
+  return [];
+}
+
+export default function GerenciamentoCargos({ cargos, onEditar, onImportarPadrao, importandoPadrao = false }) {
   const queryClient = useQueryClient();
 
   const deletarCargoMutation = useMutation({
@@ -23,12 +48,19 @@ export default function GerenciamentoCargos({ cargos, onEditar }) {
     }
   };
 
+  const cargosComCategoria = cargos.map((cargo) => ({
+    ...cargo,
+    categoria_render: inferCategoria(cargo),
+    permissoes_render: getPermissoesList(cargo),
+  }));
+
   const cargosPorCategoria = {
-    'Principal': cargos.filter(c => c.categoria === 'Principal'),
-    'Vendas': cargos.filter(c => c.categoria === 'Vendas'),
-    'Operacional': cargos.filter(c => c.categoria === 'Operacional'),
-    'Gestão': cargos.filter(c => c.categoria === 'Gestão'),
-    'Admin': cargos.filter(c => c.categoria === 'Admin')
+    'Principal': cargosComCategoria.filter(c => c.categoria_render === 'Principal'),
+    'Vendas': cargosComCategoria.filter(c => c.categoria_render === 'Vendas'),
+    'Operacional': cargosComCategoria.filter(c => c.categoria_render === 'Operacional'),
+    'Gestão': cargosComCategoria.filter(c => c.categoria_render === 'Gestão'),
+    'Admin': cargosComCategoria.filter(c => c.categoria_render === 'Admin'),
+    'Sem Categoria': cargosComCategoria.filter(c => c.categoria_render === 'Sem Categoria')
   };
 
   if (cargos.length === 0) {
@@ -39,8 +71,14 @@ export default function GerenciamentoCargos({ cargos, onEditar }) {
           Nenhum cargo criado ainda
         </h3>
         <p className="text-gray-500 dark:text-gray-400">
-          Comece criando cargos personalizados para sua equipe
+          Você pode carregar os cargos padrão do sistema ou criar cargos personalizados para sua equipe
         </p>
+        <div className="mt-5 flex items-center justify-center gap-2">
+          <Button variant="outline" onClick={onImportarPadrao} disabled={importandoPadrao || !onImportarPadrao}>
+            <Download className="w-4 h-4 mr-2" />
+            {importandoPadrao ? 'Importando...' : 'Inserir Cargos Padrão'}
+          </Button>
+        </div>
       </Card>
     );
   }
@@ -71,7 +109,7 @@ export default function GerenciamentoCargos({ cargos, onEditar }) {
                           {cargo.nome}
                         </h4>
                         <Badge variant="outline">
-                          Nível {cargo.hierarquia}
+                          Nível {cargo.hierarquia ?? 0}
                         </Badge>
                         {cargo.e_vendedor && (
                           <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
@@ -94,14 +132,14 @@ export default function GerenciamentoCargos({ cargos, onEditar }) {
                       )}
 
                       <div className="flex flex-wrap gap-1">
-                        {cargo.permissoes?.slice(0, 5).map((perm, i) => (
+                        {cargo.permissoes_render.slice(0, 5).map((perm, i) => (
                           <Badge key={i} variant="outline" className="text-xs">
                             {perm}
                           </Badge>
                         ))}
-                        {cargo.permissoes?.length > 5 && (
+                        {cargo.permissoes_render.length > 5 && (
                           <Badge variant="outline" className="text-xs">
-                            +{cargo.permissoes.length - 5} mais
+                            +{cargo.permissoes_render.length - 5} mais
                           </Badge>
                         )}
                       </div>

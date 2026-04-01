@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Package, Tag, Warehouse, Filter, Palette, Layers, Ruler, ImageIcon, Edit2 } from "lucide-react";
+import { Search, Package, Tag, Warehouse, Filter, Palette, Layers, Ruler, ImageIcon, Edit2, AlertTriangle, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import SolicitacaoCadastroModal from "./SolicitacaoCadastroModal";
 import { getColorHex } from "../produtos/FurnitureColorPicker";
+import { useEstoqueValidacao } from "@/hooks/useEstoqueValidacao";
 
 export default function BuscaProdutoAvancada(props) {
   const { produtos, onSelectProduto, onEditProduto, fornecedores = [] } = props;
@@ -17,7 +18,9 @@ export default function BuscaProdutoAvancada(props) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [solicitationParentProduct, setSolicitationParentProduct] = useState(null);
+  const [validating, setValidating] = useState(false);
   const searchRef = useRef(null);
+  const { validarProduto } = useEstoqueValidacao();
 
   // Fechar resultados ao clicar fora
   useEffect(() => {
@@ -48,26 +51,35 @@ export default function BuscaProdutoAvancada(props) {
     }
   };
 
-  const handleSelectProduto = (produto) => {
-    const qtdDisponivel = (produto.quantidade_estoque || 0) - (produto.quantidade_reservada || 0);
+  const handleSelectProduto = async (produto) => {
+    if (validating) return;
+    setValidating(true);
 
-    // Se estoque zerado, verificar se fornecedor permite encomenda
-    if (qtdDisponivel <= 0) {
-      const fornecedor = fornecedores.find(f =>
-        f.nome_empresa?.toLowerCase().trim() === produto.fornecedor_nome?.toLowerCase().trim()
-      );
+    try {
+      const validacao = await validarProduto(produto.id, 1);
 
-      if (fornecedor && fornecedor.encomendas_habilitadas === false) {
-        toast.error(`Encomendas bloqueadas para o fornecedor ${fornecedor.nome_empresa}. Produto sem estoque.`);
+      if (!validacao.pode_vender) {
+        // Pronta entrega sem estoque: bloqueia
+        toast.error(`${produto.nome}: ${validacao.motivo}`);
         return;
       }
 
-      // Marcar como encomenda
-      onSelectProduto({ ...produto, is_encomenda: true });
-      toast.info(`📦 ${produto.nome} adicionado como ENCOMENDA (estoque zerado)`);
-    } else {
-      onSelectProduto(produto);
+      if (validacao.eh_encomenda && validacao.requer_aprovacao) {
+        // Flexível sem estoque: passa para VendaModal lidar com aprovação
+        onSelectProduto({ ...produto, is_encomenda: true, validacao_estoque: validacao });
+        toast.warning(`${produto.nome} adicionado. Requer aprovação gerencial (sem estoque).`);
+      } else if (validacao.eh_encomenda) {
+        // Sob-encomenda configurado: encomenda direta
+        onSelectProduto({ ...produto, is_encomenda: true, validacao_estoque: validacao });
+        toast.info(`${produto.nome} adicionado como ENCOMENDA (prazo: ${validacao.prazo_dias} dias úteis)`);
+      } else {
+        // Estoque disponível: venda normal
+        onSelectProduto({ ...produto, is_encomenda: false, validacao_estoque: validacao });
+      }
+    } finally {
+      setValidating(false);
     }
+
     setSearchTerm("");
     setShowResults(false);
     setSelectedIndex(0);
@@ -151,14 +163,18 @@ export default function BuscaProdutoAvancada(props) {
                 {produtosFiltrados.slice(0, 10).map((produto, index) => {
                   const qtd = (produto.quantidade_estoque || 0) - (produto.quantidade_reservada || 0);
                   const isSelected = index === selectedIndex;
+                  const tipoEstoque = produto.tipo_estoque || 'herdado';
+                  const semEstoque = qtd <= 0;
+                  const bloqueado = tipoEstoque === 'pronta_entrega' && semEstoque;
 
                   return (
                     <button
                       key={produto.id}
                       type="button"
                       onClick={() => handleSelectProduto(produto)}
+                      disabled={validating}
                       className={`w-full text-left px-4 py-2.5 flex flex-col gap-1 border-b border-gray-100 dark:border-neutral-800 transition-colors ${isSelected ? 'bg-green-50 dark:bg-green-900/30' : 'hover:bg-gray-50 dark:hover:bg-neutral-800'
-                        }`}
+                        } ${validating ? 'opacity-60 cursor-wait' : ''}`}
                     >
                       {/* Linha principal: Imagem + Nome + Modelo + Preço */}
                       <div className="flex items-center justify-between w-full gap-3">
@@ -226,12 +242,22 @@ export default function BuscaProdutoAvancada(props) {
                           {produto.categoria || 'Outros'}
                         </span>
                         {/* Estoque */}
-                        <span className={`text-[10px] font-medium ml-auto ${qtd <= 0 ? 'text-red-500' : qtd <= 5 ? 'text-orange-500' : 'text-green-600'}`}>
-                          {qtd <= 0 ? (
-                            <span className="flex items-center gap-1">
-                              <span className="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-semibold">📦 Encomenda</span>
+                        <span className="text-[10px] font-medium ml-auto">
+                          {bloqueado ? (
+                            <span className="flex items-center gap-1 bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold">
+                              <AlertTriangle className="w-3 h-3" /> Sem estoque
                             </span>
-                          ) : `${qtd}un`}
+                          ) : semEstoque && tipoEstoque === 'sob_encomenda' ? (
+                            <span className="flex items-center gap-1 bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-semibold">
+                              <Clock className="w-3 h-3" /> Sob-encomenda
+                            </span>
+                          ) : semEstoque ? (
+                            <span className="flex items-center gap-1 bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-semibold">
+                              <AlertTriangle className="w-3 h-3" /> Requer aprovacao
+                            </span>
+                          ) : (
+                            <span className={`${qtd <= 5 ? 'text-orange-500' : 'text-green-600'}`}>{qtd}un</span>
+                          )}
                         </span>
 
                         {/* Botão Editar Produto */}

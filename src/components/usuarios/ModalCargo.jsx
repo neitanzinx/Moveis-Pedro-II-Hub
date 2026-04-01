@@ -47,6 +47,43 @@ const PERMISSOES_INFO = {
 
 const PERMISSOES_DISPONIVEIS = Object.keys(PERMISSOES_INFO);
 
+function getMissingCargoColumn(error) {
+  const message = error?.message || "";
+  const match = message.match(/Could not find the '([^']+)' column of 'cargos'/i);
+  return match?.[1] || null;
+}
+
+async function saveCargoWithSchemaFallback({ cargoId, data }) {
+  const unsupportedColumns = new Set();
+  let attempts = 0;
+  let lastError = null;
+
+  while (attempts < 10) {
+    const sanitizedPayload = Object.fromEntries(
+      Object.entries(data).filter(([key]) => !unsupportedColumns.has(key))
+    );
+
+    try {
+      if (cargoId) {
+        return await base44.entities.Cargo.update(cargoId, sanitizedPayload);
+      }
+      return await base44.entities.Cargo.create(sanitizedPayload);
+    } catch (error) {
+      lastError = error;
+      const missingColumn = getMissingCargoColumn(error);
+      if (!missingColumn) throw error;
+
+      const hasColumnInPayload = Object.prototype.hasOwnProperty.call(sanitizedPayload, missingColumn);
+      if (!hasColumnInPayload) throw error;
+
+      unsupportedColumns.add(missingColumn);
+      attempts += 1;
+    }
+  }
+
+  throw lastError;
+}
+
 export default function ModalCargo({ cargo, onClose }) {
   const [dados, setDados] = useState({
     nome: cargo?.nome || "",
@@ -56,8 +93,7 @@ export default function ModalCargo({ cargo, onClose }) {
     permissoes: cargo?.permissoes || [],
     e_vendedor: cargo?.e_vendedor || false,
     e_master_caminhao: cargo?.e_master_caminhao || false,
-    descricao: cargo?.descricao || "",
-    ativo: cargo?.ativo ?? true
+    descricao: cargo?.descricao || ""
   });
 
   const [buscaPermissao, setBuscaPermissao] = useState("");
@@ -65,12 +101,9 @@ export default function ModalCargo({ cargo, onClose }) {
   const queryClient = useQueryClient();
 
   const salvarMutation = useMutation({
-    mutationFn: (data) => {
-      if (cargo) {
-        return base44.entities.Cargo.update(cargo.id, data);
-      } else {
-        return base44.entities.Cargo.create(data);
-      }
+    mutationFn: async (data) => {
+      const payload = { ...data };
+      return saveCargoWithSchemaFallback({ cargoId: cargo?.id, data: payload });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cargos'] });

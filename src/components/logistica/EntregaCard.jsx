@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useDraggable } from "@dnd-kit/core";
-import { Map, AlertTriangle, MessageCircle, Package, Truck, User, Wrench, Store, Sofa, CheckCircle, CalendarX, History, Settings, Clock } from "lucide-react";
+import { Map, AlertTriangle, MessageCircle, Package, Truck, User, Wrench, Store, CheckCircle, CalendarX, History, Settings, Clock } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -105,13 +105,6 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
               </Badge>
             )}
 
-            {/* Outros Badges */}
-            {(entrega.origem === 'mostruario' || entrega.item_mostruario) && (
-              <Badge className="text-[8px] px-1 py-0 h-4 bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-none border-0 flex items-center gap-0.5" title="Item de Mostruário">
-                <Sofa className="w-2 h-2" />
-                MOST
-              </Badge>
-            )}
             {/* Badge de Montagem */}
             {entrega.tipo_montagem === 'montado' && (
               <Badge className="text-[8px] px-1 py-0 h-4 bg-orange-600 hover:bg-orange-700 text-white font-bold shadow-none border-0" title="Entrega Montado (montagem interna)">

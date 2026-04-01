@@ -23,6 +23,8 @@ const DEFAULT_SETTINGS = {
     },
     comissao_base_percentual: 3.00,
     comissao_sobre: 'bruto',
+    comissao_prioridade_estrategia: 'mais_especifica',
+    comissao_recalculo_politica: 'nao_recalcular',
     modulos_ativos: {
         montagem: true,
         assistencia_tecnica: true,

@@ -128,13 +128,13 @@ CREATE POLICY "Usuarios veem montagens" ON montagens
         )
     );
 
-CREATE POLICY "Agendamento edita montagens" ON montagens
+CREATE POLICY "Logistica edita montagens" ON montagens
     FOR ALL
     USING (
         EXISTS (
             SELECT 1 FROM public_users 
             WHERE id = auth.uid() 
-            AND cargo IN ('Administrador', 'Gerente', 'Agendamento', 'Logística')
+            AND cargo IN ('Administrador', 'Gerente', 'Logística')
             AND status_aprovacao = 'Aprovado'
         )
     );

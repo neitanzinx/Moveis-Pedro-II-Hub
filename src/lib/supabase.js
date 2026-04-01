@@ -110,9 +110,11 @@ const tableMap = {
     NPSLink: 'nps_links',
     NPSAvaliacao: 'nps_avaliacoes',
     MetaVenda: 'metas_vendas',
+    RegraComissao: 'regras_comissao',
+    ComissaoHistorico: 'comissoes_historico',
+    ComissaoFechamentoMensal: 'comissoes_fechamento_mensal',
     TokenGerencial: 'tokens_gerenciais',
     LogUsoToken: 'log_uso_tokens',
-    PedidoMostruario: 'pedidos_mostruario',
     SolicitacaoCadastro: 'solicitacoes_cadastro_produto',
     PromocaoFornecedor: 'promocoes_fornecedor',
     HistoricoPrecos: 'historico_precos',
@@ -122,7 +124,9 @@ const tableMap = {
     ComprasOrden: 'compras_ordens',
     ComprasOcItem: 'compras_oc_itens',
     ComprasCentroCusto: 'compras_centro_custos',
-    ComprasWorkflow: 'compras_workflows'
+    ComprasWorkflow: 'compras_workflows',
+    MovimentacaoEstoque: 'movimentacoes_estoque',
+    EstoqueMovimentacao: 'estoque_movimentacoes'
 };
 
 // O Adaptador Mágico (Handler)
@@ -139,7 +143,10 @@ const createHandler = (tableName) => ({
             if (orderBy && typeof orderBy === 'string') {
                 const isDesc = orderBy.startsWith('-');
                 const field = isDesc ? orderBy.substring(1) : orderBy;
-                const dbField = field === 'created_date' ? 'created_at' : field;
+                    // audit_logs usa coluna 'timestamp' em vez de 'created_at'
+                    const dbField = field === 'created_date' ? 'created_at' :
+                        (field === 'created_at' && tableName === 'audit_logs') ? 'timestamp' :
+                        field;
                 query = query.order(dbField, { ascending: !isDesc });
             } else {
                 // Ordenação padrão por ID para garantir consistência na paginação

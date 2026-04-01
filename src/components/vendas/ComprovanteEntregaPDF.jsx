@@ -1,7 +1,10 @@
+import { getEntregaFotos } from '@/utils/vendaStatus';
+
 /**
  * Gera PDF de comprovante de entrega com:
  * - Dados do pedido e cliente
  * - Assinatura digital do cliente
+ * - Fotos dos produtos entregues (se houver)
  * - Histórico de tentativas (se houver)
  * - Comprovante de pagamento (se houver)
  */
@@ -25,6 +28,8 @@ export function gerarComprovanteEntregaPDF(entrega, venda) {
       .replace(/^\[PENDENTE CADASTRO\]\s*/i, '');
   };
 
+  const fotosEntrega = getEntregaFotos(entrega);
+
   const itensHTML = venda?.itens?.map(item => `
     <tr>
       <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.quantidade}x ${limparNomeProduto(item.produto_nome)}</td>
@@ -44,6 +49,20 @@ export function gerarComprovanteEntregaPDF(entrega, venda) {
           <img src="${entrega.foto_tentativa_url}" style="max-height: 120px; border-radius: 4px;" />
         </div>
       ` : ''}
+    </div>
+  ` : '';
+
+  const fotosProdutosHTML = fotosEntrega.length > 0 ? `
+    <div class="section">
+      <div class="section-title">Fotos dos Produtos Entregues</div>
+      <div class="photo-grid">
+        ${fotosEntrega.map((foto, index) => `
+          <div class="photo-card">
+            <img src="${foto.url}" alt="${foto.tipo || `Foto ${index + 1}`}" />
+            <div class="photo-label">${foto.tipo || `Foto ${index + 1}`}</div>
+          </div>
+        `).join('')}
+      </div>
     </div>
   ` : '';
 
@@ -115,6 +134,31 @@ export function gerarComprovanteEntregaPDF(entrega, venda) {
           color: #6b7280; 
         }
         table { width: 100%; border-collapse: collapse; }
+        .photo-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 10px;
+          margin-top: 10px;
+        }
+        .photo-card {
+          border: 1px solid #e5e7eb;
+          border-radius: 6px;
+          padding: 8px;
+          background: white;
+        }
+        .photo-card img {
+          width: 100%;
+          max-height: 160px;
+          object-fit: cover;
+          border-radius: 4px;
+          display: block;
+        }
+        .photo-label {
+          margin-top: 6px;
+          font-size: 10px;
+          color: #4b5563;
+          text-align: center;
+        }
         .footer { 
           text-align: center; 
           margin-top: 24px; 
@@ -195,12 +239,14 @@ export function gerarComprovanteEntregaPDF(entrega, venda) {
 
       ${entrega.comprovante_pagamento_url ? `
         <div class="section">
-          <div class="section-title">💳 Comprovante de Pagamento</div>
+          <div class="section-title">Comprovante de Pagamento</div>
           <div style="text-align: center;">
             <img src="${entrega.comprovante_pagamento_url}" style="max-height: 150px; border-radius: 4px;" />
           </div>
         </div>
       ` : ''}
+
+      ${fotosProdutosHTML}
 
       ${tentativasHTML}
 

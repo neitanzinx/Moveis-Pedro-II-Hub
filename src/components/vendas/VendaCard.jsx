@@ -1,6 +1,7 @@
 
 import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { base44, supabase } from "@/api/base44Client";
+import { useAuth } from "@/hooks/useAuth";
 import { EMPRESA } from "@/config/empresa";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -29,6 +30,10 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
   const [baixando, setBaixando] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  // Only managers and admins can cancel sales
+  const canCancel = user?.cargo === 'Administrador' || user?.cargo === 'Gerente' || user?.cargo === 'Gerente Geral';
 
   const cancelarVendaMutation = useMutation({
     mutationFn: async () => {
@@ -120,7 +125,29 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
             updates[campoLoja] = (produto[campoLoja] || 0) + item.quantidade;
           }
 
+          const estoqueAntesCancelamento = produto.quantidade_estoque || 0;
           await base44.entities.Produto.update(produto.id, updates);
+          try {
+            await supabase.from('movimentacoes_estoque').insert({
+              produto_id: produto.id,
+              evento_tipo: 'cancelamento_devolucao',
+              modulo_origem: 'vendas',
+              quantidade: item.quantidade,
+              estoque_antes_total: estoqueAntesCancelamento,
+              estoque_depois_total: estoqueAntesCancelamento + item.quantidade,
+              usuario_id: user?.id || null,
+              usuario_nome: user?.nome || null,
+              usuario_cargo: user?.cargo || null,
+              cliente_nome: venda.cliente_nome || null,
+              cliente_contato: venda.cliente_telefone || null,
+              referencia_id: venda.id,
+              referencia_numero: venda.numero_pedido || null,
+              loja_origem: venda.loja || null,
+              organization_id: '00000000-0000-0000-0000-000000000001'
+            });
+          } catch (auditErr) {
+            console.warn('Falha ao registrar movimentação de cancelamento:', auditErr);
+          }
         }
       }
     },
@@ -499,6 +526,7 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
               <Pencil className="w-4 h-4 mr-1" />
               Editar
             </Button>
+            {canCancel && (
             <Button
               variant="outline"
               size="sm"
@@ -511,6 +539,7 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
               <XCircle className="w-4 h-4 mr-1" />
               Cancelar
             </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

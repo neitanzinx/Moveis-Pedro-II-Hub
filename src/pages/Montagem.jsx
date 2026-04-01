@@ -8,13 +8,16 @@ export default function Montagem() {
 
   if (loading || !user) return <div className="flex h-screen items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600" /></div>;
 
-  const isAdmin = user.cargo === 'Administrador';
+  const cargoNormalizado = String(user?.cargo || '').trim().toLowerCase();
+  const isAdmin =
+    user?.role === 'admin' ||
+    ['administrador', 'admin', 'adm'].includes(cargoNormalizado) ||
+    cargoNormalizado.includes('master');
   const isEstoque = user.cargo === 'Estoque';
   const isLogistica = user.cargo === 'Logística';
-  const isAgendamento = user.cargo === 'Agendamento';
   const isMontador = user.cargo === 'Montador';
 
-  if (!isAdmin && !isEstoque && !isLogistica && !isAgendamento && !isMontador) {
+  if (!isAdmin && !isEstoque && !isLogistica && !isMontador) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
         <div className="text-center text-gray-500">

@@ -12,6 +12,7 @@ import { ClienteCRMModal } from "../components/clientes/ClienteCRMModal";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import { formatarTelefone, formatarCPF, formatarNome, formatarEndereco, capitalizar } from "@/utils/formatters";
+import { useAuth } from "@/hooks/useAuth";
 
 // Helper para exibir badge do tier baseado em coroas
 const getTierBadge = (cliente) => {
@@ -41,6 +42,9 @@ export default function Clientes() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
+
+  const { can } = useAuth();
+  const canManageClientes = can('manage_clientes');
 
   const { data: clientes = [], isLoading } = useQuery({ queryKey: ['clientes'], queryFn: () => base44.entities.Cliente.list('-created_date') });
 
@@ -435,17 +439,19 @@ export default function Clientes() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingCliente(cliente);
-                            setIsModalOpen(true);
-                          }}
-                        >
-                          <Edit className="w-4 h-4 text-blue-600" />
-                        </Button>
+                        {canManageClientes && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingCliente(cliente);
+                              setIsModalOpen(true);
+                            }}
+                          >
+                            <Edit className="w-4 h-4 text-blue-600" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
@@ -458,24 +464,26 @@ export default function Clientes() {
                         >
                           <ShoppingBag className="w-4 h-4 text-amber-600" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            const confirmed = await confirm({
-                              title: "Excluir Cliente",
-                              message: "Tem certeza que deseja excluir este cliente?",
-                              confirmText: "Excluir",
-                              variant: "destructive"
-                            });
-                            if (confirmed) {
-                              deleteMutation.mutate(cliente.id);
-                            }
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4 text-red-600" />
-                        </Button>
+                        {canManageClientes && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const confirmed = await confirm({
+                                title: "Excluir Cliente",
+                                message: "Tem certeza que deseja excluir este cliente?",
+                                confirmText: "Excluir",
+                                variant: "destructive"
+                              });
+                              if (confirmed) {
+                                deleteMutation.mutate(cliente.id);
+                              }
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4 text-red-600" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

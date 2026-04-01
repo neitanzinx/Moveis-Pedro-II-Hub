@@ -38,8 +38,9 @@ const ExportacaoContabil = lazy(() => import("./ExportacaoContabil.jsx"));
 const DashboardBI = lazy(() => import("./DashboardBI.jsx"));
 const DashboardGerente = lazy(() => import("./DashboardGerente.jsx"));
 const AvaliacaoNPS = lazy(() => import("./AvaliacaoNPS.jsx"));
-const Mostruario = lazy(() => import("./Mostruario.jsx"));
 const EntradaEstoque = lazy(() => import("./EntradaEstoque.jsx"));
+const PoliticasEstoque = lazy(() => import("./PoliticasEstoque.jsx"));
+const AprovacaoSemEstoque = lazy(() => import("./AprovacaoSemEstoque.jsx"));
 
 // ============================================================================
 // CARREGAMENTO SÍNCRONO - Páginas Públicas (críticas para SEO e primeira impressão)
@@ -75,8 +76,8 @@ const PAGES = {
     BoasVindas, GerenciamentoUsuarios, Financeiro, Montagem, Fornecedores, Compras,
     Inventario, Estoque, ModoReuniao, PDV, CatalogoWhatsApp,
     LogisticaSemanal, Entregador, Marketing, MontadorExterno,
-    ExportacaoContabil, DashboardBI, DashboardGerente, Mostruario,
-    EntradaEstoque
+    ExportacaoContabil, DashboardBI, DashboardGerente,
+    EntradaEstoque, PoliticasEstoque, AprovacaoSemEstoque
 };
 
 function _getCurrentPage(url) {
@@ -261,7 +262,6 @@ function PagesContent() {
                         <Route path="/admin/Inventario" element={<Inventario />} />
                         <Route path="/admin/Entregador" element={<Entregador />} />
                         <Route path="/admin/MontadorExterno" element={<MontadorExterno />} />
-                        <Route path="/admin/Mostruario" element={<Mostruario />} />
                         <Route path="/admin/Produtos" element={<Produtos />} />
                         <Route path="/admin/Fornecedores" element={<Fornecedores />} />
                         <Route path="/admin/Compras" element={<Compras />} />
@@ -276,6 +276,10 @@ function PagesContent() {
                         <Route path="/admin/ExportacaoContabil" element={<ExportacaoContabil />} />
                         <Route path="/admin/DashboardBI" element={<DashboardBI />} />
                         <Route path="/admin/DashboardGerente" element={<DashboardGerente />} />
+
+                        {/* Estoque - Políticas e Aprovações */}
+                        <Route path="/admin/PoliticasEstoque" element={<PoliticasEstoque />} />
+                        <Route path="/admin/AprovacaoSemEstoque" element={<AprovacaoSemEstoque />} />
 
                         {/* Admin e Configurações */}
                         <Route path="/admin/GerenciamentoUsuarios" element={<GerenciamentoUsuarios />} />

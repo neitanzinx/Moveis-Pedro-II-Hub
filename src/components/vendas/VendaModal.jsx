@@ -20,11 +20,15 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import BuscaProdutoAvancada from "./BuscaProdutoAvancada";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useTenant } from "@/contexts/TenantContext";
+import { calcularComissaoVenda, registrarHistoricoComissao } from "@/services/comissaoService";
+import { useEstoqueValidacao } from "@/hooks/useEstoqueValidacao";
 
 const formasPagamento = ["Dinheiro", "Crédito", "Débito", "Pix", "AFESP", "Multicrédito"];
 const statusVenda = ["Pagamento Pendente", "Pago", "Pago & Retirado"];
 
 export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, produtos, isLoading, userLoja, proximoNumero }) {
+  const { organization, settings } = useTenant();
   const [formData, setFormData] = useState({
     numero_pedido: proximoNumero || "",
     data_venda: new Date().toISOString().split('T')[0],
@@ -68,6 +72,12 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
     parcelas: 1
   });
 
+  // Estado para modal de aprovação gerencial
+  const [aprovacaoModal, setAprovacaoModal] = useState(null); // null ou { itensEncomenda, payloadVenda, observacoesGerencial }
+  const [obsGerencial, setObsGerencial] = useState("");
+  const [salvandoVenda, setSalvandoVenda] = useState(false);
+
+  const { criarSolicitacaoEncomenda } = useEstoqueValidacao();
   const queryClient = useQueryClient();
 
   const { data: lojas = [] } = useQuery({
@@ -140,41 +150,45 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
   }, [formData.itens, formData.desconto, formData.pagamentos]);
 
   useEffect(() => {
-    calcularComissao();
-  }, [formData.pagamentos]);
+    let isCancelled = false;
 
-  const calcularComissao = async () => {
-    let comissaoTotal = 0;
-    let porcentagemPonderada = 0;
-    let totalPago = 0;
+    const calcularComissaoPreview = async () => {
+      try {
+        const calculo = await calcularComissaoVenda({
+          venda: formData,
+          organizationId: organization?.id,
+          settingsOverride: settings,
+        });
 
-    try {
-      const configuracoes = await base44.entities.ConfiguracaoComissao.list();
+        if (isCancelled) return;
 
-      for (const pag of formData.pagamentos) {
-        const config = configuracoes.find(c => c.forma_pagamento === pag.forma_pagamento);
-        if (config) {
-          comissaoTotal += (pag.valor * config.porcentagem) / 100;
-          porcentagemPonderada += config.porcentagem * pag.valor;
-          totalPago += pag.valor;
-        }
+        setFormData((prev) => ({
+          ...prev,
+          comissao_calculada: calculo.comissao_calculada,
+          porcentagem_comissao: calculo.porcentagem_comissao,
+          comissao_status: calculo.comissao_status,
+          comissao_detalhes_json: calculo.comissao_detalhes_json,
+          comissao_calculada_em: calculo.comissao_calculada_em,
+        }));
+      } catch (error) {
+        if (isCancelled) return;
+        console.error("Erro ao calcular comissão:", error);
+        setFormData((prev) => ({
+          ...prev,
+          comissao_calculada: 0,
+          porcentagem_comissao: 0,
+          comissao_status: "Calculada",
+          comissao_detalhes_json: [],
+        }));
       }
+    };
 
-      // Calcula percentual médio ponderado pelo valor de cada pagamento
-      if (totalPago > 0) {
-        porcentagemPonderada = porcentagemPonderada / totalPago;
-      }
+    calcularComissaoPreview();
 
-      setFormData(prev => ({
-        ...prev,
-        comissao_calculada: comissaoTotal,
-        porcentagem_comissao: porcentagemPonderada
-      }));
-    } catch (error) {
-      console.error("Erro ao calcular comissão:", error);
-      setFormData(prev => ({ ...prev, comissao_calculada: 0, porcentagem_comissao: 0 }));
-    }
-  };
+    return () => {
+      isCancelled = true;
+    };
+  }, [formData.pagamentos, formData.valor_total, formData.desconto, organization?.id, settings]);
 
   const handleClienteChange = (clienteId) => {
     const cliente = clientes.find(c => c.id === clienteId);
@@ -290,26 +304,6 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
       valor_pago: valorPago,
       valor_restante: valorRestante
     }));
-  };
-
-  const atualizarEstoque = async () => {
-    const { resolveStockField } = await import("@/utils/stockUtils");
-    const campoLoja = resolveStockField(formData.loja);
-
-    for (const item of formData.itens) {
-      const produto = produtos.find(p => p.id === item.produto_id);
-      if (produto) {
-        const novoEstoque = Math.max(0, (produto.quantidade_estoque || 0) - item.quantidade);
-        const updates = { quantidade_estoque: novoEstoque };
-
-        // Also deduct from the per-store stock field
-        if (campoLoja) {
-          updates[campoLoja] = Math.max(0, (produto[campoLoja] || 0) - item.quantidade);
-        }
-
-        await base44.entities.Produto.update(produto.id, updates);
-      }
-    }
   };
 
   const gerarPDF = async (vendaData) => {
@@ -601,41 +595,103 @@ _Móveis Pedro II - ${vendaData.loja}_`;
       return;
     }
 
-    if (!venda) {
-      await atualizarEstoque();
+    // Coletar itens que são encomenda e requerem aprovação
+    const itensEncomendaAprovacao = formData.itens.filter(
+      item => item.is_encomenda && item.validacao_estoque?.requer_aprovacao
+    );
 
-      // Criar venda primeiro
-      const vendaCriada = await base44.entities.Venda.create(formData);
+    if (itensEncomendaAprovacao.length > 0 && !venda) {
+      // Há itens sem estoque que requerem aprovação: exibir modal de confirmação
+      const vendaComissao = await calcularComissaoVenda({
+        venda: formData,
+        organizationId: organization?.id,
+        settingsOverride: settings,
+      });
+      const payloadVenda = {
+        ...formData,
+        ...vendaComissao,
+        vendedor_id: formData.vendedor_id || formData.responsavel_id || null,
+      };
+      setObsGerencial("");
+      setAprovacaoModal({ itensEncomenda: itensEncomendaAprovacao, payloadVenda });
+      return;
+    }
 
-      // Criar entrega automaticamente se não for retirada
-      if (formData.prazo_entrega !== "Retirado na loja") {
-        const diasStr = formData.prazo_entrega.match(/\d+/);
-        const dias = diasStr ? parseInt(diasStr[0]) : 15;
-        const limite = new Date();
-        limite.setDate(limite.getDate() + dias);
+    await _salvarVenda();
+  };
 
-        const cliente = clientes.find(c => c.id === formData.cliente_id);
+  // Separado para poder ser chamado direto OU após confirmação do modal de aprovação
+  const _salvarVenda = async (obsAprovacao) => {
+    setSalvandoVenda(true);
+    try {
+      const vendaComissao = await calcularComissaoVenda({
+        venda: formData,
+        organizationId: organization?.id,
+        settingsOverride: settings,
+      });
 
-        await base44.entities.Entrega.create({
-          venda_id: vendaCriada.id, // Agora usa o UUID correto da venda criada
-          numero_pedido: formData.numero_pedido,
-          cliente_nome: formData.cliente_nome,
-          cliente_telefone: formData.cliente_telefone,
-          endereco_entrega: cliente?.endereco
-            ? `${cliente.endereco}, ${cliente.numero || 's/n'} - ${cliente.bairro || ''}`
-            : "Endereço a definir",
-          data_limite: limite.toISOString().split('T')[0],
-          status: "Pendente",
-          impresso: false
-        });
+      const payloadVenda = {
+        ...formData,
+        ...vendaComissao,
+        vendedor_id: formData.vendedor_id || formData.responsavel_id || null,
+      };
+
+      if (!venda) {
+        const vendaCriada = await base44.entities.Venda.create(payloadVenda);
+        await registrarHistoricoComissao(vendaCriada.id, payloadVenda);
+
+        // Criar solicitações de encomenda para itens sem estoque
+        const itensEncomenda = formData.itens.filter(item => item.is_encomenda);
+        for (const item of itensEncomenda) {
+          const motivo = item.validacao_estoque?.tipo_efetivo === 'sob_encomenda'
+            ? 'produto_sob_encomenda'
+            : item.validacao_estoque?.requer_aprovacao
+              ? 'aprovacao_gerencial'
+              : 'sem_estoque';
+
+          await criarSolicitacaoEncomenda({
+            vendaId: vendaCriada.id,
+            produto: { id: item.produto_id, nome: item.produto_nome, fornecedor_nome: item.fornecedor_nome },
+            quantidade: item.quantidade,
+            motivo,
+            clienteNome: payloadVenda.cliente_nome,
+            numeroPedido: payloadVenda.numero_pedido,
+            loja: payloadVenda.loja,
+            observacoesGerencial: obsAprovacao || null,
+          });
+        }
+
+        // Criar entrega automaticamente se não for retirada
+        if (formData.prazo_entrega !== "Retirado na loja") {
+          const diasStr = formData.prazo_entrega.match(/\d+/);
+          const dias = diasStr ? parseInt(diasStr[0]) : 15;
+          const limite = new Date();
+          limite.setDate(limite.getDate() + dias);
+
+          const cliente = clientes.find(c => c.id === formData.cliente_id);
+
+          await base44.entities.Entrega.create({
+            venda_id: vendaCriada.id,
+            numero_pedido: payloadVenda.numero_pedido,
+            cliente_nome: payloadVenda.cliente_nome,
+            cliente_telefone: payloadVenda.cliente_telefone,
+            endereco_entrega: cliente?.endereco
+              ? `${cliente.endereco}, ${cliente.numero || 's/n'} - ${cliente.bairro || ''}`
+              : "Endereço a definir",
+            data_limite: limite.toISOString().split('T')[0],
+            status: "Pendente",
+            impresso: false
+          });
+        }
+
+        await gerarPDF(payloadVenda);
+        enviarMensagemWhatsApp(payloadVenda);
+      } else {
+        await onSave(payloadVenda);
       }
-
-      // Gerar PDF e enviar WhatsApp com os dados da venda criada
-      await gerarPDF(formData);
-      enviarMensagemWhatsApp(formData);
-    } else {
-      // Para edição, usar onSave
-      await onSave(formData);
+    } finally {
+      setSalvandoVenda(false);
+      setAprovacaoModal(null);
     }
   };
 
@@ -1104,10 +1160,10 @@ _Móveis Pedro II - ${vendaData.loja}_`;
             </Button>
             <Button
               type="submit"
-              disabled={isLoading || gerando || !formData.cliente_id || formData.itens.length === 0}
+              disabled={isLoading || gerando || salvandoVenda || !formData.cliente_id || formData.itens.length === 0}
               style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
             >
-              {isLoading || gerando ? (
+              {isLoading || gerando || salvandoVenda ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   {gerando ? "Gerando PDF..." : "Salvando..."}
@@ -1120,5 +1176,61 @@ _Móveis Pedro II - ${vendaData.loja}_`;
         </form>
       </DialogContent>
     </Dialog>
+
+    {/* Modal de Aprovação Gerencial - aparece quando há itens sem estoque que requerem autorização */}
+    {aprovacaoModal && (
+      <Dialog open={!!aprovacaoModal} onOpenChange={() => setAprovacaoModal(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-amber-700 flex items-center gap-2">
+              Aprovação Gerencial Necessária
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-gray-600">
+              Os seguintes itens estão sem estoque disponível e requerem autorização gerencial para prosseguir como encomenda:
+            </p>
+            <ul className="space-y-1">
+              {aprovacaoModal.itensEncomenda.map((item, i) => (
+                <li key={i} className="text-sm bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                  <span className="font-medium">{item.produto_nome}</span>
+                  <span className="text-amber-700 ml-2">
+                    — {item.validacao_estoque?.total_disponivel ?? 0} un. disponível, {item.quantidade} solicitada
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-gray-700">
+                Observações do gerente (opcional)
+              </label>
+              <textarea
+                className="w-full border rounded-md px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
+                rows={3}
+                placeholder="Ex: Mercadoria em trânsito, prazo estimado 10 dias..."
+                value={obsGerencial}
+                onChange={(e) => setObsGerencial(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAprovacaoModal(null)}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={salvandoVenda}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => _salvarVenda(obsGerencial)}
+            >
+              {salvandoVenda ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Salvando...</>
+              ) : (
+                "Confirmar e Criar Encomenda"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )}
   );
 }

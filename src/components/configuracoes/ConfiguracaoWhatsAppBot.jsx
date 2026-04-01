@@ -443,8 +443,16 @@ export default function ConfiguracaoWhatsAppBot() {
         loadSettings();
         fetchOfflineQueue();
 
+        const handleOfflineQueueUpdated = () => {
+            fetchOfflineQueue();
+        };
+        window.addEventListener('offline-queue-updated', handleOfflineQueueUpdated);
+
         const interval = setInterval(fetchStatus, 3000);
-        return () => clearInterval(interval);
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('offline-queue-updated', handleOfflineQueueUpdated);
+        };
     }, [fetchStatus, fetchOfflineQueue]);
 
 

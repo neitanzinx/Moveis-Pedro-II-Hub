@@ -24,6 +24,7 @@ import ArquivoTab from "../components/vendas/ArquivoTab";
 import EmitirNFeModal from "../components/vendas/EmitirNFeModal";
 import TransferirMontagemModal from "../components/vendas/TransferirMontagemModal";
 import { VendaDetalhesModal } from "@/components/vendas/VendaDetalhesModal";
+import { getVendaFinanceiro, getVendaResumoLogistico } from "@/utils/vendaStatus";
 
 export default function Vendas() {
     const [search, setSearch] = useState("");
@@ -398,17 +399,22 @@ export default function Vendas() {
 
     // 1. Filtra pelo Escopo do Usuário (Dono / Loja / Tudo)
     const vendasPermitidas = filterData(vendas, { userField: 'responsavel_id' });
+    const vendasComResumo = vendasPermitidas.map((venda) => ({
+        ...venda,
+        financeiro: getVendaFinanceiro(venda, { entregas, lancamentos }),
+        resumoLogistico: getVendaResumoLogistico(venda, { entregas, montagens })
+    }));
 
     // 2. Filtros de Busca e Status da Tela (exclui cancelados da aba principal)
-    const filtered = vendasPermitidas.filter(v => {
+    const filtered = vendasComResumo.filter(v => {
         if (v.status === 'Cancelado') return false;
-        if (statusFilter !== 'all' && v.status !== statusFilter) return false;
+        if (statusFilter !== 'all' && v.financeiro.displayStatus !== statusFilter) return false;
         if (search && !v.cliente_nome?.toLowerCase().includes(search.toLowerCase()) && !v.numero_pedido?.includes(search)) return false;
         return true;
     });
 
     // 3. Filtro para aba de cancelados
-    const filteredCancelados = vendasPermitidas.filter(v => {
+    const filteredCancelados = vendasComResumo.filter(v => {
         if (v.status !== 'Cancelado') return false;
         if (search && !v.cliente_nome?.toLowerCase().includes(search.toLowerCase()) && !v.numero_pedido?.includes(search)) return false;
         return true;
@@ -573,7 +579,10 @@ export default function Vendas() {
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    filtered.map(venda => (
+                                    filtered.map(venda => {
+                                        const financeiro = venda.financeiro;
+
+                                        return (
                                         <TableRow
                                             key={venda.id}
                                             className="cursor-pointer hover:bg-muted/50 transition-colors"
@@ -635,7 +644,7 @@ export default function Vendas() {
                                                 R$ {venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </TableCell>
                                             <TableCell>
-                                                <StatusBadge status={venda.status} />
+                                                <StatusBadge status={financeiro.displayStatus} />
                                             </TableCell>
 
                                             <TableCell>
@@ -643,12 +652,13 @@ export default function Vendas() {
                                                     venda={venda}
                                                     entregas={entregas}
                                                     montagens={montagens}
+                                                    financeiro={financeiro}
                                                 />
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end gap-2">
                                                     {/* Botão Emitir NFe */}
-                                                    {venda.status === "Pago" && can('manage_vendas') && (
+                                                    {financeiro.isPaid && can('manage_vendas') && (
                                                         venda.nfe_emitida ? (
                                                             <Badge className="bg-green-100 text-green-800 border-green-200">
                                                                 <CheckCircle className="w-3 h-3 mr-1" />
@@ -809,7 +819,7 @@ export default function Vendas() {
                                                 </div>
                                             </TableCell>
                                         </TableRow>
-                                    ))
+                                    )})
                                 )}
                             </TableBody>
                         </Table>
@@ -962,6 +972,9 @@ export default function Vendas() {
                 isOpen={isDetalhesModalOpen}
                 onClose={() => setIsDetalhesModalOpen(false)}
                 venda={selectedVendaDetalhes}
+                entregas={entregas}
+                montagens={montagens}
+                lancamentos={lancamentos}
             />
 
             {/* Modal Solicitar Reagendamento */}
@@ -1206,7 +1219,7 @@ function PaymentStatusBadge({ status, linkPagamento, cliente, numeroPedido, valo
 }
 
 // Componente para status operacional do pedido
-function OrderStatusBadge({ venda, entregas, montagens }) {
+function OrderStatusBadge({ venda, entregas, montagens, financeiro }) {
     // Se a venda foi cancelada, mostrar isso
     if (venda.status === 'Cancelado') {
         return (
@@ -1218,6 +1231,11 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
     }
 
     const badges = [];
+    const isStatusFinalizado = (status) => {
+        const normalized = String(status || '').toLowerCase();
+        return normalized === 'entregue' || normalized === 'retirado' || normalized === 'concluida' || normalized === 'concluída';
+    };
+
     const pushBadge = (key, className, Icon, label) => {
         badges.push(
             <Badge key={key} className={`${className} gap-1 w-fit whitespace-nowrap`}>
@@ -1228,10 +1246,11 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
     };
 
     // 0. Pre-calculating delivery info to avoid conflicting statuses
+    const resumoLogistico = getVendaResumoLogistico(venda, { entregas, montagens });
     const entregasVenda = entregas.filter(e => e.numero_pedido === venda.numero_pedido);
     const temDataEntrega = entregasVenda.some(e => e.data_agendada);
     const triagemPendente = !venda.triagem_realizada && !temDataEntrega;
-    const pagamentoPendente = venda.status === 'Pagamento Pendente';
+    const pagamentoPendente = financeiro?.isPending;
 
     // 1. Verificação de Triagem
     if (triagemPendente) {
@@ -1244,7 +1263,11 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
         // Se não tem entregas criadas
         if (entregasVenda.length === 0) {
             // Verificar se todos os itens são do tipo 'retira' (Cliente Retira)
-            const todosRetira = venda.itens?.every(item => item.tipo_entrega === 'retira');
+            const todosRetira = resumoLogistico.allRetirada;
+
+            if (resumoLogistico.isMisto) {
+                pushBadge('misto', 'bg-indigo-100 text-indigo-700 border border-indigo-200', Package, 'Pedido Misto');
+            }
 
             if (todosRetira && venda.itens?.length > 0) {
                 pushBadge('retira', 'bg-purple-100 text-purple-700 border border-purple-200', UserCheck, 'Cliente Retira');
@@ -1254,20 +1277,24 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
             }
         } else {
             // Tem entregas
-            const entrega = entregasVenda[0]; // Pega a principal (simplificação)
+            const entrega = resumoLogistico.entregaPrincipal || entregasVenda[0];
             const dataEntrega = entrega.data_agendada ? new Date(entrega.data_agendada).toLocaleDateString('pt-BR') : null;
 
-            const todosRetira = venda.itens?.every(item => item.tipo_entrega === 'retira');
+            const todosRetira = resumoLogistico.allRetirada;
+
+            if (resumoLogistico.isMisto) {
+                pushBadge('misto', 'bg-indigo-100 text-indigo-700 border border-indigo-200', Package, 'Pedido Misto');
+            }
 
             if (todosRetira) {
-                if (entrega.status === 'Entregue') {
+                if (isStatusFinalizado(entrega.status)) {
                     pushBadge('retirado', 'bg-green-100 text-green-700 border border-green-200', CheckCircle, 'Concluido');
                 } else {
                     pushBadge('retirada_pendente', 'bg-purple-100 text-purple-700 border border-purple-200', UserCheck, 'Aguardando Retirada');
                 }
             } else {
                 // Entrega Comum
-                if (entrega.status === 'Entregue') {
+                if (isStatusFinalizado(entrega.status)) {
                     pushBadge('entregue', 'bg-green-100 text-green-700 border border-green-200', CheckCircle, 'Entregue');
                 } else if (entrega.status === 'Em Rota') {
                     pushBadge('em_rota', 'bg-blue-100 text-blue-700 border border-blue-200', Truck, 'Em Rota');
@@ -1287,7 +1314,7 @@ function OrderStatusBadge({ venda, entregas, montagens }) {
     }
 
     // 3. Verificação de Montagem
-    const temMontagem = venda.itens?.some(i => ['Montado', 'Montagem Externa', 'Montagem no Local', 'interna', 'terceirizada'].includes(i.tipo_entrega) || ['interna', 'terceirizada', 'Montagem Externa'].includes(i.tipo_montagem));
+    const temMontagem = resumoLogistico.contagens.montagemInterna > 0 || resumoLogistico.contagens.montagemExterna > 0;
 
     if (temMontagem && !triagemPendente && !pagamentoPendente) {
         const montagensVenda = montagens.filter(m => m.numero_pedido === venda.numero_pedido);

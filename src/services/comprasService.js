@@ -370,6 +370,7 @@ export const comprasService = {
       let totalItensProcessados = 0;
       const lojaId = oc.metadata?.loja_id || null; // null = sem loja definida (fallback direto no produto)
       const produtosIncrementosDiretos = new Map(); // Acumula qtd quando lojaId é desconhecido
+      const movimentacoesAuditoria = []; // Coleta registros de auditoria para inserção em lote
 
       for (const itemRecebido of itens_recebidos) {
         const { item_id, quantidade_recebida } = itemRecebido;
@@ -453,6 +454,19 @@ export const comprasService = {
               });
           }
 
+          movimentacoesAuditoria.push({
+            produto_id: itemOc.produto_id,
+            evento_tipo: 'recebimento',
+            modulo_origem: 'compras',
+            quantidade: quantidade_recebida,
+            estoque_antes_local: estoque?.quantidade || 0,
+            estoque_depois_local: (estoque?.quantidade || 0) + quantidade_recebida,
+            loja_destino: lojaId,
+            referencia_id: ocId,
+            referencia_numero: oc.numero_pedido || null,
+            usuario_id: receivedBy,
+            organization_id: tenantId || DEFAULT_TENANT_ID
+          });
           produtosProcessados.add(itemOc.produto_id);
         } else {
           // Loja desconhecida: acumula para atualização direta em produtos.quantidade_estoque
@@ -460,6 +474,16 @@ export const comprasService = {
             itemOc.produto_id,
             (produtosIncrementosDiretos.get(itemOc.produto_id) || 0) + quantidade_recebida
           );
+          movimentacoesAuditoria.push({
+            produto_id: itemOc.produto_id,
+            evento_tipo: 'recebimento',
+            modulo_origem: 'compras',
+            quantidade: quantidade_recebida,
+            referencia_id: ocId,
+            referencia_numero: oc.numero_pedido || null,
+            usuario_id: receivedBy,
+            organization_id: tenantId || DEFAULT_TENANT_ID
+          });
         }
 
         totalItensProcessados++;
@@ -497,6 +521,15 @@ export const comprasService = {
         }
       }
 
+
+      // Registrar movimentações de estoque para auditoria
+      if (movimentacoesAuditoria.length > 0) {
+        try {
+          await supabase.from('movimentacoes_estoque').insert(movimentacoesAuditoria);
+        } catch (auditErr) {
+          console.warn('Falha ao registrar movimentações de recebimento:', auditErr);
+        }
+      }
 
       // 3. Verificar se OC foi completamente recebida
       const { data: todosItensOc } = await supabase

@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { base44, supabase } from "@/lib/supabase";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DollarSign, TrendingUp, Users, FileDown, AlertCircle, Calendar, Banknote } from "lucide-react";
+import { DollarSign, TrendingUp, Users, FileDown, AlertCircle, Calendar, Banknote, RefreshCcw, Lock, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -18,8 +18,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { useTenant } from "@/contexts/TenantContext";
 
 export default function RelatorioComissoes() {
+  const { organization, settings } = useTenant();
   const [user, setUser] = useState(null);
   const [vendedorFiltro, setVendedorFiltro] = useState("todos");
   const [mesInicio, setMesInicio] = useState(new Date().toISOString().slice(0, 7));
@@ -31,7 +33,10 @@ export default function RelatorioComissoes() {
   const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().slice(0, 10));
   const [processandoPagamento, setProcessandoPagamento] = useState(false);
   const [observacaoPagamento, setObservacaoPagamento] = useState("");
+  const [processandoFechamento, setProcessandoFechamento] = useState(false);
   const queryClient = useQueryClient();
+
+  const tenantId = organization?.id || "00000000-0000-0000-0000-000000000001";
 
   useEffect(() => {
     const loadUser = async () => {
@@ -54,6 +59,11 @@ export default function RelatorioComissoes() {
   const { data: assistencias = [] } = useQuery({
     queryKey: ['assistencias-comissoes'],
     queryFn: () => base44.entities.AssistenciaTecnica.list(),
+  });
+
+  const { data: fechamentos = [] } = useQuery({
+    queryKey: ['comissoes-fechamento', mesInicio, mesFim, tenantId],
+    queryFn: () => base44.entities.ComissaoFechamentoMensal.list('-created_at'),
   });
 
   if (!user) {
@@ -88,11 +98,12 @@ export default function RelatorioComissoes() {
   }
 
   // Filtrar vendas por período e vendedor
+  const getVendedorRef = (venda) => venda.vendedor_id || venda.responsavel_id || venda.responsavel_nome || "sem-vendedor";
 
   const vendasFiltradas = vendas.filter(v => {
     const dataVenda = v.data_venda?.slice(0, 7); // YYYY-MM
     const dentroPeríodo = dataVenda >= mesInicio && dataVenda <= mesFim;
-    const vendedorMatch = vendedorFiltro === "todos" || v.vendedor_id === vendedorFiltro;
+    const vendedorMatch = vendedorFiltro === "todos" || getVendedorRef(v) === vendedorFiltro;
     return dentroPeríodo && vendedorMatch && v.comissao_calculada > 0;
   });
 
@@ -118,9 +129,28 @@ export default function RelatorioComissoes() {
 
 
 
-  // Agrupar por vendedor
-  const comissoesPorVendedor = vendedores.map(vendedor => {
-    const vendasVendedor = vendasFiltradas.filter(v => v.vendedor_id === vendedor.id);
+  // Agrupar por vendedor (com fallback para responsavel_id em vendas antigas)
+  const gruposPorVendedor = vendasFiltradas.reduce((acc, venda) => {
+    const ref = getVendedorRef(venda);
+    if (!acc[ref]) {
+      const vendedorCadastrado = vendedores.find((ven) => ven.id === ref);
+      acc[ref] = {
+        vendedor: vendedorCadastrado || {
+          id: ref,
+          nome: venda.responsavel_nome || "Sem vendedor",
+          loja: venda.loja || "-",
+          meta_mensal: 0,
+        },
+        vendas: [],
+      };
+    }
+
+    acc[ref].vendas.push(venda);
+    return acc;
+  }, {});
+
+  const comissoesPorVendedor = Object.values(gruposPorVendedor).map((grupo) => {
+    const vendasVendedor = grupo.vendas;
 
     // Calcular comissão subtraindo devoluções
     const totalComissao = vendasVendedor.reduce((sum, v) => {
@@ -151,7 +181,7 @@ export default function RelatorioComissoes() {
     const breakdownPagamentos = calcularBreakdownPorFormaPagamento(vendasVendedor);
 
     return {
-      vendedor,
+      vendedor: grupo.vendedor,
       totalComissao,
       totalVendas,
       quantidadeVendas,
@@ -162,6 +192,139 @@ export default function RelatorioComissoes() {
 
   const totalGeralComissoes = comissoesPorVendedor.reduce((sum, item) => sum + item.totalComissao, 0);
   const totalGeralVendas = comissoesPorVendedor.reduce((sum, item) => sum + item.totalVendas, 0);
+
+  const getPeriodoInicioDate = () => new Date(`${mesInicio}-01T00:00:00`);
+
+  const getPeriodoFimDate = () => {
+    const [ano, mes] = mesFim.split('-').map(Number);
+    return new Date(ano, mes, 0, 23, 59, 59, 999);
+  };
+
+  const periodoInicioDate = getPeriodoInicioDate();
+  const periodoFimDate = getPeriodoFimDate();
+  const periodoInicioIso = periodoInicioDate.toISOString().slice(0, 10);
+  const periodoFimIso = periodoFimDate.toISOString().slice(0, 10);
+
+  const fechamentosPeriodo = (fechamentos || []).filter((f) => {
+    const inicio = (f.periodo_inicio || '').slice(0, 10);
+    const fim = (f.periodo_fim || '').slice(0, 10);
+    const vendedorMatch = vendedorFiltro === 'todos' || f.vendedor_id === vendedorFiltro;
+    return (
+      f.organization_id === tenantId &&
+      inicio === periodoInicioIso &&
+      fim === periodoFimIso &&
+      vendedorMatch
+    );
+  });
+
+  const mapFechamentoPorVendedor = new Map(
+    fechamentosPeriodo.map((f) => [f.vendedor_id || `sem-vendedor-${f.id}`, f])
+  );
+
+  const comissoesConsolidadas = comissoesPorVendedor.map((item) => {
+    const fechamento = mapFechamentoPorVendedor.get(item.vendedor.id);
+    if (!fechamento) {
+      return {
+        ...item,
+        fechamento_id: null,
+        status_fechamento: 'Nao Fechado',
+        totalFinal: item.totalComissao,
+      };
+    }
+
+    return {
+      ...item,
+      fechamento_id: fechamento.id,
+      status_fechamento: fechamento.status || 'Pendente',
+      totalFinal: Number(fechamento.total_final || fechamento.total_comissao || item.totalComissao),
+      fechamento,
+    };
+  });
+
+  const totalPendente = comissoesConsolidadas
+    .filter((item) => item.status_fechamento !== 'Pago')
+    .reduce((sum, item) => sum + Number(item.totalFinal || 0), 0);
+
+  const aplicarPoliticaFechamento = (existente, politica) => {
+    if (!existente) {
+      return 'criar';
+    }
+
+    if (politica === 'recalcular_tudo') {
+      return 'recriar';
+    }
+
+    if (politica === 'recalcular_periodo_aberto') {
+      return existente.status === 'Pago' ? 'manter' : 'recriar';
+    }
+
+    return 'manter';
+  };
+
+  const gerarFechamentoPeriodo = async () => {
+    setProcessandoFechamento(true);
+    const politica = settings?.comissao_recalculo_politica || 'nao_recalcular';
+
+    try {
+      const existentesPorVendedor = new Map(
+        fechamentosPeriodo.map((item) => [item.vendedor_id || `sem-vendedor-${item.id}`, item])
+      );
+
+      let criados = 0;
+      let atualizados = 0;
+      let mantidos = 0;
+
+      for (const item of comissoesPorVendedor) {
+        const existente = existentesPorVendedor.get(item.vendedor.id);
+        const acao = aplicarPoliticaFechamento(existente, politica);
+
+        if (acao === 'manter') {
+          mantidos += 1;
+          continue;
+        }
+
+        if (acao === 'recriar' && existente) {
+          await base44.entities.ComissaoFechamentoMensal.update(existente.id, {
+            quantidade_vendas: item.quantidadeVendas,
+            valor_total_vendas: Number(item.totalVendas.toFixed(2)),
+            total_comissao: Number(item.totalComissao.toFixed(2)),
+            total_final: Number(item.totalComissao.toFixed(2)),
+            total_ajustes: Number(existente.total_ajustes || 0),
+            breakdown_pagamentos: item.breakdownPagamentos,
+            status: existente.status || 'Pendente',
+            observacoes: existente.observacoes || `Fechamento atualizado automaticamente (${politica})`,
+            updated_at: new Date().toISOString(),
+          });
+          atualizados += 1;
+          continue;
+        }
+
+        await base44.entities.ComissaoFechamentoMensal.create({
+          organization_id: tenantId,
+          periodo_inicio: periodoInicioIso,
+          periodo_fim: periodoFimIso,
+          vendedor_id: item.vendedor.id,
+          loja: item.vendedor.loja || null,
+          quantidade_vendas: item.quantidadeVendas,
+          valor_total_vendas: Number(item.totalVendas.toFixed(2)),
+          total_comissao: Number(item.totalComissao.toFixed(2)),
+          total_ajustes: 0,
+          total_final: Number(item.totalComissao.toFixed(2)),
+          status: 'Pendente',
+          breakdown_pagamentos: item.breakdownPagamentos,
+          observacoes: `Fechamento gerado automaticamente em ${new Date().toLocaleDateString('pt-BR')}`,
+        });
+        criados += 1;
+      }
+
+      queryClient.invalidateQueries(['comissoes-fechamento']);
+      toast.success(`Fechamento concluído: ${criados} criado(s), ${atualizados} atualizado(s), ${mantidos} mantido(s).`);
+    } catch (error) {
+      toast.error(`Erro ao gerar fechamento: ${error.message}`);
+    } finally {
+      setProcessandoFechamento(false);
+    }
+  };
 
   const exportarCSV = () => {
     let csv = "Vendedor,Loja,Quantidade de Vendas,Total em Vendas,Total Comissões\n";
@@ -185,6 +348,16 @@ export default function RelatorioComissoes() {
   };
 
   const abrirModalPagamento = (item) => {
+    if (!item.fechamento_id) {
+      toast.error('Feche o período antes de registrar pagamento.');
+      return;
+    }
+
+    if (item.status_fechamento === 'Pago') {
+      toast.info('Esta comissão já está marcada como paga.');
+      return;
+    }
+
     setPagamentoSelecionado(item);
     setDataPagamento(new Date().toISOString().slice(0, 10));
     setObservacaoPagamento("");
@@ -198,22 +371,42 @@ export default function RelatorioComissoes() {
     try {
       await base44.entities.LancamentoFinanceiro.create({
         descricao: `Comissão - ${pagamentoSelecionado.vendedor.nome} - Ref: ${mesInicio === mesFim ? mesInicio : `${mesInicio} a ${mesFim}`}`,
-        valor: -Number(pagamentoSelecionado.totalComissao.toFixed(2)),
+        valor: -Number(pagamentoSelecionado.totalFinal.toFixed(2)),
         tipo: 'despesa',
         categoria: 'Comissões',
         data_lancamento: dataPagamento,
         forma_pagamento: 'Transferência',
         status: 'Pago',
-        observacoes: `Pgto ref. ${pagamentoSelecionado.quantidadeVendas} vendas. ${observacaoPagamento}`
+        observacoes: `Pgto ref. ${pagamentoSelecionado.quantidadeVendas} vendas. ${observacaoPagamento}`,
       });
+
+      if (pagamentoSelecionado.fechamento_id) {
+        await base44.entities.ComissaoFechamentoMensal.update(pagamentoSelecionado.fechamento_id, {
+          status: 'Pago',
+          data_pagamento: `${dataPagamento}T12:00:00.000Z`,
+          observacoes: observacaoPagamento || pagamentoSelecionado.fechamento?.observacoes || null,
+          updated_at: new Date().toISOString(),
+        });
+
+        const dataInicioHistorico = `${periodoInicioIso}T00:00:00.000Z`;
+        const dataFimHistorico = `${periodoFimIso}T23:59:59.999Z`;
+        await supabase
+          .from('comissoes_historico')
+          .update({
+            status: 'Pago',
+            data_pagamento: `${dataPagamento}T12:00:00.000Z`,
+          })
+          .eq('organization_id', tenantId)
+          .eq('vendedor_id', pagamentoSelecionado.vendedor.id)
+          .gte('data_calculo', dataInicioHistorico)
+          .lte('data_calculo', dataFimHistorico)
+          .neq('status', 'Pago');
+      }
 
       toast.success(`Pagamento registrado para ${pagamentoSelecionado.vendedor.nome}!`);
       setModalPagamento(false);
       setPagamentoSelecionado(null);
-      // Opcional: invalidar queries se quisermos atualizar algo na tela, 
-      // mas como o relatório é calculado on-the-fly baseado nas vendas, 
-      // e o pagamento vai para o Financeiro, talvez não precise recarregar aqui.
-      // Mas podemos invalidar 'lancamentos' se estivermos em cache.
+      queryClient.invalidateQueries(['comissoes-fechamento']);
       queryClient.invalidateQueries(['lancamentos']);
 
     } catch (error) {
@@ -235,15 +428,52 @@ export default function RelatorioComissoes() {
               Análise detalhada por vendedor e período
             </p>
           </div>
-          <Button
-            onClick={exportarCSV}
-            className="shadow-lg"
-            style={{ background: 'linear-gradient(135deg, #f38a4c 0%, #f5a164 100%)' }}
-          >
-            <FileDown className="w-4 h-4 mr-2" />
-            Exportar CSV
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={gerarFechamentoPeriodo}
+              variant="outline"
+              disabled={processandoFechamento || comissoesPorVendedor.length === 0}
+            >
+              <RefreshCcw className="w-4 h-4 mr-2" />
+              {processandoFechamento ? 'Processando...' : 'Gerar Fechamento'}
+            </Button>
+            <Button
+              onClick={exportarCSV}
+              className="shadow-lg"
+              style={{ background: 'linear-gradient(135deg, #f38a4c 0%, #f5a164 100%)' }}
+            >
+              <FileDown className="w-4 h-4 mr-2" />
+              Exportar CSV
+            </Button>
+          </div>
         </div>
+
+        <Card className="border-0 shadow-lg mb-6">
+          <CardContent className="p-4 md:p-5">
+            <div className="grid md:grid-cols-4 gap-3">
+              <div className="p-3 rounded-lg border" style={{ borderColor: '#E5E0D8' }}>
+                <p className="text-xs text-gray-500">Período de fechamento</p>
+                <p className="font-semibold" style={{ color: '#07593f' }}>{periodoInicioIso} a {periodoFimIso}</p>
+              </div>
+              <div className="p-3 rounded-lg border" style={{ borderColor: '#E5E0D8' }}>
+                <p className="text-xs text-gray-500">Fechamentos encontrados</p>
+                <p className="font-semibold" style={{ color: '#07593f' }}>{fechamentosPeriodo.length}</p>
+              </div>
+              <div className="p-3 rounded-lg border" style={{ borderColor: '#E5E0D8' }}>
+                <p className="text-xs text-gray-500">Pendente para pagamento</p>
+                <p className="font-semibold text-amber-600">
+                  R$ {totalPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg border" style={{ borderColor: '#E5E0D8' }}>
+                <p className="text-xs text-gray-500">Política de recálculo</p>
+                <p className="font-semibold" style={{ color: '#07593f' }}>
+                  {settings?.comissao_recalculo_politica || 'nao_recalcular'}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         <Card className="border-0 shadow-lg mb-6">
           <CardContent className="p-6">
@@ -340,7 +570,7 @@ export default function RelatorioComissoes() {
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: '#07593f' }} />
           </div>
-        ) : comissoesPorVendedor.length === 0 ? (
+        ) : comissoesConsolidadas.length === 0 ? (
           <Card className="border-0 shadow-lg">
             <CardContent className="p-12 text-center">
               <Calendar className="w-16 h-16 mx-auto mb-4 opacity-20" style={{ color: '#07593f' }} />
@@ -351,7 +581,7 @@ export default function RelatorioComissoes() {
           </Card>
         ) : (
           <div className="space-y-4">
-            {comissoesPorVendedor.map((item) => (
+            {comissoesConsolidadas.map((item) => (
               <Card key={item.vendedor.id} className="border-0 shadow-lg">
                 <CardHeader style={{ backgroundColor: '#f0f9ff' }}>
                   <div className="flex items-center justify-between">
@@ -372,18 +602,27 @@ export default function RelatorioComissoes() {
                       </div>
                     </div>
                     <div className="text-right">
+                      <div className="flex items-center justify-end gap-2 mb-1">
+                        <Badge
+                          className={item.status_fechamento === 'Pago' ? 'bg-green-100 text-green-700' : item.status_fechamento === 'Pendente' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-700'}
+                        >
+                          {item.status_fechamento === 'Pago' ? <CheckCircle2 className="w-3 h-3 mr-1" /> : <Lock className="w-3 h-3 mr-1" />}
+                          {item.status_fechamento}
+                        </Badge>
+                      </div>
                       <p className="text-sm mb-1" style={{ color: '#8B8B8B' }}>Total Comissão</p>
                       <p className="text-2xl font-bold" style={{ color: '#f38a4c' }}>
-                        R$ {item.totalComissao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        R$ {item.totalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </p>
                       <Button
                         size="sm"
                         variant="outline"
                         className="mt-2 h-8 text-green-700 border-green-200 hover:bg-green-50"
+                        disabled={!item.fechamento_id || item.status_fechamento === 'Pago'}
                         onClick={() => abrirModalPagamento(item)}
                       >
                         <Banknote className="w-4 h-4 mr-1" />
-                        Registrar Pagamento
+                        {!item.fechamento_id ? 'Fechar Período Primeiro' : item.status_fechamento === 'Pago' ? 'Já Pago' : 'Registrar Pagamento'}
                       </Button>
                     </div>
                   </div>
@@ -414,7 +653,7 @@ export default function RelatorioComissoes() {
                   {Object.keys(item.breakdownPagamentos).length > 0 && (
                     <div className="mt-4 p-4 rounded-lg border" style={{ borderColor: '#E5E0D8' }}>
                       <p className="text-sm font-semibold mb-3" style={{ color: '#07593f' }}>
-                        💳 Recebimentos por Forma de Pagamento
+                        Recebimentos por Forma de Pagamento
                       </p>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                         {Object.entries(item.breakdownPagamentos).map(([forma, dados]) => (

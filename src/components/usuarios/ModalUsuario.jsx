@@ -15,7 +15,6 @@ import { Truck, User, Mail, Phone, Building2, Briefcase, KeyRound, RotateCcw, Co
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { getCargoPrefix, getCargoConfig, CARGOS } from "@/config/cargos";
-import { getZapApiUrl } from "@/utils/zapApiUrl";
 
 // Cargos and store requirements are now driven by @/config/cargos
 
@@ -62,6 +61,7 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
   const [resetandoSenha, setResetandoSenha] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState(null);
   const [generatedMatricula, setGeneratedMatricula] = useState(null);
+  const [credentialsAction, setCredentialsAction] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
 
   const queryClient = useQueryClient();
@@ -70,10 +70,31 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
 
   const cargoConfig = getCargoConfig(dados.cargo);
   const precisaLoja = cargoConfig?.requiresStore;
+  const usaPinMontagem = dados.cargo === 'Montador';
 
   const copyToClipboard = (text, label) => {
     navigator.clipboard.writeText(text);
     toast.success(`${label} copiado!`);
+  };
+
+  const getFreshAccessToken = async () => {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !sessionData?.session?.access_token) {
+      throw new Error('Sessão inválida. Faça login novamente.');
+    }
+
+    const expiresAtMs = (sessionData.session.expires_at || 0) * 1000;
+    const fiveMinutesMs = 5 * 60 * 1000;
+
+    if (expiresAtMs - Date.now() < fiveMinutesMs) {
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError || !refreshData?.session?.access_token) {
+        throw new Error('Não foi possível renovar a sessão. Faça login novamente.');
+      }
+      return refreshData.session.access_token;
+    }
+
+    return sessionData.session.access_token;
   };
 
   const createMutation = useMutation({
@@ -165,6 +186,7 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
       queryClient.invalidateQueries({ queryKey: ['usuarios'] });
       setGeneratedMatricula(data.matricula);
       setGeneratedPassword(data.senha_temporaria);
+      setCredentialsAction('create');
       toast.success('Usuário criado com sucesso!');
     },
     onError: (error) => {
@@ -177,12 +199,11 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
     mutationFn: async (data) => {
       const dadosUsuario = {
         full_name: data.full_name,
-        telefone: data.telefone,
         cargo: data.cargo,
         loja: precisaLoja ? data.loja : null,
         ativo: data.ativo,
         is_vendedor: data.cargo === 'Vendedor',
-        pin_montagem: data.pin_montagem
+        pin_montagem: usaPinMontagem ? data.pin_montagem : null
       };
 
       return base44.entities.User.update(usuario.id, dadosUsuario);
@@ -200,34 +221,35 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
 
   const resetarSenhaMutation = useMutation({
     mutationFn: async () => {
-      const apiUrl = getZapApiUrl();
-      const response = await fetch(`${apiUrl}/api/auth/employee/reset-password`, {
+      const accessToken = await getFreshAccessToken();
+      const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-actions`;
+
+      const response = await fetch(fnUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('employee_token')}`
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
         },
-        body: JSON.stringify({ user_id: usuario.id })
+        body: JSON.stringify({ action: 'reset_password', user_id: usuario.id })
       });
 
-      if (!response.ok) {
-        throw new Error('Falha ao resetar senha');
+      const data = await response.json();
+
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || 'Falha ao resetar senha');
       }
 
-      return response.json();
+      return data;
     },
     onSuccess: (data) => {
       setResetandoSenha(false);
-      toast.success(
-        <div>
-          <p>Senha resetada com sucesso!</p>
-          <p className="font-mono text-sm mt-1">
-            Nova senha: <strong>{data.senha_temporaria}</strong>
-          </p>
-          {data.whatsapp_enviado && <p className="text-xs mt-1">Enviada via WhatsApp</p>}
-        </div>,
-        { duration: 10000 }
-      );
+      setGeneratedMatricula(data.matricula || usuario?.matricula || null);
+      setGeneratedPassword(data.senha_temporaria);
+      setCredentialsAction('reset');
+      toast.success(data.whatsapp_enviado
+        ? 'Senha resetada e enviada via WhatsApp!'
+        : 'Senha resetada com sucesso!');
     },
     onError: (error) => {
       toast.error('Erro ao resetar senha: ' + error.message);
@@ -244,7 +266,9 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
 
 
 
-  // Se acabou de criar sucesso
+  const isResetCredentials = credentialsAction === 'reset';
+
+  // Exibe credenciais geradas após criação/reset
   if (generatedPassword) {
     return (
       <Dialog open onOpenChange={onClose}>
@@ -252,13 +276,15 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-green-700">
               <CheckCircle2 className="w-6 h-6" />
-              Usuário Criado com Sucesso!
+              {isResetCredentials ? 'Senha Resetada com Sucesso!' : 'Usuário Criado com Sucesso!'}
             </DialogTitle>
           </DialogHeader>
 
           <div className="bg-green-50 p-6 rounded-xl border border-green-200 mt-2 space-y-4">
             <p className="text-green-800 text-sm">
-              O usuário foi criado e já pode acessar o sistema. Envie as credenciais abaixo:
+              {isResetCredentials
+                ? 'A senha foi resetada. Envie as credenciais abaixo ao funcionário:'
+                : 'O usuário foi criado e já pode acessar o sistema. Envie as credenciais abaixo:'}
             </p>
 
             <div className="grid grid-cols-2 gap-4">
@@ -448,7 +474,7 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
           </div>
 
           {/* Campo PIN de Montagem */}
-          {(dados.cargo === 'Montador' || dados.cargo === 'Logística' || dados.cargo === 'Estoque') && (
+          {usaPinMontagem && (
             <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-100 dark:border-blue-900/30">
               <div className="flex items-center gap-2 mb-2">
                 <KeyRound className="w-4 h-4 text-blue-600" />
@@ -463,7 +489,7 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
                 className="bg-white"
               />
               <p className="text-xs text-blue-600 mt-2">
-                Senha de 4 dígitos usada para autorizar conclusões de montagem na Logística.
+                Senha de 4 dígitos usada para confirmar conclusões de montagem interna.
               </p>
             </div>
           )}

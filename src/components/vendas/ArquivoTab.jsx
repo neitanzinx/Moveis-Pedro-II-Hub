@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import {
     MapPin, Camera, PenTool, AlertTriangle, Printer
 } from "lucide-react";
 import { gerarComprovanteEntregaPDF } from "./ComprovanteEntregaPDF";
+import { getEntregaFotos, getVendaFinanceiro, getVendaResumoLogistico } from "@/utils/vendaStatus";
 
 export default function ArquivoTab() {
     const [search, setSearch] = useState("");
@@ -40,6 +41,13 @@ export default function ArquivoTab() {
         staleTime: 0
     });
 
+    const { data: lancamentos = [] } = useQuery({
+        queryKey: ['lancamentos-arquivo'],
+        queryFn: () => base44.entities.LancamentoFinanceiro.list(),
+        refetchOnMount: 'always',
+        staleTime: 0
+    });
+
     // Filtrar entregas finalizadas (status canonico ou legado)
     const entregasFinalizadas = entregas.filter((e) => {
         const status = (e.status || '').toLowerCase();
@@ -49,7 +57,10 @@ export default function ArquivoTab() {
     // Combinar com dados da venda
     const pedidosArquivados = entregasFinalizadas.map(entrega => {
         const venda = vendas.find(v => v.id === entrega.venda_id);
-        return { ...entrega, venda };
+        const resumoLogistico = venda ? getVendaResumoLogistico(venda, { entregas, montagens: [] }) : null;
+        const financeiro = venda ? getVendaFinanceiro(venda, { entregas, lancamentos }) : null;
+        const fotosEntrega = getEntregaFotos(entrega);
+        return { ...entrega, venda, resumoLogistico, financeiro, fotosEntrega };
     }).filter(p => {
         if (!search) return true;
         const termo = search.toLowerCase();
@@ -117,7 +128,7 @@ export default function ArquivoTab() {
                                             <span className="font-bold text-gray-900">#{pedido.numero_pedido}</span>
                                             <Badge className="bg-green-100 text-green-800 border-0">
                                                 <CheckCircle className="w-3 h-3 mr-1" />
-                                                {pedido.tipo_entrega === 'Retirada' ? 'Retirado' : 'Entregue'}
+                                                {pedido.resumoLogistico?.allRetirada ? 'Retirado' : 'Entregue'}
                                             </Badge>
                                             {pedido.tentativas > 0 && (
                                                 <Badge className="bg-amber-100 text-amber-800 border-0">
@@ -144,6 +155,11 @@ export default function ArquivoTab() {
 
                                         {/* Indicadores */}
                                         <div className="flex items-center gap-2 mt-3">
+                                            {pedido.resumoLogistico?.composicao?.map((grupo) => (
+                                                <Badge key={grupo.key} variant="outline" className="text-xs">
+                                                    {grupo.count} {grupo.label}
+                                                </Badge>
+                                            ))}
                                             {pedido.assinatura_url && (
                                                 <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
                                                     <PenTool className="w-3 h-3 mr-1" />
@@ -154,6 +170,12 @@ export default function ArquivoTab() {
                                                 <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
                                                     <Camera className="w-3 h-3 mr-1" />
                                                     Comprovante
+                                                </Badge>
+                                            )}
+                                            {pedido.fotosEntrega?.length > 0 && (
+                                                <Badge variant="outline" className="text-xs bg-cyan-50 text-cyan-700 border-cyan-200">
+                                                    <Camera className="w-3 h-3 mr-1" />
+                                                    {pedido.fotosEntrega.length} foto(s)
                                                 </Badge>
                                             )}
                                         </div>
@@ -220,7 +242,13 @@ export default function ArquivoTab() {
                                         {detalhes.venda.desconto > 0 && (
                                             <p><strong>Desconto:</strong> R$ {detalhes.venda.desconto?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                                         )}
-                                        <p><strong>Status Pagamento:</strong> {detalhes.venda.status || "Não informado"}</p>
+                                        <p><strong>Status Pagamento:</strong> {detalhes.financeiro?.displayStatus || detalhes.venda.status || "Não informado"}</p>
+                                        {detalhes.financeiro && (
+                                            <>
+                                                <p><strong>Total Pago:</strong> R$ {detalhes.financeiro.valorPago?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}</p>
+                                                <p><strong>Saldo Restante:</strong> {detalhes.financeiro.valorRestante > 0 ? `R$ ${detalhes.financeiro.valorRestante.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '-'}</p>
+                                            </>
+                                        )}
                                     </div>
                                     {/* Formas de Pagamento */}
                                     {detalhes.venda.pagamentos?.length > 0 && (
@@ -244,14 +272,31 @@ export default function ArquivoTab() {
                                     Tipo de Entrega
                                 </h4>
                                 <div className="text-sm text-purple-700">
-                                    {detalhes.tipo_entrega === 'Retirada' ? (
-                                        <Badge className="bg-gray-100 text-gray-700">🏪 Cliente Retirou na Loja</Badge>
-                                    ) : detalhes.venda?.itens?.some(i => i.tipo_montagem === 'montado') ? (
-                                        <Badge className="bg-orange-100 text-orange-700">🔧 Entrega Montado (montagem interna)</Badge>
-                                    ) : detalhes.venda?.itens?.some(i => i.tipo_montagem === 'montagem_cliente') ? (
-                                        <Badge className="bg-blue-100 text-blue-700">🚚 Montagem no Local (montador externo)</Badge>
-                                    ) : (
-                                        <Badge className="bg-green-100 text-green-700">📦 Entrega Normal</Badge>
+                                    <div className="flex flex-wrap gap-2">
+                                        {detalhes.resumoLogistico?.composicao?.length > 0 ? detalhes.resumoLogistico.composicao.map((grupo) => (
+                                            <Badge key={grupo.key} className="bg-white text-purple-700 border border-purple-200">
+                                                {grupo.count} {grupo.label}
+                                            </Badge>
+                                        )) : (
+                                            <span className="text-xs text-purple-600">Sem composição logística registrada</span>
+                                        )}
+                                    </div>
+                                    {detalhes.resumoLogistico?.isMisto && (
+                                        <p className="mt-2 text-xs text-purple-600">Pedido misto: combina entrega e retirada no mesmo número.</p>
+                                    )}
+                                    {detalhes.resumoLogistico?.gruposDetalhados?.length > 0 && (
+                                        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                            {detalhes.resumoLogistico.gruposDetalhados.map((grupo) => (
+                                                <div key={grupo.key} className="rounded border border-purple-200 bg-white p-3">
+                                                    <p className="text-xs font-semibold uppercase text-purple-700">{grupo.label}</p>
+                                                    <div className="mt-2 space-y-1 text-xs text-purple-600">
+                                                        {grupo.items.map((item, idx) => (
+                                                            <p key={`${grupo.key}-${idx}`}>{item.resumoItem}</p>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -260,7 +305,7 @@ export default function ArquivoTab() {
                             <div className="bg-green-50 rounded-lg p-4">
                                 <h4 className="font-bold text-green-800 mb-2 flex items-center gap-2">
                                     <CheckCircle className="w-4 h-4" />
-                                    {detalhes.tipo_entrega === 'Retirada' ? 'Retirada Realizada' : 'Entrega Realizada'}
+                                    {detalhes.resumoLogistico?.allRetirada ? 'Retirada Realizada' : 'Entrega Realizada'}
                                 </h4>
                                 <div className="text-sm text-green-700 space-y-1">
                                     <p><strong>Data:</strong> {formatarData(detalhes.data_realizada)}</p>
@@ -302,6 +347,27 @@ export default function ArquivoTab() {
                                 </div>
                             )}
 
+                            {detalhes.fotosEntrega?.length > 0 && (
+                                <div className="bg-cyan-50 rounded-lg p-4">
+                                    <h4 className="font-bold text-cyan-800 mb-2 flex items-center gap-2">
+                                        <Camera className="w-4 h-4" />
+                                        Fotos dos Produtos Entregues
+                                    </h4>
+                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                        {detalhes.fotosEntrega.map((foto, idx) => (
+                                            <div key={`${foto.url}-${idx}`} className="overflow-hidden rounded border bg-white p-2">
+                                                <img
+                                                    src={foto.url}
+                                                    alt={foto.tipo || `Foto ${idx + 1}`}
+                                                    className="h-40 w-full rounded object-cover"
+                                                />
+                                                <p className="mt-2 text-xs text-cyan-700">{foto.tipo || `Foto ${idx + 1}`}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Histórico de Tentativas */}
                             {detalhes.tentativas > 0 && (
                                 <div className="bg-amber-50 rounded-lg p-4">
@@ -332,9 +398,15 @@ export default function ArquivoTab() {
                                     <div className="space-y-1 text-sm">
                                         {detalhes.venda.itens.map((item, idx) => (
                                             <div key={idx} className="flex justify-between">
-                                                <span>{item.quantidade}x {item.produto_nome}</span>
+                                                <span>
+                                                    {item.quantidade}x {item.produto_nome}
+                                                    <span className="block text-xs text-gray-500">
+                                                        {item.tipo_entrega === 'retira' ? 'Retirada na loja' : 'Entrega'}
+                                                        {item.tipo_montagem ? ` • ${item.tipo_montagem}` : ''}
+                                                    </span>
+                                                </span>
                                                 <span className="text-gray-600">
-                                                    R$ {(item.preco_unitario * item.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    R$ {((item.preco_unitario || item.valor_unitario || 0) * (item.quantidade || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                 </span>
                                             </div>
                                         ))}

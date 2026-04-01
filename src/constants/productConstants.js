@@ -350,7 +350,7 @@ export const TIPOS_ENTREGA = [
         valor: "montado",
         label: "Entrega Montado (montagem interna)",
         cor: "green",
-        descricao: "Montagem interna antes da entrega (mostruário ou pedido)",
+        descricao: "Montagem interna antes da entrega (pedido interno ou pedido de venda)",
         icone: "Truck"
     },
     {
@@ -432,18 +432,8 @@ export function getMarkupPadraoPorGrupo(grupoId) {
 }
 
 // =====================================================
-// LOJAS E MOSTRUÁRIOS
+// LOJAS E ESTOQUE POR UNIDADE
 // =====================================================
-
-// Lojas com mostruário (Mantido para fallback) - DEPRECATED: Use useLojas()
-// export const LOJAS_MOSTRUARIO = [
-//     { id: "cd", nome: "CD (Centro de Distribuição)", tipo: "estoque" },
-//     { id: "mega_store", nome: "Mega Store", tipo: "mostruario" },
-//     { id: "centro", nome: "Centro", tipo: "mostruario" },
-//     { id: "ponte_branca", nome: "Ponte Branca", tipo: "mostruario" },
-//     { id: "futura", nome: "Futura", tipo: "mostruario" },
-// ];
-export const LOJAS_MOSTRUARIO = [];
 
 /**
  * Mapeamento principal de ID da loja na constante hardcoded para o campo da tabela Produtos.
@@ -477,7 +467,7 @@ const slugify = (text) => {
  * um campo dinâmico baseado no slug.
  * 
  * @param {Object|string} loja - O objeto da loja retornado do BD, ou o nome da loja.
- * @returns {string} O nome do campo na tabela produtos (ex: 'estoque_cd', 'estoque_mostruario_centro')
+ * @returns {string} O nome do campo na tabela produtos (ex: 'estoque_cd' ou campo legado por loja)
  */
 export function obterCampoEstoqueDaLoja(loja) {
     if (!loja) return "estoque_cd";
@@ -623,7 +613,7 @@ export function calcularPrecoVendaCompleto(produto) {
  */
 export function calcularEstoqueTotal(produto, lojas = []) {
     if (!lojas || lojas.length === 0) {
-        // Fallback para campos originais se nenhuma loja for passada
+        // Fallback para campos legados se nenhuma loja for passada
         return (
             (produto.estoque_cd || 0) +
             (produto.estoque_mostruario_mega_store || 0) +

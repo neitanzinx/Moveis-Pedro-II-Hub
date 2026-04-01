@@ -20,11 +20,12 @@ import {
   CreditCard, Wallet, ShoppingCart, Store, RefreshCw, Download, Printer,
   Star, Copy, Link, AlertTriangle, CheckCircle, ThumbsUp, ThumbsDown, Loader2,
   Megaphone, Tag, UserPlus, Repeat, PercentIcon, Share2,
-  Trophy, MapPin, LayoutDashboard, FileText, Meh, Award
+  Trophy, MapPin, LayoutDashboard, FileText, Meh, Award, UserCog
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 import ProdutoModal from "@/components/produtos/ProdutoModal";
+import RelatorioMontadores from "@/components/relatorios/RelatorioMontadores";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
@@ -1156,6 +1157,12 @@ export default function RelatoriosAvancados() {
               <Store className="w-4 h-4" />
               Lojas
             </TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger value="montadores" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
+                <UserCog className="w-4 h-4" />
+                Montadores
+              </TabsTrigger>
+            )}
             {isAdmin && (
               <TabsTrigger value="dre" className="data-[state=active]:bg-emerald-500 data-[state=active]:text-white flex items-center gap-2">
                 <FileText className="w-4 h-4" />
@@ -2336,6 +2343,12 @@ export default function RelatoriosAvancados() {
               </Card>
             </div>
           </TabsContent>
+
+          {isAdmin && (
+            <TabsContent value="montadores" className="space-y-6">
+              <RelatorioMontadores />
+            </TabsContent>
+          )}
         </Tabs>
 
         {/* Modal de Detalhes do Produto */}

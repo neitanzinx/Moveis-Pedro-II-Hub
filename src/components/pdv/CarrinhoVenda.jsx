@@ -15,12 +15,16 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { base44 } from "@/api/base44Client";
 
-export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntrega, onToggleMontagem, onVincularImagem, onEditProduto, onAtualizarEstoque }) {
+export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntrega, onToggleMontagem, onVincularImagem, onEditProduto, onAtualizarEstoque, onAtualizarQuantidade }) {
   // Estado para o dialog de atualizar estoque
   const [atualizarEstoqueOpen, setAtualizarEstoqueOpen] = useState(false);
   const [itemParaEstoque, setItemParaEstoque] = useState(null);
   const [novaQuantidadeEstoque, setNovaQuantidadeEstoque] = useState("");
   const [atualizandoEstoque, setAtualizandoEstoque] = useState(false);
+
+  // Edição de quantidade no carrinho
+  const [editingQuantidadeIndex, setEditingQuantidadeIndex] = useState(null);
+  const [editingQuantidadeValue, setEditingQuantidadeValue] = useState("");
 
   // Vincular Imagem State
   const [vincularImagemOpen, setVincularImagemOpen] = useState(false);
@@ -104,6 +108,34 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
     }
   };
 
+  const aplicarQuantidade = (index, quantidade) => {
+    if (!Number.isFinite(quantidade) || quantidade < 1) {
+      toast.error("Informe uma quantidade válida (mínimo 1)");
+      return;
+    }
+
+    if (typeof onAtualizarQuantidade === 'function') {
+      onAtualizarQuantidade(index, quantidade);
+    }
+  };
+
+  const iniciarEdicaoQuantidade = (index, quantidadeAtual) => {
+    setEditingQuantidadeIndex(index);
+    setEditingQuantidadeValue(String(quantidadeAtual || 1));
+  };
+
+  const confirmarEdicaoQuantidade = (index) => {
+    const parsed = parseInt(editingQuantidadeValue, 10);
+    aplicarQuantidade(index, parsed);
+    setEditingQuantidadeIndex(null);
+    setEditingQuantidadeValue("");
+  };
+
+  const cancelarEdicaoQuantidade = () => {
+    setEditingQuantidadeIndex(null);
+    setEditingQuantidadeValue("");
+  };
+
   if (itens.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-200 dark:border-neutral-800 rounded-xl p-8 h-full min-h-[300px]">
@@ -165,9 +197,53 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
 
                 <div className="flex flex-col items-center gap-0.5">
                   <span className="text-[11px] uppercase font-bold text-gray-400 leading-none">Qtd</span>
-                  <div className="w-8 h-8 bg-green-50 dark:bg-green-900/20 rounded-full flex items-center justify-center text-green-700 dark:text-green-400 font-bold text-sm">
-                    {item.quantidade}
-                  </div>
+                  <button
+                    type="button"
+                    className="w-7 h-7 rounded-full border border-gray-200 dark:border-neutral-700 text-gray-600 dark:text-gray-300 hover:border-green-300 hover:text-green-700 dark:hover:border-green-700 dark:hover:text-green-400 flex items-center justify-center transition-colors"
+                    onClick={() => aplicarQuantidade(index, (item.quantidade || 1) + 1)}
+                    title="Aumentar quantidade"
+                  >
+                    +
+                  </button>
+                  {editingQuantidadeIndex === index ? (
+                    <Input
+                      type="number"
+                      min="1"
+                      value={editingQuantidadeValue}
+                      onChange={(e) => setEditingQuantidadeValue(e.target.value)}
+                      onBlur={() => confirmarEdicaoQuantidade(index)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          confirmarEdicaoQuantidade(index);
+                        }
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          cancelarEdicaoQuantidade();
+                        }
+                      }}
+                      className="h-8 w-14 text-center px-1 font-bold text-sm"
+                      autoFocus
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="w-10 h-8 bg-green-50 dark:bg-green-900/20 rounded-md flex items-center justify-center text-green-700 dark:text-green-400 font-bold text-sm border border-green-100 dark:border-green-900/40"
+                      onClick={() => iniciarEdicaoQuantidade(index, item.quantidade)}
+                      title="Clique para editar a quantidade"
+                    >
+                      {item.quantidade}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="w-7 h-7 rounded-full border border-gray-200 dark:border-neutral-700 text-gray-600 dark:text-gray-300 hover:border-red-300 hover:text-red-600 dark:hover:border-red-700 dark:hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+                    onClick={() => aplicarQuantidade(index, (item.quantidade || 1) - 1)}
+                    disabled={(item.quantidade || 1) <= 1}
+                    title="Diminuir quantidade"
+                  >
+                    -
+                  </button>
                   {item.estoque_atualizado_em && (
                     <div className="mt-2 text-[10px] bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300 px-2 py-1 rounded border border-blue-200 dark:border-blue-800 whitespace-nowrap">
                       <p className="font-semibold">Estoque definido</p>

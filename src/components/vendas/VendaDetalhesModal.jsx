@@ -1,4 +1,3 @@
-import React from 'react';
 import {
     Dialog,
     DialogContent,
@@ -29,71 +28,38 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { getEntregaFotos, getVendaFinanceiro, getVendaResumoLogistico } from '@/utils/vendaStatus';
 
-export function VendaDetalhesModal({ venda, isOpen, onClose }) {
+const TONE_CLASSES = {
+    purple: 'bg-purple-100 text-purple-700 border-purple-200',
+    blue: 'bg-blue-100 text-blue-700 border-blue-200',
+    orange: 'bg-orange-100 text-orange-700 border-orange-200',
+    cyan: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+    green: 'bg-green-100 text-green-700 border-green-200'
+};
+
+export function VendaDetalhesModal({ venda, isOpen, onClose, entregas = [], montagens = [], lancamentos = [] }) {
     if (!venda) return null;
 
     const formatCurrency = (value) => {
         return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
     };
 
+    const financeiro = getVendaFinanceiro(venda, { entregas, lancamentos });
+    const resumoLogistico = getVendaResumoLogistico(venda, { entregas, montagens });
+    const entregaAtual = resumoLogistico.entregaPrincipal;
+    const fotosEntrega = getEntregaFotos(entregaAtual);
+
     const getStatusBadge = (status) => {
         const statusMap = {
             'pago': { color: 'bg-emerald-500', label: 'Pago' },
-            'pendente': { color: 'bg-amber-500', label: 'Pendente' },
-            'cancelada': { color: 'bg-destructive', label: 'Cancelada' },
+            'pagamento pendente': { color: 'bg-amber-500', label: 'Pagamento Pendente' },
+            'cancelado': { color: 'bg-destructive', label: 'Cancelado' },
             'concluida': { color: 'bg-blue-500', label: 'Concluída' },
         };
         const config = statusMap[status?.toLowerCase()] || { color: 'bg-slate-500', label: status || 'Desconhecido' };
         return <Badge className={`${config.color} text-white`}>{config.label}</Badge>;
     };
-
-    // Extrair tipo_entrega dos itens (apenas itens com entrega)
-    const getTipoEntrega = () => {
-        if (!Array.isArray(venda.itens) || venda.itens.length === 0) return null;
-        const tipos = [...new Set(
-            venda.itens
-                .filter(i => i.tipo_entrega === 'entrega')
-                .map(i => i.tipo_entrega)
-                .filter(Boolean)
-        )];
-        return tipos.length > 0 ? 'Entrega' : null;
-    };
-
-    // Extrair tipo_montagem dos itens com detalhe
-    const getMontageDetail = () => {
-        if (!Array.isArray(venda.itens) || venda.itens.length === 0) return null;
-        
-        const itensComEntrega = venda.itens.filter(i => i.tipo_entrega === 'entrega');
-        if (itensComEntrega.length === 0) return null;
-        
-        const tiposMontagem = [
-            ...new Set(
-                itensComEntrega
-                    .filter(i => i.tipo_montagem)
-                    .map(i => i.tipo_montagem)
-            )
-        ];
-        
-        if (tiposMontagem.length === 0) return null;
-        if (tiposMontagem.length === 1) return tiposMontagem[0];
-        
-        // Se há múltiplos tipos, listar os produtos de cada tipo
-        const detalhes = {};
-        itensComEntrega.forEach(item => {
-            if (item.tipo_montagem) {
-                if (!detalhes[item.tipo_montagem]) {
-                    detalhes[item.tipo_montagem] = [];
-                }
-                detalhes[item.tipo_montagem].push(item.produto_nome);
-            }
-        });
-        
-        return detalhes; // Retornar objeto com tipos como chaves e produtos como valores
-    };
-
-    const tipoEntrega = getTipoEntrega();
-    const montageDetail = getMontageDetail();
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
@@ -110,19 +76,19 @@ export function VendaDetalhesModal({ venda, isOpen, onClose }) {
                                     <Calendar className="h-4 w-4" />
                                     {format(new Date(venda.data_venda || venda.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
                                 </span>
-                                {venda.loja_nome && (
+                                {(venda.loja_nome || venda.loja) && (
                                     <span className="flex items-center gap-1">
                                         <Store className="h-4 w-4" />
-                                        {venda.loja_nome}
+                                        {venda.loja_nome || venda.loja}
                                     </span>
                                 )}
                             </div>
                         </div>
                         <div className="flex flex-col items-end gap-2">
-                            {getStatusBadge(venda.status)}
-                            {venda.vendedor_nome && (
+                            {getStatusBadge(financeiro.displayStatus)}
+                            {(venda.vendedor_nome || venda.responsavel_nome) && (
                                 <span className="text-xs font-medium text-muted-foreground">
-                                    Vendedor: {venda.vendedor_nome}
+                                    Vendedor: {venda.vendedor_nome || venda.responsavel_nome}
                                 </span>
                             )}
                         </div>
@@ -150,10 +116,10 @@ export function VendaDetalhesModal({ venda, isOpen, onClose }) {
                                     )}
                                 </div>
                                 <div className="flex flex-col gap-1">
-                                    {venda.endereco_entrega && (
+                                    {(entregaAtual?.endereco_entrega || venda.endereco_entrega) && (
                                         <div className="flex items-start gap-2 text-xs">
                                             <MapPin className="h-3 w-3 mt-0.5 shrink-0 text-muted-foreground" />
-                                            <span>{venda.endereco_entrega}</span>
+                                            <span>{entregaAtual?.endereco_entrega || venda.endereco_entrega}</span>
                                         </div>
                                     )}
                                     {venda.ponto_referencia && (
@@ -176,13 +142,15 @@ export function VendaDetalhesModal({ venda, isOpen, onClose }) {
                                     <TableHeader className="bg-muted/50">
                                         <TableRow>
                                             <TableHead>Produto</TableHead>
+                                            <TableHead>Entrega</TableHead>
+                                            <TableHead>Montagem</TableHead>
                                             <TableHead className="text-center">Qtd</TableHead>
                                             <TableHead className="text-right">Unitário</TableHead>
                                             <TableHead className="text-right">Total</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {Array.isArray(venda.itens) && venda.itens.map((item, idx) => (
+                                        {resumoLogistico.itensDetalhados.map((item, idx) => (
                                             <TableRow key={idx}>
                                                 <TableCell className="font-medium text-sm">
                                                     {item.produto_nome}
@@ -192,10 +160,12 @@ export function VendaDetalhesModal({ venda, isOpen, onClose }) {
                                                         </span>
                                                     )}
                                                 </TableCell>
+                                                <TableCell className="text-xs text-muted-foreground">{item.entregaLabel || '-'}</TableCell>
+                                                <TableCell className="text-xs text-muted-foreground">{item.montagemLabel || '-'}</TableCell>
                                                 <TableCell className="text-center">{item.quantidade}</TableCell>
-                                                <TableCell className="text-right">{formatCurrency(item.valor_unitario)}</TableCell>
+                                                <TableCell className="text-right">{formatCurrency(item.valor_unitario || item.preco_unitario)}</TableCell>
                                                 <TableCell className="text-right font-semibold">
-                                                    {formatCurrency(item.quantidade * item.valor_unitario)}
+                                                    {formatCurrency((item.quantidade || 0) * (item.valor_unitario || item.preco_unitario || 0))}
                                                 </TableCell>
                                             </TableRow>
                                         ))}
@@ -233,6 +203,22 @@ export function VendaDetalhesModal({ venda, isOpen, onClose }) {
                                         <span>Total</span>
                                         <span>{formatCurrency(venda.valor_total)}</span>
                                     </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-muted-foreground">Status</span>
+                                        <span className={financeiro.isPaid ? 'text-emerald-700 font-semibold' : 'text-amber-700 font-semibold'}>
+                                            {financeiro.displayStatus}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-muted-foreground">Total pago</span>
+                                        <span>{formatCurrency(financeiro.valorPago)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-muted-foreground">Saldo restante</span>
+                                        <span className={financeiro.valorRestante > 0 ? 'text-amber-700 font-semibold' : 'text-emerald-700 font-semibold'}>
+                                            {financeiro.valorRestante > 0 ? formatCurrency(financeiro.valorRestante) : '-'}
+                                        </span>
+                                    </div>
 
                                     {/* Pagamentos */}
                                     {Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0 && (
@@ -240,7 +226,7 @@ export function VendaDetalhesModal({ venda, isOpen, onClose }) {
                                             <p className="text-xs font-semibold text-muted-foreground uppercase text-center mb-2">Formas de Pagamento</p>
                                             {venda.pagamentos.map((pag, idx) => (
                                                 <div key={idx} className="flex justify-between items-center bg-background p-2 rounded-lg border text-sm">
-                                                    <span className="font-medium">{pag.forma_pagamento}</span>
+                                                    <span className="font-medium">{pag.forma_pagamento || pag.forma || '-'}</span>
                                                     <span className="font-semibold text-primary">{formatCurrency(pag.valor)}</span>
                                                 </div>
                                             ))}
@@ -256,62 +242,97 @@ export function VendaDetalhesModal({ venda, isOpen, onClose }) {
                                         <Truck className="h-5 w-5" />
                                         Logística
                                     </h3>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className="bg-muted/10 p-3 rounded-lg border flex flex-col gap-1">
-                                            <span className="text-[10px] text-muted-foreground uppercase font-bold">Entrega</span>
-                                            {tipoEntrega ? (
-                                                <>
-                                                    <div className="flex items-center gap-2 text-sm font-medium">
-                                                        <Truck className="h-4 w-4 text-blue-500" />
-                                                        {tipoEntrega}
-                                                    </div>
-                                                    {venda.data_entrega && (
-                                                        <span className="text-xs text-muted-foreground">
-                                                            {format(new Date(venda.data_entrega), "dd/MM/yyyy", { locale: ptBR })}
-                                                        </span>
-                                                    )}
-                                                </>
-                                            ) : (
-                                                <span className="text-xs text-muted-foreground italic">Não preenchido</span>
+                                    <div className="space-y-3 bg-muted/10 p-4 rounded-xl border">
+                                        <div className="flex flex-wrap gap-2">
+                                            {resumoLogistico.composicao.length > 0 ? resumoLogistico.composicao.map((grupo) => (
+                                                <Badge key={grupo.key} variant="outline" className={TONE_CLASSES[grupo.tone] || TONE_CLASSES.blue}>
+                                                    {grupo.count} {grupo.label}
+                                                </Badge>
+                                            )) : (
+                                                <span className="text-xs text-muted-foreground italic">Sem composição logística informada</span>
                                             )}
                                         </div>
-                                        <div className="bg-muted/10 p-3 rounded-lg border flex flex-col gap-1">
-                                            <span className="text-[10px] text-muted-foreground uppercase font-bold">Montagem</span>
-                                            {montageDetail ? (
-                                                <>
-                                                    {typeof montageDetail === 'string' ? (
-                                                        <>
-                                                            <div className="flex items-center gap-2 text-sm font-medium">
-                                                                <Wrench className="h-4 w-4 text-orange-500" />
-                                                                {montageDetail}
-                                                            </div>
-                                                            {venda.data_montagem && (
-                                                                <span className="text-xs text-muted-foreground">
-                                                                    {format(new Date(venda.data_montagem), "dd/MM/yyyy", { locale: ptBR })}
-                                                                </span>
-                                                            )}
-                                                        </>
-                                                    ) : (
-                                                        <div className="space-y-2 text-sm">
-                                                            {Object.entries(montageDetail).map(([tipo, produtos]) => (
-                                                                <div key={tipo} className="text-xs">
-                                                                    <p className="font-semibold text-orange-600">{tipo}:</p>
-                                                                    <ul className="ml-2 space-y-1">
-                                                                        {produtos.map((prod, idx) => (
-                                                                            <li key={idx} className="text-muted-foreground">• {prod}</li>
-                                                                        ))}
-                                                                    </ul>
-                                                                </div>
+                                        <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+                                            <div className="rounded-lg border bg-background p-3">
+                                                <p className="text-[10px] font-bold uppercase text-muted-foreground">Composição</p>
+                                                <div className="mt-2 flex items-center gap-2 font-medium">
+                                                    <Truck className="h-4 w-4 text-blue-500" />
+                                                    {resumoLogistico.headline}
+                                                </div>
+                                                {resumoLogistico.isMisto && (
+                                                    <p className="mt-2 text-xs text-muted-foreground">
+                                                        Este pedido combina itens para entrega e retirada no mesmo número.
+                                                    </p>
+                                                )}
+                                            </div>
+                                            <div className="rounded-lg border bg-background p-3">
+                                                <p className="text-[10px] font-bold uppercase text-muted-foreground">Status operacional</p>
+                                                {entregaAtual ? (
+                                                    <div className="mt-2 space-y-1 text-sm">
+                                                        <div className="font-medium">{entregaAtual.status || '-'}</div>
+                                                        <div className="text-xs text-muted-foreground">
+                                                            {entregaAtual.data_realizada
+                                                                ? `Concluído em ${format(new Date(entregaAtual.data_realizada), "dd/MM/yyyy HH:mm", { locale: ptBR })}`
+                                                                : entregaAtual.data_agendada
+                                                                    ? `Agendado para ${format(new Date(entregaAtual.data_agendada), "dd/MM/yyyy", { locale: ptBR })}`
+                                                                    : 'Sem data operacional'}
+                                                        </div>
+                                                        <div className="text-xs text-muted-foreground">
+                                                            {entregaAtual.endereco_entrega || 'Retirada na loja'}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <span className="mt-2 block text-xs text-muted-foreground italic">Sem entrega vinculada</span>
+                                                )}
+                                                {(resumoLogistico.contagens.montagemInterna > 0 || resumoLogistico.contagens.montagemExterna > 0) && (
+                                                    <div className="mt-3 flex items-center gap-2 text-xs">
+                                                        <Wrench className="h-3.5 w-3.5 text-orange-500" />
+                                                        <span>{resumoLogistico.montagensConcluidas ? 'Montagens concluídas' : 'Montagens pendentes'}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {resumoLogistico.gruposDetalhados.length > 0 && (
+                                            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                                                {resumoLogistico.gruposDetalhados.map((grupo) => (
+                                                    <div key={grupo.key} className="rounded-lg border bg-background p-3">
+                                                        <p className={`text-xs font-bold uppercase ${TONE_CLASSES[grupo.tone] || TONE_CLASSES.blue}`}>
+                                                            {grupo.label}
+                                                        </p>
+                                                        <div className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+                                                            {grupo.items.map((item, index) => (
+                                                                <p key={`${grupo.key}-${index}`}>{item.resumoItem}</p>
                                                             ))}
                                                         </div>
-                                                    )}
-                                                </>
-                                            ) : (
-                                                <span className="text-xs text-muted-foreground italic">Não preenchido</span>
-                                            )}
-                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 </section>
+
+                                {fotosEntrega.length > 0 && (
+                                    <section>
+                                        <h3 className="text-lg font-semibold flex items-center gap-2 mb-4 text-primary">
+                                            <Package className="h-5 w-5" />
+                                            Fotos da Entrega
+                                        </h3>
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                            {fotosEntrega.map((foto, index) => (
+                                                <div key={`${foto.url}-${index}`} className="overflow-hidden rounded-xl border bg-muted/20 p-2">
+                                                    <img
+                                                        src={foto.url}
+                                                        alt={foto.tipo || `Foto da entrega ${index + 1}`}
+                                                        className="h-48 w-full rounded-lg object-cover"
+                                                    />
+                                                    <p className="mt-2 text-xs font-medium text-muted-foreground">
+                                                        {foto.tipo || `Foto ${index + 1}`}
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </section>
+                                )}
 
                                 {venda.observacoes && (
                                     <section>

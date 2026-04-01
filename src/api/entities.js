@@ -21,6 +21,12 @@ export const Vendedor = base44.entities.Vendedor;
 
 export const ConfiguracaoComissao = base44.entities.ConfiguracaoComissao;
 
+export const RegraComissao = base44.entities.RegraComissao;
+
+export const ComissaoHistorico = base44.entities.ComissaoHistorico;
+
+export const ComissaoFechamentoMensal = base44.entities.ComissaoFechamentoMensal;
+
 export const AuditLog = base44.entities.AuditLog;
 
 export const LancamentoFinanceiro = base44.entities.LancamentoFinanceiro;

@@ -38,16 +38,12 @@ import {
     Upload,
     X,
     Link as LinkIcon,
-    ChevronRight,
-    ChevronLeft,
-    ChevronDown,
-    ChevronUp,
     Warehouse
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
-import { CATEGORIAS, AMBIENTES, MATERIAIS, TIPOS_ENTREGA, CAMPOS_ESTOQUE_LOJA } from '@/constants/productConstants';
+import { CATEGORIAS, AMBIENTES, MATERIAIS, TIPOS_ENTREGA, CAMPOS_ESTOQUE_LOJA, obterCampoEstoqueDaLoja } from '@/constants/productConstants';
 import {
     normalizeProductName,
     normalizeColor,
@@ -60,15 +56,42 @@ import {
 } from '@/utils/productFormatters';
 import { calculateSuggestedMarkup, calculateMarkupDetails } from '@/utils/markupCalculator';
 import FurnitureColorPicker, { getColorHex } from './FurnitureColorPicker';
+import ProdutoHistoricoTab from './ProdutoHistoricoTab';
 
-// Seções do formulário para navegação interna
-const SECOES = [
-    { id: 'geral', name: 'Informações Gerais', icon: Package },
-    { id: 'caracteristicas', name: 'Características Técnicas', icon: Ruler },
-    { id: 'financeiro', name: 'Preço e Estoque', icon: DollarSign },
-    { id: 'fiscal', name: 'Fiscal e Logístico', icon: Warehouse },
-    { id: 'fotos', name: 'Fotos', icon: ImageIcon },
+const VIEW_OPTIONS = [
+    { id: 'ficha', name: 'Ficha do Produto', icon: Package },
+    { id: 'historico', name: 'Histórico', icon: ClipboardCheck },
 ];
+
+const FIELD_TO_SECTION = {
+    ncm: 'secao-fiscal-logistico',
+    cest: 'secao-fiscal-logistico',
+    cfop: 'secao-fiscal-logistico',
+    origem_mercadoria: 'secao-fiscal-logistico',
+    peso_bruto: 'secao-fiscal-logistico',
+    peso_liquido: 'secao-fiscal-logistico',
+    altura_embalagem: 'secao-fiscal-logistico',
+    largura_embalagem: 'secao-fiscal-logistico',
+    profundidade_embalagem: 'secao-fiscal-logistico',
+    preco_venda: 'secao-financeiro-estoque',
+    valor_montagem: 'secao-financeiro-estoque',
+    preco_custo_tabela: 'secao-financeiro-estoque',
+    estoque_cd: 'secao-financeiro-estoque',
+    estoque_minimo: 'secao-financeiro-estoque',
+    estoque_ideal: 'secao-financeiro-estoque',
+    largura: 'secao-caracteristicas',
+    altura: 'secao-caracteristicas',
+    profundidade: 'secao-caracteristicas',
+    cor: 'secao-caracteristicas',
+    material: 'secao-caracteristicas',
+    nome: 'secao-identificacao',
+    codigo_barras: 'secao-identificacao',
+    categoria: 'secao-identificacao',
+    fornecedor_id: 'secao-identificacao',
+    fotos: 'secao-fotos'
+};
+
+const ESTOQUE_LOJA_FIELDS = Object.values(CAMPOS_ESTOQUE_LOJA).filter((field) => field !== 'estoque_cd');
 
 // Estado inicial do formulário
 const INITIAL_FORM_DATA = {
@@ -101,6 +124,7 @@ const INITIAL_FORM_DATA = {
     promocao_observacao: '', // Observação da promoção
     tem_promocao: false, // Toggle para ativar seção promocional
     preco_venda: '',
+    valor_montagem: '',
     // Dimensões do produto
     largura: '',
     altura: '',
@@ -110,10 +134,10 @@ const INITIAL_FORM_DATA = {
     cor_hex: '',
     // Estoque
     estoque_cd: '',
-    estoque_mostruario_centro: '',
-    estoque_mostruario_mega_store: '',
-    estoque_mostruario_ponte_branca: '',
-    estoque_mostruario_futura: '',
+    ...ESTOQUE_LOJA_FIELDS.reduce((acc, field) => {
+        acc[field] = '';
+        return acc;
+    }, {}),
     quantidade_estoque: '', // Será a soma
     estoque_minimo: '',
     estoque_ideal: '',
@@ -129,15 +153,15 @@ export default function ProdutoCadastroCompleto({
     onSave,
     produto = null,
     isLoading = false,
-    focusField = null
+    focusField = null,
+    readOnly = false
 }) {
     const [formData, setFormData] = useState(INITIAL_FORM_DATA);
     const [errors, setErrors] = useState({});
     const [duplicatas, setDuplicatas] = useState([]);
     const [uploadingImages, setUploadingImages] = useState(false);
     const [fotoUrlInput, setFotoUrlInput] = useState('');
-    const [showFiscalSection, setShowFiscalSection] = useState(false);
-    const [activeTab, setActiveTab] = useState('geral');
+    const [activeView, setActiveView] = useState('ficha');
 
     // Multi-Tenant: Carrega lojas dinâmicas e configurações
     const { data: lojas = [] } = useLojas();
@@ -185,12 +209,12 @@ export default function ProdutoCadastroCompleto({
                 promocao_observacao: '',
                 tem_promocao: false, // Feature desabilitada
                 preco_venda: produto.preco_venda?.toString() || '',
+                valor_montagem: produto.valor_montagem?.toString() || '',
                 // Estoque
                 estoque_cd: produto.estoque_cd?.toString() || '',
-                estoque_mostruario_centro: produto.estoque_mostruario_centro?.toString() || '',
-                estoque_mostruario_mega_store: produto.estoque_mostruario_mega_store?.toString() || '',
-                estoque_mostruario_ponte_branca: produto.estoque_mostruario_ponte_branca?.toString() || '',
-                estoque_mostruario_futura: produto.estoque_mostruario_futura?.toString() || '',
+                ...Object.fromEntries(
+                    ESTOQUE_LOJA_FIELDS.map((field) => [field, produto[field]?.toString() || ''])
+                ),
                 quantidade_estoque: produto.quantidade_estoque?.toString() || '',
                 estoque_minimo: produto.estoque_minimo?.toString() || '',
                 estoque_ideal: produto.estoque_ideal?.toString() || '',
@@ -203,67 +227,57 @@ export default function ProdutoCadastroCompleto({
             });
             setErrors({});
             setDuplicatas([]);
-            setActiveTab('geral');
+            setActiveView('ficha');
         } else if (!produto && isOpen) {
             setFormData(INITIAL_FORM_DATA);
             setErrors({});
             setDuplicatas([]);
+            setActiveView('ficha');
         }
     }, [produto, isOpen]);
 
-    // Smart Validation: Foca no campo com erro e troca de aba
+    const focusFieldInForm = (field) => {
+        const target = document.getElementById(field) || document.querySelector(`[name="${field}"]`);
+        if (!target) return false;
+
+        target.focus();
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('ring-2', 'ring-red-500', 'ring-offset-2');
+
+        setTimeout(() => {
+            target.classList.remove('ring-2', 'ring-red-500', 'ring-offset-2');
+        }, 3000);
+
+        return true;
+    };
+
+    const scrollToSection = (sectionId) => {
+        const target = document.getElementById(sectionId);
+        if (!target) return false;
+
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        target.classList.add('ring-2', 'ring-red-500', 'ring-offset-2', 'rounded-xl');
+
+        setTimeout(() => {
+            target.classList.remove('ring-2', 'ring-red-500', 'ring-offset-2', 'rounded-xl');
+        }, 3000);
+
+        return true;
+    };
+
+    // Smart Validation: Foca no campo com erro dentro da ficha única
     useEffect(() => {
+        if (readOnly) return;
         if (isOpen && focusField) {
-            // Mapeamento campo -> aba
-            const fieldToTab = {
-                'ncm': 'fiscal',
-                'cest': 'fiscal',
-                'cfop': 'fiscal',
-                'origem_mercadoria': 'fiscal',
-                'peso_bruto': 'fiscal',
-                'peso_liquido': 'fiscal',
-                'volumes': 'fiscal',
-                'altura_embalagem': 'fiscal',
-                'largura_embalagem': 'fiscal',
-                'profundidade_embalagem': 'fiscal',
-                'preco_venda': 'financeiro',
-                'preco_custo_tabela': 'financeiro',
-                'estoque_cd': 'financeiro',
-                'estoque_minimo': 'financeiro',
-                'estoque_ideal': 'financeiro',
-                'largura': 'caracteristicas',
-                'altura': 'caracteristicas',
-                'profundidade': 'caracteristicas',
-                'cor': 'caracteristicas',
-                'material': 'caracteristicas',
-                'nome': 'geral',
-                'codigo_barras': 'geral',
-                'categoria': 'geral',
-                'fornecedor_id': 'geral',
-                'fotos': 'fotos'
-            };
-
-            const targetTab = fieldToTab[focusField];
-            if (targetTab) {
-                setActiveTab(targetTab);
-
-                // Pequeno delay para garantir que a aba renderizou
-                setTimeout(() => {
-                    const input = document.getElementById(focusField) || document.querySelector(`[name="${focusField}"]`);
-                    if (input) {
-                        input.focus();
-                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        input.classList.add('ring-2', 'ring-red-500', 'ring-offset-2'); // Destaque visual
-
-                        // Remover destaque após alguns segundos
-                        setTimeout(() => {
-                            input.classList.remove('ring-2', 'ring-red-500', 'ring-offset-2');
-                        }, 3000);
-                    }
-                }, 300);
-            }
+            setActiveView('ficha');
+            setTimeout(() => {
+                const focused = focusFieldInForm(focusField);
+                if (!focused && FIELD_TO_SECTION[focusField]) {
+                    scrollToSection(FIELD_TO_SECTION[focusField]);
+                }
+            }, 300);
         }
-    }, [isOpen, focusField]);
+    }, [isOpen, focusField, readOnly]);
 
     // Verifica duplicatas com base em características EXATAS
     useEffect(() => {
@@ -402,9 +416,14 @@ export default function ProdutoCadastroCompleto({
         setErrors(newErrors);
 
         if (Object.keys(newErrors).length > 0) {
-            // Se houver erro, focar no primeiro erro encontrado
-            if (newErrors.nome || newErrors.categoria) setActiveTab('geral');
-            else if (newErrors.preco_venda) setActiveTab('financeiro');
+            setActiveView('ficha');
+            const firstErrorField = Object.keys(newErrors)[0];
+            setTimeout(() => {
+                const focused = focusFieldInForm(firstErrorField);
+                if (!focused && FIELD_TO_SECTION[firstErrorField]) {
+                    scrollToSection(FIELD_TO_SECTION[firstErrorField]);
+                }
+            }, 100);
             toast.error('Verifique os campos obrigatórios');
         }
 
@@ -421,15 +440,16 @@ export default function ProdutoCadastroCompleto({
 
     // Submete o formulário
     const handleSubmit = () => {
+        if (readOnly || !onSave) return;
         if (!validateForm()) return;
 
         // Calcula estoque total das lojas
-        let estoqueCd = parseInt(formData.estoque_cd) || 0;
-        let estoqueCentro = parseInt(formData.estoque_mostruario_centro) || 0;
-        let estoquePonteBranca = parseInt(formData.estoque_mostruario_ponte_branca) || 0;
-        let estoqueMega = parseInt(formData.estoque_mostruario_mega_store) || 0;
-        let estoqueFutura = parseInt(formData.estoque_mostruario_futura) || 0;
-        let estoqueTotal = estoqueCd + estoqueCentro + estoquePonteBranca + estoqueMega + estoqueFutura;
+        const estoqueCd = parseInt(formData.estoque_cd) || 0;
+        const estoquePorLoja = ESTOQUE_LOJA_FIELDS.reduce((acc, field) => {
+            acc[field] = parseInt(formData[field]) || 0;
+            return acc;
+        }, {});
+        const estoqueTotal = estoqueCd + Object.values(estoquePorLoja).reduce((sum, value) => sum + value, 0);
 
         let precoVenda = parseFloat(formData.preco_venda) || 0;
         let precoCusto = parseFloat(formData.preco_custo) || 0;
@@ -465,12 +485,10 @@ export default function ProdutoCadastroCompleto({
             // preco_custo agora é sempre igual ao preço de tabela
             preco_custo: parseFloat(formData.preco_custo_tabela) || precoCusto || null,
             preco_venda: precoVenda,
+            valor_montagem: formData.valor_montagem ? parseFloat(formData.valor_montagem) : null,
             quantidade_estoque: estoqueTotal,
             estoque_cd: estoqueCd,
-            estoque_mostruario_centro: estoqueCentro,
-            estoque_mostruario_ponte_branca: estoquePonteBranca,
-            estoque_mostruario_mega_store: estoqueMega,
-            estoque_mostruario_futura: estoqueFutura,
+            ...estoquePorLoja,
             estoque_minimo: formData.estoque_minimo ? parseInt(formData.estoque_minimo) : 0,
             estoque_ideal: formData.estoque_ideal ? parseInt(formData.estoque_ideal) : 0,
             cor: formData.cor || null,
@@ -490,19 +508,19 @@ export default function ProdutoCadastroCompleto({
                 <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0">
                     <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
                         <DialogTitle className="text-xl font-bold">
-                            {produto ? 'Editar Produto' : 'Cadastrar Novo Produto'}
+                            {readOnly ? 'Ficha do Produto' : (produto ? 'Editar Produto' : 'Cadastrar Novo Produto')}
                         </DialogTitle>
 
-                        {/* Abas de Navegação */}
+                        {/* Navegação principal */}
                         <div className="flex items-center gap-1 mt-4 overflow-x-auto no-scrollbar pb-1">
-                            {SECOES.map((sec) => {
-                                const Icon = sec.icon;
-                                const isActive = activeTab === sec.id;
+                            {VIEW_OPTIONS.map((view) => {
+                                const Icon = view.icon;
+                                const isActive = activeView === view.id;
 
                                 return (
                                     <button
-                                        key={sec.id}
-                                        onClick={() => setActiveTab(sec.id)}
+                                        key={view.id}
+                                        onClick={() => setActiveView(view.id)}
                                         className={cn(
                                             "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap",
                                             isActive
@@ -511,7 +529,7 @@ export default function ProdutoCadastroCompleto({
                                         )}
                                     >
                                         <Icon className="w-4 h-4" />
-                                        {sec.name}
+                                        {view.name}
                                     </button>
                                 );
                             })}
@@ -520,10 +538,9 @@ export default function ProdutoCadastroCompleto({
 
                     {/* Conteúdo scrollável */}
                     <div className="flex-1 overflow-y-auto px-6 py-4 bg-gray-50/30">
-                        {/* SEÇÃO: INFORMAÇÕES GERAIS */}
-                        {activeTab === 'geral' && (
-                            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
-                                <Card>
+                        {activeView === 'ficha' && (
+                            <fieldset disabled={readOnly} className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+                                <Card id="secao-identificacao" className="scroll-mt-4">
                                     <CardHeader>
                                         <CardTitle className="text-base flex items-center gap-2">
                                             <Package className="w-4 h-4 text-green-600" />
@@ -538,6 +555,7 @@ export default function ProdutoCadastroCompleto({
                                                     id="nome"
                                                     value={formData.nome}
                                                     onChange={(e) => handleChange('nome', e.target.value)}
+                                                            onBlur={handleNomeBlur}
                                                     placeholder="Ex: Sofá Retrátil 3 Lugares"
                                                     className={cn("text-lg", errors.nome && 'border-red-500')}
                                                 />
@@ -569,7 +587,7 @@ export default function ProdutoCadastroCompleto({
                                                     value={formData.fornecedor_id?.toString() || ''}
                                                     onValueChange={handleFornecedorChange}
                                                 >
-                                                    <SelectTrigger>
+                                                    <SelectTrigger id="fornecedor_id">
                                                         <SelectValue placeholder="Selecione o fornecedor" />
                                                     </SelectTrigger>
                                                     <SelectContent>
@@ -588,7 +606,7 @@ export default function ProdutoCadastroCompleto({
                                                     value={formData.categoria}
                                                     onValueChange={(value) => handleChange('categoria', value)}
                                                 >
-                                                    <SelectTrigger className={errors.categoria ? 'border-red-500' : ''}>
+                                                    <SelectTrigger id="categoria" className={errors.categoria ? 'border-red-500' : ''}>
                                                         <SelectValue placeholder="Selecione a categoria" />
                                                     </SelectTrigger>
                                                     <SelectContent>
@@ -605,7 +623,7 @@ export default function ProdutoCadastroCompleto({
                                                     value={formData.ambiente}
                                                     onValueChange={(value) => handleChange('ambiente', value)}
                                                 >
-                                                    <SelectTrigger>
+                                                    <SelectTrigger id="ambiente">
                                                         <SelectValue placeholder="Selecione o ambiente" />
                                                     </SelectTrigger>
                                                     <SelectContent>
@@ -628,13 +646,8 @@ export default function ProdutoCadastroCompleto({
                                         </div>
                                     </CardContent>
                                 </Card>
-                            </div>
-                        )}
 
-                        {/* SEÇÃO: CARACTERÍSTICAS TÉCNICAS */}
-                        {activeTab === 'caracteristicas' && (
-                            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
-                                <Card>
+                                <Card id="secao-caracteristicas" className="scroll-mt-4">
                                     <CardHeader>
                                         <CardTitle className="text-base flex items-center gap-2">
                                             <Palette className="w-4 h-4 text-purple-600" />
@@ -660,7 +673,7 @@ export default function ProdutoCadastroCompleto({
                                                     value={formData.material}
                                                     onValueChange={(value) => handleChange('material', value)}
                                                 >
-                                                    <SelectTrigger>
+                                                    <SelectTrigger id="material">
                                                         <SelectValue placeholder="Selecione" />
                                                     </SelectTrigger>
                                                     <SelectContent>
@@ -676,7 +689,7 @@ export default function ProdutoCadastroCompleto({
                                                     value={formData.tipo_entrega_padrao}
                                                     onValueChange={(value) => handleChange('tipo_entrega_padrao', value)}
                                                 >
-                                                    <SelectTrigger>
+                                                    <SelectTrigger id="tipo_entrega_padrao">
                                                         <SelectValue />
                                                     </SelectTrigger>
                                                     <SelectContent>
@@ -734,13 +747,8 @@ export default function ProdutoCadastroCompleto({
                                         </div>
                                     </CardContent>
                                 </Card>
-                            </div>
-                        )}
 
-                        {/* SEÇÃO: FINANCEIRO E ESTOQUE */}
-                        {activeTab === 'financeiro' && (
-                            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
-                                <Card className="border-green-200">
+                                <Card id="secao-financeiro-estoque" className="border-green-200 scroll-mt-4">
                                     <CardHeader>
                                         <CardTitle className="text-base flex items-center gap-2">
                                             <DollarSign className="w-4 h-4 text-green-600" />
@@ -786,6 +794,17 @@ export default function ProdutoCadastroCompleto({
                                                     </Button>
                                                 )}
                                             </div>
+                                            <div>
+                                                <Label>Valor de Montagem</Label>
+                                                <Input
+                                                    id="valor_montagem"
+                                                    type="number"
+                                                    step="0.01"
+                                                    value={formData.valor_montagem}
+                                                    onChange={(e) => handleChange('valor_montagem', e.target.value)}
+                                                    placeholder="R$ 0,00"
+                                                />
+                                            </div>
                                         </div>
                                     </CardContent>
                                 </Card>
@@ -800,15 +819,19 @@ export default function ProdutoCadastroCompleto({
                                             <Badge variant="outline" className="bg-green-50">
                                                 Total: {
                                                     (parseInt(formData.estoque_cd) || 0) +
-                                                    (parseInt(formData.estoque_mostruario_centro) || 0) +
-                                                    (parseInt(formData.estoque_mostruario_ponte_branca) || 0) +
-                                                    (parseInt(formData.estoque_mostruario_mega_store) || 0) +
-                                                    (parseInt(formData.estoque_mostruario_futura) || 0)
+                                                    ESTOQUE_LOJA_FIELDS.reduce((sum, field) => sum + (parseInt(formData[field]) || 0), 0)
                                                 }
                                             </Badge>
                                         </div>
                                     </CardHeader>
                                     <CardContent className="space-y-4">
+                                        <Alert className="bg-blue-50 border-blue-200">
+                                            <AlertTriangle className="h-4 w-4 text-blue-600" />
+                                            <AlertDescription className="text-sm text-blue-800 ml-2">
+                                                Movimentações de estoque ocorrem via Transferência, Inventário, Recebimento de Compras ou Venda. 
+                                                Veja o histórico de movimentações na aba Histórico.
+                                            </AlertDescription>
+                                        </Alert>
                                         <div className="grid grid-cols-2 gap-3">
                                             <div className="bg-gray-50 p-2 rounded-lg border">
                                                 <Label className="text-xs text-gray-500">Depósito / CD</Label>
@@ -816,27 +839,22 @@ export default function ProdutoCadastroCompleto({
                                                     id="estoque_cd"
                                                     type="number"
                                                     value={formData.estoque_cd}
-                                                    onChange={(e) => handleChange('estoque_cd', e.target.value)}
-                                                    className="h-8 text-sm"
+                                                    disabled={true}
+                                                    className="h-8 text-sm bg-gray-100 cursor-not-allowed"
                                                 />
                                             </div>
                                             {(lojas || []).map(loja => {
-                                                const nomeNorm = loja.nome.toLowerCase();
-                                                let field = null;
-                                                if (nomeNorm.includes('centro')) field = 'estoque_mostruario_centro';
-                                                else if (nomeNorm.includes('ponte branca') || nomeNorm.includes('ponte_branca')) field = 'estoque_mostruario_ponte_branca';
-                                                else if (nomeNorm.includes('mega')) field = 'estoque_mostruario_mega_store';
-                                                else if (nomeNorm.includes('futura')) field = 'estoque_mostruario_futura';
+                                                const field = obterCampoEstoqueDaLoja(loja);
 
-                                                if (!field) return null;
+                                                if (!field || field === 'estoque_cd' || !(field in formData)) return null;
                                                 return (
                                                     <div key={loja.id} className="p-2 rounded-lg border">
                                                         <Label className="text-xs text-gray-500">{loja.nome}</Label>
                                                         <Input
                                                             type="number"
                                                             value={formData[field]}
-                                                            onChange={(e) => handleChange(field, e.target.value)}
-                                                            className="h-8 text-sm"
+                                                            disabled={true}
+                                                            className="h-8 text-sm bg-gray-100 cursor-not-allowed"
                                                             id={field}
                                                         />
                                                     </div>
@@ -867,13 +885,8 @@ export default function ProdutoCadastroCompleto({
                                         </div>
                                     </CardContent>
                                 </Card>
-                            </div>
-                        )}
 
-                        {/* SEÇÃO: FISCAL E LOGÍSTICO */}
-                        {activeTab === 'fiscal' && (
-                            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
-                                <Card>
+                                <Card id="secao-fiscal-logistico" className="scroll-mt-4">
                                     <CardHeader>
                                         <CardTitle className="text-base">Dados Fiscais (NFe)</CardTitle>
                                     </CardHeader>
@@ -963,112 +976,154 @@ export default function ProdutoCadastroCompleto({
                                         </div>
                                     </CardContent>
                                 </Card>
+
+                                <Card id="secao-fotos" className="scroll-mt-4">
+                                    <CardHeader>
+                                        <CardTitle className="text-base flex items-center gap-2">
+                                            <ImageIcon className="w-4 h-4 text-amber-600" />
+                                            Fotos do Produto
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="space-y-6">
+                                        <div className="border-2 border-dashed rounded-xl p-8 text-center bg-white">
+                                            <label className="cursor-pointer group">
+                                                <input
+                                                    type="file"
+                                                    multiple
+                                                    accept="image/*"
+                                                    onChange={handleImageUpload}
+                                                    className="hidden"
+                                                    disabled={uploadingImages}
+                                                />
+                                                <div className="space-y-2">
+                                                    {uploadingImages ? (
+                                                        <Loader2 className="w-10 h-10 mx-auto animate-spin text-green-600" />
+                                                    ) : (
+                                                        <>
+                                                            <div className="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center mx-auto group-hover:bg-green-100 transition-colors">
+                                                                <Upload className="w-6 h-6 text-green-600" />
+                                                            </div>
+                                                            <div>
+                                                                <p className="font-semibold text-gray-900">Clique para enviar fotos</p>
+                                                                <p className="text-sm text-gray-500">ou arraste e solte arquivos aqui</p>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label>Ou adicione por URL</Label>
+                                            <div className="flex gap-2">
+                                                <Input
+                                                    value={fotoUrlInput}
+                                                    onChange={(e) => setFotoUrlInput(e.target.value)}
+                                                    placeholder="https://..."
+                                                />
+                                                <Button type="button" onClick={handleAddFotoUrl} variant="outline" size="icon">
+                                                    <Plus className="w-4 h-4" />
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        {formData.fotos.length > 0 && (
+                                            <div className="grid grid-cols-3 md:grid-cols-4 gap-4">
+                                                {formData.fotos.map((foto, index) => (
+                                                    <div key={index} className="relative group aspect-square rounded-xl overflow-hidden border bg-white shadow-sm">
+                                                        <img src={foto} className="w-full h-full object-cover" alt="" />
+                                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                                            <Button
+                                                                variant="destructive"
+                                                                size="icon"
+                                                                className="h-8 w-8"
+                                                                onClick={() => handleRemoveFoto(index)}
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </Button>
+                                                        </div>
+                                                        {index === 0 && (
+                                                            <div className="absolute top-2 left-2 px-2 py-0.5 bg-green-500 text-white text-[10px] font-bold rounded shadow-sm">
+                                                                PRINCIPAL
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            </fieldset>
+                        )}
+
+                        {/* SEÇÃO: HISTÓRICO */}
+                        {activeView === 'historico' && produto?.id && (
+                            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle className="text-base flex items-center gap-2">
+                                            <ClipboardCheck className="w-4 h-4 text-blue-600" />
+                                            Histórico de Movimentações
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <ProdutoHistoricoTab produtoId={produto.id} />
+                                    </CardContent>
+                                </Card>
                             </div>
                         )}
 
-                        {/* SEÇÃO: FOTOS */}
-                        {activeTab === 'fotos' && (
+                        {/* SEÇÃO: HISTÓRICO - Sem produto */}
+                        {activeView === 'historico' && !produto?.id && (
                             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
-                                <div className="border-2 border-dashed rounded-xl p-8 text-center bg-white">
-                                    <label className="cursor-pointer group">
-                                        <input
-                                            type="file"
-                                            multiple
-                                            accept="image/*"
-                                            onChange={handleImageUpload}
-                                            className="hidden"
-                                            disabled={uploadingImages}
-                                        />
-                                        <div className="space-y-2">
-                                            {uploadingImages ? (
-                                                <Loader2 className="w-10 h-10 mx-auto animate-spin text-green-600" />
-                                            ) : (
-                                                <>
-                                                    <div className="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center mx-auto group-hover:bg-green-100 transition-colors">
-                                                        <Upload className="w-6 h-6 text-green-600" />
-                                                    </div>
-                                                    <div>
-                                                        <p className="font-semibold text-gray-900">Clique para enviar fotos</p>
-                                                        <p className="text-sm text-gray-500">ou arraste e solte arquivos aqui</p>
-                                                    </div>
-                                                </>
-                                            )}
-                                        </div>
-                                    </label>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <Label>Ou adicione por URL</Label>
-                                    <div className="flex gap-2">
-                                        <Input
-                                            value={fotoUrlInput}
-                                            onChange={(e) => setFotoUrlInput(e.target.value)}
-                                            placeholder="https://..."
-                                        />
-                                        <Button type="button" onClick={handleAddFotoUrl} variant="outline" size="icon">
-                                            <Plus className="w-4 h-4" />
-                                        </Button>
-                                    </div>
-                                </div>
-
-                                {formData.fotos.length > 0 && (
-                                    <div className="grid grid-cols-3 md:grid-cols-4 gap-4">
-                                        {formData.fotos.map((foto, index) => (
-                                            <div key={index} className="relative group aspect-square rounded-xl overflow-hidden border bg-white shadow-sm">
-                                                <img src={foto} className="w-full h-full object-cover" alt="" />
-                                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                                    <Button
-                                                        variant="destructive"
-                                                        size="icon"
-                                                        className="h-8 w-8"
-                                                        onClick={() => handleRemoveFoto(index)}
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </Button>
-                                                </div>
-                                                {index === 0 && (
-                                                    <div className="absolute top-2 left-2 px-2 py-0.5 bg-green-500 text-white text-[10px] font-bold rounded shadow-sm">
-                                                        PRINCIPAL
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle className="text-base flex items-center gap-2">
+                                            <ClipboardCheck className="w-4 h-4 text-blue-600" />
+                                            Histórico de Movimentações
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="text-center text-gray-500 py-12">
+                                        <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                                        <p>Salve o produto para visualizar o histórico de movimentações.</p>
+                                    </CardContent>
+                                </Card>
                             </div>
                         )}
                     </div>
 
                     {/* Footer fixo */}
                     <div className="px-6 py-4 border-t bg-white shrink-0">
-                        <div className="flex justify-between items-center">
+                        <div className={cn('flex items-center', readOnly ? 'justify-end' : 'justify-between')}>
                             <Button
                                 type="button"
                                 variant="ghost"
                                 onClick={onClose}
                                 disabled={isLoading}
                             >
-                                Cancelar
+                                {readOnly ? 'Fechar' : 'Cancelar'}
                             </Button>
 
-                            <Button
-                                type="button"
-                                onClick={handleSubmit}
-                                disabled={isLoading}
-                                className="bg-green-600 hover:bg-green-700 min-w-[140px] shadow-lg shadow-green-100 transition-all hover:scale-105"
-                            >
-                                {isLoading ? (
-                                    <>
-                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                        Salvando...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Check className="w-4 h-4 mr-2" />
-                                        {produto ? 'Salvar Alterações' : 'Cadastrar Produto'}
-                                    </>
-                                )}
-                            </Button>
+                            {!readOnly && (
+                                <Button
+                                    type="button"
+                                    onClick={handleSubmit}
+                                    disabled={isLoading}
+                                    className="bg-green-600 hover:bg-green-700 min-w-[140px] shadow-lg shadow-green-100 transition-all hover:scale-105"
+                                >
+                                    {isLoading ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                            Salvando...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Check className="w-4 h-4 mr-2" />
+                                            {produto ? 'Salvar Alterações' : 'Cadastrar Produto'}
+                                        </>
+                                    )}
+                                </Button>
+                            )}
                         </div>
                     </div>
                 </DialogContent>

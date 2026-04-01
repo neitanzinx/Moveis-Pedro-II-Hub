@@ -1,20 +1,7 @@
-import { Shield, Briefcase, UserCircle, Package, Calendar, TrendingUp, DollarSign, Users, Truck, Clock } from "lucide-react";
+import { Shield, Briefcase, UserCircle, Package, TrendingUp, DollarSign, Users, Truck } from "lucide-react";
 
 // Definição centralizada de todos os cargos do sistema
 export const CARGOS = [
-    {
-        value: 'Pendente Definição',
-        label: 'Pendente Definição',
-        icon: Clock,
-        color: '#9ca3af',
-        bgColor: '#f3f4f6',
-        description: 'Aguardando definição pelo admin',
-        permissions: ['Nenhuma - aguardando aprovação'],
-        requiresStore: false,
-        canRegister: false,
-        mobileAppOnly: false,
-        prefix: 'PD'
-    },
     {
         value: 'Administrador',
         label: 'Administrador',
@@ -74,7 +61,7 @@ export const CARGOS = [
         bgColor: '#ecfdf5',
         description: 'Controla produtos e inventário',
         permissions: ['Receber mercadoria', 'Conferir carga', 'Movimentar estoque', 'Inventario'],
-        requiresStore: true, // Geralmente associado a uma loja ou CD
+        requiresStore: false,
         canRegister: false,
         mobileAppOnly: false,
         prefix: 'ES'
@@ -104,19 +91,6 @@ export const CARGOS = [
         canRegister: false,
         mobileAppOnly: false,
         prefix: 'FI'
-    },
-    {
-        value: 'Agendamento',
-        label: 'Agendamento',
-        icon: Calendar,
-        color: '#06b6d4',
-        bgColor: '#ecfeff',
-        description: 'Agenda entregas e montagens',
-        permissions: ['Agendar montagens', 'Gerenciar montadores', 'Confirmar entregas'],
-        requiresStore: false,
-        canRegister: true,
-        mobileAppOnly: false,
-        prefix: 'AG'
     },
     {
         value: 'RH',
@@ -185,7 +159,8 @@ export const STATUS_APROVACAO = {
 
 // Funções auxiliares
 export const getCargoConfig = (value) => {
-    return CARGOS.find(c => c.value === value) || CARGOS[0];
+    const fallback = CARGOS.find(c => c.value === 'Vendedor') || CARGOS[0];
+    return CARGOS.find(c => c.value === value) || fallback;
 };
 
 export const getCargoPrefix = (cargoValue) => {

@@ -837,31 +837,38 @@ function limparJSON(texto) {
 
 // 🛡️ Enviar mensagem com verificação de conexão
 async function enviarMensagemSegura(chatId, content, options = {}) {
-    // Se não estiver conectado, manda direto pra fila
-    if (connectionStatus !== 'connected') {
-        console.warn(`⚠️ WhatsApp desconectado. Enviando mensagem para ${chatId} para a fila.`);
-        await adicionarAFila(chatId, content, options, options.venda_id);
-        return { success: true, queued: true, message: "Mensagem guardada para envio posterior (WhatsApp offline)." };
-    }
-
     try {
-        console.log(`📤 Enviando mensagem para ${chatId}...`);
-        const result = await client.sendMessage(chatId, content, options);
-        console.log(`✅ Mensagem enviada com SUCESSO para ${chatId}`);
-        return { success: true, result };
-    } catch (error) {
-        console.error(`❌ Erro ao enviar mensagem:`, error.message);
-
-        // 🚑 CORREÇÃO DE EMERGÊNCIA: Ignorar erro específico do whatsapp-web.js
-        if (error.message && (error.message.includes('markedUnread') || error.message.includes("reading 'getChat'"))) {
-            console.log('⚠️ Erro não crítico detectado (markedUnread/getChat) - Assumindo sucesso.');
-            return { success: true, warning: error.message };
+        // Se não estiver conectado, manda direto pra fila
+        if (connectionStatus !== 'connected') {
+            console.warn(`⚠️ WhatsApp desconectado. Enviando mensagem para ${chatId} para a fila.`);
+            await adicionarAFila(chatId, content, options, options.venda_id);
+            return { success: true, queued: true, message: "Mensagem guardada para envio posterior (WhatsApp offline)." };
         }
 
-        // Para outros erros (como conexão perdida no momento), tenta guardar na fila
-        console.log(`📥 Erro no envio. Guardando na fila para ${chatId}...`);
-        await adicionarAFila(chatId, content, options, options.venda_id);
-        return { success: true, queued: true, error: error.message };
+        try {
+            console.log(`📤 Enviando mensagem para ${chatId}...`);
+            const result = await client.sendMessage(chatId, content, options);
+            console.log(`✅ Mensagem enviada com SUCESSO para ${chatId}`);
+            return { success: true, result };
+        } catch (error) {
+            console.error(`❌ Erro ao enviar mensagem:`, error.message);
+
+            // 🚑 CORREÇÃO DE EMERGÊNCIA: Ignorar erro específico do whatsapp-web.js
+            if (error.message && (error.message.includes('markedUnread') || error.message.includes("reading 'getChat'"))) {
+                console.log('⚠️ Erro não crítico detectado (markedUnread/getChat) - Assumindo sucesso.');
+                return { success: true, warning: error.message };
+            }
+
+            // Para outros erros (como conexão perdida no momento), tenta guardar na fila
+            console.log(`📥 Erro no envio. Guardando na fila para ${chatId}...`);
+            await adicionarAFila(chatId, content, options, options.venda_id);
+            return { success: true, queued: true, error: error.message };
+        }
+    } catch (outerError) {
+        // Fallback de segurança: garante que a função nunca lança exceção
+        console.error(`💥 Erro inesperado em enviarMensagemSegura para ${chatId}:`, outerError);
+        try { await adicionarAFila(chatId, content, options, options.venda_id); } catch (_) {}
+        return { success: true, queued: true, error: outerError?.message || String(outerError) };
     }
 }
 
@@ -1749,6 +1756,11 @@ app.post('/aviso-montagem-agendada', async (req, res) => {
         return res.status(400).json({ error: "telefone e cliente_nome são obrigatórios" });
     }
 
+    // Se WhatsApp desconectado, retorna 503 para o frontend enfileirar localmente.
+    if (connectionStatus !== 'connected') {
+        return res.status(503).json({ error: 'WhatsApp desconectado', code: 'WA_OFFLINE' });
+    }
+
     let tel = telefone.replace(/\D/g, '');
     if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
     const chatId = `${tel}@c.us`;
@@ -1777,11 +1789,78 @@ Entre em contato diretamente com o montador pelo WhatsApp acima. Ele tem autonom
 *Móveis Pedro II* 🧡💚`;
 
     try {
-        await client.sendMessage(chatId, msg);
+        const result = await enviarMensagemSegura(chatId, msg);
         console.log(`🔧 Aviso de montagem agendada enviado para ${cliente_nome}`);
-        res.json({ success: true });
+        res.json({ success: true, queued: !!result?.queued });
     } catch (e) {
         console.error("Erro ao enviar aviso de montagem:", e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- ROTA 8C: AVISO DE MONTAGEM CANCELADA ---
+app.post('/aviso-montagem-cancelada', async (req, res) => {
+    const { telefone, cliente_nome, numero_pedido, produto_nome } = req.body;
+
+    if (!telefone || !cliente_nome) {
+        return res.status(400).json({ error: "telefone e cliente_nome são obrigatórios" });
+    }
+
+    if (connectionStatus !== 'connected') {
+        return res.status(503).json({ error: 'WhatsApp desconectado', code: 'WA_OFFLINE' });
+    }
+
+    let tel = telefone.replace(/\D/g, '');
+    if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
+    const chatId = `${tel}@c.us`;
+
+    const msg =
+        `Olá *${cliente_nome}*!\n\n` +
+        `A montagem do pedido *#${numero_pedido || '-'}*` +
+        `${produto_nome ? ` (${produto_nome})` : ''} foi cancelada e retornou para a triagem.\n\n` +
+        `Em breve nossa equipe vai te contatar para definir uma nova data.\n\n` +
+        `*Móveis Pedro II* 🧡💚`;
+
+    try {
+        const result = await enviarMensagemSegura(chatId, msg);
+        res.json({ success: true, queued: !!result?.queued });
+    } catch (e) {
+        console.error("Erro ao enviar aviso de cancelamento de montagem:", e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- ROTA 8D: AVISO DE MONTAGEM REAGENDADA ---
+app.post('/aviso-montagem-reagendada', async (req, res) => {
+    const { telefone, cliente_nome, numero_pedido, produto_nome, data_formatada, turno, montador_nome } = req.body;
+
+    if (!telefone || !cliente_nome) {
+        return res.status(400).json({ error: "telefone e cliente_nome são obrigatórios" });
+    }
+
+    if (connectionStatus !== 'connected') {
+        return res.status(503).json({ error: 'WhatsApp desconectado', code: 'WA_OFFLINE' });
+    }
+
+    let tel = telefone.replace(/\D/g, '');
+    if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
+    const chatId = `${tel}@c.us`;
+
+    const msg =
+        `Olá *${cliente_nome}*! 📅\n\n` +
+        `Sua montagem do pedido *#${numero_pedido || '-'}* foi reagendada.\n\n` +
+        `📦 *Item:* ${produto_nome || 'Seus móveis'}\n` +
+        `📅 *Nova data:* ${data_formatada || 'A confirmar'}\n` +
+        `🕐 *Turno:* ${turno || 'Horário comercial'}\n` +
+        `${montador_nome ? `👷 *Montador:* ${montador_nome}\n` : ''}\n` +
+        `Se precisar ajustar novamente, responda esta mensagem ou fale com nossa equipe.\n\n` +
+        `*Móveis Pedro II* 🧡💚`;
+
+    try {
+        const result = await enviarMensagemSegura(chatId, msg);
+        res.json({ success: true, queued: !!result?.queued });
+    } catch (e) {
+        console.error("Erro ao enviar aviso de reagendamento de montagem:", e);
         res.status(500).json({ error: e.message });
     }
 });

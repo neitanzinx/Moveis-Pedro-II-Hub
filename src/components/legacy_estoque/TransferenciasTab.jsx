@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { base44, supabase } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Plus, ArrowRight, Check } from "lucide-react";
@@ -86,6 +86,44 @@ export default function TransferenciasTab({ user }) {
           // Total quantity_estoque stays the same (it's a transfer)
           if (Object.keys(updates).length > 0) {
             await base44.entities.Produto.update(produto.id, updates);
+            try {
+              const auditEntries = [];
+              if (campoOrigem && qty > 0) {
+                auditEntries.push({
+                  produto_id: produto.id,
+                  evento_tipo: 'transferencia_saida',
+                  modulo_origem: 'estoque',
+                  quantidade: qty,
+                  estoque_antes_local: produto[campoOrigem] || 0,
+                  estoque_depois_local: updates[campoOrigem] ?? null,
+                  loja_origem: transferencia.loja_origem,
+                  loja_destino: transferencia.loja_destino,
+                  referencia_id: transferencia.id,
+                  usuario_nome: user?.full_name || null,
+                  organization_id: '00000000-0000-0000-0000-000000000001'
+                });
+              }
+              if (campoDestino && qty > 0) {
+                auditEntries.push({
+                  produto_id: produto.id,
+                  evento_tipo: 'transferencia_entrada',
+                  modulo_origem: 'estoque',
+                  quantidade: qty,
+                  estoque_antes_local: produto[campoDestino] || 0,
+                  estoque_depois_local: updates[campoDestino] ?? null,
+                  loja_origem: transferencia.loja_origem,
+                  loja_destino: transferencia.loja_destino,
+                  referencia_id: transferencia.id,
+                  usuario_nome: user?.full_name || null,
+                  organization_id: '00000000-0000-0000-0000-000000000001'
+                });
+              }
+              if (auditEntries.length > 0) {
+                await supabase.from('movimentacoes_estoque').insert(auditEntries);
+              }
+            } catch (auditErr) {
+              console.warn('Falha ao registrar movimentação de transferência:', auditErr);
+            }
           }
         }
 

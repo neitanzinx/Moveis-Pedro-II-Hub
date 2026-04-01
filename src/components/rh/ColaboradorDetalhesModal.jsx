@@ -10,10 +10,10 @@ import {
 import {
     User, Phone, Mail, MapPin, Calendar, DollarSign,
     Briefcase, Building, CreditCard, Edit, FileText,
-    Clock, UserCheck
+    Clock, UserCheck, KeyRound, ShieldAlert, Moon, Zap
 } from "lucide-react";
 
-export default function ColaboradorDetalhesModal({ colaborador, onClose, onEdit }) {
+export default function ColaboradorDetalhesModal({ colaborador, onClose, onEdit, canEdit = false }) {
     if (!colaborador) return null;
 
     const getStatusBadgeStyle = (status) => {
@@ -152,6 +152,7 @@ export default function ColaboradorDetalhesModal({ colaborador, onClose, onEdit 
                         </h3>
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 rounded-xl border" style={{ borderColor: '#E5E0D8' }}>
                             <InfoItem icon={Building} label="Cargo" value={colaborador.cargo} />
+                            <InfoItem icon={KeyRound} label="Matrícula" value={colaborador.matricula} />
 
                             <InfoItem icon={FileText} label="Tipo de Contrato" value={colaborador.tipo_contrato} />
                             <InfoItem icon={Calendar} label="Data de Admissão" value={colaborador.data_admissao ? new Date(colaborador.data_admissao).toLocaleDateString('pt-BR') : null} />
@@ -189,6 +190,28 @@ export default function ColaboradorDetalhesModal({ colaborador, onClose, onEdit 
                                         colaborador.cep
                                     ].filter(Boolean).join(' - ')}
                                 </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Benefícios */}
+                    {(colaborador.vale_transporte || colaborador.vale_alimentacao || colaborador.vale_refeicao || colaborador.plano_saude || colaborador.plano_odontologico || colaborador.bonus_mensal || colaborador.outros_beneficios || colaborador.adicional_noturno || colaborador.periculosidade || colaborador.insalubridade_grau) && (
+                        <div>
+                            <h3 className="font-semibold mb-3 flex items-center gap-2" style={{ color: '#07593f' }}>
+                                <DollarSign className="w-4 h-4" />
+                                Benefícios e Adicionais
+                            </h3>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 rounded-xl border" style={{ borderColor: '#E5E0D8' }}>
+                                <InfoItem icon={DollarSign} label="Vale Transporte" value={colaborador.vale_transporte ? `R$ ${Number(colaborador.vale_transporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
+                                <InfoItem icon={DollarSign} label="Vale Alimentação" value={colaborador.vale_alimentacao ? `R$ ${Number(colaborador.vale_alimentacao).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
+                                <InfoItem icon={DollarSign} label="Vale Refeição" value={colaborador.vale_refeicao ? `R$ ${Number(colaborador.vale_refeicao).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
+                                <InfoItem icon={DollarSign} label="Plano de Saúde" value={colaborador.plano_saude ? `R$ ${Number(colaborador.plano_saude).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
+                                <InfoItem icon={DollarSign} label="Plano Odontológico" value={colaborador.plano_odontologico ? `R$ ${Number(colaborador.plano_odontologico).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
+                                <InfoItem icon={DollarSign} label="Bônus Mensal" value={colaborador.bonus_mensal ? `R$ ${Number(colaborador.bonus_mensal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
+                                {colaborador.outros_beneficios && <InfoItem icon={DollarSign} label={colaborador.descricao_outros_beneficios || "Outros Benefícios"} value={`R$ ${Number(colaborador.outros_beneficios).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} />}
+                                {colaborador.adicional_noturno && <InfoItem icon={Moon} label="Adicional Noturno" value="+20%" />}
+                                {colaborador.periculosidade && <InfoItem icon={Zap} label="Periculosidade" value="+30%" />}
+                                <InfoItem icon={ShieldAlert} label="Insalubridade" value={colaborador.insalubridade_grau ? { minimo: 'Grau Mínimo (10%)', medio: 'Grau Médio (20%)', maximo: 'Grau Máximo (40%)' }[colaborador.insalubridade_grau] : null} />
                             </div>
                         </div>
                     )}
@@ -242,13 +265,15 @@ export default function ColaboradorDetalhesModal({ colaborador, onClose, onEdit 
                     <Button variant="outline" onClick={onClose}>
                         Fechar
                     </Button>
-                    <Button
-                        onClick={onEdit}
-                        style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
-                    >
-                        <Edit className="w-4 h-4 mr-2" />
-                        Editar Colaborador
-                    </Button>
+                    {canEdit && (
+                        <Button
+                            onClick={onEdit}
+                            style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
+                        >
+                            <Edit className="w-4 h-4 mr-2" />
+                            Editar Colaborador
+                        </Button>
+                    )}
                 </div>
             </DialogContent>
         </Dialog>

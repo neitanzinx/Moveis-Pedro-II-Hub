@@ -644,10 +644,16 @@ export default function PDV() {
       .channel('pdv-produtos-changes')
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'produtos' },
+        { event: '*', schema: 'public', table: 'produtos' },
         (payload) => {
           const newProduto = payload.new;
-          console.log("🔄 Produto atualizado em realtime:", newProduto.nome);
+
+          if (payload.eventType === 'DELETE') {
+            queryClient.invalidateQueries({ queryKey: ['produtos'] });
+            return;
+          }
+
+          console.log("🔄 Produto atualizado em realtime:", newProduto?.nome || payload.eventType);
 
           // 1. Atualiza o cache da lista de produtos (para a busca encontrar o preço novo)
           queryClient.invalidateQueries({ queryKey: ['produtos'] });
@@ -1062,6 +1068,25 @@ export default function PDV() {
     setItens(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleAtualizarQuantidadeItem = (index, novaQuantidade) => {
+    const quantidadeSegura = parseInt(novaQuantidade, 10);
+    if (!Number.isFinite(quantidadeSegura) || quantidadeSegura < 1) return;
+
+    setItens(prev => {
+      const newItens = [...prev];
+      const itemAtual = newItens[index];
+      if (!itemAtual) return prev;
+
+      newItens[index] = {
+        ...itemAtual,
+        quantidade: quantidadeSegura,
+        subtotal: quantidadeSegura * (itemAtual.preco_unitario || 0)
+      };
+
+      return newItens;
+    });
+  };
+
   const handleSetMontagemPadrao = async (index, produtoId, tipoMontagem) => {
     try {
       const now = new Date().toISOString();
@@ -1430,7 +1455,6 @@ export default function PDV() {
             return tf === 'montado' || tf === 'montagem_cliente';
           })) ? 'Pendente' : null,
           itens_montagem_interna: itensParaMontagemInterna,
-          item_mostruario: itens.some(i => i.origem === 'mostruario'),
           pagamento_na_entrega: pagamentoEntrega.ativo,
           valor_a_receber: pagamentoEntrega.ativo ? pagamentoEntrega.valor : 0,
           forma_pagamento_entrega: pagamentoEntrega.ativo ? formaPagamentoEntregaStr : null,
@@ -1815,6 +1839,7 @@ export default function PDV() {
                 <CarrinhoVenda
                   itens={itens}
                   onRemoveItem={handleRemoveItem}
+                  onAtualizarQuantidade={handleAtualizarQuantidadeItem}
                   onToggleEntrega={handleToggleEntrega}
                   onToggleMontagem={handleToggleMontagem}
                   onSetMontagemPadrao={handleSetMontagemPadrao}

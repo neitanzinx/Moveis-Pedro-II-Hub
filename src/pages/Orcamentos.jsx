@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { base44, supabase } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,6 +75,23 @@ export default function Orcamentos() {
 
     const { data: clientes = [] } = useQuery({ queryKey: ['clientes'], queryFn: () => base44.entities.Cliente.list() });
     const { data: produtos = [] } = useQuery({ queryKey: ['produtos'], queryFn: () => base44.entities.Produto.list() });
+
+    useEffect(() => {
+        const channel = supabase
+            .channel('orcamentos-produtos-realtime')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'produtos' },
+                () => {
+                    queryClient.invalidateQueries({ queryKey: ['produtos'] });
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [queryClient]);
 
     const createMutation = useMutation({
         mutationFn: (data) => base44.entities.Orcamento.create(data),

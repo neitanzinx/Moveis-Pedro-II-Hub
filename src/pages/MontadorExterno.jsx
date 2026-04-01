@@ -24,8 +24,90 @@ import {
 } from "@/components/ui/dialog";
 import { whatsappService } from "@/services/whatsappService";
 import { supabase } from "@/lib/supabase";
+import { useConfirm } from "@/hooks/useConfirm";
 
 export default function MontadorExterno() {
+    const MONTAGEM_ITEM_NULLABLE_FIELDS = new Set([
+        'montador_id',
+        'montador_nome',
+        'montador_telefone',
+        'data_agendada',
+        'horario_agendado',
+        'cancelado_por',
+        'cancelado_em',
+        'reagendado_em'
+    ]);
+
+    const sanitizeMontagemItemPayload = (payload) => {
+        return Object.fromEntries(
+            Object.entries(payload).map(([key, value]) => {
+                if (MONTAGEM_ITEM_NULLABLE_FIELDS.has(key) && value === '') {
+                    return [key, null];
+                }
+
+                return [key, value];
+            })
+        );
+    };
+
+    const getMissingMontagemItemColumn = (error) => {
+        const message = error?.message || "";
+        const match = message.match(/Could not find the '([^']+)' column of 'montagens_itens'/i);
+        return match?.[1] || null;
+    };
+
+    const updateMontagemItemWithSchemaFallback = async ({ id, data }) => {
+        const unsupportedColumns = new Set();
+        let attempts = 0;
+        let lastError = null;
+
+        while (attempts < 10) {
+            const sanitizedPayload = sanitizeMontagemItemPayload(
+                Object.fromEntries(
+                    Object.entries(data).filter(([key]) => !unsupportedColumns.has(key))
+                )
+            );
+
+            try {
+                return await base44.entities.MontagemItem.update(id, sanitizedPayload);
+            } catch (error) {
+                lastError = error;
+                const missingColumn = getMissingMontagemItemColumn(error);
+                if (!missingColumn) throw error;
+
+                const hasColumnInPayload = Object.prototype.hasOwnProperty.call(sanitizedPayload, missingColumn);
+                if (!hasColumnInPayload) throw error;
+
+                console.warn(`Coluna opcional ausente em montagens_itens; ignorando no update: ${missingColumn}`);
+                unsupportedColumns.add(missingColumn);
+                attempts += 1;
+            }
+        }
+
+        throw lastError;
+    };
+
+    const normalizarTexto = (valor) =>
+        String(valor || "")
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .trim()
+            .toLowerCase();
+
+    const normalizarTelefone = (valor) => String(valor || "").replace(/\D/g, "");
+
+    const montadorEstaAtivo = (registroMontador) => {
+        const statusNormalizado = normalizarTexto(registroMontador?.status);
+        const ativoBooleano = registroMontador?.ativo === true || registroMontador?.ativo === 1 || registroMontador?.ativo === "true";
+
+        // Compatibilidade com schemas antigos (campo status) e novos (campo ativo)
+        return (
+            ativoBooleano ||
+            statusNormalizado === "ativo" ||
+            statusNormalizado === "aprovado"
+        );
+    };
+
     // Estado para busca na aba "Minhas"
     const [searchTerm, setSearchTerm] = useState("");
 
@@ -39,6 +121,7 @@ export default function MontadorExterno() {
     const [agendamentoData, setAgendamentoData] = useState({ data: "", horario: "" });
 
     const queryClient = useQueryClient();
+    const confirm = useConfirm();
 
 
 
@@ -50,17 +133,42 @@ export default function MontadorExterno() {
     });
 
     useEffect(() => {
-        if (user && montadores.length > 0) {
-            // Tenta encontrar montador pelo ID do usuário ou pelo Nome (fallback para sistemas de auth diferentes)
-            const meuMontador = montadores.find(m =>
-                m.usuario_id === user.id ||
-                (m.nome && user.full_name && m.nome.trim().toLowerCase() === user.full_name.trim().toLowerCase())
-            );
-            if (meuMontador?.status === 'ativo') {
-                setMontador(meuMontador);
-            } else if (meuMontador?.status === 'pendente_aprovacao') {
-                setMontadorPendente(meuMontador);
-            }
+        if (!user || montadores.length === 0) {
+            setMontador(null);
+            setMontadorPendente(null);
+            return;
+        }
+
+        const nomeUsuario = normalizarTexto(user?.full_name || user?.nome);
+        const emailUsuario = normalizarTexto(user?.email);
+        const telefoneUsuario = normalizarTelefone(user?.telefone);
+
+        // Prioridade de vínculo:
+        // 1) usuario_id
+        // 2) email
+        // 3) telefone
+        // 4) nome normalizado (com remoção de acentos)
+        const meuMontador = montadores.find((m) => {
+            const matchUsuarioId = String(m?.usuario_id || "") === String(user?.id || "");
+            const matchEmail = !!emailUsuario && normalizarTexto(m?.email) === emailUsuario;
+            const matchTelefone = !!telefoneUsuario && normalizarTelefone(m?.telefone) === telefoneUsuario;
+            const matchNome = !!nomeUsuario && normalizarTexto(m?.nome) === nomeUsuario;
+
+            return matchUsuarioId || matchEmail || matchTelefone || matchNome;
+        });
+
+        if (!meuMontador) {
+            setMontador(null);
+            setMontadorPendente(null);
+            return;
+        }
+
+        if (montadorEstaAtivo(meuMontador)) {
+            setMontador(meuMontador);
+            setMontadorPendente(null);
+        } else {
+            setMontador(null);
+            setMontadorPendente(meuMontador);
         }
     }, [user, montadores]);
 
@@ -85,7 +193,7 @@ export default function MontadorExterno() {
                 idsEntregasEntregues.includes(m.entrega_id) // Só mostra se entrega foi concluída
             );
         },
-        enabled: !!montador || user?.cargo === 'Administrador',
+        enabled: !!user && (!!montador || user?.cargo === 'Administrador' || user?.cargo === 'Montador Externo'),
         refetchOnMount: 'always',
         staleTime: 0,
         refetchInterval: 30000 // Atualiza a cada 30 segundos
@@ -96,13 +204,19 @@ export default function MontadorExterno() {
         queryKey: ['minhas-montagens', montador?.id],
         queryFn: async () => {
             const todas = await base44.entities.MontagemItem.list('-data_agendada');
+            const usuarioIdNormalizado = String(user?.id || "");
+            const montadorIdNormalizado = String(montador?.id || "");
             // Admin vê todas terceirizadas, montador vê só as dele
             if (user?.cargo === 'Administrador' && !montador) {
-                return todas.filter(m => m.tipo_montagem === 'terceirizada' && m.montador_id === user?.id);
+                return todas.filter((m) =>
+                    m.tipo_montagem === 'terceirizada' &&
+                    String(m.montador_id || "") === usuarioIdNormalizado
+                );
             }
-            return todas.filter(m => m.montador_id === montador?.id);
+            if (!montador) return [];
+            return todas.filter((m) => String(m.montador_id || "") === montadorIdNormalizado);
         },
-        enabled: !!montador || user?.cargo === 'Administrador'
+        enabled: !!user && (!!montador || user?.cargo === 'Administrador' || user?.cargo === 'Montador Externo')
     });
     
     // Buscar todas as vendas para associar vendedor e data
@@ -125,7 +239,7 @@ export default function MontadorExterno() {
     };
 
     const updateMutation = useMutation({
-        mutationFn: ({ id, data }) => base44.entities.MontagemItem.update(id, data),
+        mutationFn: ({ id, data }) => updateMontagemItemWithSchemaFallback({ id, data }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['montagens-disponiveis'] });
             queryClient.invalidateQueries({ queryKey: ['minhas-montagens'] });
@@ -212,7 +326,7 @@ export default function MontadorExterno() {
             });
 
             try {
-                await whatsappService.notifyAssemblyScheduled({
+                const sent = await whatsappService.notifyAssemblyScheduled({
                     telefone: selectedMontagem.cliente_telefone,
                     cliente_nome: selectedMontagem.cliente_nome,
                     numero_pedido: selectedMontagem.numero_pedido,
@@ -222,10 +336,16 @@ export default function MontadorExterno() {
                     montador_nome: montadorData.nome,
                     montador_telefone: montadorData.telefone
                 });
-                toast.success("Montagem agendada! Cliente notificado via WhatsApp.");
+                if (sent === 'queued') {
+                    toast.success("Montagem agendada! Notificação na fila - será enviada ao reconectar.");
+                } else if (sent === true) {
+                    toast.success("Montagem agendada! Cliente notificado via WhatsApp.");
+                } else {
+                    toast.warning("Montagem agendada. Não foi possível notificar o cliente.");
+                }
             } catch (botError) {
                 console.error("Erro ao notificar via bot:", botError);
-                toast.success("Montagem agendada! (Bot offline - cliente não notificado)");
+                toast.warning("Montagem agendada. Notificação do WhatsApp ficou pendente.");
             }
 
             setAgendamentoModal(false);
@@ -271,12 +391,17 @@ export default function MontadorExterno() {
 
     // Cancelar montagem (volta para triagem)
     const cancelarMontagem = async (montagem) => {
-        const confirmar = window.confirm(
+        const confirmar = await confirm({
+            title: "Cancelar montagem",
+            message:
             `⚠️ ATENÇÃO: Esta ação irá:\n\n` +
             `• Devolver a montagem para a triagem\n` +
             `• Notificar o cliente "${montagem.cliente_nome}" via WhatsApp\n\n` +
-            `Deseja realmente cancelar esta montagem?`
-        );
+            `Deseja realmente cancelar esta montagem?`,
+            confirmText: "Cancelar montagem",
+            cancelText: "Voltar",
+            variant: "destructive"
+        });
 
         if (!confirmar) return;
 
@@ -298,16 +423,22 @@ export default function MontadorExterno() {
 
             // Notificar cliente via bot
             try {
-                await whatsappService.notifyAssemblyCancelled({
+                const sent = await whatsappService.notifyAssemblyCancelled({
                     telefone: montagem.cliente_telefone,
                     cliente_nome: montagem.cliente_nome,
                     numero_pedido: montagem.numero_pedido,
                     produto_nome: montagem.produto_nome
                 });
-                toast.success("Montagem cancelada. Cliente notificado via WhatsApp.");
+                if (sent === 'queued') {
+                    toast.success("Montagem cancelada. Notificação na fila - será enviada ao reconectar.");
+                } else if (sent === true) {
+                    toast.success("Montagem cancelada. Cliente notificado via WhatsApp.");
+                } else {
+                    toast.warning("Montagem cancelada. Não foi possível notificar o cliente.");
+                }
             } catch (botError) {
                 console.error("Erro ao notificar via bot:", botError);
-                toast.warning("Montagem cancelada. (Bot offline - cliente não notificado)");
+                toast.warning("Montagem cancelada. Notificação do WhatsApp ficou pendente.");
             }
         } catch (e) {
             console.error("Erro ao cancelar montagem:", e);
@@ -337,10 +468,14 @@ export default function MontadorExterno() {
             return;
         }
 
-        const confirmar = window.confirm(
+        const confirmar = await confirm({
+            title: "Confirmar reagendamento",
+            message:
             `📅 O cliente "${montagemReagendar.cliente_nome}" será notificado sobre a nova data.\n\n` +
-            `Confirmar reagendamento?`
-        );
+            `Confirmar reagendamento?`,
+            confirmText: "Confirmar",
+            cancelText: "Voltar"
+        });
 
         if (!confirmar) return;
 
@@ -363,7 +498,7 @@ export default function MontadorExterno() {
 
             // Notificar cliente via bot
             try {
-                await whatsappService.notifyAssemblyRescheduled({
+                const sent = await whatsappService.notifyAssemblyRescheduled({
                     telefone: montagemReagendar.cliente_telefone,
                     cliente_nome: montagemReagendar.cliente_nome,
                     numero_pedido: montagemReagendar.numero_pedido,
@@ -372,10 +507,16 @@ export default function MontadorExterno() {
                     turno: reagendarData.horario,
                     montador_nome: montador?.nome
                 });
-                toast.success("Montagem reagendada! Cliente notificado via WhatsApp.");
+                if (sent === 'queued') {
+                    toast.success("Montagem reagendada! Notificação na fila - será enviada ao reconectar.");
+                } else if (sent === true) {
+                    toast.success("Montagem reagendada! Cliente notificado via WhatsApp.");
+                } else {
+                    toast.warning("Montagem reagendada. Não foi possível notificar o cliente.");
+                }
             } catch (botError) {
                 console.error("Erro ao notificar via bot:", botError);
-                toast.warning("Montagem reagendada. (Bot offline - cliente não notificado)");
+                toast.warning("Montagem reagendada. Notificação do WhatsApp ficou pendente.");
             }
 
             setReagendarModal(false);
@@ -768,9 +909,17 @@ export default function MontadorExterno() {
                                                                 {montagem.status === 'em_andamento' && (
                                                                     <Button
                                                                         className="col-span-2 bg-blue-600 hover:bg-blue-700 h-10 rounded-xl text-sm"
-                                                                        onClick={() => {
-                                                                            // Na verdade precisamos de um modal de conclusão ou confirmar direto
-                                                                            if (confirm("Confirmar conclusão da montagem?")) finalizarMontagem(montagem);
+                                                                        onClick={async () => {
+                                                                            const confirmar = await confirm({
+                                                                                title: "Finalizar montagem",
+                                                                                message: `Confirmar conclusão da montagem para ${montagem.cliente_nome}?`,
+                                                                                confirmText: "Finalizar",
+                                                                                cancelText: "Voltar"
+                                                                            });
+
+                                                                            if (confirmar) {
+                                                                                finalizarMontagem(montagem);
+                                                                            }
                                                                         }}
                                                                     >
                                                                         <CheckCircle className="w-4 h-4 mr-2" />

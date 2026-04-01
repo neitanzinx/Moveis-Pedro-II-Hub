@@ -61,10 +61,6 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                 // Estoque
                 quantidade_estoque: produto.quantidade_estoque || 0,
                 estoque_cd: produto.estoque_cd || 0,
-                estoque_mostruario_mega_store: produto.estoque_mostruario_mega_store || 0,
-                estoque_mostruario_centro: produto.estoque_mostruario_centro || 0,
-                estoque_mostruario_ponte_branca: produto.estoque_mostruario_ponte_branca || 0,
-                estoque_mostruario_futura: produto.estoque_mostruario_futura || 0,
                 estoque_minimo: produto.estoque_minimo || 0,
                 estoque_ideal: produto.estoque_ideal || 0,
             });
@@ -75,11 +71,7 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
         setSaving(true);
         try {
             const getVal = (v) => parseInt(v) || 0;
-            const estoqueTotal = getVal(formData.estoque_cd) +
-                getVal(formData.estoque_mostruario_mega_store) +
-                getVal(formData.estoque_mostruario_centro) +
-                getVal(formData.estoque_mostruario_ponte_branca) +
-                getVal(formData.estoque_mostruario_futura);
+            const estoqueTotal = getVal(formData.estoque_cd);
 
             const updatedData = { ...formData, quantidade_estoque: estoqueTotal };
             await onSave(updatedData);
@@ -365,14 +357,9 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                         <CardContent>
                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                                 <div className="space-y-2 col-span-2 md:col-span-3 lg:col-span-2">
-                                    <Label className="font-bold cursor-help text-xs" title="Quantidade total de estoque (Soma de todas as lojas e CD)">Estoque Total</Label>
+                                    <Label className="font-bold cursor-help text-xs" title="Quantidade total de estoque controlada neste modal">Estoque Total</Label>
                                     <div className="h-8 flex items-center px-3 bg-blue-50 border border-blue-100 rounded-md text-blue-700 font-bold">
-                                        {(parseInt(formData.estoque_cd) || 0) +
-                                            (parseInt(formData.estoque_mostruario_mega_store) || 0) +
-                                            (parseInt(formData.estoque_mostruario_centro) || 0) +
-                                            (parseInt(formData.estoque_mostruario_ponte_branca) || 0) +
-                                            (parseInt(formData.estoque_mostruario_futura) || 0)
-                                        }
+                                        {parseInt(formData.estoque_cd) || 0}
                                     </div>
                                 </div>
                                 <div className="space-y-1">
@@ -382,42 +369,6 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                                         className="h-8"
                                         value={formData.estoque_cd || 0}
                                         onChange={e => setFormData({ ...formData, estoque_cd: parseInt(e.target.value) || 0 })}
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <Label className="text-[10px] text-gray-500 uppercase">Mega Store</Label>
-                                    <Input
-                                        type="number"
-                                        className="h-8"
-                                        value={formData.estoque_mostruario_mega_store || 0}
-                                        onChange={e => setFormData({ ...formData, estoque_mostruario_mega_store: parseInt(e.target.value) || 0 })}
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <Label className="text-[10px] text-gray-500 uppercase">Centro</Label>
-                                    <Input
-                                        type="number"
-                                        className="h-8"
-                                        value={formData.estoque_mostruario_centro || 0}
-                                        onChange={e => setFormData({ ...formData, estoque_mostruario_centro: parseInt(e.target.value) || 0 })}
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <Label className="text-[10px] text-gray-500 uppercase">Ponte Branca</Label>
-                                    <Input
-                                        type="number"
-                                        className="h-8"
-                                        value={formData.estoque_mostruario_ponte_branca || 0}
-                                        onChange={e => setFormData({ ...formData, estoque_mostruario_ponte_branca: parseInt(e.target.value) || 0 })}
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <Label className="text-[10px] text-gray-500 uppercase">Futura</Label>
-                                    <Input
-                                        type="number"
-                                        className="h-8"
-                                        value={formData.estoque_mostruario_futura || 0}
-                                        onChange={e => setFormData({ ...formData, estoque_mostruario_futura: parseInt(e.target.value) || 0 })}
                                     />
                                 </div>
                             </div>

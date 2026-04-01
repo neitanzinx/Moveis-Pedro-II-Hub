@@ -10,11 +10,11 @@ const EXCLUDED_STOCK_FIELDS = new Set([
  * to the corresponding product database field name.
  *
  * Examples:
- *   "Centro"       → "estoque_mostruario_centro"
- *   "Mega Store"   → "estoque_mostruario_mega_store"
+ *   "Centro"       → "estoque_centro" (legacy field)
+ *   "Mega Store"   → "estoque_mega_store" (legacy field)
  *   "CD"           → "estoque_cd"
- *   "Ponte Branca" → "estoque_mostruario_ponte_branca"
- *   "Futura"       → "estoque_mostruario_futura"
+ *   "Ponte Branca" → "estoque_ponte_branca" (legacy field)
+ *   "Futura"       → "estoque_futura" (legacy field)
  *   "Depósito / CD" → "estoque_cd"
  *
  * @param {string} lojaNome - The store name as displayed in the UI
@@ -26,7 +26,7 @@ export function resolveStockField(lojaNome) {
 }
 
 /**
- * Resolves the LOJAS_MOSTRUARIO id from a human-readable store name.
+ * Resolves a store id slug from a human-readable store name.
  * @param {string} lojaNome
  * @returns {string|null} The loja id (e.g. "centro", "cd"), or null
  */

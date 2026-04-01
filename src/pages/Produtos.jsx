@@ -40,7 +40,6 @@ import {
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
-import ProdutoQuickEditModal from "@/components/produtos/ProdutoQuickEditModal";
 import ImportProdutosModal from "@/components/produtos/ImportProdutosModal";
 import { formatPrice } from "@/utils/productFormatters";
 import { getColorHex } from "@/components/produtos/FurnitureColorPicker";
@@ -48,18 +47,35 @@ import { CATEGORIAS } from "@/constants/productConstants";
 import ProductIncompleteIndicator from "@/components/produtos/ProductIncompleteIndicator";
 import GeradorEtiquetasModal from "@/components/legacy_estoque/GeradorEtiquetasModal";
 import { Printer } from "lucide-react";
+import { useProdutoFilters } from "@/hooks/useProdutoFilters";
 
 export default function Produtos() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategoria, setSelectedCategoria] = useState("todas");
-  const [selectedStatus, setSelectedStatus] = useState("todos");
+  const {
+    searchTerm,
+    setSearchTerm,
+    debouncedSearch,
+    selectedCategoria,
+    setSelectedCategoria,
+    selectedFabricante,
+    setSelectedFabricante,
+    selectedOrdenacao,
+    setSelectedOrdenacao,
+    selectedDirecao,
+    setSelectedDirecao,
+    filtroAtencao,
+    setFiltroAtencao,
+    categorias,
+    fabricantes,
+    produtosComAtencao,
+    aplicarOrdenacao
+  } = useProdutoFilters();
   const [viewMode, setViewMode] = useState("grid"); // grid ou list
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 100;
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isQuickEditOpen, setIsQuickEditOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingProduto, setEditingProduto] = useState(null);
+  const [modalMode, setModalMode] = useState('edit');
   const [savingProduto, setSavingProduto] = useState(false);
   const [pendingReturnUrl, setPendingReturnUrl] = useState(null);
   const [focusField, setFocusField] = useState(null);
@@ -72,8 +88,42 @@ export default function Produtos() {
   const confirm = useConfirm();
 
   const { data: produtos, isLoading } = useQuery({
-    queryKey: ['produtos'],
-    queryFn: () => base44.entities.Produto.list('nome'),
+    queryKey: ['produtos', debouncedSearch, selectedCategoria, selectedFabricante, filtroAtencao],
+    queryFn: async () => {
+      let allProdutos = await base44.entities.Produto.list('nome');
+      
+      // Apply filters
+      return allProdutos.filter(p => {
+        // Search filter
+        if (debouncedSearch) {
+          const searchTerms = debouncedSearch.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+          const searchableText = [
+            p.nome,
+            p.modelo_referencia,
+            p.categoria,
+            p.ambiente,
+            p.codigo_barras,
+            p.sku,
+            p.fornecedor_nome,
+            p.cor
+          ].filter(Boolean).join(' ').toLowerCase();
+          
+          const matchesSearch = searchTerms.every(term => searchableText.includes(term));
+          if (!matchesSearch) return false;
+        }
+        
+        // Category filter
+        if (selectedCategoria !== 'todas' && p.categoria !== selectedCategoria) return false;
+        
+        // Manufacturer filter
+        if (selectedFabricante !== 'todos' && p.fornecedor_nome !== selectedFabricante) return false;
+        
+        // Attention filter
+        if (filtroAtencao && !p.requer_atencao) return false;
+        
+        return true;
+      });
+    }
   });
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -121,129 +171,62 @@ export default function Produtos() {
   const canEdit = isAdmin || isManager || isWarehouse;
   const canDelete = isAdmin || isManager;
 
-  // Helper para calcular estoque total (CD + lojas mostruário)
+  // Helper para calcular estoque total consolidado
   const getEstoqueTotal = (p) => {
-    return (p?.estoque_cd || 0) +
-      (p?.estoque_mostruario_mega_store || 0) +
-      (p?.estoque_mostruario_centro || 0) +
-      (p?.estoque_mostruario_ponte_branca || 0) +
-      (p?.estoque_mostruario_futura || 0);
+    return p?.quantidade_estoque || p?.estoque_cd || 0;
   };
 
-  // Categorias únicas dos produtos
-  const categoriasDisponiveis = useMemo(() => {
-    // Pegar categorias de todos os produtos
-    const cats = new Set((produtos || []).map(p => p.categoria).filter(Boolean));
-    return Array.from(cats).sort();
-  }, [produtos]);
-
-  // Products are now treated as unique entities, so no parenting logic needed
-  const displayProducts = useMemo(() => {
-    return produtos || [];
-  }, [produtos]);
+  // Apply ordering to products
+  const produtosOrdenados = useMemo(() => {
+    return aplicarOrdenacao(produtos || []);
+  }, [produtos, selectedOrdenacao, selectedDirecao, selectedFabricante, aplicarOrdenacao]);
 
   // Estatísticas
   const stats = useMemo(() => {
-    // Agora "Total" conta o que está na tela (variações + standalone)
-    const items = displayProducts;
+    const items = produtos || [];
     return {
       total: items.length,
       ativos: items.filter(p => p.ativo !== false).length,
       inativos: items.filter(p => p.ativo === false).length,
       semFoto: items.filter(p => !p.fotos?.length).length,
       semPreco: items.filter(p => !p.preco_venda).length,
+      comAtencao: produtosComAtencao?.length || 0
     };
-  }, [displayProducts]);
-
-
-  // Filtragem
-  const filteredProdutos = useMemo(() => {
-    return displayProducts.filter(produto => {
-      // Busca multi-termo
-      const searchTerms = searchTerm.toLowerCase().split(/\s+/).filter(t => t.length > 0);
-      const searchableText = [
-        produto.nome,
-        produto.modelo_referencia,
-        produto.categoria,
-        produto.ambiente,
-        produto.codigo_barras,
-        produto.sku,
-        produto.fornecedor_nome,
-        produto.cor,
-        produto.tamanho,
-        String(produto.largura || ''),
-        String(produto.altura || '')
-      ].filter(Boolean).join(' ').toLowerCase();
-
-      const matchesSearch = searchTerms.length === 0 ||
-        searchTerms.every(term => searchableText.includes(term));
-
-      const matchesCategoria = selectedCategoria === "todas" || produto.categoria === selectedCategoria;
-
-      const matchesStatus =
-        selectedStatus === "todos" ||
-        (selectedStatus === "ativo" && produto.ativo !== false) ||
-        (selectedStatus === "inativo" && produto.ativo === false) ||
-        (selectedStatus === "semFoto" && !produto.fotos?.length) ||
-        (selectedStatus === "atencao" && (produto.requer_atencao || !produto.preco_venda));
-
-      return matchesSearch && matchesCategoria && matchesStatus;
-    });
-  }, [displayProducts, searchTerm, selectedCategoria, selectedStatus]);
+  }, [produtos, produtosComAtencao]);
 
   // Resetar página quando filtros mudarem
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedCategoria, selectedStatus]);
+  }, [debouncedSearch, selectedCategoria, selectedFabricante, filtroAtencao, selectedOrdenacao, selectedDirecao]);
 
   // Paginação
   const paginatedProdutos = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredProdutos.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredProdutos, currentPage]);
+    return produtosOrdenados.slice(startIndex, startIndex + itemsPerPage);
+  }, [produtosOrdenados, currentPage]);
 
-  const totalPages = Math.ceil(filteredProdutos.length / itemsPerPage);
+  const totalPages = Math.ceil(produtosOrdenados.length / itemsPerPage);
 
   const openEditModal = (produto, nextFocusField = null) => {
+    setModalMode('edit');
     setFocusField(nextFocusField);
     setEditingProduto({ ...produto, nomeDisplay: produto.nome });
     setIsModalOpen(true);
   };
 
+  const openViewModal = (produto) => {
+    setModalMode('view');
+    setFocusField(null);
+    setEditingProduto({ ...produto, nomeDisplay: produto.nome });
+    setIsModalOpen(true);
+  };
+
   const handleEdit = (produto) => {
-    // Edição direta - sem lógica de pai/filho
     openEditModal(produto, null);
   };
 
-  const handleQuickSave = async (data) => {
-    const precoNovo = parseFloat(data.preco_venda) || 0;
-    const precoAntigo = editingProduto?.preco_venda || 0;
-
-    await base44.entities.Produto.update(editingProduto.id, data);
-
-    // --- REGISTRAR HISTÓRICO DE PREÇOS ---
-    try {
-      if (editingProduto?.id && precoNovo !== precoAntigo) {
-        await base44.entities.HistoricoPrecos?.create?.({
-          organization_id: organization?.id || '00000000-0000-0000-0000-000000000001',
-          produto_id: editingProduto.id,
-          preco_antigo: precoAntigo,
-          preco_novo: precoNovo,
-          tipo: 'venda',
-          motivo: 'Edição Rápida',
-          usuario_nome: user?.nome || 'Sistema'
-        });
-      }
-    } catch (histErr) {
-      console.warn('Não foi possível registrar histórico de preços (Quick Edit):', histErr);
-    }
-
-    queryClient.invalidateQueries({ queryKey: ['produtos'] });
-    setIsQuickEditOpen(false);
-    setEditingProduto(null);
-  };
-
   const handleNew = () => {
+    setModalMode('edit');
     setEditingProduto(null);
     setFocusField(null);
     setIsModalOpen(true);
@@ -257,6 +240,7 @@ export default function Produtos() {
       nome: `${produto.nome} (Cópia)`,
       codigo_barras: null,
     };
+    setModalMode('edit');
     setEditingProduto(copy);
     setFocusField(null);
     setIsModalOpen(true);
@@ -309,6 +293,7 @@ export default function Produtos() {
       queryClient.invalidateQueries({ queryKey: ['produtos'] });
       setIsModalOpen(false);
       setEditingProduto(null);
+      setModalMode('edit');
 
       // Smart return flow
       if (pendingReturnUrl) {
@@ -379,23 +364,17 @@ export default function Produtos() {
 
         {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
-          <Card
-            className={`cursor-pointer transition-all ${selectedStatus === 'todos' ? 'ring-2 ring-green-500' : 'hover:shadow-md'}`}
-            onClick={() => setSelectedStatus('todos')}
-          >
+          <Card className="hover:shadow-md transition-all">
             <CardContent className="p-4 text-center">
               <Package className="w-6 h-6 mx-auto mb-1 text-gray-500" />
               <p className="text-2xl font-bold" style={{ color: '#07593f' }}>
-                {stats.total >= 100000 ? '+100k' : stats.total}
+                {stats.total}
               </p>
               <p className="text-xs text-gray-500">Total</p>
             </CardContent>
           </Card>
 
-          <Card
-            className={`cursor-pointer transition-all ${selectedStatus === 'ativo' ? 'ring-2 ring-green-500' : 'hover:shadow-md'}`}
-            onClick={() => setSelectedStatus('ativo')}
-          >
+          <Card className="hover:shadow-md transition-all">
             <CardContent className="p-4 text-center">
               <CheckCircle className="w-6 h-6 mx-auto mb-1 text-green-500" />
               <p className="text-2xl font-bold text-green-600">{stats.ativos}</p>
@@ -403,10 +382,7 @@ export default function Produtos() {
             </CardContent>
           </Card>
 
-          <Card
-            className={`cursor-pointer transition-all ${selectedStatus === 'inativo' ? 'ring-2 ring-green-500' : 'hover:shadow-md'}`}
-            onClick={() => setSelectedStatus('inativo')}
-          >
+          <Card className="hover:shadow-md transition-all">
             <CardContent className="p-4 text-center">
               <XCircle className="w-6 h-6 mx-auto mb-1 text-red-400" />
               <p className="text-2xl font-bold text-red-500">{stats.inativos}</p>
@@ -414,12 +390,7 @@ export default function Produtos() {
             </CardContent>
           </Card>
 
-
-
-          <Card
-            className={`cursor-pointer transition-all ${selectedStatus === 'semFoto' ? 'ring-2 ring-green-500' : 'hover:shadow-md'}`}
-            onClick={() => setSelectedStatus('semFoto')}
-          >
+          <Card className="hover:shadow-md transition-all">
             <CardContent className="p-4 text-center">
               <ImageIcon className="w-6 h-6 mx-auto mb-1 text-yellow-500" />
               <p className="text-2xl font-bold text-yellow-600">{stats.semFoto}</p>
@@ -427,14 +398,22 @@ export default function Produtos() {
             </CardContent>
           </Card>
 
-          <Card
-            className={`cursor-pointer transition-all ${selectedStatus === 'atencao' ? 'ring-2 ring-green-500' : 'hover:shadow-md'}`}
-            onClick={() => setSelectedStatus('atencao')}
-          >
+          <Card className="hover:shadow-md transition-all">
             <CardContent className="p-4 text-center">
               <AlertTriangle className="w-6 h-6 mx-auto mb-1 text-orange-500" />
               <p className="text-2xl font-bold text-orange-600">{stats.semPreco}</p>
               <p className="text-xs text-gray-500">Sem Preço</p>
+            </CardContent>
+          </Card>
+
+          <Card
+            className={`cursor-pointer transition-all ${filtroAtencao ? 'ring-2 ring-green-500' : 'hover:shadow-md'}`}
+            onClick={() => setFiltroAtencao(!filtroAtencao)}
+          >
+            <CardContent className="p-4 text-center">
+              <AlertTriangle className="w-6 h-6 mx-auto mb-1 text-red-500" />
+              <p className="text-2xl font-bold text-red-600">{stats.comAtencao}</p>
+              <p className="text-xs text-gray-500">Requer Atenção</p>
             </CardContent>
           </Card>
         </div>
@@ -442,34 +421,82 @@ export default function Produtos() {
         {/* Filters */}
         <Card className="mb-6">
           <CardContent className="p-4">
-            <div className="flex flex-col md:flex-row gap-4">
-              {/* Search */}
-              <div className="relative flex-1">
+            <div className="space-y-4">
+              {/* Search Row */}
+              <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <Input
-                  placeholder="Buscar por nome, código, categoria ou fornecedor..."
+                  placeholder="Buscar por nome, código, SKU ou fornecedor..."
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
                   className="pl-10"
                 />
               </div>
 
-              {/* Category Filter */}
-              <Select value={selectedCategoria} onValueChange={setSelectedCategoria}>
-                <SelectTrigger className="w-full md:w-48">
-                  <Filter className="w-4 h-4 mr-2" />
-                  <SelectValue placeholder="Categoria" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todas">Todas Categorias</SelectItem>
-                  {categoriasDisponiveis.map(cat => (
-                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Filters Row */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {/* Category Filter */}
+                <Select value={selectedCategoria} onValueChange={setSelectedCategoria}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Categoria" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todas">Todas Categorias</SelectItem>
+                    {categorias?.map(cat => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {/* Manufacturer Filter */}
+                <Select value={selectedFabricante} onValueChange={setSelectedFabricante}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Fabricante" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos Fabricantes</SelectItem>
+                    {fabricantes?.map(fab => (
+                      <SelectItem key={fab} value={fab}>{fab}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {/* Ordenacao */}
+                <Select value={selectedOrdenacao} onValueChange={setSelectedOrdenacao}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Ordenar por" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="alfabetica">Alfabética</SelectItem>
+                    <SelectItem value="preco">Preço</SelectItem>
+                    <SelectItem value="estoque">Estoque</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {/* Direction */}
+                <Select value={selectedDirecao} onValueChange={setSelectedDirecao}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Direção" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="asc">Crescente</SelectItem>
+                    <SelectItem value="desc">Decrescente</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {/* Attention Filter Button */}
+                <Button
+                  variant={filtroAtencao ? "default" : "outline"}
+                  className="w-full"
+                  onClick={() => setFiltroAtencao(!filtroAtencao)}
+                >
+                  <AlertTriangle className="w-4 h-4 mr-2" />
+                  {filtroAtencao ? "Com Atenção" : "Todas"}
+                </Button>
+              </div>
 
               {/* View Mode Toggle */}
-              <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+              <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
                 <Button
                   variant={viewMode === 'grid' ? 'default' : 'ghost'}
                   size="sm"
@@ -499,21 +526,21 @@ export default function Produtos() {
         )}
 
         {/* Empty State */}
-        {!isLoading && filteredProdutos.length === 0 && (
+        {!isLoading && produtosOrdenados.length === 0 && (
           <Card className="py-16 text-center">
             <CardContent>
               <Package className="w-16 h-16 mx-auto mb-4 text-gray-300" />
               <h3 className="text-xl font-semibold text-gray-700 mb-2">
-                {searchTerm || selectedCategoria !== 'todas' || selectedStatus !== 'todos'
+                {debouncedSearch || selectedCategoria !== 'todas' || selectedFabricante !== 'todos' || filtroAtencao
                   ? 'Nenhum produto encontrado'
                   : 'Nenhum produto cadastrado'}
               </h3>
               <p className="text-gray-500 mb-6">
-                {searchTerm || selectedCategoria !== 'todas' || selectedStatus !== 'todos'
+                {debouncedSearch || selectedCategoria !== 'todas' || selectedFabricante !== 'todos' || filtroAtencao
                   ? 'Tente ajustar os filtros de busca'
                   : 'Comece cadastrando seu primeiro produto'}
               </p>
-              {canEdit && !searchTerm && selectedCategoria === 'todas' && selectedStatus === 'todos' && (
+              {canEdit && !debouncedSearch && selectedCategoria === 'todas' && selectedFabricante === 'todos' && !filtroAtencao && (
                 <Button onClick={handleNew} className="gap-2" style={{ backgroundColor: '#07593f' }}>
                   <Plus className="w-4 h-4" />
                   Cadastrar Primeiro Produto
@@ -524,15 +551,14 @@ export default function Produtos() {
         )}
 
         {/* Grid View */}
-        {!isLoading && filteredProdutos.length > 0 && viewMode === 'grid' && (
+        {!isLoading && produtosOrdenados.length > 0 && viewMode === 'grid' && (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {paginatedProdutos.map(produto => (
               <Card
                 key={produto.id}
                 className={`group flex relative overflow-hidden cursor-pointer bg-white transition-all hover:shadow-lg hover:ring-1 hover:ring-green-500/20 ${produto.ativo === false ? 'opacity-75' : ''}`}
                 onClick={() => {
-                  // Se for variação, abre edição do pai
-                  handleEdit(produto);
+                  openViewModal(produto);
                 }}
               >
                 {/* Image Section (Left) */}
@@ -574,7 +600,7 @@ export default function Produtos() {
                     <Button size="icon" variant="secondary" className="h-7 w-7 shadow-sm bg-white/90 backdrop-blur" onClick={(e) => { e.stopPropagation(); setProdutosParaEtiqueta([produto]); setIsGeradorEtiquetasOpen(true); }} title="Imprimir Etiqueta">
                       <Printer className="w-3.5 h-3.5 text-green-700" />
                     </Button>
-                    <Button size="icon" variant="secondary" className="h-7 w-7 shadow-sm bg-white/90 backdrop-blur" onClick={(e) => { e.stopPropagation(); setIsQuickEditOpen(true); setEditingProduto(produto); }} title="Editar">
+                    <Button size="icon" variant="secondary" className="h-7 w-7 shadow-sm bg-white/90 backdrop-blur" onClick={(e) => { e.stopPropagation(); openEditModal(produto); }} title="Editar">
                       <Edit className="w-3.5 h-3.5 text-gray-700" />
                     </Button>
                   </div>
@@ -663,7 +689,7 @@ export default function Produtos() {
 
         {/* List View */}
         {
-          !isLoading && filteredProdutos.length > 0 && viewMode === 'list' && (
+          !isLoading && produtosOrdenados.length > 0 && viewMode === 'list' && (
             <Card>
               <div className="divide-y">
                 {paginatedProdutos.map((produto) => (
@@ -784,10 +810,10 @@ export default function Produtos() {
         }
 
         {/* Pagination Controls */}
-        {!isLoading && filteredProdutos.length > 0 && (
+        {!isLoading && produtosOrdenados.length > 0 && (
           <div className="flex flex-col md:flex-row justify-between items-center mt-6 gap-4">
             <p className="text-sm text-gray-500">
-              Exibindo {Math.min((currentPage - 1) * itemsPerPage + 1, filteredProdutos.length)} - {Math.min(currentPage * itemsPerPage, filteredProdutos.length)} de {filteredProdutos.length >= 100000 ? '+100k' : filteredProdutos.length} produtos
+              Exibindo {Math.min((currentPage - 1) * itemsPerPage + 1, produtosOrdenados.length)} - {Math.min(currentPage * itemsPerPage, produtosOrdenados.length)} de {produtosOrdenados.length >= 100000 ? '+100k' : produtosOrdenados.length} produtos
             </p>
 
             <div className="flex gap-2 items-center">
@@ -820,11 +846,13 @@ export default function Produtos() {
           setIsModalOpen(false);
           setEditingProduto(null);
           setFocusField(null);
+          setModalMode('edit');
         }}
-        onSave={handleSave}
+        onSave={modalMode === 'edit' ? handleSave : undefined}
         produto={editingProduto}
         focusField={focusField}
         isLoading={savingProduto}
+        readOnly={modalMode === 'view'}
       />
 
       <GeradorEtiquetasModal
@@ -832,16 +860,6 @@ export default function Produtos() {
         onClose={() => setIsGeradorEtiquetasOpen(false)}
         produtosPreSelecionados={produtosParaEtiqueta}
         user={user}
-      />
-      {/* Modal de Edição Rápida */}
-      <ProdutoQuickEditModal
-        isOpen={isQuickEditOpen}
-        onClose={() => {
-          setIsQuickEditOpen(false);
-          setEditingProduto(null);
-        }}
-        produto={editingProduto}
-        onSave={handleQuickSave}
       />
 
       {/* Modal de Importação */}

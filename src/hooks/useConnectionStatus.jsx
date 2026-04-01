@@ -10,6 +10,9 @@ export function useConnectionStatus() {
 
     // Função de sincronização da fila offline (compartilhada entre triggers)
     const syncOfflineQueue = useCallback(async () => {
+        const whatsappOnline = await whatsappService.checkStatus();
+        if (!whatsappOnline) return;
+
         const queue = await getOfflineQueue();
         if (queue.length === 0) return;
 
@@ -18,15 +21,17 @@ export function useConnectionStatus() {
 
         for (const item of queue) {
             try {
-                if (typeof whatsappService[item.action] === 'function') {
-                    await whatsappService[item.action](...item.payload);
-                    await removeOfflineQueueItem(item.id);
-                    sucesso++;
-                } else {
-                    // Remove itens inválidos para não ficarem presos na fila indefinidamente
+                if (typeof whatsappService[item.action] !== 'function') {
                     console.warn(`Ação inválida encontrada na fila e removida: ${item.action}`);
                     await removeOfflineQueueItem(item.id);
+                    continue;
                 }
+                const replayOk = await whatsappService[item.action](...item.payload);
+                if (replayOk === true) {
+                    await removeOfflineQueueItem(item.id);
+                    sucesso++;
+                }
+                // replayOk === 'queued' mantém o item para nova tentativa futura.
             } catch (error) {
                 console.error(`Erro ao sincronizar item offline ${item.id}:`, error);
             }

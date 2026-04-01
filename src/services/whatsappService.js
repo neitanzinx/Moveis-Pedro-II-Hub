@@ -2,6 +2,31 @@ import { toast } from "sonner";
 import { ZAP_API_URL as API_URL } from "@/utils/zapApiUrl";
 import { saveToOfflineQueue } from "@/utils/offlineQueue";
 
+const isLikelyBotOfflineResponse = (status, errorPayload) => {
+    // Qualquer erro 5xx do bot deve cair no fallback offline.
+    if (status >= 500) return true;
+    if (status < 400) return false;
+
+    const raw = typeof errorPayload === 'string'
+        ? errorPayload
+        : JSON.stringify(errorPayload || {});
+
+    return /whatsapp|offline|disconnected|desconect|pareado|conectado|bot|inicializ/i.test(raw);
+};
+
+const enqueueForLater = async (actionName, payloadArgs, message) => {
+    const saved = await saveToOfflineQueue(actionName, payloadArgs);
+    if (!saved) {
+        toast.error("Falha ao salvar ação na fila offline.");
+        return false;
+    }
+    if (message) toast.info(message);
+    return 'queued';
+};
+
+const isFetchConnectionError = (error) =>
+    error?.name === 'TypeError' && /failed to fetch|networkerror/i.test(error?.message || '');
+
 export const whatsappService = {
     /**
      * Verifica o status da conexão com a API do WhatsApp
@@ -33,8 +58,7 @@ export const whatsappService = {
         };
 
         if (!navigator.onLine) {
-            await saveToOfflineQueue('sendMessage', [telefone, mensagem]);
-            toast.info("Sem internet: Mensagem do Zap salva para envio posterior.");
+            await enqueueForLater('sendMessage', [telefone, mensagem], "Sem internet: Mensagem do Zap salva para envio posterior.");
             return true; // Retorna true para a UI prosseguir achando que deu certo offline
         }
 
@@ -49,14 +73,17 @@ export const whatsappService = {
 
             if (!response.ok) {
                 const errData = await response.json().catch(() => ({}));
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    await enqueueForLater('sendMessage', [telefone, mensagem], "WhatsApp indisponível: Mensagem salva para envio posterior.");
+                    return true;
+                }
                 console.error("Detalhes do erro do servidor:", errData);
                 throw new Error(errData.error || 'Falha ao enviar mensagem');
             }
             return true;
         } catch (error) {
             if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-                await saveToOfflineQueue('sendMessage', [telefone, mensagem]);
-                toast.info("Sem conexão com servidor: Mensagem do Zap salva para envio posterior.");
+                await enqueueForLater('sendMessage', [telefone, mensagem], "Sem conexão com servidor: Mensagem do Zap salva para envio posterior.");
                 return true;
             }
             console.error("Erro no envio do WhatsApp:", error);
@@ -77,6 +104,11 @@ export const whatsappService = {
             caption: caption,
         };
 
+        if (!navigator.onLine) {
+            await enqueueForLater('sendImageMessage', [telefone, imageUrl, caption], "Sem internet: Imagem do Zap salva para envio posterior.");
+            return true;
+        }
+
         try {
             const response = await fetch(`${API_URL}/send-image-url`, {
                 method: 'POST',
@@ -88,10 +120,21 @@ export const whatsappService = {
 
             if (!response.ok) {
                 const errData = await response.json().catch(() => ({}));
-                throw new Error(errData.error || 'Falha ao enviar imagem');
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    await enqueueForLater('sendImageMessage', [telefone, imageUrl, caption], "WhatsApp indisponível: Imagem salva para envio posterior.");
+                    return true;
+                }
+
+                console.error("Detalhes do erro do servidor:", errData);
+                return false;
             }
             return true;
         } catch (error) {
+            if (isFetchConnectionError(error)) {
+                await enqueueForLater('sendImageMessage', [telefone, imageUrl, caption], "Servidor inacessível: Imagem salva para envio posterior.");
+                return true;
+            }
+
             console.error("Erro no envio de imagem WhatsApp:", error);
             return false;
         }
@@ -143,8 +186,7 @@ _Móveis Pedro II_`;
         if (!entrega?.id) return false;
 
         if (!navigator.onLine) {
-            await saveToOfflineQueue('sendDeliveryNextStop', [telefone, entrega, linkRastreio]);
-            toast.info('Sem internet: aviso de próxima parada salvo para envio posterior.');
+            await enqueueForLater('sendDeliveryNextStop', [telefone, entrega, linkRastreio], 'Sem internet: aviso de próxima parada salvo para envio posterior.');
             return true;
         }
 
@@ -161,14 +203,17 @@ _Móveis Pedro II_`;
 
             if (!response.ok) {
                 const errData = await response.json().catch(() => ({}));
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    await enqueueForLater('sendDeliveryNextStop', [telefone, entrega, linkRastreio], 'WhatsApp indisponível: aviso de próxima parada salvo para envio posterior.');
+                    return true;
+                }
                 throw new Error(errData.error || 'Falha ao enviar próxima parada');
             }
 
             return true;
         } catch (error) {
             if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-                await saveToOfflineQueue('sendDeliveryNextStop', [telefone, entrega, linkRastreio]);
-                toast.info('Servidor inacessível: aviso de próxima parada salvo para envio posterior.');
+                await enqueueForLater('sendDeliveryNextStop', [telefone, entrega, linkRastreio], 'Servidor inacessível: aviso de próxima parada salvo para envio posterior.');
                 return true;
             }
             console.error('Erro ao enviar próxima parada:', error);
@@ -212,8 +257,7 @@ _Móveis Pedro II_`;
      */
     notifyRouteStart: async (entregas) => {
         if (!navigator.onLine) {
-            await saveToOfflineQueue('notifyRouteStart', [entregas]);
-            toast.info("Sem internet: Aviso de início de rota salvo para envio posterior.");
+            await enqueueForLater('notifyRouteStart', [entregas], "Sem internet: Aviso de início de rota salvo para envio posterior.");
             return true;
         }
 
@@ -223,11 +267,17 @@ _Móveis Pedro II_`;
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ entregas })
             });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    await enqueueForLater('notifyRouteStart', [entregas], "WhatsApp indisponível: Aviso de rota salvo para envio posterior.");
+                    return true;
+                }
+            }
             return response.ok;
         } catch (error) {
             if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-                await saveToOfflineQueue('notifyRouteStart', [entregas]);
-                toast.info("Servidor inacessível: Aviso de rota salvo para envio posterior.");
+                await enqueueForLater('notifyRouteStart', [entregas], "Servidor inacessível: Aviso de rota salvo para envio posterior.");
                 return true;
             }
             console.error("Erro ao notificar início de rota:", error);
@@ -242,8 +292,7 @@ _Móveis Pedro II_`;
      */
     notifyDeliveryCompletion: async (idConcluida, updateData) => {
         if (!navigator.onLine) {
-            await saveToOfflineQueue('notifyDeliveryCompletion', [idConcluida, updateData]);
-            toast.info("Sem internet: Confirmação de entrega salva para envio posterior.");
+            await enqueueForLater('notifyDeliveryCompletion', [idConcluida, updateData], "Sem internet: Confirmação de entrega salva para envio posterior.");
             return true;
         }
 
@@ -256,11 +305,17 @@ _Móveis Pedro II_`;
                     update_data: updateData
                 })
             });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    await enqueueForLater('notifyDeliveryCompletion', [idConcluida, updateData], "WhatsApp indisponível: Confirmação de entrega salva para envio posterior.");
+                    return true;
+                }
+            }
             return response.ok;
         } catch (error) {
             if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-                await saveToOfflineQueue('notifyDeliveryCompletion', [idConcluida, updateData]);
-                toast.info("Servidor inacessível: Confirmação de entrega salva para posterior.");
+                await enqueueForLater('notifyDeliveryCompletion', [idConcluida, updateData], "Servidor inacessível: Confirmação de entrega salva para posterior.");
                 return true;
             }
             console.error("Erro ao notificar conclusão:", error);
@@ -273,8 +328,7 @@ _Móveis Pedro II_`;
      */
     sendConfirmations: async (entregas) => {
         if (!navigator.onLine) {
-            await saveToOfflineQueue('sendConfirmations', [entregas]);
-            toast.info("Sem internet: Confirmações salvas para envio posterior.");
+            await enqueueForLater('sendConfirmations', [entregas], "Sem internet: Confirmações salvas para envio posterior.");
             return { ok: true, status: 200 }; // Fake response for UI success
         }
 
@@ -284,11 +338,17 @@ _Móveis Pedro II_`;
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ entregas })
             });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    await enqueueForLater('sendConfirmations', [entregas], "WhatsApp indisponível: confirmações salvas para envio posterior.");
+                    return { ok: true, status: 200 };
+                }
+            }
             return response; // Retorna response para tratar erros específicos se necessário
         } catch (error) {
             if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-                await saveToOfflineQueue('sendConfirmations', [entregas]);
-                toast.info("Servidor inacessível: Confirmações salvas para envio posterior.");
+                await enqueueForLater('sendConfirmations', [entregas], "Servidor inacessível: Confirmações salvas para envio posterior.");
                 return { ok: true, status: 200 }; // Fake response
             }
             console.error("Erro ao enviar confirmações:", error);
@@ -302,8 +362,7 @@ _Móveis Pedro II_`;
      */
     rescheduleDeliveries: async (entregas) => {
         if (!navigator.onLine) {
-            await saveToOfflineQueue('rescheduleDeliveries', [entregas]);
-            toast.info("Sem internet: Notificação de reagendamento salva offline.");
+            await enqueueForLater('rescheduleDeliveries', [entregas], "Sem internet: Notificação de reagendamento salva offline.");
             return true;
         }
 
@@ -313,11 +372,17 @@ _Móveis Pedro II_`;
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ entregas })
             });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    await enqueueForLater('rescheduleDeliveries', [entregas], "WhatsApp indisponível: reagendamento salvo offline.");
+                    return true;
+                }
+            }
             return response.ok;
         } catch (error) {
             if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-                await saveToOfflineQueue('rescheduleDeliveries', [entregas]);
-                toast.info("Servidor inacessível: Reagendamento salvo offline.");
+                await enqueueForLater('rescheduleDeliveries', [entregas], "Servidor inacessível: Reagendamento salvo offline.");
                 return true;
             }
             console.error("Erro ao reagendar entregas:", error);
@@ -331,9 +396,7 @@ _Móveis Pedro II_`;
      */
     notifyAssemblyScheduled: async (data) => {
         if (!navigator.onLine) {
-            await saveToOfflineQueue('notifyAssemblyScheduled', [data]);
-            toast.info("Sem internet: Aviso de agendamento salvo offline.");
-            return true;
+            return enqueueForLater('notifyAssemblyScheduled', [data], "Sem internet: Aviso de agendamento salvo offline.");
         }
 
         try {
@@ -342,19 +405,21 @@ _Móveis Pedro II_`;
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
-            if (!response.ok && response.status === 503) {
-                await saveToOfflineQueue('notifyAssemblyScheduled', [data]);
-                return true;
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    return enqueueForLater('notifyAssemblyScheduled', [data], "WhatsApp indisponível: Aviso de agendamento salvo offline.");
+                }
+                console.error("Erro ao notificar agendamento de montagem:", errData);
+                return false;
             }
-            return response.ok;
+            return true;
         } catch (error) {
-            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-                await saveToOfflineQueue('notifyAssemblyScheduled', [data]);
-                toast.info("Servidor inacessível: Aviso de agendamento salvo offline.");
-                return true;
+            if (isFetchConnectionError(error)) {
+                return enqueueForLater('notifyAssemblyScheduled', [data], "Servidor inacessível: Aviso de agendamento salvo offline.");
             }
             console.error("Erro ao notificar agendamento de montagem:", error);
-            throw error;
+            return false;
         }
     },
 
@@ -364,9 +429,7 @@ _Móveis Pedro II_`;
      */
     notifyAssemblyCancelled: async (data) => {
         if (!navigator.onLine) {
-            await saveToOfflineQueue('notifyAssemblyCancelled', [data]);
-            toast.info("Sem internet: Aviso de cancelamento salvo offline.");
-            return true;
+            return enqueueForLater('notifyAssemblyCancelled', [data], "Sem internet: Aviso de cancelamento salvo offline.");
         }
 
         try {
@@ -375,19 +438,21 @@ _Móveis Pedro II_`;
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
-            if (!response.ok && response.status === 503) {
-                await saveToOfflineQueue('notifyAssemblyCancelled', [data]);
-                return true;
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    return enqueueForLater('notifyAssemblyCancelled', [data], "WhatsApp indisponível: Aviso de cancelamento salvo offline.");
+                }
+                console.error("Erro ao notificar cancelamento de montagem:", errData);
+                return false;
             }
-            return response.ok;
+            return true;
         } catch (error) {
-            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-                await saveToOfflineQueue('notifyAssemblyCancelled', [data]);
-                toast.info("Servidor inacessível: Aviso de cancelamento salvo offline.");
-                return true;
+            if (isFetchConnectionError(error)) {
+                return enqueueForLater('notifyAssemblyCancelled', [data], "Servidor inacessível: Aviso de cancelamento salvo offline.");
             }
             console.error("Erro ao notificar cancelamento de montagem:", error);
-            throw error;
+            return false;
         }
     },
 
@@ -397,9 +462,7 @@ _Móveis Pedro II_`;
      */
     notifyAssemblyRescheduled: async (data) => {
         if (!navigator.onLine) {
-            await saveToOfflineQueue('notifyAssemblyRescheduled', [data]);
-            toast.info("Sem internet: Aviso de reagendamento salvo offline.");
-            return true;
+            return enqueueForLater('notifyAssemblyRescheduled', [data], "Sem internet: Aviso de reagendamento salvo offline.");
         }
 
         try {
@@ -408,19 +471,21 @@ _Móveis Pedro II_`;
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
-            if (!response.ok && response.status === 503) {
-                await saveToOfflineQueue('notifyAssemblyRescheduled', [data]);
-                return true;
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    return enqueueForLater('notifyAssemblyRescheduled', [data], "WhatsApp indisponível: Aviso de reagendamento salvo offline.");
+                }
+                console.error("Erro ao notificar reagendamento de montagem:", errData);
+                return false;
             }
-            return response.ok;
+            return true;
         } catch (error) {
-            if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-                await saveToOfflineQueue('notifyAssemblyRescheduled', [data]);
-                toast.info("Servidor inacessível: Aviso de reagendamento salvo offline.");
-                return true;
+            if (isFetchConnectionError(error)) {
+                return enqueueForLater('notifyAssemblyRescheduled', [data], "Servidor inacessível: Aviso de reagendamento salvo offline.");
             }
             console.error("Erro ao notificar reagendamento de montagem:", error);
-            throw error;
+            return false;
         }
     },
 
@@ -430,8 +495,7 @@ _Móveis Pedro II_`;
      */
     sendMarketingMessage: async (data) => {
         if (!navigator.onLine) {
-            await saveToOfflineQueue('sendMarketingMessage', [data]);
-            toast.info("Sem internet: Marketing salvo offline.");
+            await enqueueForLater('sendMarketingMessage', [data], "Sem internet: Marketing salvo offline.");
             return true;
         }
         try {
@@ -440,10 +504,24 @@ _Móveis Pedro II_`;
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    await enqueueForLater('sendMarketingMessage', [data], "WhatsApp indisponível: Marketing salvo offline.");
+                    return true;
+                }
+
+                console.error("Erro ao enviar mensagem de marketing:", errData);
+                return false;
+            }
             return response.ok;
         } catch (error) {
+            if (isFetchConnectionError(error)) {
+                await enqueueForLater('sendMarketingMessage', [data], "Servidor inacessível: Marketing salvo offline.");
+                return true;
+            }
             console.error("Erro ao enviar mensagem de marketing:", error);
-            throw error;
+            return false;
         }
     },
 
@@ -453,8 +531,7 @@ _Móveis Pedro II_`;
      */
     sendSaleConfirmation: async (data) => {
         if (!navigator.onLine) {
-            await saveToOfflineQueue('sendSaleConfirmation', [data]);
-            toast.info("Sem internet: Comprovante de venda salvo para envio posterior via WhatsApp.");
+            await enqueueForLater('sendSaleConfirmation', [data], "Sem internet: Comprovante de venda salvo para envio posterior via WhatsApp.");
             return true;
         }
 
@@ -469,10 +546,8 @@ _Móveis Pedro II_`;
 
             if (!response.ok) {
                 console.error('❌ Bot respondeu com erro:', responseData);
-                if (response.status === 503) {
-                    // WhatsApp desconectado — salva na fila para reenviar quando reconectar
-                    await saveToOfflineQueue('sendSaleConfirmation', [data]);
-                    toast.info("WhatsApp desconectado: Comprovante salvo para envio automático quando reconectar.");
+                if (isLikelyBotOfflineResponse(response.status, responseData)) {
+                    await enqueueForLater('sendSaleConfirmation', [data], "WhatsApp desconectado: Comprovante salvo para envio automático quando reconectar.");
                     return true;
                 } else {
                     toast.error("Erro ao enviar comprovante no WhatsApp.");
@@ -485,8 +560,7 @@ _Móveis Pedro II_`;
             return true;
         } catch (error) {
             if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-                await saveToOfflineQueue('sendSaleConfirmation', [data]);
-                toast.info("Servidor inacessível: Comprovante de venda salvo para envio posterior.");
+                await enqueueForLater('sendSaleConfirmation', [data], "Servidor inacessível: Comprovante de venda salvo para envio posterior.");
                 return true;
             }
             console.error("❌ Erro conexão bot:", error);
@@ -500,16 +574,36 @@ _Móveis Pedro II_`;
      * @param {object} data 
      */
     sendBirthdayMessage: async (data) => {
+        if (!navigator.onLine) {
+            await enqueueForLater('sendBirthdayMessage', [data], "Sem internet: Mensagem de aniversário salva offline.");
+            return true;
+        }
+
         try {
             const response = await fetch(`${API_URL}/enviar-mensagem-aniversario`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                if (isLikelyBotOfflineResponse(response.status, errData)) {
+                    await enqueueForLater('sendBirthdayMessage', [data], "WhatsApp indisponível: Mensagem de aniversário salva offline.");
+                    return true;
+                }
+
+                console.error("Erro ao enviar mensagem de aniversário:", errData);
+                return false;
+            }
             return response.ok;
         } catch (error) {
+            if (isFetchConnectionError(error)) {
+                await enqueueForLater('sendBirthdayMessage', [data], "Servidor inacessível: Mensagem de aniversário salva offline.");
+                return true;
+            }
             console.error("Erro ao enviar mensagem de aniversário:", error);
-            throw error;
+            return false;
         }
     }
 };

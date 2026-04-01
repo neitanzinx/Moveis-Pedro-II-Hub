@@ -22,6 +22,8 @@ export default function AcoesVendedoresWidget() {
         queryKey: ['acoes-vendedores'],
         queryFn: () => base44.entities.AuditLog.list('-created_at'),
         refetchInterval: 15000,
+            staleTime: 30000,
+            retry: false,
     });
 
     const { data: storeUsers = [] } = useQuery({

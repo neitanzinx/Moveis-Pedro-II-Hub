@@ -104,6 +104,7 @@ npm run test:watch      # Watch mode
 - Table map in [src/lib/supabase.js](src/lib/supabase.js) lists all ~50+ entities
 
 ## Notes for AI Agents
+Use Supabase MCP patterns for all data interactions. Always check RBAC permissions before showing UI elements or performing actions. Follow the established file structure and coding conventions for consistency. When adding new features, consider the multi-tenant architecture and ensure proper data isolation. For any external API integrations, use the provided proxy configurations to avoid CORS issues.
 - **Backward compatibility**: `api/base44Client.js` is deprecated; always use `@/lib/supabase` imports
 - **Type safety**: Project uses JSX (not TypeScript); keep prop validation simple or use JSDoc comments
 - **Performance**: Refetch intervals set to 10s for real-time features (deliveries, assemblies)

@@ -1,28 +1,12 @@
-import React, { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/hooks/useAuth";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import {
-    Users, Search, Plus, Edit, Trash2, Eye, UserCheck,
-    UserX, Phone, Mail, Building, Calendar, DollarSign,
-    Filter, Download, MoreVertical, FileText, KeyRound,
-    RotateCcw, Copy, EyeOff, Loader2, CheckCircle2, AlertCircle, Shield
-} from "lucide-react";
-import { toast } from "sonner";
-import { supabase } from "@/lib/supabase";
-import { getZapApiUrl } from "@/utils/zapApiUrl";
-import { formatarTelefone, formatarNome } from "@/utils/formatters";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
 import {
     Select,
     SelectContent,
@@ -34,8 +18,8 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
-    DropdownMenuTrigger,
     DropdownMenuSeparator,
+    DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
     AlertDialog,
@@ -48,14 +32,31 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+    Users,
+    Search,
+    Plus,
+    Edit,
+    Trash2,
+    Eye,
+    UserCheck,
+    UserX,
+    Calendar,
+    Download,
+    MoreVertical,
+    FileText,
+    Shield,
+    ExternalLink,
+    KeyRound,
+    Building,
+} from "lucide-react";
+import { formatarNome } from "@/utils/formatters";
 import ColaboradorModal from "./ColaboradorModal";
 import ColaboradorDetalhesModal from "./ColaboradorDetalhesModal";
-
 import ContratacaoResumoModal from "./ContratacaoResumoModal";
-import ModalUsuario from "@/components/usuarios/ModalUsuario";
 
 const STATUS_OPTIONS = [
-    { value: "todos", label: "Todos os Status" },
+    { value: "todos", label: "Todos" },
     { value: "Ativo", label: "Ativo" },
     { value: "Férias", label: "Férias" },
     { value: "Licença", label: "Licença" },
@@ -63,21 +64,87 @@ const STATUS_OPTIONS = [
     { value: "Desligado", label: "Desligado" },
 ];
 
-
-
 const CONTRATO_OPTIONS = [
-    { value: "todos", label: "Todos os Contratos" },
+    { value: "todos", label: "Todos" },
     { value: "CLT", label: "CLT" },
     { value: "PJ", label: "PJ" },
     { value: "Estagiário", label: "Estagiário" },
     { value: "Temporário", label: "Temporário" },
 ];
 
+const STAT_CARDS = [
+    {
+        key: "Ativo",
+        label: "Ativos",
+        icon: UserCheck,
+        bg: "#D1FAE5",
+        fg: "#065F46",
+        activeFg: "#fff",
+        activeBg: "#065F46",
+        border: "#6EE7B7",
+    },
+    {
+        key: "Férias",
+        label: "Em Férias",
+        icon: Calendar,
+        bg: "#DBEAFE",
+        fg: "#1E40AF",
+        activeFg: "#fff",
+        activeBg: "#1E40AF",
+        border: "#93C5FD",
+    },
+    {
+        key: "Licença",
+        label: "Em Licença",
+        icon: UserX,
+        bg: "#FEF3C7",
+        fg: "#92400E",
+        activeFg: "#fff",
+        activeBg: "#92400E",
+        border: "#FCD34D",
+    },
+    {
+        key: "total",
+        label: "Total",
+        icon: Users,
+        bg: "#F0FDF4",
+        fg: "#07593f",
+        activeFg: "#fff",
+        activeBg: "#07593f",
+        border: "#86EFAC",
+    },
+];
+
+function getStatusStyle(status) {
+    const map = {
+        Ativo: { bg: "#D1FAE5", color: "#065F46" },
+        Férias: { bg: "#DBEAFE", color: "#1E40AF" },
+        Licença: { bg: "#FEF3C7", color: "#92400E" },
+        Afastado: { bg: "#FED7AA", color: "#C2410C" },
+        Desligado: { bg: "#FEE2E2", color: "#991B1B" },
+    };
+    return map[status] || { bg: "#E5E7EB", color: "#374151" };
+}
+
+function getAvatarGradient(status) {
+    const map = {
+        Ativo: "linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)",
+        Férias: "linear-gradient(135deg, #1E40AF 0%, #2563EB 100%)",
+        Licença: "linear-gradient(135deg, #92400E 0%, #B45309 100%)",
+        Afastado: "linear-gradient(135deg, #C2410C 0%, #EA580C 100%)",
+        Desligado: "linear-gradient(135deg, #6B7280 0%, #9CA3AF 100%)",
+    };
+    return map[status] || "linear-gradient(135deg, #6B7280 0%, #9CA3AF 100%)";
+}
+
 export default function ColaboradoresTab() {
     const queryClient = useQueryClient();
+    const navigate = useNavigate();
+    const { can } = useAuth();
+    const canManageRH = can("manage_rh");
+
     const [busca, setBusca] = useState("");
     const [filtroStatus, setFiltroStatus] = useState("todos");
-
     const [filtroContrato, setFiltroContrato] = useState("todos");
     const [modalAberto, setModalAberto] = useState(false);
     const [modalDetalhes, setModalDetalhes] = useState(false);
@@ -85,147 +152,87 @@ export default function ColaboradoresTab() {
     const [colaboradorSelecionado, setColaboradorSelecionado] = useState(null);
     const [novoColaborador, setNovoColaborador] = useState(null);
     const [confirmDelete, setConfirmDelete] = useState(null);
-    const [passwordResetData, setPasswordResetData] = useState(null);
-    const [showPassword, setShowPassword] = useState(false);
-
     const [initialTab, setInitialTab] = useState("pessoal");
-    const [modalUsuarioAberto, setModalUsuarioAberto] = useState(false);
-
-    const handleGerarAcesso = () => {
-        setModalResumo(false);
-        setColaboradorSelecionado(novoColaborador);
-        setInitialTab("sistema");
-        setModalAberto(true);
-    };
 
     const { data: colaboradores = [], isLoading } = useQuery({
-        queryKey: ['colaboradores'],
-        queryFn: () => base44.entities.Colaborador.list('-created_at'),
+        queryKey: ["colaboradores"],
+        queryFn: () => base44.entities.Colaborador.list("-created_at"),
     });
 
     const { data: usuarios = [] } = useQuery({
-        queryKey: ['usuarios'],
+        queryKey: ["usuarios"],
         queryFn: () => base44.entities.User.list(),
-    });
-
-    const { data: caminhoes = [] } = useQuery({
-        queryKey: ['caminhoes'],
-        queryFn: () => base44.entities.Caminhao.list()
     });
 
     const deleteMutation = useMutation({
         mutationFn: (id) => base44.entities.Colaborador.delete(id),
         onSuccess: () => {
-            queryClient.invalidateQueries(['colaboradores']);
+            queryClient.invalidateQueries(["colaboradores"]);
             setConfirmDelete(null);
         },
     });
 
-    const resetPasswordMutation = useMutation({
-        mutationFn: async (userId) => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) throw new Error("Sessão expirada. Faça login novamente.");
+    const usuariosById = useMemo(
+        () => new Map(usuarios.map((u) => [u.id, u])),
+        [usuarios]
+    );
 
-            const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-actions`;
-            const response = await fetch(fnUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`,
-                    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
-                },
-                body: JSON.stringify({ action: 'reset_password', user_id: userId })
-            });
+    const colaboradoresEnriquecidos = useMemo(
+        () =>
+            colaboradores.map((c) => {
+                const usuarioVinculado = c.user_id ? usuariosById.get(c.user_id) : null;
+                return { ...c, matricula: usuarioVinculado?.matricula || null };
+            }),
+        [colaboradores, usuariosById]
+    );
 
-            const data = await response.json();
-            if (data?.error) throw new Error(data.error);
-            return data;
-        },
-        onSuccess: (data) => {
-            setPasswordResetData({
-                password: data.senha_temporaria,
-                matricula: colaboradorSelecionado?.matricula || "N/A",
-                whatsappSent: data.whatsapp_enviado
-            });
-            toast.success(data.whatsapp_enviado
-                ? "Senha resetada e enviada via WhatsApp!"
-                : "Senha resetada! (WhatsApp não disponível)");
-        },
-        onError: (error) => {
-            toast.error("Erro ao resetar senha: " + error.message);
-        }
-    });
+    const contasAguardandoVinculo = useMemo(
+        () =>
+            usuarios.filter((u) => {
+                const isEmployee = u.cargo && u.matricula?.startsWith("MP-");
+                const isNotLinked = !colaboradores.some((c) => c.user_id === u.id);
+                return isEmployee && isNotLinked;
+            }).length,
+        [usuarios, colaboradores]
+    );
 
-    const handleResetPassword = (colaborador) => {
-        const userId = colaborador.user_id || (colaborador.isAcessoRapido ? colaborador.id : null);
-        if (!userId) {
-            toast.error("Este colaborador não possui acesso ao sistema vinculado.");
-            return;
-        }
+    const colaboradoresFiltrados = useMemo(
+        () =>
+            colaboradoresEnriquecidos.filter((c) => {
+                const termo = busca.toLowerCase();
+                const matchBusca =
+                    !busca ||
+                    c.nome_completo?.toLowerCase().includes(termo) ||
+                    c.cpf?.includes(busca) ||
+                    c.email?.toLowerCase().includes(termo) ||
+                    c.matricula?.toLowerCase().includes(termo);
+                const matchStatus = filtroStatus === "todos" || c.status === filtroStatus;
+                const matchContrato =
+                    filtroContrato === "todos" || c.tipo_contrato === filtroContrato;
+                return matchBusca && matchStatus && matchContrato;
+            }),
+        [colaboradoresEnriquecidos, busca, filtroStatus, filtroContrato]
+    );
+
+    const counts = useMemo(
+        () => ({
+            Ativo: colaboradoresEnriquecidos.filter((c) => c.status === "Ativo").length,
+            Férias: colaboradoresEnriquecidos.filter((c) => c.status === "Férias").length,
+            Licença: colaboradoresEnriquecidos.filter((c) => c.status === "Licença").length,
+            total: colaboradoresEnriquecidos.length,
+        }),
+        [colaboradoresEnriquecidos]
+    );
+
+    const abrirModal = (colaborador = null, tab = "pessoal") => {
         setColaboradorSelecionado(colaborador);
-        if (confirm(`Deseja resetar a senha de ${colaborador.nome_completo || colaborador.full_name}?`)) {
-            resetPasswordMutation.mutate(userId);
-        }
-    };
-
-    const copyToClipboard = (text, type) => {
-        navigator.clipboard.writeText(text);
-        toast.success(`${type} copiado(a)!`);
-    };
-
-    // Filter and merge collaborators with Acesso Rápido users
-    const acesoRapidoUsers = usuarios
-        .filter(u => {
-            // Must have cargo and matricula starting with MP- (Employee indicator)
-            const isEmployee = u.cargo && u.matricula?.startsWith('MP-');
-            // Must not be already linked to a collaborator
-            const isNotLinked = !colaboradores.some(colab => colab.user_id === u.id);
-            return isEmployee && isNotLinked;
-        })
-        .map(u => ({
-            ...u,
-            id: u.id, // Keep the user id
-            nome_completo: u.full_name,
-            isAcessoRapido: true,
-            status: 'Acesso Rápido'
-        }));
-
-    const todosColaboradores = [...colaboradores, ...acesoRapidoUsers];
-
-    const colaboradoresFiltrados = todosColaboradores.filter(c => {
-        const matchBusca = !busca ||
-            c.nome_completo?.toLowerCase().includes(busca.toLowerCase()) ||
-            c.cpf?.includes(busca) ||
-            c.email?.toLowerCase().includes(busca.toLowerCase()) ||
-            c.matricula?.toLowerCase().includes(busca.toLowerCase());
-
-        const matchStatus = filtroStatus === "todos" || c.status === filtroStatus;
-        const matchContrato = filtroContrato === "todos" || c.tipo_contrato === filtroContrato;
-
-        return matchBusca && matchStatus && matchContrato;
-    });
-
-    // Metrics
-    const totalAtivos = colaboradores.filter(c => c.status === 'Ativo').length;
-    const totalFerias = colaboradores.filter(c => c.status === 'Férias').length;
-    const totalLicenca = colaboradores.filter(c => c.status === 'Licença').length;
-    const totalDesligados = colaboradores.filter(c => c.status === 'Desligado').length;
-    const totalAcessoRapido = acesoRapidoUsers.length;
-
-    const abrirModal = (colaborador = null) => {
-        setColaboradorSelecionado(colaborador);
-        setInitialTab("pessoal");
+        setInitialTab(tab);
         setModalAberto(true);
     };
 
     const abrirDetalhes = (colaborador) => {
         setColaboradorSelecionado(colaborador);
         setModalDetalhes(true);
-    };
-
-    const abrirResumo = (colaborador) => {
-        setNovoColaborador(colaborador);
-        setModalResumo(true);
     };
 
     const handleNovoColaboradorSuccess = (colaborador) => {
@@ -235,33 +242,23 @@ export default function ColaboradoresTab() {
         setModalResumo(true);
     };
 
-    const getStatusBadgeStyle = (status) => {
-        switch (status) {
-            case 'Ativo':
-                return { backgroundColor: '#D1FAE5', color: '#065F46' };
-            case 'Férias':
-                return { backgroundColor: '#DBEAFE', color: '#1E40AF' };
-            case 'Licença':
-                return { backgroundColor: '#FEF3C7', color: '#92400E' };
-            case 'Afastado':
-                return { backgroundColor: '#FED7AA', color: '#C2410C' };
-            case 'Desligado':
-                return { backgroundColor: '#FEE2E2', color: '#991B1B' };
-            case 'Acesso Rápido':
-                return { backgroundColor: '#E0F2FE', color: '#0369A1' };
-            default:
-                return { backgroundColor: '#E5E7EB', color: '#374151' };
+    const handleStatClick = (key) => {
+        if (key === "total") {
+            setFiltroStatus("todos");
+        } else {
+            setFiltroStatus((prev) => (prev === key ? "todos" : key));
         }
     };
 
     const exportarCSV = () => {
-        let csv = "Nome,CPF,Cargo,Status,Tipo Contrato,Salário Base,Data Admissão,Telefone,Email\n";
-        colaboradoresFiltrados.forEach(c => {
-            csv += `"${c.nome_completo || ''}","${c.cpf || ''}","${c.cargo || ''}","${c.status || ''}","${c.tipo_contrato || ''}","${c.salario_base || ''}","${c.data_admissao || ''}","${c.telefone || ''}","${c.email || ''}"\n`;
+        let csv =
+            "Nome,Matrícula,CPF,Cargo,Status,Tipo Contrato,Salário Base,Data Admissão,Telefone,Email\n";
+        colaboradoresFiltrados.forEach((c) => {
+            csv += `"${c.nome_completo || ""}","${c.matricula || ""}","${c.cpf || ""}","${c.cargo || ""}","${c.status || ""}","${c.tipo_contrato || ""}","${c.salario_base || ""}","${c.data_admissao || ""}","${c.telefone || ""}","${c.email || ""}"\n`;
         });
-        const blob = new Blob([csv], { type: 'text/csv' });
+        const blob = new Blob([csv], { type: "text/csv" });
         const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
+        const a = document.createElement("a");
         a.href = url;
         a.download = `colaboradores_${new Date().toISOString().slice(0, 10)}.csv`;
         a.click();
@@ -269,308 +266,409 @@ export default function ColaboradoresTab() {
 
     if (isLoading) {
         return (
-            <div className="flex items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: '#07593f' }} />
+            <div className="flex items-center justify-center py-16">
+                <div
+                    className="animate-spin rounded-full h-8 w-8 border-b-2"
+                    style={{ borderColor: "#07593f" }}
+                />
             </div>
         );
     }
 
     return (
-        <div className="space-y-6">
-            {/* Metrics */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Card className="border-0 shadow-lg">
-                    <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
+        <div className="space-y-4">
+            {/* Stat cards — also act as filter shortcuts */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {STAT_CARDS.map(({ key, label, icon: Icon, bg, fg, activeBg, border }) => {
+                    const count = counts[key] ?? 0;
+                    const isActive = filtroStatus === key || (key === "total" && filtroStatus === "todos" && busca === "");
+                    return (
+                        <button
+                            key={key}
+                            onClick={() => handleStatClick(key)}
+                            className="rounded-xl p-4 flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.99] text-left focus:outline-none focus-visible:ring-2"
+                            style={{
+                                backgroundColor: isActive ? activeBg : bg,
+                                border: `2px solid ${isActive ? activeBg : border}`,
+                                color: isActive ? "#fff" : fg,
+                            }}
+                        >
                             <div>
-                                <p className="text-xs text-gray-500">Ativos</p>
-                                <p className="text-2xl font-bold text-green-600">{totalAtivos}</p>
+                                <p className="text-xs font-medium opacity-80">{label}</p>
+                                <p className="text-2xl font-bold mt-0.5">{count}</p>
                             </div>
-                            <UserCheck className="w-8 h-8 text-green-600 opacity-50" />
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card className="border-0 shadow-lg">
-                    <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-xs text-gray-500">Em Férias</p>
-                                <p className="text-2xl font-bold text-blue-600">{totalFerias}</p>
-                            </div>
-                            <Calendar className="w-8 h-8 text-blue-600 opacity-50" />
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card className="border-0 shadow-lg">
-                    <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-xs text-gray-500">Em Licença</p>
-                                <p className="text-2xl font-bold text-orange-600">{totalLicenca}</p>
-                            </div>
-                            <UserX className="w-8 h-8 text-orange-600 opacity-50" />
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card className="border-0 shadow-lg">
-                    <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-xs text-gray-500">Total Geral</p>
-                                <p className="text-2xl font-bold" style={{ color: '#07593f' }}>{todosColaboradores.length}</p>
-                            </div>
-                            <Users className="w-8 h-8 opacity-50" style={{ color: '#07593f' }} />
-                        </div>
-                    </CardContent>
-                </Card>
+                            <Icon className="w-8 h-8 opacity-30" />
+                        </button>
+                    );
+                })}
             </div>
 
-            {/* Acesso Rápido Alert */}
-            {totalAcessoRapido > 0 && (
+            {/* Unlinked accounts alert */}
+            {contasAguardandoVinculo > 0 && (
                 <Alert className="bg-blue-50 border-blue-200">
                     <KeyRound className="h-4 w-4 text-blue-600" />
-                    <AlertDescription className="text-blue-800 flex items-center justify-between w-full">
+                    <AlertDescription className="text-blue-800 flex items-center justify-between gap-4 w-full">
                         <span>
-                            Existem <strong>{totalAcessoRapido}</strong> usuários com acesso ao sistema aguardando cadastro completo no RH.
+                            <strong>{contasAguardandoVinculo}</strong> conta
+                            {contasAguardandoVinculo > 1 ? "s" : ""} de acesso sem vínculo com
+                            colaborador de RH.
                         </span>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-blue-300 text-blue-800 shrink-0"
+                            onClick={() => navigate("/admin/GerenciamentoUsuarios")}
+                        >
+                            <ExternalLink className="w-4 h-4 mr-1.5" />
+                            Gerenciar
+                        </Button>
                     </AlertDescription>
                 </Alert>
             )}
 
-            {/* Filters and Actions */}
-            <Card className="border-0 shadow-lg">
-                <CardContent className="p-4">
-                    <div className="flex flex-col md:flex-row gap-4">
-                        <div className="flex-1 relative">
-                            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <Input
-                                placeholder="Buscar por nome, CPF ou email..."
-                                value={busca}
-                                onChange={(e) => setBusca(e.target.value)}
-                                className="pl-9"
-                            />
-                        </div>
-                        <Select value={filtroStatus} onValueChange={setFiltroStatus}>
-                            <SelectTrigger className="w-full md:w-40">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {STATUS_OPTIONS.map(opt => (
-                                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-
-                        <Select value={filtroContrato} onValueChange={setFiltroContrato}>
-                            <SelectTrigger className="w-full md:w-40">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {CONTRATO_OPTIONS.map(opt => (
-                                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <Button
-                            onClick={exportarCSV}
-                            variant="outline"
-                            className="gap-2"
-                        >
-                            <Download className="w-4 h-4" />
-                            Exportar
-                        </Button>
+            {/* Filter + action bar */}
+            <div className="flex flex-col sm:flex-row gap-2">
+                <div className="flex-1 relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Input
+                        placeholder="Buscar por nome, matrícula, CPF ou email..."
+                        value={busca}
+                        onChange={(e) => setBusca(e.target.value)}
+                        className="pl-9"
+                    />
+                </div>
+                <Select value={filtroStatus} onValueChange={setFiltroStatus}>
+                    <SelectTrigger className="w-full sm:w-36">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {STATUS_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+                <Select value={filtroContrato} onValueChange={setFiltroContrato}>
+                    <SelectTrigger className="w-full sm:w-36">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {CONTRATO_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+                <div className="flex gap-2">
+                    <Button
+                        onClick={exportarCSV}
+                        variant="outline"
+                        size="icon"
+                        title="Exportar CSV"
+                    >
+                        <Download className="w-4 h-4" />
+                    </Button>
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        title="Gerenciar Contas de Acesso"
+                        onClick={() => navigate("/admin/GerenciamentoUsuarios")}
+                    >
+                        <Shield className="w-4 h-4" />
+                    </Button>
+                    {canManageRH && (
                         <Button
                             onClick={() => abrirModal()}
-                            className="gap-2"
-                            style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
+                            className="gap-2 whitespace-nowrap"
+                            style={{
+                                background: "linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)",
+                            }}
                         >
                             <Plus className="w-4 h-4" />
                             Novo Colaborador
                         </Button>
-                        <Button
-                            onClick={() => setModalUsuarioAberto(true)}
-                            className="gap-2 bg-blue-600 hover:bg-blue-700"
-                            title="Criar usuário apenas para acesso ao sistema (sem cadastro RH completo)"
-                        >
-                            <KeyRound className="w-4 h-4" />
-                            Acesso Rápido
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
+                    )}
+                </div>
+            </div>
 
-            {/* Collaborators List */}
-            <Card className="border-0 shadow-lg">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Users className="w-5 h-5" style={{ color: '#07593f' }} />
-                        Lista de Colaboradores ({colaboradoresFiltrados.length})
-                    </CardTitle>
-                </CardHeader>
-                <CardContent>
-                    {colaboradoresFiltrados.length === 0 ? (
-                        <div className="text-center py-12">
-                            <Users className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                            <p className="text-gray-500">Nenhum colaborador encontrado</p>
-                            <Button
-                                onClick={() => abrirModal()}
-                                className="mt-4"
-                                style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
+            {/* Collaborator table */}
+            <div
+                className="rounded-xl border overflow-hidden bg-white"
+                style={{ borderColor: "#E5E0D8" }}
+            >
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr
+                                className="border-b text-xs text-gray-500 uppercase tracking-wide"
+                                style={{ backgroundColor: "#F9F6F2", borderColor: "#E5E0D8" }}
                             >
-                                <Plus className="w-4 h-4 mr-2" />
-                                Cadastrar Primeiro Colaborador
-                            </Button>
-                        </div>
-                    ) : (
-                        <div className="space-y-3">
-                            {colaboradoresFiltrados.map(colaborador => (
-                                <div
-                                    key={colaborador.id}
-                                    className="flex items-center justify-between p-4 rounded-xl border hover:shadow-md transition-all"
-                                    style={{ borderColor: '#E5E0D8' }}
-                                >
-                                    <div className="flex items-center gap-4">
-                                        <div
-                                            className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold text-white"
-                                            style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
+                                <th className="text-left px-4 py-3 font-semibold">Colaborador</th>
+                                <th className="text-left px-4 py-3 font-semibold hidden md:table-cell">
+                                    Cargo
+                                </th>
+                                <th className="text-left px-4 py-3 font-semibold hidden lg:table-cell">
+                                    Contrato
+                                </th>
+                                <th className="text-left px-4 py-3 font-semibold hidden lg:table-cell">
+                                    Admissão
+                                </th>
+                                <th className="text-left px-4 py-3 font-semibold hidden xl:table-cell">
+                                    Matrícula
+                                </th>
+                                <th className="text-center px-4 py-3 font-semibold">Status</th>
+                                <th className="text-right px-4 py-3 font-semibold">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {colaboradoresFiltrados.length === 0 ? (
+                                <tr>
+                                    <td colSpan={7} className="text-center py-14">
+                                        <Users className="w-12 h-12 mx-auto mb-3 text-gray-200" />
+                                        <p className="text-gray-400 mb-3">
+                                            Nenhum colaborador encontrado
+                                        </p>
+                                        {canManageRH && (
+                                            <Button
+                                                onClick={() => abrirModal()}
+                                                size="sm"
+                                                style={{
+                                                    background:
+                                                        "linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)",
+                                                }}
+                                            >
+                                                <Plus className="w-4 h-4 mr-2" />
+                                                Cadastrar Colaborador
+                                            </Button>
+                                        )}
+                                    </td>
+                                </tr>
+                            ) : (
+                                colaboradoresFiltrados.map((colaborador) => {
+                                    const statusStyle = getStatusStyle(colaborador.status);
+                                    const admissao = colaborador.data_admissao
+                                        ? new Date(
+                                              colaborador.data_admissao + "T00:00:00"
+                                          ).toLocaleDateString("pt-BR")
+                                        : null;
+                                    return (
+                                        <tr
+                                            key={colaborador.id}
+                                            className="border-b last:border-0 hover:bg-gray-50/70 transition-colors"
+                                            style={{ borderColor: "#F0EBE3" }}
                                         >
-                                            {colaborador.nome_completo?.charAt(0).toUpperCase() || '?'}
-                                        </div>
-                                        <div>
-                                            <p className="font-semibold" style={{ color: '#07593f' }}>
-                                                {formatarNome(colaborador.nome_completo)}
-                                            </p>
-                                            <div className="flex items-center gap-3 text-sm text-gray-500">
-                                                <span className="flex items-center gap-1">
-                                                    <Building className="w-3 h-3" />
-                                                    {colaborador.cargo || 'Sem cargo'}
+                                            {/* Colaborador name + email */}
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-center gap-3">
+                                                    <div
+                                                        className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                                                        style={{
+                                                            background: getAvatarGradient(
+                                                                colaborador.status
+                                                            ),
+                                                        }}
+                                                    >
+                                                        {colaborador.nome_completo
+                                                            ?.charAt(0)
+                                                            .toUpperCase() || "?"}
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <p
+                                                            className="font-semibold truncate"
+                                                            style={{ color: "#07593f" }}
+                                                        >
+                                                            {formatarNome(colaborador.nome_completo) ||
+                                                                "Sem nome"}
+                                                        </p>
+                                                        {colaborador.email && (
+                                                            <p className="text-xs text-gray-400 truncate hidden sm:block">
+                                                                {colaborador.email}
+                                                            </p>
+                                                        )}
+                                                        {/* On mobile, show cargo below name */}
+                                                        <p className="text-xs text-gray-500 md:hidden mt-0.5">
+                                                            {colaborador.cargo || "Sem cargo"}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </td>
+
+                                            {/* Cargo */}
+                                            <td className="px-4 py-3 hidden md:table-cell">
+                                                <span className="flex items-center gap-1.5 text-gray-700">
+                                                    <Building className="w-3 h-3 text-gray-400 shrink-0" />
+                                                    {colaborador.cargo || (
+                                                        <span className="text-gray-300 italic">
+                                                            Sem cargo
+                                                        </span>
+                                                    )}
                                                 </span>
-                                                {colaborador.tipo_contrato && (
-                                                    <Badge variant="outline" className="text-xs">
+                                            </td>
+
+                                            {/* Contrato */}
+                                            <td className="px-4 py-3 hidden lg:table-cell">
+                                                {colaborador.tipo_contrato ? (
+                                                    <Badge
+                                                        variant="outline"
+                                                        className="text-xs font-normal"
+                                                    >
                                                         {colaborador.tipo_contrato}
                                                     </Badge>
+                                                ) : (
+                                                    <span className="text-gray-300">—</span>
                                                 )}
-                                            </div>
-                                            <div className="flex items-center gap-3 text-xs text-gray-400 mt-1">
-                                                {colaborador.telefone && (
-                                                    <span className="flex items-center gap-1">
-                                                        <Phone className="w-3 h-3" />
-                                                        {formatarTelefone(colaborador.telefone)}
-                                                    </span>
-                                                )}
-                                                {colaborador.email && (
-                                                    <span className="flex items-center gap-1">
-                                                        <Mail className="w-3 h-3" />
-                                                        {colaborador.email}
-                                                    </span>
-                                                )}
-                                                {colaborador.data_admissao && (
-                                                    <span className="flex items-center gap-1">
-                                                        <Calendar className="w-3 h-3" />
-                                                        Desde {new Date(colaborador.data_admissao).toLocaleDateString('pt-BR')}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
+                                            </td>
 
-                                    <div className="flex items-center gap-3">
-                                        {colaborador.salario_base && (
-                                            <div className="text-right mr-4 hidden md:block">
-                                                <p className="text-xs text-gray-500">Salário Base</p>
-                                                <p className="font-semibold" style={{ color: '#07593f' }}>
-                                                    R$ {Number(colaborador.salario_base).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                </p>
-                                            </div>
-                                        )}
-                                        <Badge style={getStatusBadgeStyle(colaborador.status)}>
-                                            {colaborador.status || 'Indefinido'}
-                                        </Badge>
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="ghost" size="icon">
-                                                    <MoreVertical className="w-4 h-4" />
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                <DropdownMenuItem onClick={() => abrirDetalhes(colaborador)} disabled={colaborador.isAcessoRapido}>
-                                                    <Eye className="w-4 h-4 mr-2" />
-                                                    Ver Detalhes
-                                                </DropdownMenuItem>
-                                                <DropdownMenuItem onClick={() => abrirResumo(colaborador)} disabled={colaborador.isAcessoRapido}>
-                                                    <FileText className="w-4 h-4 mr-2" />
-                                                    Ver Resumo Contratação
-                                                </DropdownMenuItem>
-                                                <DropdownMenuSeparator />
-                                                {colaborador.isAcessoRapido && (
-                                                    <DropdownMenuItem onClick={() => abrirModal({
-                                                        nome_completo: colaborador.full_name,
-                                                        email: colaborador.email,
-                                                        cargo: colaborador.cargo,
-                                                        user_id: colaborador.id,
-                                                        isAcessoRapido: true
-                                                    })}>
-                                                        <UserCheck className="w-4 h-4 mr-2 text-blue-600" />
-                                                        Completar Cadastro RH
-                                                    </DropdownMenuItem>
+                                            {/* Admissão */}
+                                            <td className="px-4 py-3 hidden lg:table-cell text-gray-600">
+                                                {admissao || (
+                                                    <span className="text-gray-300">—</span>
                                                 )}
-                                                <DropdownMenuItem onClick={() => {
-                                                    if (colaborador.isAcessoRapido) {
-                                                        abrirModal({
-                                                            nome_completo: colaborador.full_name,
-                                                            email: colaborador.email,
-                                                            cargo: colaborador.cargo,
-                                                            user_id: colaborador.id,
-                                                            isAcessoRapido: true
-                                                        });
-                                                    } else {
-                                                        abrirModal(colaborador);
-                                                    }
-                                                }}>
-                                                    <Edit className="w-4 h-4 mr-2" />
-                                                    Editar
-                                                </DropdownMenuItem>
-                                                <DropdownMenuItem onClick={() => {
-                                                    if (colaborador.isAcessoRapido) {
-                                                        setColaboradorSelecionado({
-                                                            ...colaborador,
-                                                            nome_completo: colaborador.full_name,
-                                                            user_id: colaborador.id,
-                                                            isAcessoRapido: true
-                                                        });
-                                                    } else {
-                                                        setColaboradorSelecionado(colaborador);
-                                                    }
-                                                    setInitialTab("profissional");
-                                                    setModalAberto(true);
-                                                }}>
-                                                    <Shield className="w-4 h-4 mr-2" />
-                                                    Alterar Cargo
-                                                </DropdownMenuItem>
-                                                <DropdownMenuSeparator />
-                                                {(colaborador.user_id || colaborador.isAcessoRapido) && (
-                                                    <DropdownMenuItem onClick={() => handleResetPassword(colaborador)}>
-                                                        <RotateCcw className="w-4 h-4 mr-2" />
-                                                        Redefinir Senha
-                                                    </DropdownMenuItem>
+                                            </td>
+
+                                            {/* Matrícula */}
+                                            <td className="px-4 py-3 hidden xl:table-cell">
+                                                {colaborador.matricula ? (
+                                                    <code className="text-xs bg-gray-100 px-2 py-0.5 rounded font-mono text-gray-700">
+                                                        {colaborador.matricula}
+                                                    </code>
+                                                ) : (
+                                                    <span className="text-gray-300">—</span>
                                                 )}
-                                                <DropdownMenuItem
-                                                    onClick={() => setConfirmDelete(colaborador)}
-                                                    className="text-red-600"
-                                                    disabled={colaborador.isAcessoRapido}
+                                            </td>
+
+                                            {/* Status badge */}
+                                            <td className="px-4 py-3 text-center">
+                                                <Badge
+                                                    className="text-xs"
+                                                    style={{
+                                                        backgroundColor: statusStyle.bg,
+                                                        color: statusStyle.color,
+                                                        border: "none",
+                                                    }}
                                                 >
-                                                    <Trash2 className="w-4 h-4 mr-2" />
-                                                    Excluir
-                                                </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
+                                                    {colaborador.status || "Indefinido"}
+                                                </Badge>
+                                            </td>
+
+                                            {/* Actions */}
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-center justify-end gap-1">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-gray-500 hover:text-gray-800"
+                                                        title="Ver detalhes"
+                                                        onClick={() =>
+                                                            abrirDetalhes(colaborador)
+                                                        }
+                                                    >
+                                                        <Eye className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                    {canManageRH && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-8 w-8 text-gray-500 hover:text-gray-800"
+                                                            title="Editar"
+                                                            onClick={() =>
+                                                                abrirModal(colaborador)
+                                                            }
+                                                        >
+                                                            <Edit className="w-3.5 h-3.5" />
+                                                        </Button>
+                                                    )}
+                                                    <DropdownMenu>
+                                                        <DropdownMenuTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-8 w-8 text-gray-500 hover:text-gray-800"
+                                                            >
+                                                                <MoreVertical className="w-3.5 h-3.5" />
+                                                            </Button>
+                                                        </DropdownMenuTrigger>
+                                                        <DropdownMenuContent align="end">
+                                                            <DropdownMenuItem
+                                                                onClick={() => {
+                                                                    setNovoColaborador(
+                                                                        colaborador
+                                                                    );
+                                                                    setModalResumo(true);
+                                                                }}
+                                                            >
+                                                                <FileText className="w-4 h-4 mr-2" />
+                                                                Resumo de Contratação
+                                                            </DropdownMenuItem>
+                                                            {canManageRH && (
+                                                                <>
+                                                                    <DropdownMenuSeparator />
+                                                                    <DropdownMenuItem
+                                                                        onClick={() =>
+                                                                            abrirModal(
+                                                                                colaborador,
+                                                                                "profissional"
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <Shield className="w-4 h-4 mr-2" />
+                                                                        Alterar Cargo
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuItem
+                                                                        className="text-red-600 focus:text-red-600"
+                                                                        onClick={() =>
+                                                                            setConfirmDelete(
+                                                                                colaborador
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <Trash2 className="w-4 h-4 mr-2" />
+                                                                        Excluir
+                                                                    </DropdownMenuItem>
+                                                                </>
+                                                            )}
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Table footer */}
+                {colaboradoresFiltrados.length > 0 && (
+                    <div
+                        className="px-4 py-2 border-t text-xs text-gray-400 flex items-center justify-between"
+                        style={{
+                            borderColor: "#E5E0D8",
+                            backgroundColor: "#F9F6F2",
+                        }}
+                    >
+                        <span>
+                            {colaboradoresFiltrados.length} de{" "}
+                            {colaboradoresEnriquecidos.length} colaboradores
+                        </span>
+                        {(filtroStatus !== "todos" || filtroContrato !== "todos" || busca) && (
+                            <button
+                                className="text-blue-600 hover:underline"
+                                onClick={() => {
+                                    setFiltroStatus("todos");
+                                    setFiltroContrato("todos");
+                                    setBusca("");
+                                }}
+                            >
+                                Limpar filtros
+                            </button>
+                        )}
+                    </div>
+                )}
+            </div>
 
             {/* Modals */}
             {modalAberto && (
@@ -582,13 +680,16 @@ export default function ColaboradoresTab() {
                         setModalAberto(false);
                         setColaboradorSelecionado(null);
                     }}
-                    onSuccess={!colaboradorSelecionado ? handleNovoColaboradorSuccess : undefined}
+                    onSuccess={
+                        !colaboradorSelecionado ? handleNovoColaboradorSuccess : undefined
+                    }
                 />
             )}
 
             {modalDetalhes && colaboradorSelecionado && (
                 <ColaboradorDetalhesModal
                     colaborador={colaboradorSelecionado}
+                    canEdit={canManageRH}
                     onClose={() => {
                         setModalDetalhes(false);
                         setColaboradorSelecionado(null);
@@ -600,11 +701,9 @@ export default function ColaboradoresTab() {
                 />
             )}
 
-            {/* Hiring Summary Modal */}
             {modalResumo && novoColaborador && (
                 <ContratacaoResumoModal
                     colaborador={novoColaborador}
-                    onGenerateAccess={handleGerarAcesso}
                     onClose={() => {
                         setModalResumo(false);
                         setNovoColaborador(null);
@@ -612,22 +711,17 @@ export default function ColaboradoresTab() {
                 />
             )}
 
-            {/* Quick System Access Modal */}
-            {modalUsuarioAberto && (
-                <ModalUsuario
-                    caminhoes={caminhoes}
-                    onClose={() => setModalUsuarioAberto(false)}
-                />
-            )}
-
-            {/* Delete Confirmation */}
-            <AlertDialog open={!!confirmDelete} onOpenChange={() => setConfirmDelete(null)}>
+            <AlertDialog
+                open={!!confirmDelete}
+                onOpenChange={() => setConfirmDelete(null)}
+            >
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Tem certeza que deseja excluir o colaborador <strong>{confirmDelete?.nome_completo}</strong>?
-                            Esta ação não pode ser desfeita.
+                            Tem certeza que deseja excluir{" "}
+                            <strong>{confirmDelete?.nome_completo}</strong>? Esta ação não
+                            pode ser desfeita.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -641,84 +735,6 @@ export default function ColaboradoresTab() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-
-            {/* Password Reset Result Modal */}
-            <Dialog open={!!passwordResetData} onOpenChange={() => {
-                setPasswordResetData(null);
-                setShowPassword(false);
-            }}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <RotateCcw className="w-5 h-5 text-orange-600" />
-                            Senha Redefinida
-                        </DialogTitle>
-                        <DialogDescription>
-                            Dados de acesso para <strong>{colaboradorSelecionado?.nome_completo}</strong>
-                        </DialogDescription>
-                    </DialogHeader>
-
-                    <div className="py-4 space-y-4">
-                        {passwordResetData?.whatsappSent ? (
-                            <Alert className="bg-green-50 border-green-200">
-                                <CheckCircle2 className="w-4 h-4 text-green-600" />
-                                <AlertDescription className="text-green-800">
-                                    A nova senha foi enviada para o WhatsApp do colaborador!
-                                </AlertDescription>
-                            </Alert>
-                        ) : (
-                            <Alert className="bg-yellow-50 border-yellow-200">
-                                <AlertCircle className="w-4 h-4 text-yellow-600" />
-                                <AlertDescription className="text-yellow-800">
-                                    Não foi possível enviar via WhatsApp. Informe os dados manualmente:
-                                </AlertDescription>
-                            </Alert>
-                        )}
-
-                        <div className="space-y-3">
-                            <div className="p-3 bg-gray-50 rounded-lg">
-                                <p className="text-xs text-gray-500 mb-1">Matrícula</p>
-                                <div className="flex items-center justify-between">
-                                    <code className="text-lg font-mono font-bold">{passwordResetData?.matricula}</code>
-                                    <Button size="sm" variant="ghost" onClick={() => copyToClipboard(passwordResetData?.matricula, 'Matrícula')}>
-                                        <Copy className="w-4 h-4" />
-                                    </Button>
-                                </div>
-                            </div>
-
-                            <div className="p-3 bg-gray-50 rounded-lg">
-                                <p className="text-xs text-gray-500 mb-1">Nova Senha Temporária</p>
-                                <div className="flex items-center justify-between">
-                                    <code className="text-lg font-mono font-bold">
-                                        {showPassword ? passwordResetData?.password : '••••••••'}
-                                    </code>
-                                    <div className="flex gap-1">
-                                        <Button size="sm" variant="ghost" onClick={() => setShowPassword(!showPassword)}>
-                                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                        </Button>
-                                        <Button size="sm" variant="ghost" onClick={() => copyToClipboard(passwordResetData?.password, 'Senha')}>
-                                            <Copy className="w-4 h-4" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <Alert className="bg-blue-50 border-blue-200">
-                            <Shield className="w-4 h-4 text-blue-600" />
-                            <AlertDescription className="text-blue-800 text-sm">
-                                O colaborador deverá trocar esta senha no próximo acesso.
-                            </AlertDescription>
-                        </Alert>
-                    </div>
-
-                    <DialogFooter>
-                        <Button onClick={() => setPasswordResetData(null)} style={{ background: '#07593f' }}>
-                            Fechar
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
         </div>
     );
 }

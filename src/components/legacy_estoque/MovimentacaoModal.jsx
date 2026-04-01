@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { base44 } from "@/api/base44Client";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { base44, supabase } from "@/api/base44Client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,9 @@ import { ArrowUpCircle, ArrowDownCircle, CheckCircle2, Loader2 } from "lucide-re
 import { toast } from "sonner";
 import { calcularEstoqueTotal, obterCampoEstoqueDaLoja } from "@/constants/productConstants";
 import { useLojas } from "@/hooks/useLojas";
+import { useAuth } from "@/hooks/useAuth";
+
+const LOJA_CD_FALLBACK = { id: "cd-fallback", nome: "Depósito / CD" };
 
 export default function MovimentacaoModal({
   open,
@@ -20,10 +23,10 @@ export default function MovimentacaoModal({
   onSuccess
 }) {
   const { data: lojasReal = [] } = useLojas();
+  const { user } = useAuth();
   const [quantidade, setQuantidade] = useState("");
-  const [tipo, setTipo] = useState("entrada");
+  const [tipo, setTipo] = useState("cd_para_loja");
   const [lojaId, setLojaId] = useState("");
-  const [fornecedorId, setFornecedorId] = useState("");
 
   const isOpen = open ?? legacyIsOpen ?? false;
   const handleClose = () => {
@@ -38,62 +41,143 @@ export default function MovimentacaoModal({
   const inputRef = useRef(null);
   const queryClient = useQueryClient();
 
+  const lojasComCd = React.useMemo(() => {
+    const base = Array.isArray(lojasReal) ? [...lojasReal] : [];
+    const hasCd = base.some((loja) => obterCampoEstoqueDaLoja(loja) === "estoque_cd");
+    if (!hasCd) base.unshift(LOJA_CD_FALLBACK);
+    return base;
+  }, [lojasReal]);
+
+  const lojasSemCd = React.useMemo(
+    () => lojasComCd.filter((loja) => obterCampoEstoqueDaLoja(loja) !== "estoque_cd"),
+    [lojasComCd]
+  );
+
+  const cdLoja = React.useMemo(
+    () => lojasComCd.find((loja) => obterCampoEstoqueDaLoja(loja) === "estoque_cd") || LOJA_CD_FALLBACK,
+    [lojasComCd]
+  );
+
   // Reset state when modal opens/product changes
   useEffect(() => {
     if (isOpen) {
       setQuantidade("");
-      setTipo("entrada");
-      setLojaId(lojasReal[0]?.id || "");
-      setFornecedorId(produto?.fornecedor_id || "");
+      setTipo("cd_para_loja");
+      setLojaId(lojasSemCd[0]?.id || "");
       // Focus quantity input after a short delay to allow modal animation
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [isOpen, produto, lojasReal]);
-
-  const { data: fornecedores = [] } = useQuery({
-    queryKey: ['fornecedores'],
-    queryFn: () => base44.entities.Fornecedor.list('nome'),
-    enabled: isOpen
-  });
+  }, [isOpen, lojasSemCd]);
 
   const mutation = useMutation({
     mutationFn: async () => {
       const qtd = parseInt(quantidade);
       if (!qtd || qtd <= 0) throw new Error("Quantidade inválida");
 
-      const lojaInfo = lojasReal.find(l => l.id === lojaId);
-      const fieldName = obterCampoEstoqueDaLoja(lojaInfo || lojaId);
-      const currentLocalStock = produto[fieldName] || 0;
+      const lojaInfo = lojasComCd.find(l => l.id === lojaId);
+      if (!lojaInfo) throw new Error("Selecione a loja de transferência.");
 
-      const novaQtdLocal = tipo === 'entrada'
-        ? currentLocalStock + qtd
-        : currentLocalStock - qtd;
+      const campoCd = "estoque_cd";
+      const campoLoja = obterCampoEstoqueDaLoja(lojaInfo);
 
-      // Recalcular total dinamicamente usando a lista de lojas real
-      const produtoAtualizadoLocalmente = {
-        ...produto,
-        [fieldName]: novaQtdLocal
-      };
-      const novaQtdTotal = calcularEstoqueTotal(produtoAtualizadoLocalmente, lojasReal);
+      const origemCampo = tipo === "cd_para_loja" ? campoCd : campoLoja;
+      const destinoCampo = tipo === "cd_para_loja" ? campoLoja : campoCd;
 
-      if (tipo === 'saida' && novaQtdLocal < 0) throw new Error(`Estoque em ${lojaInfo?.nome || lojaId} insuficiente (${currentLocalStock})`);
+      const origemNome = tipo === "cd_para_loja" ? cdLoja.nome : lojaInfo.nome;
+      const destinoNome = tipo === "cd_para_loja" ? lojaInfo.nome : cdLoja.nome;
 
-      const updates = {
-        [fieldName]: novaQtdLocal,
-        quantidade_estoque: novaQtdTotal
-      };
+      const estoqueOrigemAntes = Number(produto[origemCampo] || 0);
+      const estoqueDestinoAntes = Number(produto[destinoCampo] || 0);
 
-      if (tipo === 'entrada' && fornecedorId) {
-        const forn = fornecedores.find(f => f.id === fornecedorId);
-        updates.fornecedor_id = fornecedorId;
-        updates.fornecedor_nome = forn?.nome;
+      if (estoqueOrigemAntes < qtd) {
+        throw new Error(`Estoque insuficiente em ${origemNome} (${estoqueOrigemAntes}).`);
       }
 
+      const estoqueOrigemDepois = estoqueOrigemAntes - qtd;
+      const estoqueDestinoDepois = estoqueDestinoAntes + qtd;
+
+      const produtoAtualizadoLocalmente = {
+        ...produto,
+        [origemCampo]: estoqueOrigemDepois,
+        [destinoCampo]: estoqueDestinoDepois,
+      };
+      const novaQtdTotal = calcularEstoqueTotal(produtoAtualizadoLocalmente, lojasComCd);
+
+      const updates = {
+        [origemCampo]: estoqueOrigemDepois,
+        [destinoCampo]: estoqueDestinoDepois,
+        quantidade_estoque: novaQtdTotal,
+      };
+
       await base44.entities.Produto.update(produto.id, updates);
+      try {
+        await supabase.from('movimentacoes_estoque').insert([
+          {
+            produto_id: produto.id,
+            evento_tipo: 'transferencia_saida',
+            modulo_origem: 'estoque',
+            quantidade: qtd,
+            estoque_antes_local: estoqueOrigemAntes,
+            estoque_depois_local: estoqueOrigemDepois,
+            estoque_antes_total: produto.quantidade_estoque || 0,
+            estoque_depois_total: novaQtdTotal,
+            loja_origem: origemNome,
+            loja_destino: destinoNome,
+            referencia_tipo: 'movimentacao_modal',
+            usuario_nome: user?.full_name || user?.nome || null,
+            organization_id: '00000000-0000-0000-0000-000000000001'
+          },
+          {
+            produto_id: produto.id,
+            evento_tipo: 'transferencia_entrada',
+            modulo_origem: 'estoque',
+            quantidade: qtd,
+            estoque_antes_local: estoqueDestinoAntes,
+            estoque_depois_local: estoqueDestinoDepois,
+            estoque_antes_total: produto.quantidade_estoque || 0,
+            estoque_depois_total: novaQtdTotal,
+            loja_origem: origemNome,
+            loja_destino: destinoNome,
+            referencia_tipo: 'movimentacao_modal',
+            usuario_nome: user?.full_name || user?.nome || null,
+            organization_id: '00000000-0000-0000-0000-000000000001'
+          }
+        ]);
+      } catch (auditErr) {
+        console.warn('Falha ao registrar movimentação de transferência:', auditErr);
+      }
+
+      return {
+        id: produto.id,
+        ...produto,
+        ...updates
+      };
     },
-    onSuccess: () => {
+    onSuccess: (produtoAtualizado) => {
+      // Atualiza imediatamente os caches locais para feedback instantaneo.
+      queryClient.setQueryData(['produtos'], (old) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((p) => (p.id === produtoAtualizado.id ? { ...p, ...produtoAtualizado } : p));
+      });
+
+      queryClient.setQueriesData(
+        { queryKey: ['produtos-paginated'] },
+        (oldData) => {
+          if (!oldData?.pages) return oldData;
+          return {
+            ...oldData,
+            pages: oldData.pages.map((page) => ({
+              ...page,
+              data: (page.data || []).map((p) => (p.id === produtoAtualizado.id ? { ...p, ...produtoAtualizado } : p))
+            }))
+          };
+        }
+      );
+
       queryClient.invalidateQueries({ queryKey: ['produtos'] });
-      toast.success("Estoque atualizado!");
+      queryClient.invalidateQueries({ queryKey: ['produtos-paginated'] });
+      queryClient.invalidateQueries({ queryKey: ['produtos-atencao-count'] });
+      toast.success("Transferência realizada com sucesso!");
       onSuccess?.();
       handleClose();
     },
@@ -121,38 +205,38 @@ export default function MovimentacaoModal({
         </DialogHeader>
 
         <div className="grid gap-6 py-4">
-          {/* Tabs Tipo */}
+          {/* Direção da transferência */}
           <div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 dark:bg-neutral-800 rounded-lg">
             <button
-              onClick={() => setTipo('entrada')}
-              className={`flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all ${tipo === 'entrada'
+              onClick={() => setTipo('cd_para_loja')}
+              className={`flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all ${tipo === 'cd_para_loja'
                 ? 'bg-white dark:bg-neutral-700 text-green-600 shadow-sm'
                 : 'text-gray-500 hover:text-gray-700'
                 }`}
             >
-              <ArrowUpCircle className="w-4 h-4" /> Entrada
+              <ArrowDownCircle className="w-4 h-4" /> CD → Loja
             </button>
             <button
-              onClick={() => setTipo('saida')}
-              className={`flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all ${tipo === 'saida'
+              onClick={() => setTipo('loja_para_cd')}
+              className={`flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all ${tipo === 'loja_para_cd'
                 ? 'bg-white dark:bg-neutral-700 text-red-600 shadow-sm'
                 : 'text-gray-500 hover:text-gray-700'
                 }`}
             >
-              <ArrowDownCircle className="w-4 h-4" /> Saída
+              <ArrowUpCircle className="w-4 h-4" /> Loja → CD
             </button>
           </div>
 
           {/* Inputs */}
           <div className="space-y-4">
             <div>
-              <Label>Local</Label>
+              <Label>Loja</Label>
               <Select value={lojaId} onValueChange={setLojaId}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {lojasReal.map(loja => (
+                  {lojasSemCd.map(loja => (
                     <SelectItem key={loja.id} value={loja.id}>{loja.nome}</SelectItem>
                   ))}
                 </SelectContent>
@@ -161,22 +245,32 @@ export default function MovimentacaoModal({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-gray-50 dark:bg-neutral-800 p-3 rounded-lg text-center border border-gray-100 dark:border-neutral-700">
-                <p className="text-xs text-gray-500 uppercase">Atual</p>
-                <p className="text-2xl font-bold text-gray-700 dark:text-gray-300">{produto.quantidade_estoque}</p>
+                <p className="text-xs text-gray-500 uppercase">Origem</p>
+                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  {tipo === 'cd_para_loja' ? cdLoja.nome : (lojasComCd.find(l => l.id === lojaId)?.nome || '-')}
+                </p>
+                <p className="text-2xl font-bold text-gray-700 dark:text-gray-300 mt-1">
+                  {tipo === 'cd_para_loja'
+                    ? Number(produto.estoque_cd || 0)
+                    : Number(produto[obterCampoEstoqueDaLoja(lojasComCd.find(l => l.id === lojaId) || lojaId)] || 0)
+                  }
+                </p>
               </div>
-              <div className={`p-3 rounded-lg text-center border ${tipo === 'entrada'
+              <div className={`p-3 rounded-lg text-center border ${tipo === 'cd_para_loja'
                 ? 'bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-900'
                 : 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900'
                 }`}>
-                <p className={`text-xs uppercase ${tipo === 'entrada' ? 'text-green-600' : 'text-red-600'}`}>
-                  Final
+                <p className={`text-xs uppercase ${tipo === 'cd_para_loja' ? 'text-green-600' : 'text-red-600'}`}>
+                  Destino
                 </p>
-                <p className={`text-2xl font-bold ${tipo === 'entrada' ? 'text-green-700' : 'text-red-700'}`}>
-                  {quantidade ? (
-                    tipo === 'entrada'
-                      ? (produto.quantidade_estoque || 0) + parseInt(quantidade)
-                      : (produto.quantidade_estoque || 0) - parseInt(quantidade)
-                  ) : '-'}
+                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  {tipo === 'cd_para_loja' ? (lojasComCd.find(l => l.id === lojaId)?.nome || '-') : cdLoja.nome}
+                </p>
+                <p className={`text-2xl font-bold mt-1 ${tipo === 'cd_para_loja' ? 'text-green-700' : 'text-red-700'}`}>
+                  {tipo === 'cd_para_loja'
+                    ? Number(produto[obterCampoEstoqueDaLoja(lojasComCd.find(l => l.id === lojaId) || lojaId)] || 0)
+                    : Number(produto.estoque_cd || 0)
+                  }
                 </p>
               </div>
             </div>
@@ -194,33 +288,21 @@ export default function MovimentacaoModal({
               />
             </div>
 
-            {tipo === 'entrada' && (
-              <div>
-                <Label>Fornecedor (Opcional)</Label>
-                <Select value={fornecedorId} onValueChange={setFornecedorId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {fornecedores.map(f => (
-                      <SelectItem key={f.id} value={f.id}>{f.nome}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <p className="text-xs text-gray-500">
+              A transferência move quantidade entre CD e loja sem alterar o estoque total do produto.
+            </p>
           </div>
 
           <Button
-            className={`w-full h-12 text-lg ${tipo === 'entrada'
+            className={`w-full h-12 text-lg ${tipo === 'cd_para_loja'
               ? 'bg-green-600 hover:bg-green-700'
               : 'bg-red-600 hover:bg-red-700'
               }`}
             onClick={() => mutation.mutate()}
-            disabled={mutation.isPending || !quantidade}
+            disabled={mutation.isPending || !quantidade || !lojaId}
           >
             {mutation.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5 mr-2" />}
-            Confirmar {tipo === 'entrada' ? 'Entrada' : 'Saída'}
+            Confirmar {tipo === 'cd_para_loja' ? 'CD → Loja' : 'Loja → CD'}
           </Button>
         </div>
       </DialogContent>

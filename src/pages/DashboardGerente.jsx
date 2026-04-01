@@ -56,7 +56,6 @@ import {
     Search,
     Eye,
     FileText,
-    Sofa,
     Filter
 } from "lucide-react";
 import {
@@ -115,17 +114,6 @@ export default function DashboardGerente() {
     const [buscaPedido, setBuscaPedido] = useState('');
     const [buscaEntrega, setBuscaEntrega] = useState('');
     const [pedidoSelecionado, setPedidoSelecionado] = useState(null);
-
-    // Estados para mostruário
-    const [mostruarioModalOpen, setMostruarioModalOpen] = useState(false);
-    const [produtoParaMostruario, setProdutoParaMostruario] = useState(null);
-    const [mostruarioMotivo, setMostruarioMotivo] = useState('');
-
-    // Estados para solicitar mostruário (nova funcionalidade)
-    const [solicitarMostruarioModalOpen, setSolicitarMostruarioModalOpen] = useState(false);
-    const [buscaProdutoMostruario, setBuscaProdutoMostruario] = useState('');
-    const [produtoSelecionadoMostruario, setProdutoSelecionadoMostruario] = useState(null);
-    const [quantidadeMostruario, setQuantidadeMostruario] = useState(1);
 
     // Estados para detalhes do produto (Curva ABC)
     const [produtoModalOpen, setProdutoModalOpen] = useState(false);
@@ -206,13 +194,6 @@ export default function DashboardGerente() {
         enabled: !!user
     });
 
-    // Query para pedidos de mostruário
-    const { data: pedidosMostruario = [], refetch: refetchMostruario } = useQuery({
-        queryKey: ['pedidos-mostruario'],
-        queryFn: () => base44.entities.PedidoMostruario.list('-created_at'),
-        enabled: !!user
-    });
-
     const { data: assistencias = [] } = useQuery({
         queryKey: ['assistencias-gerente'],
         queryFn: () => base44.entities.AssistenciaTecnica.list(),
@@ -223,6 +204,12 @@ export default function DashboardGerente() {
     const { data: solicitacoesPreco = [], refetch: refetchSolicitacoesPreco } = useQuery({
         queryKey: ['solicitacoes-preco-gerente'],
         queryFn: () => base44.entities.SolicitacaoPreco.list('-data_solicitacao'),
+        enabled: !!user
+    });
+
+    const { data: fechamentosComissao = [] } = useQuery({
+        queryKey: ['comissoes-fechamento-dashboard'],
+        queryFn: () => base44.entities.ComissaoFechamentoMensal.list('-created_at'),
         enabled: !!user
     });
 
@@ -290,99 +277,6 @@ export default function DashboardGerente() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries(['tokens-gerenciais']);
-        }
-    });
-
-    // Mutation para marcar produto como mostruário
-    const marcarMostruario = useMutation({
-        mutationFn: async ({ produtoId, isMostruario, loja, motivo }) => {
-            await base44.entities.Produto.update(produtoId, {
-                is_mostruario: isMostruario,
-                mostruario_loja: isMostruario ? loja : null,
-                mostruario_data: isMostruario ? new Date().toISOString() : null
-            });
-            // Registrar movimentação
-            if (isMostruario) {
-                await base44.entities.MostruarioMovimentacao.create({
-                    produto_id: produtoId,
-                    produto_nome: produtoParaMostruario?.nome || '',
-                    loja: loja,
-                    tipo: 'entrada',
-                    quantidade: 1,
-                    motivo: motivo || 'Marcar como mostruário',
-                    usuario_id: user?.id,
-                    usuario_nome: user?.full_name
-                });
-            }
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries(['produtos-gerente']);
-            queryClient.invalidateQueries(['pedidos-mostruario']);
-            setMostruarioModalOpen(false);
-            setProdutoParaMostruario(null);
-            setMostruarioMotivo('');
-        }
-    });
-
-    // Mutation para criar pedido de mostruário (solicitação para montagem interna)
-    const criarPedidoMostruario = useMutation({
-        mutationFn: async (pedido) => {
-            const { resolveStockField } = await import("@/utils/stockUtils");
-
-            // 1. Create PedidoMostruario record
-            const novoPedido = await base44.entities.PedidoMostruario.create(pedido);
-
-            // 2. Move stock: deduct from CD, add to destination store showroom
-            if (pedido.produto_id) {
-                const produtosAll = await base44.entities.Produto.list();
-                const produto = produtosAll.find(p => String(p.id) === String(pedido.produto_id));
-                if (produto) {
-                    const qty = pedido.quantidade || 1;
-                    const campoDestino = resolveStockField(pedido.loja);
-                    const updates = {
-                        estoque_cd: Math.max(0, (produto.estoque_cd || 0) - qty),
-                    };
-                    if (campoDestino && campoDestino !== 'estoque_cd') {
-                        updates[campoDestino] = (produto[campoDestino] || 0) + qty;
-                    }
-                    await base44.entities.Produto.update(produto.id, updates);
-                }
-            }
-
-            // 3. Create assembly order tagged as mostruário
-            await base44.entities.Montagem.create({
-                numero_pedido: `MOST-${novoPedido.id || Date.now()}`,
-                venda_id: null,
-                cliente_nome: `MOSTRUÁRIO - ${pedido.loja}`,
-                cliente_telefone: '-',
-                endereco_montagem: pedido.loja,
-                data_montagem: new Date().toISOString().split('T')[0],
-                status: 'Pendente',
-                tipo_montagem: 'mostruario',
-                loja_mostruario: pedido.loja,
-                observacoes: `Montagem de Mostruário para ${pedido.loja}. ${pedido.observacoes || ''}`,
-                itens: [{
-                    produto_nome: pedido.produto_nome,
-                    quantidade: pedido.quantidade || 1,
-                    valor_montagem: 0,
-                    montagem_externa: false
-                }]
-            });
-
-            return novoPedido;
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries(['pedidos-mostruario']);
-            queryClient.invalidateQueries(['pedidos-mostruario-montagem']);
-            queryClient.invalidateQueries(['montagens']);
-            queryClient.invalidateQueries(['produtos']);
-            setSolicitarMostruarioModalOpen(false);
-            setBuscaProdutoMostruario('');
-            setProdutoSelecionadoMostruario(null);
-            setQuantidadeMostruario(1);
-            toast.success('🔧 Montagem solicitada!', {
-                description: 'Estoque movido CD → loja e montagem agendada.'
-            });
         }
     });
 
@@ -753,6 +647,38 @@ export default function DashboardGerente() {
 
     const totalComissoes = comissoesPorVendedor.reduce((sum, v) => sum + v.comissao, 0);
 
+    const comissoesPendentesFechamento = useMemo(() => {
+        const hoje = new Date();
+        const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0, 10);
+        const fimMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).toISOString().slice(0, 10);
+
+        const fechamentosPendentes = (fechamentosComissao || []).filter((item) => {
+            const inicio = (item.periodo_inicio || '').slice(0, 10);
+            const fim = (item.periodo_fim || '').slice(0, 10);
+            const statusPendente = item.status !== 'Pago';
+            const periodoAtual = inicio === inicioMes && fim === fimMes;
+            const lojaMatch = lojaAtiva === 'todas' || item.loja === lojaAtiva;
+            return statusPendente && periodoAtual && lojaMatch;
+        });
+
+        return fechamentosPendentes
+            .map((item) => {
+                const userEncontrado = users.find((u) => u.id === item.vendedor_id);
+                return {
+                    id: item.vendedor_id || item.id,
+                    nome: userEncontrado?.full_name || 'Vendedor',
+                    vendas: item.quantidade_vendas || 0,
+                    comissao: Number(item.total_final || item.total_comissao || 0),
+                    status: item.status || 'Pendente'
+                };
+            })
+            .sort((a, b) => b.comissao - a.comissao);
+    }, [fechamentosComissao, lojaAtiva, users]);
+
+    const totalComissoesPendentes = comissoesPendentesFechamento.reduce((sum, v) => sum + v.comissao, 0);
+    const comissoesCardLista = comissoesPendentesFechamento.length > 0 ? comissoesPendentesFechamento : comissoesPorVendedor;
+    const totalComissoesCard = comissoesPendentesFechamento.length > 0 ? totalComissoesPendentes : totalComissoes;
+
     // Curva ABC de produtos
     const curvaABC = useMemo(() => {
         const produtosVendidos = {};
@@ -859,20 +785,11 @@ export default function DashboardGerente() {
         const totalValorEncalhado = encalhados.reduce((sum, p) => sum + (p.valorEstoque || 0), 0);
         const produtosC = encalhados.filter(p => p.classificacaoABC === 'C');
 
-        // Produtos de mostruário
-        const mostruarios = produtos.filter(p =>
-            p.is_mostruario &&
-            p.ativo &&
-            (lojaAtiva === 'todas' || p.mostruario_loja === lojaAtiva)
-        );
-
         return {
             encalhados: encalhados.slice(0, 10),
             totalEncalhados: encalhados.length,
             totalValorEncalhado,
-            produtosCriticos: produtosC.length, // Produtos C encalhados (alta prioridade)
-            mostruarios,
-            totalMostruarios: mostruarios.length
+            produtosCriticos: produtosC.length // Produtos C encalhados (alta prioridade)
         };
     }, [vendas, produtos, lojaAtiva, giroFiltro, curvaABC.produtos]);
 
@@ -1524,8 +1441,16 @@ export default function DashboardGerente() {
                 </Card>
             </div>
 
+            {/* Fluxo Operacional */}
+            <div className="mt-8 mb-3">
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Fluxo Operacional</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Acompanhe pedidos, entregas e pagamentos em uma sequência única de operação.
+                </p>
+            </div>
+
             {/* Tabs de Navegação do Dashboard - Estilo "Caixinha" Centralizado */}
-            <div className="mt-8 mb-6 flex justify-center">
+            <div className="mb-6 flex justify-center">
                 <Tabs value={abaDashboard} onValueChange={setAbaDashboard} className="w-full max-w-4xl">
                     <div className="flex justify-center mb-6">
                         <TabsList className="bg-gray-100 dark:bg-gray-800 p-1.5 rounded-full inline-flex items-center justify-center h-auto shadow-inner">
@@ -1541,7 +1466,7 @@ export default function DashboardGerente() {
                                 className="gap-2 px-6 py-2.5 rounded-full text-sm font-medium transition-all data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm dark:data-[state=active]:bg-gray-700 dark:data-[state=active]:text-indigo-400"
                             >
                                 <Search className="w-4 h-4" />
-                                Pesquisar Pedido
+                                Pedidos
                             </TabsTrigger>
                             <TabsTrigger
                                 value="entregas"
@@ -2185,7 +2110,22 @@ export default function DashboardGerente() {
                 </Card>
             </div>
 
-            {/* Seção 2: Comissões (mantida) */}
+            {/* Performance Comercial */}
+            <div className="mt-6 mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                <div>
+                    <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Performance Comercial</h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Comissões, evolução dos vendedores e comparação de desempenho.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+                        Comissões: {formatarMoeda(totalComissoes)}
+                    </Badge>
+                    <Badge variant="outline" className="text-gray-500 bg-white dark:bg-gray-900">
+                        Vendedores ativos: {rankingVendedores.length}
+                    </Badge>
+                </div>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Comissões a Pagar */}
                 <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20">
@@ -2194,14 +2134,14 @@ export default function DashboardGerente() {
                             <DollarSign className="w-5 h-5 text-amber-600" />
                             Comissões a Pagar
                             <Badge className="ml-auto bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
-                                {formatarMoeda(totalComissoes)}
+                                {formatarMoeda(totalComissoesCard)}
                             </Badge>
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
-                        {comissoesPorVendedor.length > 0 ? (
+                        {comissoesCardLista.length > 0 ? (
                             <div className="space-y-3 max-h-[250px] overflow-y-auto pr-2">
-                                {comissoesPorVendedor.map((v, i) => (
+                                {comissoesCardLista.map((v, i) => (
                                     <div key={v.id || v.nome} className="flex items-center justify-between p-2 bg-white dark:bg-neutral-800 rounded-lg shadow-sm border border-transparent hover:border-amber-200 transition-colors">
                                         <div className="flex items-center gap-3">
                                             <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center text-sm font-bold text-amber-700 shadow-sm">
@@ -2224,11 +2164,38 @@ export default function DashboardGerente() {
                         )}
                     </CardContent>
                 </Card>
-                {/* Coluna vazia para não esticar as comissões excessivamente se deixadas neste grid */}
-                <div className="hidden lg:block"></div>
+                {/* Visão Rápida */}
+                <Card>
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-lg flex items-center gap-2">
+                            <TrendingUp className="w-5 h-5 text-emerald-600" />
+                            Visão Rápida
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                        <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+                            <span className="text-sm text-gray-600 dark:text-gray-300">MoM</span>
+                            <span className={`font-bold ${comparativoMoM.variacao >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                {comparativoMoM.variacao >= 0 ? '+' : ''}{comparativoMoM.variacao.toFixed(1)}%
+                            </span>
+                        </div>
+                        <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+                            <span className="text-sm text-gray-600 dark:text-gray-300">YoY</span>
+                            <span className={`font-bold ${comparativoYoY.variacao >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                {comparativoYoY.variacao >= 0 ? '+' : ''}{comparativoYoY.variacao.toFixed(1)}%
+                            </span>
+                        </div>
+                        <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+                            <span className="text-sm text-gray-600 dark:text-gray-300">Média comissão/vendedor</span>
+                            <span className="font-bold text-amber-600">
+                                {formatarMoeda(comissoesPorVendedor.length ? totalComissoes / comissoesPorVendedor.length : 0)}
+                            </span>
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
 
-            {/* Nova Seção: Top Vendedores Expandido */}
+            {/* Top Vendedores */}
             <div className="mt-6">
                 <Card className="overflow-hidden shadow-sm border border-gray-100 dark:border-gray-800">
                     <CardHeader className="bg-gray-50/50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-800 pb-4">
@@ -2254,7 +2221,7 @@ export default function DashboardGerente() {
                                                 i === 2 ? 'bg-gradient-to-br from-orange-100 to-orange-300 text-orange-800 border-2 border-orange-400' :
                                                     'bg-gray-50 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300'
                                             }`}>
-                                            {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : <span className="text-xl font-bold">#{i + 1}</span>}
+                                            <span className="text-xl font-bold">#{i + 1}</span>
                                         </div>
                                         <div>
                                             <p className="font-bold text-gray-900 dark:text-white text-lg tracking-tight group-hover:text-yellow-600 dark:group-hover:text-yellow-500 transition-colors">{v.nome}</p>
@@ -2417,12 +2384,13 @@ export default function DashboardGerente() {
                 </Card>
             </div>
 
-            {/* Seção 3: Estoque e Logística */}
+            {/* Operações de Estoque e Entrega */}
             <div className="mt-6">
-                <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2 mb-4">
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex items-center gap-2 mb-1">
                     <Package className="w-5 h-5 text-blue-600" />
-                    Estoque e Logística
+                    Operações de Estoque e Entrega
                 </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Alertas de giro, curva ABC e acompanhamento de execução logística.</p>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Curva ABC */}
@@ -2516,11 +2484,11 @@ export default function DashboardGerente() {
                                     <div className="grid grid-cols-2 gap-2 mb-3">
                                         <div className="p-2 rounded-lg bg-orange-50 dark:bg-orange-950/30 text-center">
                                             <p className="text-lg font-bold text-orange-600">{formatarMoeda(giroEstoque.totalValorEncalhado)}</p>
-                                            <p className="text-[10px] text-gray-500">💰 Valor parado</p>
+                                            <p className="text-[10px] text-gray-500">Valor parado</p>
                                         </div>
                                         <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/30 text-center">
                                             <p className="text-lg font-bold text-red-600">{giroEstoque.produtosCriticos}</p>
-                                            <p className="text-[10px] text-gray-500">🔴 Classe C (liquidar)</p>
+                                            <p className="text-[10px] text-gray-500">Classe C (liquidar)</p>
                                         </div>
                                     </div>
 
@@ -2566,7 +2534,7 @@ export default function DashboardGerente() {
                                     {giroEstoque.produtosCriticos > 0 && (
                                         <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 mb-3 border border-amber-200 dark:border-amber-800">
                                             <p className="text-xs text-amber-700 dark:text-amber-400">
-                                                💡 <strong>Sugestão:</strong> {giroEstoque.produtosCriticos} produto(s) Classe C parado(s) há mais de {giroFiltro} dias. Considere promoção ou transferência para mostruário.
+                                                <strong>Sugestão:</strong> {giroEstoque.produtosCriticos} produto(s) Classe C parado(s) há mais de {giroFiltro} dias. Considere promoção, giro interno entre lojas ou campanha de saída.
                                             </p>
                                         </div>
                                     )}
@@ -2592,7 +2560,7 @@ export default function DashboardGerente() {
                                                     <span className="text-sm truncate block font-medium">{p.nome}</span>
                                                     <div className="flex items-center gap-2">
                                                         <span className={`text-[10px] ${p.diasSemVenda === 999 ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
-                                                            {p.diasSemVenda === 999 ? '⚠️ Nunca vendido' : `${p.diasSemVenda} dias sem venda`}
+                                                            {p.diasSemVenda === 999 ? 'Nunca vendido' : `${p.diasSemVenda} dias sem venda`}
                                                         </span>
                                                         {p.qtdVendas > 0 && (
                                                             <span className="text-[10px] text-green-600">({p.qtdVendas} vendas antes)</span>
@@ -2605,18 +2573,6 @@ export default function DashboardGerente() {
                                                     <p className="text-xs font-medium">{formatarMoeda(p.valorEstoque)}</p>
                                                     <p className="text-[10px] text-gray-500">{p.quantidade_estoque} un</p>
                                                 </div>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                    onClick={() => {
-                                                        setProdutoParaMostruario(p);
-                                                        setMostruarioModalOpen(true);
-                                                    }}
-                                                    title="Transferir para Mostruário"
-                                                >
-                                                    <Sofa className="w-3 h-3" />
-                                                </Button>
                                             </div>
                                         </div>
                                     ))}
@@ -2624,7 +2580,7 @@ export default function DashboardGerente() {
                             ) : (
                                 <div className="text-center py-6 text-gray-500">
                                     <Check className="w-8 h-8 mx-auto mb-2 text-green-500" />
-                                    <p className="text-sm font-medium">Estoque saudável! 🎉</p>
+                                    <p className="text-sm font-medium">Estoque saudável</p>
                                     <p className="text-xs text-gray-400">Nenhum produto parado há mais de {giroFiltro} dias</p>
                                 </div>
                             )}
@@ -2656,106 +2612,21 @@ export default function DashboardGerente() {
                             </div>
                             {statusEntregas.atrasadas.length > 0 && (
                                 <div className="mt-3 p-2 rounded-lg bg-red-50 dark:bg-red-950/20">
-                                    <p className="text-xs text-red-600 font-medium mb-1">⚠️ Entregas atrasadas requerem atenção!</p>
+                                    <p className="text-xs text-red-600 font-medium mb-1">Entregas atrasadas requerem atenção.</p>
                                 </div>
                             )}
                         </CardContent>
                     </Card>
 
-                    {/* Mostruário */}
-                    <Card className="border-indigo-200">
-                        <CardHeader className="pb-2">
-                            <CardTitle className="text-lg flex items-center gap-2">
-                                <Sofa className="w-5 h-5 text-indigo-600" />
-                                Peças de Mostruário
-                                <div className="ml-auto flex items-center gap-2">
-                                    <Button
-                                        size="sm"
-                                        className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700"
-                                        onClick={() => setSolicitarMostruarioModalOpen(true)}
-                                    >
-                                        <Plus className="w-3 h-3 mr-1" />
-                                        Solicitar Montagem
-                                    </Button>
-                                    <Badge className="bg-indigo-100 text-indigo-700">
-                                        {giroEstoque.totalMostruarios} peças
-                                    </Badge>
-                                </div>
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            {/* Pedidos de mostruário pendentes de montagem */}
-                            {pedidosMostruario.filter(p => p.status === 'Pendente' || p.status === 'Em Montagem').length > 0 && (
-                                <div className="mb-3 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200">
-                                    <p className="text-xs font-medium text-amber-700 mb-2">⏳ Aguardando montagem:</p>
-                                    <div className="space-y-1">
-                                        {pedidosMostruario.filter(p => p.status === 'Pendente' || p.status === 'Em Montagem').slice(0, 3).map(p => (
-                                            <div key={p.id} className="flex items-center justify-between text-xs">
-                                                <span className="text-gray-700 dark:text-gray-300 truncate">{p.produto_nome}</span>
-                                                <Badge className={
-                                                    p.status === 'Em Montagem'
-                                                        ? 'bg-blue-100 text-blue-700 text-[10px]'
-                                                        : 'bg-yellow-100 text-yellow-700 text-[10px]'
-                                                }>
-                                                    {p.status === 'Em Montagem' ? '🔧 Montando' : '⏳ Pendente'}
-                                                </Badge>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {giroEstoque.mostruarios.length > 0 ? (
-                                <div className="space-y-2 max-h-[180px] overflow-y-auto">
-                                    {giroEstoque.mostruarios.slice(0, 5).map(p => (
-                                        <div key={p.id} className="flex items-center justify-between p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/20">
-                                            <div className="flex-1 min-w-0">
-                                                <span className="text-sm truncate block font-medium">{p.nome}</span>
-                                                <span className="text-[10px] text-gray-500">
-                                                    {p.mostruario_loja} • {p.mostruario_data ? new Date(p.mostruario_data).toLocaleDateString('pt-BR') : ''}
-                                                </span>
-                                            </div>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-7 text-xs text-red-500 hover:text-red-700"
-                                                onClick={() => {
-                                                    marcarMostruario.mutate({
-                                                        produtoId: p.id,
-                                                        isMostruario: false,
-                                                        loja: lojaAtiva,
-                                                        motivo: 'Removido do mostruário'
-                                                    });
-                                                }}
-                                            >
-                                                Remover
-                                            </Button>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="text-center py-6 text-gray-500">
-                                    <Sofa className="w-8 h-8 mx-auto mb-2 opacity-20" />
-                                    <p className="text-sm">Nenhuma peça de mostruário</p>
-                                    <p className="text-xs text-gray-400 mt-1">Adicione produtos encalhados ao mostruário</p>
-                                </div>
-                            )}
-
-                            {/* Potencial Mostruário */}
-                            <div className="mt-3 p-2 border-t border-gray-100 dark:border-gray-800">
-                                <div className="flex items-center justify-between text-sm">
-                                    <span className="text-gray-500">Potencial (estoque = 1):</span>
-                                    <span className="font-bold text-indigo-600">
-                                        {produtos.filter(p => p.ativo && p.quantidade_estoque === 1 && !p.is_mostruario).length} itens
-                                    </span>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
                 </div>
             </div>
 
-            {/* Cards de Pendências Detalhadas */}
+            {/* Painel de Pendências */}
+            <div className="mt-6 mb-4">
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Painel de Pendências</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Resumo consolidado dos itens que precisam de ação imediata.</p>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Entregas Pendentes */}
                 <Card className={pendencias.entregas.length > 0 ? 'border-orange-200 bg-orange-50/50 dark:bg-orange-950/20' : ''}>
@@ -2831,8 +2702,12 @@ export default function DashboardGerente() {
                 </Card>
             </div>
 
-            {/* Seção de Tokens Gerenciais */}
-            <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20">
+            {/* Operações Complementares */}
+            <div className="mt-6 space-y-6">
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">Operações Complementares</h2>
+
+                {/* Seção de Tokens Gerenciais */}
+                <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-lg flex items-center gap-2">
                         <Key className="w-5 h-5 text-amber-600" />
@@ -2956,7 +2831,7 @@ export default function DashboardGerente() {
                                                     <SelectValue />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="DESCONTO">💰 Desconto</SelectItem>
+                                                    <SelectItem value="DESCONTO">Desconto</SelectItem>
                                                     <SelectItem value="CANCELAMENTO">❌ Cancelamento</SelectItem>
                                                     <SelectItem value="ALTERACAO_PRECO">✏️ Alt. Preço</SelectItem>
                                                     <SelectItem value="SUPER_CAIXA">⭐ Super Caixa</SelectItem>
@@ -3095,7 +2970,7 @@ export default function DashboardGerente() {
                                                         {token.tipo_token === 'SUPERVISOR_MODE' ? 'Supervisor' : 'Uso Único'}
                                                     </Badge>
                                                     <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                                                        {token.permissao === 'DESCONTO' && '💰 Desc.'}
+                                                        {token.permissao === 'DESCONTO' && 'Desc.'}
                                                         {token.permissao === 'CANCELAMENTO' && '❌ Canc.'}
                                                         {token.permissao === 'ALTERACAO_PRECO' && '✏️ Preço'}
                                                         {token.permissao === 'SUPER_CAIXA' && '⭐ Super'}
@@ -3155,10 +3030,10 @@ export default function DashboardGerente() {
                         </div>
                     )}
                 </CardContent>
-            </Card>
+                </Card>
 
-            {/* Solicitações de Cadastro e Aprovação de Preços */}
-            <div className={`grid grid-cols-1 ${isGerenteGeral && getSolicitacoesPrecoPendentes.length > 0 ? 'xl:grid-cols-2' : ''} gap-6`}>
+                {/* Solicitações de Cadastro e Aprovação de Preços */}
+                <div className={`grid grid-cols-1 ${isGerenteGeral && getSolicitacoesPrecoPendentes.length > 0 ? 'xl:grid-cols-2' : ''} gap-6`}>
                 {isGerenteGeral && (
                     <SolicitacoesCadastroWidget />
                 )}
@@ -3234,6 +3109,7 @@ export default function DashboardGerente() {
                         </CardContent>
                     </Card>
                 )}
+                </div>
             </div>
 
             {/* Ações de Vendedores - LOG DE AUDITORIA */}
@@ -3307,196 +3183,6 @@ export default function DashboardGerente() {
                     <ControleMontadoresWidget />
                 )
             }
-
-
-            {/* Modal para Marcar Mostruário */}
-            <Dialog open={mostruarioModalOpen} onOpenChange={setMostruarioModalOpen}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <Sofa className="w-5 h-5 text-indigo-600" />
-                            Marcar como Mostruário
-                        </DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                        {produtoParaMostruario && (
-                            <div className="p-4 rounded-lg bg-indigo-50 dark:bg-indigo-950/30">
-                                <p className="font-medium">{produtoParaMostruario.nome}</p>
-                                <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
-                                    <span>Estoque: {produtoParaMostruario.quantidade_estoque} un</span>
-                                    <span>Valor: {formatarMoeda(produtoParaMostruario.valorEstoque)}</span>
-                                </div>
-                                <p className="text-xs text-orange-600 mt-2">
-                                    {produtoParaMostruario.diasSemVenda === 999
-                                        ? 'Nunca vendido'
-                                        : `Sem venda há ${produtoParaMostruario.diasSemVenda} dias`}
-                                </p>
-                            </div>
-                        )}
-                        <div>
-                            <Label htmlFor="mostruario-motivo">Motivo (opcional)</Label>
-                            <Input
-                                id="mostruario-motivo"
-                                value={mostruarioMotivo}
-                                onChange={(e) => setMostruarioMotivo(e.target.value)}
-                                placeholder="Ex: Peça de demonstração"
-                                className="mt-1"
-                            />
-                        </div>
-                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-                            <p>✓ Será marcado como mostruário na loja: <strong>{lojaAtiva === 'todas' ? lojas[0] : lojaAtiva}</strong></p>
-                            <p>✓ A movimentação será registrada no histórico</p>
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => {
-                            setMostruarioModalOpen(false);
-                            setProdutoParaMostruario(null);
-                            setMostruarioMotivo('');
-                        }}>Cancelar</Button>
-                        <Button
-                            onClick={() => {
-                                marcarMostruario.mutate({
-                                    produtoId: produtoParaMostruario.id,
-                                    isMostruario: true,
-                                    loja: lojaAtiva === 'todas' ? lojas[0] : lojaAtiva,
-                                    motivo: mostruarioMotivo || 'Marcado como mostruário'
-                                });
-                            }}
-                            disabled={marcarMostruario.isPending}
-                            className="bg-indigo-600 hover:bg-indigo-700"
-                        >
-                            {marcarMostruario.isPending ? (
-                                <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Salvando...</>
-                            ) : (
-                                <><Sofa className="w-4 h-4 mr-2" /> Marcar como Mostruário</>
-                            )}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            {/* Modal para Solicitar Montagem de Mostruário */}
-            <Dialog open={solicitarMostruarioModalOpen} onOpenChange={setSolicitarMostruarioModalOpen}>
-                <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <Sofa className="w-5 h-5 text-indigo-600" />
-                            Solicitar Montagem de Mostruário
-                        </DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                        <div>
-                            <Label>Buscar Produto</Label>
-                            <Input
-                                value={buscaProdutoMostruario}
-                                onChange={(e) => setBuscaProdutoMostruario(e.target.value)}
-                                placeholder="Digite o nome do produto..."
-                                className="mt-1"
-                            />
-                        </div>
-
-                        {/* Lista de produtos cadastrados */}
-                        <div className="max-h-[300px] overflow-y-auto border rounded-lg">
-                            {produtos
-                                .filter(p =>
-                                    p.ativo &&
-                                    (buscaProdutoMostruario === '' ||
-                                        p.nome?.toLowerCase().includes(buscaProdutoMostruario.toLowerCase()))
-                                )
-                                .slice(0, 20)
-                                .map(p => (
-                                    <div
-                                        key={p.id}
-                                        className={`p-3 border-b cursor-pointer transition-colors ${produtoSelecionadoMostruario?.id === p.id
-                                            ? 'bg-indigo-100 dark:bg-indigo-900/30'
-                                            : 'hover:bg-gray-50 dark:hover:bg-neutral-800'
-                                            }`}
-                                        onClick={() => setProdutoSelecionadoMostruario(p)}
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            <div>
-                                                <p className="font-medium text-sm">{p.nome}</p>
-                                                <p className="text-xs text-gray-500">
-                                                    Estoque: {p.quantidade_estoque || 0} • {formatarMoeda(p.preco_venda || 0)}
-                                                </p>
-                                            </div>
-                                            {produtoSelecionadoMostruario?.id === p.id && (
-                                                <Check className="w-5 h-5 text-indigo-600" />
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                            {produtos.filter(p =>
-                                p.ativo &&
-                                (buscaProdutoMostruario === '' ||
-                                    p.nome?.toLowerCase().includes(buscaProdutoMostruario.toLowerCase()))
-                            ).length === 0 && (
-                                    <div className="p-6 text-center text-gray-500">
-                                        <Search className="w-8 h-8 mx-auto mb-2 opacity-20" />
-                                        <p className="text-sm">Nenhum produto encontrado</p>
-                                    </div>
-                                )}
-                        </div>
-
-                        {/* Produto selecionado */}
-                        {produtoSelecionadoMostruario && (
-                            <div className="p-4 rounded-lg bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200">
-                                <p className="font-medium text-indigo-900 dark:text-indigo-100">
-                                    Selecionado: {produtoSelecionadoMostruario.nome}
-                                </p>
-                                <div className="flex items-center gap-4 mt-2">
-                                    <Label className="text-sm">Quantidade:</Label>
-                                    <Input
-                                        type="number"
-                                        min="1"
-                                        value={quantidadeMostruario}
-                                        onChange={(e) => setQuantidadeMostruario(parseInt(e.target.value) || 1)}
-                                        className="w-20 h-8"
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="text-xs text-gray-500 bg-gray-50 dark:bg-neutral-900 p-2 rounded">
-                            <p>📋 A solicitação será enviada para <strong>Montagens Internas</strong></p>
-                            <p>🔧 Os montadores poderão ver e executar a montagem</p>
-                            <p>📍 Loja: <strong>{lojaAtiva === 'todas' ? lojas[0] || 'Principal' : lojaAtiva}</strong></p>
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => {
-                            setSolicitarMostruarioModalOpen(false);
-                            setBuscaProdutoMostruario('');
-                            setProdutoSelecionadoMostruario(null);
-                            setQuantidadeMostruario(1);
-                        }}>Cancelar</Button>
-                        <Button
-                            onClick={() => {
-                                if (!produtoSelecionadoMostruario) return;
-                                criarPedidoMostruario.mutate({
-                                    produto_id: produtoSelecionadoMostruario.id,
-                                    produto_nome: produtoSelecionadoMostruario.nome,
-                                    quantidade: quantidadeMostruario,
-                                    loja: lojaAtiva === 'todas' ? lojas[0] || 'Principal' : lojaAtiva,
-                                    status: 'Pendente',
-                                    solicitante_id: user?.id,
-                                    solicitante_nome: user?.full_name,
-                                    observacoes: `Solicitado para mostruário por ${user?.full_name}`
-                                });
-                            }}
-                            disabled={!produtoSelecionadoMostruario || criarPedidoMostruario.isPending}
-                            className="bg-indigo-600 hover:bg-indigo-700"
-                        >
-                            {criarPedidoMostruario.isPending ? (
-                                <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Solicitando...</>
-                            ) : (
-                                <><Package className="w-4 h-4 mr-2" /> Solicitar Montagem</>
-                            )}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
             {/* Modal de Detalhes do Produto */}
             <ProdutoModal
                 isOpen={produtoModalOpen}

@@ -7,12 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   AlertCircle, Users, Calendar, Briefcase, FileText,
-  Award, DollarSign, FolderOpen, Megaphone, Clock, AlertTriangle,
-  Plus, RefreshCw, TrendingUp, TrendingDown, UserCheck, CalendarClock,
-  FileWarning, ClipboardCheck, ArrowRight, Bell, CheckCircle2
+  Award, DollarSign, FolderOpen, AlertTriangle,
+  Plus, RefreshCw, UserCheck, CalendarClock,
+  FileWarning, ClipboardCheck, ArrowRight, Bell
 } from "lucide-react";
 
 // Import all HR tab components
@@ -24,20 +23,15 @@ import AvaliacoesTab from "@/components/rh/AvaliacoesTab";
 
 import DocumentosTab from "@/components/rh/DocumentosTab";
 
-// Quick Action Button Component
+// Quick Action Button Component (kept for compatibility)
 function QuickAction({ icon: Icon, label, onClick, color = "#07593f" }) {
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-center gap-2 p-4 rounded-xl bg-white border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all duration-200 group"
+      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all text-sm font-medium text-gray-700"
     >
-      <div
-        className="w-12 h-12 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110"
-        style={{ backgroundColor: `${color}15` }}
-      >
-        <Icon className="w-6 h-6" style={{ color }} />
-      </div>
-      <span className="text-sm font-medium text-gray-700 text-center">{label}</span>
+      <Icon className="w-4 h-4" style={{ color }} />
+      {label}
     </button>
   );
 }
@@ -71,57 +65,28 @@ function AlertCard({ icon: Icon, title, count, description, color, onClick }) {
 }
 
 // Activity Item Component
-function ActivityItem({ icon: Icon, title, time, description, color }) {
+
+// Compact Metric Card
+function MetricCard({ icon: Icon, value, label, color, onClick, badge }) {
   return (
-    <div className="flex gap-3 py-3 border-b border-gray-100 last:border-0">
+    <button
+      onClick={onClick}
+      className="flex items-center gap-3 p-3 rounded-lg bg-white border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all text-left w-full"
+    >
       <div
-        className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-        style={{ backgroundColor: `${color}15` }}
+        className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+        style={{ backgroundColor: `${color}18` }}
       >
         <Icon className="w-4 h-4" style={{ color }} />
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-medium text-gray-900 text-sm">{title}</span>
-          <span className="text-xs text-gray-400 flex-shrink-0">{time}</span>
-        </div>
-        <p className="text-xs text-gray-500 truncate">{description}</p>
+      <div className="min-w-0 flex-1">
+        <p className="text-xl font-bold text-gray-900 leading-none">{value}</p>
+        <p className="text-xs text-gray-500 mt-0.5 truncate">{label}</p>
       </div>
-    </div>
-  );
-}
-
-// Metric Card Component
-function MetricCard({ icon: Icon, value, label, trend, trendValue, color, onClick, badge }) {
-  return (
-    <Card
-      className="border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 group overflow-hidden"
-      onClick={onClick}
-    >
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between mb-3">
-          <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110"
-            style={{ background: `linear-gradient(135deg, ${color} 0%, ${color}dd 100%)` }}
-          >
-            <Icon className="w-6 h-6 text-white" />
-          </div>
-          {badge > 0 && (
-            <Badge className="bg-red-500 text-white text-xs animate-pulse">
-              {badge} pendente{badge > 1 ? 's' : ''}
-            </Badge>
-          )}
-        </div>
-        <p className="text-3xl font-bold text-gray-900 mb-1">{value}</p>
-        <p className="text-sm text-gray-500 mb-2">{label}</p>
-        {trend && (
-          <div className={`flex items-center gap-1 text-xs ${trend === 'up' ? 'text-green-600' : 'text-red-500'}`}>
-            {trend === 'up' ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-            <span>{trendValue}</span>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      {badge > 0 && (
+        <Badge className="bg-red-500 text-white text-xs px-1.5 py-0.5 shrink-0">{badge}</Badge>
+      )}
+    </button>
   );
 }
 
@@ -233,37 +198,6 @@ export default function RecursosHumanos() {
     };
   }, [colaboradores, ferias, licencas, vagas, folhas, avaliacoes]);
 
-  // Recent activities (mock based on data)
-  const recentActivities = useMemo(() => {
-    const activities = [];
-
-    // Add recent vacation requests
-    ferias.slice(0, 3).forEach(f => {
-      const colaborador = colaboradores.find(c => c.id === f.colaborador_id);
-      activities.push({
-        icon: Calendar,
-        title: `Férias ${f.status === 'Aprovada' ? 'aprovadas' : f.status === 'Solicitada' ? 'solicitadas' : f.status.toLowerCase()}`,
-        description: formatarNome(colaborador?.nome || 'Colaborador'),
-        time: f.data_inicio ? new Date(f.data_inicio).toLocaleDateString('pt-BR') : '',
-        color: f.status === 'Aprovada' ? '#22c55e' : f.status === 'Solicitada' ? '#f59e0b' : '#64748b'
-      });
-    });
-
-    // Add recent payroll entries
-    folhas.slice(0, 2).forEach(f => {
-      const colaborador = colaboradores.find(c => c.id === f.colaborador_id);
-      activities.push({
-        icon: DollarSign,
-        title: `Folha ${f.status === 'Pago' ? 'paga' : 'gerada'}`,
-        description: formatarNome(colaborador?.nome || 'Colaborador'),
-        time: `${f.mes_referencia}/${f.ano_referencia}`,
-        color: f.status === 'Pago' ? '#22c55e' : '#3b82f6'
-      });
-    });
-
-    return activities.slice(0, 5);
-  }, [ferias, folhas, colaboradores]);
-
   const handleRefreshData = () => {
     refetchColaboradores();
     refetchFerias();
@@ -301,30 +235,22 @@ export default function RecursosHumanos() {
     <div className="p-4 md:p-6 lg:p-8 bg-gray-50/50 min-h-screen">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3 mb-1">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}>
-                <Users className="w-5 h-5 text-white" />
-              </div>
-              <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
-                Recursos Humanos
-              </h1>
-              {metrics.totalPendencias > 0 && (
-                <Badge className="bg-red-500 text-white animate-pulse">
-                  {metrics.totalPendencias} pendência{metrics.totalPendencias > 1 ? 's' : ''}
-                </Badge>
-              )}
-            </div>
-            <p className="text-gray-500 text-sm md:text-base">
-              Gestão de pessoas, folha de pagamento e desenvolvimento
-            </p>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-bold text-gray-900">
+              Recursos Humanos
+            </h1>
+            {metrics.totalPendencias > 0 && (
+              <Badge className="bg-red-500 text-white">
+                {metrics.totalPendencias} pendente{metrics.totalPendencias > 1 ? 's' : ''}
+              </Badge>
+            )}
           </div>
           <Button
             variant="outline"
             size="sm"
             onClick={handleRefreshData}
-            className="flex items-center gap-2 self-start md:self-auto"
+            className="flex items-center gap-2"
           >
             <RefreshCw className="w-4 h-4" />
             Atualizar
@@ -388,7 +314,7 @@ export default function RecursosHumanos() {
         )}
 
         {/* Main Metrics Dashboard */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
           <MetricCard
             icon={UserCheck}
             value={metrics.colaboradoresAtivos}
@@ -435,66 +361,6 @@ export default function RecursosHumanos() {
             color="#64748b"
             onClick={() => setActiveTab("ferias")}
           />
-        </div>
-
-        {/* Quick Actions & Recent Activity */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Quick Actions */}
-          <Card className="border-0 shadow-lg lg:col-span-2">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Plus className="w-5 h-5" style={{ color: '#07593f' }} />
-                Ações Rápidas
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <QuickAction
-                  icon={Calendar}
-                  label="Registrar Férias"
-                  onClick={() => setActiveTab("ferias")}
-                  color="#3b82f6"
-                />
-                <QuickAction
-                  icon={DollarSign}
-                  label="Gerar Folha"
-                  onClick={() => setActiveTab("folha")}
-                  color="#22c55e"
-                />
-                <QuickAction
-                  icon={Award}
-                  label="Nova Avaliação"
-                  onClick={() => setActiveTab("avaliacoes")}
-                  color="#8b5cf6"
-                />
-
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Recent Activity */}
-          <Card className="border-0 shadow-lg">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Clock className="w-5 h-5" style={{ color: '#07593f' }} />
-                Atividade Recente
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <ScrollArea className="h-[180px]">
-                {recentActivities.length > 0 ? (
-                  recentActivities.map((activity, index) => (
-                    <ActivityItem key={index} {...activity} />
-                  ))
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-gray-400 py-6">
-                    <CheckCircle2 className="w-8 h-8 mb-2" />
-                    <p className="text-sm">Nenhuma atividade recente</p>
-                  </div>
-                )}
-              </ScrollArea>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Main Tabs */}

@@ -1068,8 +1068,8 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
           </DialogHeader>
           <div className="py-4 space-y-3">
             {statusServidor === 'online'
-              ? <div className="p-3 rounded bg-green-100 text-green-800 flex items-center gap-2"><Server className="w-5 h-5" /> <span>Robô Online!</span></div>
-              : <div className="p-3 rounded bg-red-100 text-red-800 flex items-center gap-2"><WifiOff className="w-5 h-5" /> <span>Robô Offline</span></div>
+              ? <div className="p-3 rounded bg-green-100 text-green-800 flex items-center gap-2"><Server className="w-5 h-5" /> <span>Automação Online!</span></div>
+              : <div className="p-3 rounded bg-red-100 text-red-800 flex items-center gap-2"><WifiOff className="w-5 h-5" /> <span>Automação Offline</span></div>
             }
 
             {/* Resumo de Entregas */}

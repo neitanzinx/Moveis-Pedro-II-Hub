@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { base44, supabase } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Plus, Check, AlertTriangle, Play, Eye } from "lucide-react";
@@ -63,6 +63,25 @@ export default function InventarioTab({ user }) {
               [targetField]: item.quantidade_contada,
               quantidade_estoque: newTotal
             });
+            try {
+              await supabase.from('movimentacoes_estoque').insert({
+                produto_id: produto.id,
+                evento_tipo: 'inventario',
+                modulo_origem: 'estoque',
+                quantidade: Math.abs(item.diferenca),
+                estoque_antes_local: produto[targetField] || 0,
+                estoque_depois_local: item.quantidade_contada,
+                estoque_antes_total: produto.quantidade_estoque || 0,
+                estoque_depois_total: newTotal,
+                referencia_id: inventario.id,
+                referencia_numero: inventario.numero_inventario?.toString() || null,
+                usuario_nome: user?.email || null,
+                loja_origem: lojaInventario?.nome || null,
+                organization_id: '00000000-0000-0000-0000-000000000001'
+              });
+            } catch (auditErr) {
+              console.warn('Falha ao registrar movimentação de inventário:', auditErr);
+            }
           }
         }
       }

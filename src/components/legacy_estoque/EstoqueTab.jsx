@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import ProdutoCadastroCompleto from "../produtos/ProdutoCadastroCompleto";
+import ProdutoConferenciaModal from "./ProdutoConferenciaModal";
 import ProductIncompleteIndicator from "../produtos/ProductIncompleteIndicator";
 import { getColorHex } from "../produtos/FurnitureColorPicker";
 import MovimentacaoModal from "./MovimentacaoModal";
@@ -20,6 +21,11 @@ import { obterCampoEstoqueDaLoja } from "@/constants/productConstants";
 
 export default function EstoqueTab({ user }) {
   const { data: lojasAtivas = [] } = useLojas();
+  const lojasComCd = useMemo(() => {
+    const hasCd = lojasAtivas.some((loja) => obterCampoEstoqueDaLoja(loja) === 'estoque_cd');
+    if (hasCd) return lojasAtivas;
+    return [{ id: 'cd-fallback', nome: 'Depósito / CD' }, ...lojasAtivas];
+  }, [lojasAtivas]);
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedCategoria, setSelectedCategoria] = useState("todas");
@@ -28,9 +34,11 @@ export default function EstoqueTab({ user }) {
   const [selectedDirecao, setSelectedDirecao] = useState("asc");
   const [filtroAtencao, setFiltroAtencao] = useState(false);
   const [editingProduto, setEditingProduto] = useState(null);
+  const [cadastroProduto, setCadastroProduto] = useState(null);
   const [focusField, setFocusField] = useState(null);
   const [movingProduto, setMovingProduto] = useState(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCadastroModalOpen, setIsCadastroModalOpen] = useState(false);
+  const [isConferenciaModalOpen, setIsConferenciaModalOpen] = useState(false);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [isGeradorEtiquetasOpen, setIsGeradorEtiquetasOpen] = useState(false);
   const [produtosParaEtiqueta, setProdutosParaEtiqueta] = useState([]);
@@ -47,9 +55,9 @@ export default function EstoqueTab({ user }) {
   useEffect(() => {
     const handleAction = (e) => {
       if (e.detail === 'estoque') {
-        setEditingProduto(null);
+        setCadastroProduto(null);
         setFocusField(null);
-        setIsModalOpen(true);
+        setIsCadastroModalOpen(true);
       }
     };
     window.addEventListener('estoque-header-action', handleAction);
@@ -58,6 +66,28 @@ export default function EstoqueTab({ user }) {
 
   const queryClient = useQueryClient();
   const confirm = useConfirm();
+
+  // Mantem a aba de estoque sincronizada entre operadores em tempo real.
+  useEffect(() => {
+    const channel = supabase
+      .channel('estoque-tab-produtos-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'produtos' },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['produtos-paginated'] });
+          queryClient.invalidateQueries({ queryKey: ['produtos-atencao-count'] });
+          queryClient.invalidateQueries({ queryKey: ['categorias-produtos'] });
+          queryClient.invalidateQueries({ queryKey: ['fabricantes-produtos'] });
+          queryClient.invalidateQueries({ queryKey: ['produtos'] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
   // 1. Categories Query (Distinct)
   const { data: categorias = [] } = useQuery({
@@ -74,11 +104,22 @@ export default function EstoqueTab({ user }) {
   const { data: fabricantes = [] } = useQuery({
     queryKey: ['fabricantes-produtos'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Em alguns ambientes o campo `marca` nao existe. Faz fallback para evitar erro 400.
+      let data = null;
+      const withMarca = await supabase
         .from('produtos')
         .select('fornecedor_nome, marca');
 
-      if (error) throw error;
+      if (withMarca.error) {
+        const fallback = await supabase
+          .from('produtos')
+          .select('fornecedor_nome');
+
+        if (fallback.error) throw fallback.error;
+        data = fallback.data;
+      } else {
+        data = withMarca.data;
+      }
 
       const items = [...new Set(
         (data || [])
@@ -211,9 +252,25 @@ export default function EstoqueTab({ user }) {
   };
 
   const handleOpenProdutoEditor = (produto, nextFocusField = null) => {
-    setEditingProduto(produto || null);
-    setFocusField(nextFocusField);
-    setIsModalOpen(true);
+    if (!produto) {
+      setCadastroProduto(null);
+      setFocusField(null);
+      setIsCadastroModalOpen(true);
+      return;
+    }
+
+    // Quando o clique vier do indicador de incompletude, mantemos o cadastro completo
+    // para permitir corrigir todos os campos de produto.
+    if (nextFocusField) {
+      setCadastroProduto(produto);
+      setFocusField(nextFocusField);
+      setIsCadastroModalOpen(true);
+      return;
+    }
+
+    // Fluxo principal da aba de estoque: conferencia + ajuste rapido.
+    setEditingProduto(produto);
+    setIsConferenciaModalOpen(true);
   };
 
   return (
@@ -472,7 +529,7 @@ export default function EstoqueTab({ user }) {
                           <Badge variant="destructive" className="h-4 px-1 text-[10px]">Baixo</Badge>
                         )}
                         <div className="text-[10px] text-gray-500 flex gap-1 flex-wrap justify-center max-w-[120px]">
-                          {lojasAtivas.map(loja => {
+                          {lojasComCd.map(loja => {
                             const campo = obterCampoEstoqueDaLoja(loja);
                             const qtd = produto[campo];
                             if (qtd > 0) {
@@ -549,18 +606,40 @@ export default function EstoqueTab({ user }) {
         </div>
       )}
 
-      <ProdutoCadastroCompleto
-        isOpen={isModalOpen}
+      <ProdutoConferenciaModal
+        isOpen={isConferenciaModalOpen}
         onClose={() => {
-          setIsModalOpen(false);
-          setFocusField(null);
+          setIsConferenciaModalOpen(false);
+          setEditingProduto(null);
         }}
         produto={editingProduto}
+        onSave={async (data) => {
+          try {
+            if (!editingProduto?.id) return;
+            await base44.entities.Produto.update(editingProduto.id, data);
+            queryClient.invalidateQueries({ queryKey: ['produtos-paginated'] });
+            queryClient.invalidateQueries({ queryKey: ['produtos'] });
+            queryClient.invalidateQueries({ queryKey: ['produtos-atencao-count'] });
+          } catch (error) {
+            console.error("Erro ao salvar conferencia de estoque:", error);
+            throw error;
+          }
+        }}
+      />
+
+      <ProdutoCadastroCompleto
+        isOpen={isCadastroModalOpen}
+        onClose={() => {
+          setIsCadastroModalOpen(false);
+          setCadastroProduto(null);
+          setFocusField(null);
+        }}
+        produto={cadastroProduto}
         focusField={focusField}
         onSave={async (data) => {
           try {
-            if (editingProduto) {
-              await base44.entities.Produto.update(editingProduto.id, data);
+            if (cadastroProduto) {
+              await base44.entities.Produto.update(cadastroProduto.id, data);
               toast.success("Produto atualizado com sucesso");
             } else {
               await base44.entities.Produto.create(data);
@@ -570,7 +649,9 @@ export default function EstoqueTab({ user }) {
             queryClient.invalidateQueries({ queryKey: ['produtos-atencao-count'] });
             queryClient.invalidateQueries({ queryKey: ['categorias-produtos'] }); // Update categories too
             queryClient.invalidateQueries({ queryKey: ['fabricantes-produtos'] });
-            setIsModalOpen(false);
+            queryClient.invalidateQueries({ queryKey: ['produtos'] });
+            setIsCadastroModalOpen(false);
+            setCadastroProduto(null);
             setFocusField(null);
           } catch (error) {
             console.error("Erro ao salvar produto:", error);

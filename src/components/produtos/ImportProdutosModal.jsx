@@ -182,20 +182,20 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
             // Várias formas de escrever o nome da loja no CSV
             if (codigo) {
-                dynamicMapping[`mostruario loja ${codigo.toLowerCase()}`] = fieldName;
-                dynamicMapping[`mostruario ${codigo.toLowerCase()}`] = fieldName;
+                dynamicMapping[`estoque loja ${codigo.toLowerCase()}`] = fieldName;
+                dynamicMapping[`estoque ${codigo.toLowerCase()}`] = fieldName;
                 dynamicMapping[codigo.toLowerCase()] = fieldName;
                 dynamicMapping[codigoNormalizado] = fieldName;
             }
             if (nome) {
-                dynamicMapping[`mostruario loja ${nome.toLowerCase()}`] = fieldName;
-                dynamicMapping[`mostruario ${nome.toLowerCase()}`] = fieldName;
+                dynamicMapping[`estoque loja ${nome.toLowerCase()}`] = fieldName;
+                dynamicMapping[`estoque ${nome.toLowerCase()}`] = fieldName;
                 dynamicMapping[nomeNormalizado] = fieldName;
             }
         });
 
         // Futura = placeholder (ignorar, mas ler para não quebrar importação)
-        dynamicMapping['mostruario loja futura'] = '_ignorar';
+        dynamicMapping['estoque loja futura'] = '_ignorar';
         dynamicMapping['futura'] = '_ignorar';
 
         return dynamicMapping;
@@ -203,7 +203,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
     // Gera template CSV dinâmico com lojas
     const CSV_TEMPLATE = useMemo(() => {
-        const lojasHeaders = lojas.map(l => `MOSTRUARIO ${(l?.nome || '').toUpperCase()}`).join(',');
+        const lojasHeaders = lojas.map(l => `ESTOQUE LOJA ${(l?.nome || '').toUpperCase()}`).join(',');
         return `${CSV_TEMPLATE_HEADER},${lojasHeaders}${CSV_TEMPLATE_FOOTER}\nAltaro,Sofá 3 Lugares,ALT-SF3R,1200,220,95,100,,Cinza,Suede,5${',0'.repeat(lojas.length)},12,150,5,100,2640,5,15,SIM`;
     }, [lojas]);
 
@@ -1010,7 +1010,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                         ))}
                                     </div>
                                     <div className="flex flex-wrap gap-1">
-                                        {['LARGURA', 'ALTURA', 'PROFUNDIDADE', 'ESTOQUE CD', 'MOSTRUARIO LOJAS', 'MARKUP', 'IMPOSTOS', 'FRETE', 'IPI', 'DESCONTOS', 'MONTAGEM'].map(col => (
+                                        {['LARGURA', 'ALTURA', 'PROFUNDIDADE', 'ESTOQUE CD', 'ESTOQUE LOJAS', 'MARKUP', 'IMPOSTOS', 'FRETE', 'IPI', 'DESCONTOS', 'MONTAGEM'].map(col => (
                                             <Badge key={col} variant="outline" className="text-xs">
                                                 {col}
                                             </Badge>

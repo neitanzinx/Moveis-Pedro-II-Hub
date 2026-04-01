@@ -24,7 +24,7 @@ export const ROLE_RULES = {
       'view_entregas', 'manage_entregas', 'view_assistencia', 'manage_assistencia',
       'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
-      'view_montagem', 'view_marketing', 'view_mostruario',
+      'view_montagem', 'view_marketing',
       'view_compras', 'create_oc', 'manage_compras', 'approve_oc'
     ],
     scope: SCOPES.STORE
@@ -36,7 +36,7 @@ export const ROLE_RULES = {
       'view_entregas', 'manage_entregas', 'view_assistencia', 'manage_assistencia',
       'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
-      'view_montagem', 'view_marketing', 'view_mostruario',
+      'view_montagem', 'view_marketing',
       'view_compras', 'create_oc', 'manage_compras', 'send_oc', 'receive_oc'
     ],
     scope: SCOPES.ALL
@@ -64,13 +64,6 @@ export const ROLE_RULES = {
     scope: SCOPES.ALL
   },
   'Logística': {
-    can: [
-      'view_entregas', 'manage_entregas', 'view_montagem', 'manage_montagem',
-      'view_clientes'
-    ],
-    scope: SCOPES.ALL
-  },
-  'Agendamento': {
     can: [
       'view_entregas', 'manage_entregas', 'view_montagem', 'manage_montagem',
       'view_clientes'
@@ -117,7 +110,6 @@ export const MENU_ITEMS = [
   { title: "Produtos", url: "/admin/Produtos", icon: Tag, permission: 'view_produtos', section: "Operacional" },
   { title: "Estoque", url: "/admin/Estoque", icon: Warehouse, permission: 'view_estoque', section: "Operacional" },
   { title: "Compras", url: "/admin/Compras", icon: ShoppingCart, permission: 'view_compras', section: "Operacional" },
-  { title: "Mostruário", url: "/admin/Mostruario", icon: Tag, permission: 'view_mostruario', section: "Operacional" },
   { title: "Logística", url: "/admin/LogisticaSemanal", icon: CalendarDays, permission: 'view_entregas', section: "Operacional" },
   { title: "Montagem", url: "/admin/Montagem", icon: Building2, permission: 'view_montagem', section: "Operacional", module: 'montagem' },
   { title: "Assistência Técnica", url: "/admin/AssistenciaTecnica", icon: Wrench, permission: 'view_assistencia', section: "Operacional", module: 'assistencia_tecnica' },

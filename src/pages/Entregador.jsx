@@ -18,6 +18,24 @@ import { Input } from "@/components/ui/input";
 import { whatsappService } from "@/services/whatsappService";
 import { toast } from "sonner";
 
+const ENTREGADOR_SESSION_KEY = 'entregador_rota_state';
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 horas
+
+function lerSessaoSalva() {
+    try {
+        const saved = localStorage.getItem(ENTREGADOR_SESSION_KEY);
+        if (!saved) return null;
+        const parsed = JSON.parse(saved);
+        if (!parsed.updatedAt || Date.now() - parsed.updatedAt > SESSION_TTL_MS) {
+            localStorage.removeItem(ENTREGADOR_SESSION_KEY);
+            return null;
+        }
+        return parsed;
+    } catch (e) {
+        return null;
+    }
+}
+
 // Custom Hook para persistência agressiva do checklist
 function useChecklistCache(caminhaoId, dataSelecionada) {
     const [itensConferidos, setItensConferidos] = useState(new Set());
@@ -62,12 +80,17 @@ function useChecklistCache(caminhaoId, dataSelecionada) {
 
 export default function Entregador() {
     const [user, setUser] = useState(null);
-    const [etapa, setEtapa] = useState('selecao'); // 'selecao' | 'rota'
-    const [rotaIniciada, setRotaIniciada] = useState(false);
+
+    // Hidratação síncrona do estado da rota a partir de sessão salva localmente
+    const _sessaoSalva = lerSessaoSalva();
+    const [etapa, setEtapa] = useState(_sessaoSalva?.etapa || 'selecao'); // 'selecao' | 'rota'
+    const [rotaIniciada, setRotaIniciada] = useState(_sessaoSalva?.rotaIniciada || false);
     const [enviando, setEnviando] = useState(false);
-    const [caminhaoSelecionado, setCaminhaoSelecionado] = useState(null);
-    const [turnoSelecionado, setTurnoSelecionado] = useState(null);
-    const [dataSelecionada, setDataSelecionada] = useState(new Date().toISOString().split('T')[0]);
+    const [caminhaoSelecionado, setCaminhaoSelecionado] = useState(_sessaoSalva?.caminhaoSelecionado || null);
+    const [turnoSelecionado, setTurnoSelecionado] = useState(_sessaoSalva?.turnoSelecionado || null);
+    const [dataSelecionada, setDataSelecionada] = useState(_sessaoSalva?.dataSelecionada || new Date().toISOString().split('T')[0]);
+    // false enquanto reconciliação com banco não foi concluída (evita falso "Todas as tarefas concluídas")
+    const [sessaoVerificada, setSessaoVerificada] = useState(!_sessaoSalva);
     const gpsInterval = useRef(null);
 
     // Estados dos modais
@@ -254,13 +277,27 @@ export default function Entregador() {
         }
     });
 
+    // Persistência da sessão de rota ativa no localStorage
+    useEffect(() => {
+        if (etapa === 'rota' && rotaIniciada && caminhaoSelecionado && turnoSelecionado) {
+            localStorage.setItem(ENTREGADOR_SESSION_KEY, JSON.stringify({
+                etapa,
+                rotaIniciada,
+                caminhaoSelecionado,
+                turnoSelecionado,
+                dataSelecionada,
+                updatedAt: Date.now()
+            }));
+        }
+    }, [etapa, rotaIniciada, caminhaoSelecionado, turnoSelecionado, dataSelecionada]);
+
     // RECUPERAR ESTADO AO INICIAR (Fonte de Verdade: Banco de Dados)
     useEffect(() => {
+        if (!user) return;
         const restaurarSessaoAPartirDoBanco = async () => {
-            if (!user) return;
             try {
                 // Consultamos o banco para ver se há um caminhão 'Em Trânsito' atrelado a este motorista.
-                const { data: caminhaoAtivo, error } = await supabase
+                const { data: caminhaoAtivo } = await supabase
                     .from('caminhoes')
                     .select('id, turno_atual, motorista_atual_nome')
                     .eq('status_rota', 'Em Trânsito')
@@ -268,15 +305,26 @@ export default function Entregador() {
                     .single();
 
                 if (caminhaoAtivo) {
+                    // Banco confirma rota ativa: restaurar e preferir data salva localmente
+                    const sessaoSalva = lerSessaoSalva();
                     setCaminhaoSelecionado(caminhaoAtivo.id);
                     setTurnoSelecionado(caminhaoAtivo.turno_atual || 'Comercial');
+                    if (sessaoSalva?.dataSelecionada) {
+                        setDataSelecionada(sessaoSalva.dataSelecionada);
+                    }
                     setRotaIniciada(true);
                     setEtapa('rota');
-                    toast.success("Rota recuperada do servidor!");
+                    toast.success("Rota recuperada!");
                 }
+                // Se data=null (PGRST116 - sem rota no banco), não limpa sessão local.
+                // Pode ser GPS ainda não atualizado ou motorista_atual_nome com divergência.
+                // O localStorage (com TTL de 12h) é a fonte primária de navegação;
+                // apenas finalizarRota() e o TTL fazem limpeza explícita.
             } catch (error) {
-                // Pode não achar, o que é esperado se não houver rota iniciada
-                console.log("Nenhuma rota ativa no banco para este usuário.", error.message);
+                // Erro real de rede/DB: mantém estado local para não perder sessão
+                console.log("Erro ao verificar rota ativa:", error?.message);
+            } finally {
+                setSessaoVerificada(true);
             }
         };
 
@@ -522,6 +570,7 @@ export default function Entregador() {
         if (!confirmed) return;
 
         pararRastreamento();
+        localStorage.removeItem(ENTREGADOR_SESSION_KEY);
         setRotaIniciada(false);
         setEtapa('selecao');
         setCaminhaoSelecionado(null);
@@ -1162,56 +1211,73 @@ export default function Entregador() {
                             </DialogTitle>
                         </DialogHeader>
                         <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-                            {itensChecklist.map((item, idx) => {
-                                const conferido = itensConferidos.has(item.id);
-                                const bloqueadoMontagem = item.bloqueado_montagem;
-                                return (
-                                    <div
-                                        key={item.id}
-                                        onClick={() => {
-                                            if (bloqueadoMontagem) return;
-                                            toggleItemConferido(item.id);
-                                        }}
-                                        className={`p-3 rounded-lg border-2 transition-all ${bloqueadoMontagem
-                                            ? 'bg-gray-100 border-gray-300 opacity-60 cursor-not-allowed'
-                                            : conferido
-                                                ? 'bg-green-50 border-green-400 cursor-pointer'
-                                                : 'bg-white border-gray-200 hover:border-blue-300 cursor-pointer'
-                                            }`}
-                                    >
-                                        <div className="flex items-start gap-3">
-                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${bloqueadoMontagem
-                                                ? 'bg-gray-300 text-gray-600'
-                                                : conferido ? 'bg-green-500 text-white' : 'bg-gray-200'
-                                                }`}>
-                                                {bloqueadoMontagem
-                                                    ? <AlertTriangle className="w-4 h-4" />
-                                                    : conferido ? <Check className="w-4 h-4" /> : <span className="text-xs text-gray-500">{idx + 1}</span>}
+                            {(() => {
+                                const grupos = {};
+                                itensChecklist.forEach((item, idx) => {
+                                    const chave = String(item.pedido);
+                                    if (!grupos[chave]) grupos[chave] = { pedido: item.pedido, cliente: item.cliente, itens: [] };
+                                    grupos[chave].itens.push({ ...item, _idx: idx });
+                                });
+                                return Object.values(grupos).map((grupo) => {
+                                    const selecionaveis = grupo.itens.filter(i => !i.bloqueado_montagem);
+                                    const todosConferidos = selecionaveis.length > 0 && selecionaveis.every(i => itensConferidos.has(i.id));
+                                    const algumBloqueado = grupo.itens.some(i => i.bloqueado_montagem);
+                                    return (
+                                        <div key={grupo.pedido} className={`rounded-lg border-2 overflow-hidden transition-all ${todosConferidos ? 'border-green-400' : algumBloqueado ? 'border-gray-300' : 'border-gray-200'}`}>
+                                            <div className={`px-3 py-2 flex items-center gap-2 ${todosConferidos ? 'bg-green-50' : algumBloqueado ? 'bg-gray-100' : 'bg-blue-50'}`}>
+                                                <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-semibold text-xs">Ped #{grupo.pedido}</span>
+                                                <span className="text-sm font-medium text-gray-800 truncate">{grupo.cliente}</span>
                                             </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className={`font-medium leading-tight ${bloqueadoMontagem ? 'text-gray-500' : 'text-gray-900'}`}>{item.produto}</p>
-                                                <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-500">
-                                                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Ped #{item.pedido}</span>
-                                                    <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-medium">Qtd: {item.quantidade}</span>
-                                                    {item.cor && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">{item.cor}</span>}
-                                                    {item.codigo && <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">Cód: {item.codigo}</span>}
-                                                </div>
-                                                {bloqueadoMontagem && (
-                                                    <p className="text-xs text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded px-2 py-1 font-medium">
-                                                        Item bloqueado: montagem interna pendente.
-                                                    </p>
-                                                )}
-                                                {item.detalhes && (
-                                                    <p className="text-xs text-gray-600 mt-2 bg-gray-50 p-2 rounded border border-gray-100 italic">
-                                                        {item.detalhes}
-                                                    </p>
-                                                )}
-                                                <p className="text-xs text-gray-500 mt-2 font-medium">Cliente: {item.cliente}</p>
+                                            <div className="divide-y divide-gray-100">
+                                                {grupo.itens.map((item) => {
+                                                    const conferido = itensConferidos.has(item.id);
+                                                    const bloqueadoMontagem = item.bloqueado_montagem;
+                                                    return (
+                                                        <div
+                                                            key={item.id}
+                                                            onClick={() => {
+                                                                if (bloqueadoMontagem) return;
+                                                                toggleItemConferido(item.id);
+                                                            }}
+                                                            className={`p-3 flex items-start gap-3 transition-all ${bloqueadoMontagem
+                                                                ? 'bg-gray-100 opacity-60 cursor-not-allowed'
+                                                                : conferido
+                                                                    ? 'bg-green-50 cursor-pointer'
+                                                                    : 'bg-white hover:bg-blue-50 cursor-pointer'
+                                                                }`}
+                                                        >
+                                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${bloqueadoMontagem
+                                                                ? 'bg-gray-300 text-gray-600'
+                                                                : conferido ? 'bg-green-500 text-white' : 'bg-gray-200'
+                                                                }`}>
+                                                                {bloqueadoMontagem
+                                                                    ? <AlertTriangle className="w-4 h-4" />
+                                                                    : conferido ? <Check className="w-4 h-4" /> : <span className="text-xs text-gray-500">{item._idx + 1}</span>}
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className={`font-medium leading-tight ${bloqueadoMontagem ? 'text-gray-500' : 'text-gray-900'}`}>{item.produto}</p>
+                                                                <div className="flex flex-wrap gap-2 mt-1 text-xs text-gray-500">
+                                                                    <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-medium">Qtd: {item.quantidade}</span>
+                                                                    {item.cor && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">{item.cor}</span>}
+                                                                    {item.codigo && <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">Cód: {item.codigo}</span>}
+                                                                </div>
+                                                                {bloqueadoMontagem && (
+                                                                    <p className="text-xs text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded px-2 py-1 font-medium">
+                                                                        Item bloqueado: montagem interna pendente.
+                                                                    </p>
+                                                                )}
+                                                                {item.detalhes && (
+                                                                    <p className="text-xs text-gray-600 mt-2 bg-gray-50 p-2 rounded border border-gray-100 italic">{item.detalhes}</p>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                });
+                            })()}
                         </div>
                         <div className="pt-4 border-t space-y-2">
                             <div className="flex items-center justify-between text-sm">
@@ -1482,7 +1548,7 @@ export default function Entregador() {
                     </>
                 )}
 
-                {entregasRota.filter(e => e.status !== 'Entregue').length === 0 && todasAssistencias.length === 0 && (
+                {sessaoVerificada && entregasRota.filter(e => e.status !== 'Entregue').length === 0 && todasAssistencias.length === 0 && (
                     <div className="text-center py-10 text-gray-400">
                         <CheckCircle className="w-16 h-16 mx-auto mb-3 opacity-20" />
                         <p className="font-medium">Todas as tarefas concluídas!</p>
@@ -1896,9 +1962,42 @@ export default function Entregador() {
 
                                         // Atualizar também a venda se aplicável
                                         if (modalConfirmaPagamento.venda_id) {
-                                            await supabase.from('vendas').update({
+                                            let vendaUpdates = {
                                                 pagamento_entrega_confirmado: pagamentoStatus === 'pago',
                                                 pagamento_entrega_observacao: pagamentoStatus === 'pendente' ? motivoPendente : null
+                                            };
+
+                                            if (pagamentoStatus === 'pago') {
+                                                const { data: vendaAtual } = await supabase
+                                                    .from('vendas')
+                                                    .select('valor_total, valor_pago, valor_restante')
+                                                    .eq('id', modalConfirmaPagamento.venda_id)
+                                                    .single();
+
+                                                const valorTotal = Number(vendaAtual?.valor_total || 0);
+                                                const valorPagoAtual = Number(vendaAtual?.valor_pago || 0);
+                                                const valorRestanteBase = vendaAtual?.valor_restante == null
+                                                    ? Math.max(valorTotal - valorPagoAtual, 0)
+                                                    : Math.max(Number(vendaAtual.valor_restante || 0), 0);
+                                                const valorRecebido = Number(modalConfirmaPagamento.valor_a_receber || 0);
+                                                const novoValorRestante = Math.max(valorRestanteBase - valorRecebido, 0);
+                                                const novoValorPago = Math.max(valorPagoAtual, valorTotal - novoValorRestante);
+
+                                                vendaUpdates = {
+                                                    ...vendaUpdates,
+                                                    valor_pago: novoValorPago,
+                                                    valor_restante: novoValorRestante,
+                                                    status: novoValorRestante <= 0.01 ? 'Pago' : 'Pagamento Pendente'
+                                                };
+                                            } else {
+                                                vendaUpdates = {
+                                                    ...vendaUpdates,
+                                                    status: 'Pagamento Pendente'
+                                                };
+                                            }
+
+                                            await supabase.from('vendas').update({
+                                                ...vendaUpdates
                                             }).eq('id', modalConfirmaPagamento.venda_id);
 
                                             // Processar lançamentos financeiros de "Pago"
@@ -1969,6 +2068,8 @@ export default function Entregador() {
                                         toast.success(pagamentoStatus === 'pago' ? 'Pagamento confirmado!' : 'Pendência registrada');
                                         setModalConfirmaPagamento(null);
                                         queryClient.invalidateQueries(['entregas']);
+                                        queryClient.invalidateQueries(['vendas']);
+                                        queryClient.invalidateQueries(['lancamentos-financeiros']);
                                     } catch (e) {
                                         console.error('Erro ao registrar pagamento:', e);
                                         toast.error('Erro ao registrar pagamento');
@@ -1997,55 +2098,69 @@ export default function Entregador() {
                         </DialogTitle>
                     </DialogHeader>
                     <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-                        {itensChecklist.map((item, idx) => {
-                            const conferido = itensConferidos.has(item.id);
-                            const bloqueadoMontagem = item.bloqueado_montagem;
-                            return (
-                                <div
-                                    key={item.id}
-                                    onClick={() => {
-                                        if (bloqueadoMontagem) return;
-                                        const conferido = itensConferidos.has(item.id);
-                                        const novo = new Set(itensConferidos);
-                                        if (conferido) novo.delete(item.id);
-                                        else novo.add(item.id);
-                                        _setItensConferidos(novo);
-                                        localStorage.setItem(`checklist_cache_${dataSelecionada}_${caminhaoSelecionado}`, JSON.stringify(Array.from(novo)));
-                                    }}
-                                    className={`p-3 rounded-lg border-2 transition-all ${bloqueadoMontagem
-                                        ? 'bg-gray-100 border-gray-300 opacity-60 cursor-not-allowed'
-                                        : conferido
-                                            ? 'bg-green-50 border-green-400 cursor-pointer'
-                                            : 'bg-white border-gray-200 hover:border-blue-300 cursor-pointer'
-                                        }`}
-                                >
-                                    <div className="flex items-start gap-3">
-                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${bloqueadoMontagem
-                                            ? 'bg-gray-300 text-gray-600'
-                                            : conferido ? 'bg-green-500 text-white' : 'bg-gray-200'
-                                            }`}>
-                                            {bloqueadoMontagem
-                                                ? <AlertTriangle className="w-4 h-4" />
-                                                : conferido ? <Check className="w-4 h-4" /> : <span className="text-xs text-gray-500">{idx + 1}</span>}
+                        {(() => {
+                            const grupos = {};
+                            itensChecklist.forEach((item, idx) => {
+                                const chave = String(item.pedido);
+                                if (!grupos[chave]) grupos[chave] = { pedido: item.pedido, cliente: item.cliente, itens: [] };
+                                grupos[chave].itens.push({ ...item, _idx: idx });
+                            });
+                            return Object.values(grupos).map((grupo) => {
+                                const selecionaveis = grupo.itens.filter(i => !i.bloqueado_montagem);
+                                const todosConferidos = selecionaveis.length > 0 && selecionaveis.every(i => itensConferidos.has(i.id));
+                                const algumBloqueado = grupo.itens.some(i => i.bloqueado_montagem);
+                                return (
+                                    <div key={grupo.pedido} className={`rounded-lg border-2 overflow-hidden transition-all ${todosConferidos ? 'border-green-400' : algumBloqueado ? 'border-gray-300' : 'border-gray-200'}`}>
+                                        <div className={`px-3 py-2 flex items-center gap-2 ${todosConferidos ? 'bg-green-50' : algumBloqueado ? 'bg-gray-100' : 'bg-blue-50'}`}>
+                                            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-semibold text-xs">Ped #{grupo.pedido}</span>
+                                            <span className="text-sm font-medium text-gray-800 truncate">{grupo.cliente}</span>
                                         </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className={`font-medium truncate ${bloqueadoMontagem ? 'text-gray-500' : 'text-gray-900'}`}>{item.produto}</p>
-                                            <div className="flex flex-wrap gap-2 mt-1 text-xs text-gray-500">
-                                                <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Ped #{item.pedido}</span>
-                                                <span>Qtd: {item.quantidade}</span>
-                                                {item.cor && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">{item.cor}</span>}
-                                            </div>
-                                            {bloqueadoMontagem && (
-                                                <p className="text-xs text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded px-2 py-1 font-medium">
-                                                    Item bloqueado: montagem interna pendente.
-                                                </p>
-                                            )}
-                                            <p className="text-xs text-gray-400 mt-1 truncate">Cliente: {item.cliente}</p>
+                                        <div className="divide-y divide-gray-100">
+                                            {grupo.itens.map((item) => {
+                                                const conferido = itensConferidos.has(item.id);
+                                                const bloqueadoMontagem = item.bloqueado_montagem;
+                                                return (
+                                                    <div
+                                                        key={item.id}
+                                                        onClick={() => {
+                                                            if (bloqueadoMontagem) return;
+                                                            toggleItemConferido(item.id);
+                                                        }}
+                                                        className={`p-3 flex items-start gap-3 transition-all ${bloqueadoMontagem
+                                                            ? 'bg-gray-100 opacity-60 cursor-not-allowed'
+                                                            : conferido
+                                                                ? 'bg-green-50 cursor-pointer'
+                                                                : 'bg-white hover:bg-blue-50 cursor-pointer'
+                                                            }`}
+                                                    >
+                                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${bloqueadoMontagem
+                                                            ? 'bg-gray-300 text-gray-600'
+                                                            : conferido ? 'bg-green-500 text-white' : 'bg-gray-200'
+                                                            }`}>
+                                                            {bloqueadoMontagem
+                                                                ? <AlertTriangle className="w-4 h-4" />
+                                                                : conferido ? <Check className="w-4 h-4" /> : <span className="text-xs text-gray-500">{item._idx + 1}</span>}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className={`font-medium leading-tight ${bloqueadoMontagem ? 'text-gray-500' : 'text-gray-900'}`}>{item.produto}</p>
+                                                            <div className="flex flex-wrap gap-2 mt-1 text-xs text-gray-500">
+                                                                <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-medium">Qtd: {item.quantidade}</span>
+                                                                {item.cor && <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">{item.cor}</span>}
+                                                            </div>
+                                                            {bloqueadoMontagem && (
+                                                                <p className="text-xs text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded px-2 py-1 font-medium">
+                                                                    Item bloqueado: montagem interna pendente.
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            });
+                        })()}
                     </div>
                     <div className="pt-4 border-t space-y-2">
                         <div className="flex items-center justify-between text-sm">
