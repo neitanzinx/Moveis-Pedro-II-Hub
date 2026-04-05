@@ -27,11 +27,11 @@ export function useConnectionStatus() {
                     continue;
                 }
                 const replayOk = await whatsappService[item.action](...item.payload);
-                if (replayOk === true) {
+                if (replayOk === true || replayOk?.status === 'sent') {
                     await removeOfflineQueueItem(item.id);
                     sucesso++;
                 }
-                // replayOk === 'queued' mantém o item para nova tentativa futura.
+                // replayOk com status 'queued' mantém o item para nova tentativa futura.
             } catch (error) {
                 console.error(`Erro ao sincronizar item offline ${item.id}:`, error);
             }

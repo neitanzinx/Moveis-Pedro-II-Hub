@@ -155,11 +155,12 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
       {itens.map((item, index) => {
         const selecaoIncompleta = !item.tipo_entrega ||
           (item.tipo_entrega === 'entrega' && requerMontagem(item) && !item.tipo_montagem);
+        const bloqueadoEstoque = item.bloqueado_estoque === true;
 
         return (
           <div
             key={index}
-            className={`group p-3 bg-white dark:bg-neutral-900 rounded-lg border hover:shadow-sm transition-all ${selecaoIncompleta
+            className={`group p-3 bg-white dark:bg-neutral-900 rounded-lg border hover:shadow-sm transition-all ${(selecaoIncompleta || bloqueadoEstoque)
               ? 'border-red-300 dark:border-red-900 bg-red-50/10'
               : 'border-gray-100 dark:border-neutral-800 hover:border-green-200 dark:hover:border-green-900'
               }`}
@@ -288,6 +289,13 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                       </div>
                     )}
                   </div>
+                  {bloqueadoEstoque && (
+                    <div className="mt-2">
+                      <Badge variant="destructive" className="text-[11px] h-5">
+                        Estoque zerado na loja. Gerente deve ajustar no Estoque para continuar.
+                      </Badge>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -295,19 +303,7 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                 <p className="font-bold text-gray-800 dark:text-gray-200 w-24 text-right">
                   R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </p>
-
-                {item.is_encomenda && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
-                    onClick={() => handleOpenAtualizarEstoque(index, item)}
-                    title="Atualizar quantidade em estoque"
-                  >
-                    <Package className="w-4 h-4" />
-                  </Button>
-                )}
-
+                
                 {onEditProduto && (
                   <Button
                     variant="ghost"

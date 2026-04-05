@@ -65,7 +65,7 @@ export const ROLE_RULES = {
   'Financeiro': {
     can: [
       'view_financeiro', 'manage_financeiro', 'view_vendas',
-      'view_montagem', 'view_clientes', 'view_compras', 'approve_oc'
+      'view_clientes', 'view_compras', 'approve_oc'
     ],
     scope: SCOPES.ALL
   },

@@ -1025,8 +1025,8 @@ export default function PDV() {
         return newItens;
       });
 
-      // Atualizar a lista de produtos em cache
-      queryClient.invalidateQueries(['produtos']);
+      // Atualizar imediatamente os dados de produtos para desbloquear o PDV sem recarregar a pagina.
+      await queryClient.invalidateQueries({ queryKey: ['produtos'], refetchType: 'active' });
 
       return true;
     } catch (error) {
@@ -1167,6 +1167,49 @@ export default function PDV() {
     return null;
   };
 
+  const getProdutoDoItemCarrinho = (item) => {
+    if (!item?.produto_id) return null;
+    return produtos.find((produto) => produto.id === item.produto_id) || null;
+  };
+
+  const getEstoqueLojaProduto = (produto) => {
+    if (!produto || !configVenda.loja) return null;
+    const campoLoja = resolveStockField(configVenda.loja);
+    if (!campoLoja) return null;
+    return Number(produto[campoLoja] || 0);
+  };
+
+  const itemBloqueadoPorEstoque = (item) => {
+    if (!item || item.is_encomenda || item.is_solicitacao) return false;
+
+    const produtoAtual = getProdutoDoItemCarrinho(item);
+    if (!produtoAtual) return false;
+
+    const estoqueLojaAtual = getEstoqueLojaProduto(produtoAtual);
+    if (estoqueLojaAtual === null) return false;
+
+    return estoqueLojaAtual <= 0;
+  };
+
+  const itensBloqueadosPorEstoque = itens.filter(itemBloqueadoPorEstoque);
+
+  const getResumoItensBloqueadosPorEstoque = (limite = 3) => {
+    if (itensBloqueadosPorEstoque.length === 0) return '';
+
+    const nomesUnicos = Array.from(new Set(
+      itensBloqueadosPorEstoque.map((item) => item?.produto_nome).filter(Boolean)
+    ));
+
+    const nomesVisiveis = nomesUnicos.slice(0, limite).join(', ');
+    const restantes = nomesUnicos.length - limite;
+
+    if (restantes > 0) {
+      return `${nomesVisiveis} e mais ${restantes}`;
+    }
+
+    return nomesVisiveis;
+  };
+
   const podeAvancar = () => {
     return getMotivoBloqueioBotao() === null;
   };
@@ -1185,6 +1228,10 @@ export default function PDV() {
         !i.tipo_montagem
       );
       if (semMontagem.length > 0) return `${semMontagem.length} item(ns) sem tipo de montagem`;
+      if (itensBloqueadosPorEstoque.length > 0) {
+        const resumoItens = getResumoItensBloqueadosPorEstoque();
+        return `${itensBloqueadosPorEstoque.length} item(ns) com estoque zerado (${resumoItens}). Ajuste no Estoque e atualize o PDV.`;
+      }
     }
     if (etapa === 2) {
       if (!clienteSelecionado) return 'Selecione um cliente';
@@ -1219,6 +1266,11 @@ export default function PDV() {
       const itensComSolicitacaoPendente = itens.filter(i => i.status_solicitacao_preco === 'pendente');
       if (itensComSolicitacaoPendente.length > 0) {
         return toast.error(`Existem ${itensComSolicitacaoPendente.length} produto(s) com solicitação de preço pendente. Aguarde a aprovação ou ajuste o preço.`);
+      }
+
+      if (itensBloqueadosPorEstoque.length > 0) {
+        const resumoItens = getResumoItensBloqueadosPorEstoque();
+        return toast.error(`Venda bloqueada: ${itensBloqueadosPorEstoque.length} item(ns) com estoque zerado (${resumoItens}). Gerente deve ajustar no Estoque para continuar.`);
       }
     }
     if (etapa === 2) {
@@ -1264,6 +1316,14 @@ export default function PDV() {
       setLoading(false);
       return toast.warning("Selecione o prazo de entrega");
     }
+
+    if (itensBloqueadosPorEstoque.length > 0) {
+      isProcessingRef.current = false;
+      setLoading(false);
+      const resumoItens = getResumoItensBloqueadosPorEstoque();
+      return toast.error(`Venda bloqueada: ${itensBloqueadosPorEstoque.length} item(ns) com estoque zerado (${resumoItens}). Ajuste no Estoque e atualize o PDV.`);
+    }
+
     if (restante > 0 && !pagamentoEntrega.ativo) {
       const confirmed = await confirm({
         title: "Saldo Pendente",
@@ -1837,7 +1897,15 @@ export default function PDV() {
                   </div>
                 </div>
                 <CarrinhoVenda
-                  itens={itens}
+                  itens={itens.map((item) => {
+                    const produtoAtual = getProdutoDoItemCarrinho(item);
+                    const estoqueLojaAtual = getEstoqueLojaProduto(produtoAtual);
+                    return {
+                      ...item,
+                      estoque_loja_atual: estoqueLojaAtual,
+                      bloqueado_estoque: itemBloqueadoPorEstoque(item)
+                    };
+                  })}
                   onRemoveItem={handleRemoveItem}
                   onAtualizarQuantidade={handleAtualizarQuantidadeItem}
                   onToggleEntrega={handleToggleEntrega}

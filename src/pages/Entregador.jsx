@@ -17,6 +17,7 @@ import { supabase } from "@/api/base44Client";
 import { Input } from "@/components/ui/input";
 import { whatsappService } from "@/services/whatsappService";
 import { toast } from "sonner";
+import { applyDeliveryPayment, formatMoney, needsDeliveryPaymentConfirmation, toMoneyNumber, MONEY_EPSILON } from "@/utils/deliveryPayment";
 
 const ENTREGADOR_SESSION_KEY = 'entregador_rota_state';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 horas
@@ -34,6 +35,17 @@ function lerSessaoSalva() {
     } catch (e) {
         return null;
     }
+}
+
+function statusVendaCancelada(status) {
+    const normalizado = (status || '')
+        .toString()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+
+    return normalizado === 'cancelada' || normalizado === 'cancelado';
 }
 
 // Custom Hook para persistência agressiva do checklist
@@ -116,6 +128,7 @@ export default function Entregador() {
     // Estado para modal de confirmação de pagamento simplificado
     const [modalConfirmaPagamento, setModalConfirmaPagamento] = useState(null);
     const [pagamentoStatus, setPagamentoStatus] = useState('pago'); // 'pago' | 'pendente'
+    const [valorRecebido, setValorRecebido] = useState("");
     const [motivoPendente, setMotivoPendente] = useState("");
 
     // Estado para checklist de carregamento
@@ -174,10 +187,33 @@ export default function Entregador() {
         queryKey: ['entregas-dia', dataSelecionada],
         queryFn: async () => {
             const todas = await base44.entities.Entrega.list('-ordem_rota');
-            return todas.filter(e =>
+            const entregasDia = todas.filter(e =>
                 e.data_agendada?.startsWith(dataSelecionada) &&
                 e.status !== 'Cancelada'
             );
+
+            const vendaIds = [...new Set(entregasDia.map(e => e.venda_id).filter(Boolean))];
+            if (vendaIds.length === 0) return entregasDia;
+
+            try {
+                const { data: vendas, error } = await supabase
+                    .from('vendas')
+                    .select('id, status')
+                    .in('id', vendaIds);
+
+                if (error) throw error;
+
+                const vendasCanceladas = new Set(
+                    (vendas || [])
+                        .filter(v => statusVendaCancelada(v.status))
+                        .map(v => v.id)
+                );
+
+                return entregasDia.filter(e => !e.venda_id || !vendasCanceladas.has(e.venda_id));
+            } catch (erroFiltro) {
+                console.error('Erro ao filtrar vendas canceladas nas entregas do dia:', erroFiltro);
+                return entregasDia;
+            }
         },
         refetchInterval: rotaIniciada ? 10000 : 30000
     });
@@ -275,6 +311,78 @@ export default function Entregador() {
             queryClient.invalidateQueries({ queryKey: ['assistencias'] });
         }
     });
+
+    const abrirModalConfirmacaoPagamento = (entrega, contexto = 'manual') => {
+        const valorInicial = toMoneyNumber(entrega?.valor_a_receber);
+        setModalConfirmaPagamento({ ...entrega, contexto });
+        setPagamentoStatus('pago');
+        setValorRecebido(valorInicial > 0 ? valorInicial.toFixed(2) : '');
+        setMotivoPendente("");
+    };
+
+    const fecharModalConfirmacaoPagamento = () => {
+        setModalConfirmaPagamento(null);
+        setPagamentoStatus('pago');
+        setValorRecebido("");
+        setMotivoPendente("");
+    };
+
+    const confirmarPagamentoNoModal = async () => {
+        if (!modalConfirmaPagamento) return;
+
+        const valorRecebidoNumerico = toMoneyNumber(valorRecebido);
+
+        if (pagamentoStatus === 'pago' && valorRecebidoNumerico <= MONEY_EPSILON) {
+            toast.error('Informe um valor recebido maior que zero.');
+            return;
+        }
+
+        if (pagamentoStatus === 'pendente' && !motivoPendente.trim()) {
+            toast.error('Informe o motivo da pendência.');
+            return;
+        }
+
+        const contexto = modalConfirmaPagamento.contexto || 'manual';
+        const entrega = { ...modalConfirmaPagamento };
+        const pagamentoPayload = {
+            pagamentoStatus,
+            valorRecebido: valorRecebidoNumerico,
+            motivoPendente: motivoPendente.trim(),
+        };
+
+        if (pagamentoStatus === 'pago') {
+            setModalComprovante({
+                ...entrega,
+                contexto,
+                pagamentoPayload,
+            });
+            fecharModalConfirmacaoPagamento();
+            return;
+        }
+
+        try {
+            if (contexto === 'finalizacao') {
+                await finalizarEntrega(entrega, entrega.assinatura_url, null, pagamentoPayload);
+            } else {
+                setEnviando(true);
+                await applyDeliveryPayment({
+                    entrega,
+                    ...pagamentoPayload,
+                });
+                toast.success('Pendência registrada');
+                queryClient.invalidateQueries({ queryKey: ['entregas-dia'] });
+                queryClient.invalidateQueries({ queryKey: ['entregas'] });
+                queryClient.invalidateQueries({ queryKey: ['vendas'] });
+                queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
+            }
+            fecharModalConfirmacaoPagamento();
+        } catch (e) {
+            console.error('Erro ao registrar pagamento:', e);
+            toast.error(e.message || 'Erro ao registrar pagamento');
+        } finally {
+            setEnviando(false);
+        }
+    };
 
     // Persistência da sessão de rota ativa no localStorage
     useEffect(() => {
@@ -401,6 +509,13 @@ export default function Entregador() {
         }
     };
 
+    const rotaPossuiAndamento = (entregas = []) => {
+        const statusAndamento = ['Entregue', 'Próxima parada', 'A caminho', 'Em rota'];
+        return entregas.some((entrega) =>
+            statusAndamento.includes(entrega?.status) || entrega?.whatsapp_enviado === true
+        );
+    };
+
     // Preparar checklist de carregamento
     const prepararChecklist = async () => {
         if (!caminhaoSelecionado || !turnoSelecionado) {
@@ -409,6 +524,25 @@ export default function Entregador() {
         }
         if (entregasRota.length === 0) {
             toast.error("Nenhuma entrega para carregar.");
+            return;
+        }
+
+        if (rotaPossuiAndamento(entregasRota)) {
+            const retomarSemChecklist = await confirm({
+                title: 'Retomar rota',
+                message: 'Esta rota já possui andamento. Deseja retomar sem checklist?',
+                confirmText: 'Retomar'
+            });
+
+            if (!retomarSemChecklist) return;
+
+            setRotaIniciada(true);
+            setEtapa('rota');
+            await refetch();
+            if (!gpsInterval.current) {
+                iniciarRastreamento();
+            }
+            toast.success('Rota retomada!');
             return;
         }
 
@@ -535,9 +669,12 @@ export default function Entregador() {
                 }
             }
 
-            // Notificar apenas o PRIMEIRO cliente que o caminhão saiu do depósito
-            if (entregasRota.length > 0) {
-                await whatsappService.notifyRouteStart([entregasRota[0]]);
+            const rotaJaPossuiAndamento = rotaPossuiAndamento(entregasRota);
+            const primeiraPendente = entregasRota.find((e) => e.status !== 'Entregue');
+
+            // Notificar apenas em rota nova e somente o primeiro pedido pendente.
+            if (primeiraPendente && !rotaJaPossuiAndamento) {
+                await whatsappService.notifyRouteStart([primeiraPendente]);
             }
 
             setRotaIniciada(true);
@@ -578,75 +715,7 @@ export default function Entregador() {
         toast.success("Rota finalizada!");
     };
 
-    const avisarProximo = async (entrega) => {
-        console.log('avisarProximo chamado para:', entrega.id);
-        setEnviando(true);
-        try {
-            // Força o uso do domínio oficial para o link de rastreio enviado ao cliente
-            const origin = 'https://moveispedro2.com.br';
-            const linkRastreio = `${origin}/rastreio/${entrega.numero_pedido}`;
-            const telefone = entrega.cliente_telefone;
-            console.log('Telefone:', telefone, 'Link:', linkRastreio);
-
-            if (!telefone) {
-                console.warn('Telefone não encontrado');
-                toast.error("Telefone do cliente não cadastrado.");
-                setEnviando(false);
-                return;
-            }
-
-            // Atualizar status para "Próxima parada" para permitir o rastreio (se não estiver em rota/caminho)
-            const statusPermitidos = ["Próxima parada", "A caminho", "Em rota"];
-            if (!statusPermitidos.includes(entrega.status)) {
-                console.log('Atualizando status para Próxima parada...');
-                await updateEntrega.mutateAsync({
-                    id: entrega.id,
-                    data: { status: 'Próxima parada' }
-                });
-            }
-
-            console.log('Enviando mensagem WhatsApp...');
-            const sent = await whatsappService.sendDeliveryNextStop(telefone, entrega, linkRastreio);
-            console.log('Mensagem enviada?', sent);
-
-            if (sent) {
-                // Marcar no cache imediatamente (antes da mutação async) para evitar
-                // que o useEffect re-dispare avisarProximo antes do refetch completar
-                queryClient.setQueryData(['entregas-dia', dataSelecionada], (oldData) => {
-                    if (!oldData) return oldData;
-                    return oldData.map(e => e.id === entrega.id ? { ...e, whatsapp_enviado: true } : e);
-                });
-                // Marcar cliente como notificado no banco usando updateEntrega
-                await updateEntrega.mutateAsync({
-                    id: entrega.id,
-                    data: {
-                        whatsapp_enviado: true,
-                        data_notificacao: new Date().toISOString()
-                    }
-                });
-                toast.success("Cliente avisado e link de rastreio enviado!");
-            } else {
-                toast.error("Erro ao enviar mensagem.");
-            }
-        } catch (e) {
-            console.error('Erro em avisarProximo:', e);
-            toast.error("Erro ao enviar aviso.");
-        } finally {
-            setEnviando(false);
-        }
-    };
-
     const primeiraPendenteId = entregasRota.find(e => e.status !== 'Entregue')?.id;
-
-    // Efeito para automatizar o envio de "Próxima parada"
-    useEffect(() => {
-        if (rotaIniciada && primeiraPendenteId) {
-            const proximaEntrega = entregasRota.find(e => e.id === primeiraPendenteId);
-            if (proximaEntrega && !proximaEntrega.whatsapp_enviado && !enviando) {
-                avisarProximo(proximaEntrega);
-            }
-        }
-    }, [rotaIniciada, primeiraPendenteId, entregasRota, enviando]);
 
     const normalizarNumeroPedido = (valor) => (valor || '').toString().replace(/\D/g, '');
 
@@ -778,11 +847,11 @@ export default function Entregador() {
         };
 
         // Se tem pagamento, pedir comprovante
-        if (entrega.pagamento_na_entrega || entrega.valor_a_receber > 0) {
-            setModalComprovante(entregaComFotos);
+        if (needsDeliveryPaymentConfirmation(entrega)) {
+            abrirModalConfirmacaoPagamento(entregaComFotos, 'finalizacao');
         } else {
             // Finalizar diretamente
-            await finalizarEntrega(entregaComFotos, entrega.assinatura_url, null);
+            await finalizarEntrega(entregaComFotos, entrega.assinatura_url, null, null);
         }
     };
 
@@ -790,13 +859,53 @@ export default function Entregador() {
     const salvarComprovante = async (comprovanteDataUrl) => {
         const entrega = modalComprovante;
         setModalComprovante(null);
-        await finalizarEntrega(entrega, entrega.assinatura_url, comprovanteDataUrl);
+
+        if (!entrega) return;
+
+        if (entrega.contexto === 'finalizacao') {
+            await finalizarEntrega(entrega, entrega.assinatura_url, comprovanteDataUrl, entrega.pagamentoPayload || null);
+            return;
+        }
+
+        setEnviando(true);
+        try {
+            await applyDeliveryPayment({
+                entrega,
+                ...(entrega.pagamentoPayload || {}),
+                comprovanteUrl: comprovanteDataUrl,
+            });
+            toast.success('Pagamento confirmado!');
+            queryClient.invalidateQueries({ queryKey: ['entregas-dia'] });
+            queryClient.invalidateQueries({ queryKey: ['entregas'] });
+            queryClient.invalidateQueries({ queryKey: ['vendas'] });
+            queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
+        } catch (error) {
+            console.error('Erro ao registrar pagamento com comprovante:', error);
+            toast.error(error.message || 'Erro ao registrar pagamento');
+        } finally {
+            setEnviando(false);
+        }
     };
 
     // Finalizar entrega com assinatura, fotos e comprovante
-    const finalizarEntrega = async (entrega, assinaturaUrl, comprovanteUrl) => {
+    const finalizarEntrega = async (entrega, assinaturaUrl, comprovanteUrl, pagamentoPayload = null) => {
         setEnviando(true);
         try {
+            if (entrega?.venda_id) {
+                const { data: vendaAtual, error: vendaError } = await supabase
+                    .from('vendas')
+                    .select('id, status')
+                    .eq('id', entrega.venda_id)
+                    .single();
+
+                if (vendaError) throw vendaError;
+
+                if (statusVendaCancelada(vendaAtual?.status)) {
+                    toast.error('Entrega bloqueada: esta venda foi cancelada.');
+                    return;
+                }
+            }
+
             const updateData = {
                 status: 'Entregue',
                 data_realizada: new Date().toISOString(),
@@ -831,7 +940,19 @@ export default function Entregador() {
                 const { saveDeliveryToOfflineQueue } = await import('@/utils/deliveryOfflineQueue');
                 await saveDeliveryToOfflineQueue(entrega.id, {
                     updateData,
-                    fotosOfflineList: entrega.isOffline ? entrega.fotos_entrega : []
+                    fotosOfflineList: entrega.isOffline ? entrega.fotos_entrega : [],
+                    financialPayload: pagamentoPayload ? {
+                        entrega: {
+                            id: entrega.id,
+                            venda_id: entrega.venda_id,
+                            valor_a_receber: entrega.valor_a_receber,
+                            forma_pagamento_entrega: entrega.forma_pagamento_entrega,
+                            forma_pagamento: entrega.forma_pagamento,
+                            numero_pedido: entrega.numero_pedido,
+                        },
+                        ...pagamentoPayload,
+                        comprovanteUrl,
+                    } : null,
                 });
 
                 toast.success("Entrega salva offline! Será sincronizada quando houver internet.");
@@ -845,11 +966,26 @@ export default function Entregador() {
             } else {
                 // 🚀 AUTOMAÇÃO: Chamar o robô de WhatsApp para concluir e avisar o próximo
                 try {
-                    const ok = await whatsappService.notifyDeliveryCompletion(entrega.id, updateData);
-                    if (!ok) throw new Error("A API retornou erro HTTP (500/400)");
+                    const completionResult = await whatsappService.notifyDeliveryCompletion(entrega.id, updateData);
+                    if (completionResult?.status === 'failed') {
+                        throw new Error("A API retornou erro HTTP (500/400)");
+                    }
+
+                    // Se foi para fila offline do bot, persistimos no banco aqui para manter consistência imediata.
+                    if (completionResult?.status === 'queued') {
+                        await updateEntrega.mutateAsync({ id: entrega.id, data: updateData });
+                    }
                 } catch (zapErr) {
                     console.error("Falha ao chamar automação do robô, tentando fallback direto no banco...");
                     await updateEntrega.mutateAsync({ id: entrega.id, data: updateData });
+                }
+
+                if (pagamentoPayload) {
+                    await applyDeliveryPayment({
+                        entrega,
+                        ...pagamentoPayload,
+                        comprovanteUrl,
+                    });
                 }
 
                 // Atualizar cache imediatamente para que o useEffect detecte a próxima entrega
@@ -861,7 +997,9 @@ export default function Entregador() {
 
                 toast.success("Entrega finalizada!");
                 sessionStorage.removeItem('rascunho_entrega');
-                refetch();
+                queryClient.invalidateQueries({ queryKey: ['vendas'] });
+                queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
+                await refetch();
             }
         } catch (error) {
             toast.error("Erro ao finalizar entrega.");
@@ -1508,11 +1646,7 @@ export default function Entregador() {
                                                 variant="outline"
                                                 size="sm"
                                                 className="w-full border-amber-400 text-amber-700 hover:bg-amber-50"
-                                                onClick={() => {
-                                                    setModalConfirmaPagamento(entrega);
-                                                    setPagamentoStatus('pago');
-                                                    setMotivoPendente("");
-                                                }}
+                                                onClick={() => abrirModalConfirmacaoPagamento(entrega, 'manual')}
                                             >
                                                 <DollarSign className="w-4 h-4 mr-1" /> Confirmar Pagamento
                                             </Button>
@@ -1656,10 +1790,36 @@ export default function Entregador() {
                             titulo="Foto do Comprovante"
                             onCapture={salvarComprovante}
                             onCancel={() => {
-                                // Finalizar sem comprovante
                                 const entrega = modalComprovante;
                                 setModalComprovante(null);
-                                finalizarEntrega(entrega, entrega.assinatura_url, null);
+
+                                    if (!entrega) return;
+
+                                    if (entrega.contexto === 'finalizacao') {
+                                        finalizarEntrega(entrega, entrega.assinatura_url, null, entrega.pagamentoPayload || null);
+                                        return;
+                                    }
+
+                                    setEnviando(true);
+                                    applyDeliveryPayment({
+                                        entrega,
+                                        ...(entrega.pagamentoPayload || {}),
+                                        comprovanteUrl: null,
+                                    })
+                                        .then(() => {
+                                            toast.success('Pagamento confirmado!');
+                                            queryClient.invalidateQueries({ queryKey: ['entregas-dia'] });
+                                            queryClient.invalidateQueries({ queryKey: ['entregas'] });
+                                            queryClient.invalidateQueries({ queryKey: ['vendas'] });
+                                            queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
+                                        })
+                                        .catch((error) => {
+                                            console.error('Erro ao registrar pagamento sem comprovante:', error);
+                                            toast.error(error.message || 'Erro ao registrar pagamento');
+                                        })
+                                        .finally(() => {
+                                            setEnviando(false);
+                                        });
                             }}
                         />
                     </div>
@@ -1927,7 +2087,7 @@ export default function Entregador() {
             </Dialog>
 
             {/* Modal de Confirmação de Pagamento Simplificado */}
-            <Dialog open={!!modalConfirmaPagamento} onOpenChange={() => setModalConfirmaPagamento(null)}>
+            <Dialog open={!!modalConfirmaPagamento} onOpenChange={fecharModalConfirmacaoPagamento}>
                 <DialogContent className="max-w-sm">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
@@ -1938,9 +2098,9 @@ export default function Entregador() {
                     {modalConfirmaPagamento && (
                         <div className="space-y-4">
                             <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
-                                <p className="text-sm text-amber-800 font-medium">Valor a receber:</p>
+                                <p className="text-sm text-amber-800 font-medium">Pedido foi pago?</p>
                                 <p className="text-2xl font-bold text-amber-900">
-                                    R$ {(modalConfirmaPagamento.valor_a_receber || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {formatMoney(modalConfirmaPagamento.valor_a_receber || 0)}
                                 </p>
                                 {modalConfirmaPagamento.forma_pagamento_entrega && (
                                     <p className="text-xs text-amber-600 mt-1">
@@ -1966,6 +2126,23 @@ export default function Entregador() {
                                     <X className="w-4 h-4 mr-1" /> Não Pago
                                 </Button>
                             </div>
+
+                            {pagamentoStatus === 'pago' && (
+                                <div className="space-y-2">
+                                    <p className="text-sm font-medium text-gray-700">Valor recebido</p>
+                                    <Input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={valorRecebido}
+                                        onChange={(e) => setValorRecebido(e.target.value)}
+                                        placeholder="0,00"
+                                    />
+                                    <p className="text-xs text-gray-500">
+                                        Informe o valor efetivamente recebido. Se houver saldo restante, o pedido continua pendente.
+                                    </p>
+                                </div>
+                            )}
 
                             {/* Motivo se Pendente */}
                             {pagamentoStatus === 'pendente' && (
@@ -1996,137 +2173,13 @@ export default function Entregador() {
                             {/* Botão Confirmar */}
                             <Button
                                 className={`w-full ${pagamentoStatus === 'pago' ? 'bg-green-600 hover:bg-green-700' : 'bg-orange-600 hover:bg-orange-700'}`}
-                                onClick={async () => {
-                                    try {
-                                        const hoje = new Date().toISOString();
-                                        const updates = {
-                                            pagamento_confirmado: pagamentoStatus === 'pago',
-                                            pagamento_pendente_motivo: pagamentoStatus === 'pendente' ? motivoPendente : null,
-                                            data_pagamento_confirmado: hoje
-                                        };
-                                        await supabase.from('entregas').update(updates).eq('id', modalConfirmaPagamento.id);
-
-                                        // Atualizar também a venda se aplicável
-                                        if (modalConfirmaPagamento.venda_id) {
-                                            let vendaUpdates = {
-                                                pagamento_entrega_confirmado: pagamentoStatus === 'pago',
-                                                pagamento_entrega_observacao: pagamentoStatus === 'pendente' ? motivoPendente : null
-                                            };
-
-                                            if (pagamentoStatus === 'pago') {
-                                                const { data: vendaAtual } = await supabase
-                                                    .from('vendas')
-                                                    .select('valor_total, valor_pago, valor_restante')
-                                                    .eq('id', modalConfirmaPagamento.venda_id)
-                                                    .single();
-
-                                                const valorTotal = Number(vendaAtual?.valor_total || 0);
-                                                const valorPagoAtual = Number(vendaAtual?.valor_pago || 0);
-                                                const valorRestanteBase = vendaAtual?.valor_restante == null
-                                                    ? Math.max(valorTotal - valorPagoAtual, 0)
-                                                    : Math.max(Number(vendaAtual.valor_restante || 0), 0);
-                                                const valorRecebido = Number(modalConfirmaPagamento.valor_a_receber || 0);
-                                                const novoValorRestante = Math.max(valorRestanteBase - valorRecebido, 0);
-                                                const novoValorPago = Math.max(valorPagoAtual, valorTotal - novoValorRestante);
-
-                                                vendaUpdates = {
-                                                    ...vendaUpdates,
-                                                    valor_pago: novoValorPago,
-                                                    valor_restante: novoValorRestante,
-                                                    status: novoValorRestante <= 0.01 ? 'Pago' : 'Pagamento Pendente'
-                                                };
-                                            } else {
-                                                vendaUpdates = {
-                                                    ...vendaUpdates,
-                                                    status: 'Pagamento Pendente'
-                                                };
-                                            }
-
-                                            await supabase.from('vendas').update({
-                                                ...vendaUpdates
-                                            }).eq('id', modalConfirmaPagamento.venda_id);
-
-                                            // Processar lançamentos financeiros de "Pago"
-                                            if (pagamentoStatus === 'pago') {
-                                                // 1. Atualizar o lançamento de receita para "Pago"
-                                                const { data: lancamentosVenda } = await supabase
-                                                    .from('lancamentos_financeiros')
-                                                    .select('*')
-                                                    .eq('venda_id', modalConfirmaPagamento.venda_id)
-                                                    .eq('tipo', 'receita')
-                                                    .eq('status', 'Pendente');
-
-                                                if (lancamentosVenda && lancamentosVenda.length > 0) {
-                                                    for (const lancamento of lancamentosVenda) {
-                                                        await base44.entities.LancamentoFinanceiro.update(lancamento.id, {
-                                                            status: 'Pago',
-                                                            pago: true,
-                                                            data_pagamento: hoje.split('T')[0]
-                                                        });
-                                                    }
-                                                }
-
-                                                // 2. Criar lançamento de Taxa de Cartão se for cartão
-                                                const formaPag = modalConfirmaPagamento.forma_pagamento_entrega || '';
-                                                const isCartao = formaPag.toLowerCase().includes('cartão') || formaPag.toLowerCase().includes('crédito') || formaPag.toLowerCase().includes('débito');
-
-                                                if (isCartao) {
-                                                    const configTaxas = await base44.entities.ConfiguracaoTaxa.list();
-
-                                                    // Tentar achar a taxa correspondente
-                                                    const isCreditoParcelado = formaPag.toLowerCase().includes('crédito') && !formaPag.toLowerCase().includes('1x') && formaPag.match(/\d+x/i);
-
-                                                    const taxa = configTaxas.find(t => {
-                                                        if (isCreditoParcelado) return t.forma_pagamento === 'Crédito Parcelado';
-
-                                                        let nomeBusca = formaPag.toLowerCase().replace('cartão de ', '');
-                                                        nomeBusca = nomeBusca.split('(')[0].trim();
-                                                        return t.forma_pagamento.toLowerCase().includes(nomeBusca);
-                                                    });
-
-                                                    if (taxa && taxa.valor > 0) {
-                                                        const valorBase = modalConfirmaPagamento.valor_a_receber || 0;
-                                                        const valorTaxa = taxa.tipo_taxa === 'porcentagem'
-                                                            ? (valorBase * taxa.valor) / 100
-                                                            : taxa.valor;
-
-                                                        if (valorTaxa > 0) {
-                                                            await base44.entities.LancamentoFinanceiro.create({
-                                                                descricao: `Taxa ${formaPag} - Recebido na Entrega #${modalConfirmaPagamento.numero_pedido}`,
-                                                                valor: -valorTaxa,
-                                                                tipo: 'despesa',
-                                                                data_vencimento: hoje.split('T')[0],
-                                                                data_lancamento: hoje.split('T')[0],
-                                                                pago: true,
-                                                                categoria_nome: 'Taxas de Cartão',
-                                                                forma_pagamento: formaPag,
-                                                                status: 'Pago',
-                                                                observacao: `${taxa.valor}${taxa.tipo_taxa === 'porcentagem' ? '%' : ' R$'} sobre R$ ${valorBase.toFixed(2)}`,
-                                                                venda_id: modalConfirmaPagamento.venda_id,
-                                                                numero_pedido: modalConfirmaPagamento.numero_pedido
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        toast.success(pagamentoStatus === 'pago' ? 'Pagamento confirmado!' : 'Pendência registrada');
-                                        setModalConfirmaPagamento(null);
-                                        queryClient.invalidateQueries(['entregas']);
-                                        queryClient.invalidateQueries(['vendas']);
-                                        queryClient.invalidateQueries(['lancamentos-financeiros']);
-                                    } catch (e) {
-                                        console.error('Erro ao registrar pagamento:', e);
-                                        toast.error('Erro ao registrar pagamento');
-                                    }
-                                }}
-                                disabled={pagamentoStatus === 'pendente' && !motivoPendente}
+                                onClick={confirmarPagamentoNoModal}
+                                disabled={enviando || (pagamentoStatus === 'pendente' && !motivoPendente.trim())}
                             >
                                 {pagamentoStatus === 'pago' ? (
-                                    <><Check className="w-4 h-4 mr-1" /> Confirmar Recebimento</>
+                                    <><Check className="w-4 h-4 mr-1" /> Confirmar e anexar comprovante</>
                                 ) : (
-                                    <><AlertTriangle className="w-4 h-4 mr-1" /> Registrar Pendência</>
+                                    <><AlertTriangle className="w-4 h-4 mr-1" /> Finalizar com pendência</>
                                 )}
                             </Button>
                         </div>

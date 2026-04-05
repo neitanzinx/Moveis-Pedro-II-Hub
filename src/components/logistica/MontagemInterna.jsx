@@ -624,8 +624,8 @@ export default function MontagemInterna() {
   const limparSelecao = () => setSelectedMontagemIds([]);
 
   const concluirMontagens = async (itens, { limparApos = false } = {}) => {
-    if (!isMontador) {
-      toast.info('Somente o cargo Montador pode concluir montagens.');
+    if (!isMontador && !isAdmin) {
+      toast.info('Sem permissão para concluir montagens.');
       return;
     }
 
@@ -1017,15 +1017,17 @@ export default function MontagemInterna() {
                       <UserCheck className="w-4 h-4 mr-1" />
                       {deveDesatribuirSelecionadas ? 'Desatribuir de mim' : 'Atribuir a mim'}
                     </Button>
-                    <Button
-                      size="sm"
-                      className="bg-green-600 hover:bg-green-700"
-                      onClick={concluirSelecionadas}
-                    >
-                      <CheckSquare className="w-4 h-4 mr-1" />
-                      Concluir selecionadas
-                    </Button>
                   </>
+                )}
+                {(isMontador || isAdmin) && (
+                  <Button
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700"
+                    onClick={concluirSelecionadas}
+                  >
+                    <CheckSquare className="w-4 h-4 mr-1" />
+                    Concluir selecionadas
+                  </Button>
                 )}
                 <Button
                   size="sm"

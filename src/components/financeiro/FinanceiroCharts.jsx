@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, PieChart, Pie, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import { TrendingUp, PieChart as PieChartIcon, BarChart3 } from "lucide-react";
+import { normalizeTipo } from "@/services/financeiroAggregation";
 
 export default function FinanceiroCharts({ lancamentos, categorias, mesAno, vendas = [] }) {
   // lancamentos já vem filtrado pelo mês do componente pai
@@ -16,9 +17,9 @@ export default function FinanceiroCharts({ lancamentos, categorias, mesAno, vend
         map.set(catNome, { entradas: 0, saidas: 0 });
       }
       const current = map.get(catNome);
-      if (lanc.tipo === 'Entrada' || lanc.tipo === 'receita') {
+      if (normalizeTipo(lanc.tipo) === "entrada") {
         current.entradas += lanc.valor || 0;
-      } else {
+      } else if (normalizeTipo(lanc.tipo) === "saida") {
         current.saidas += Math.abs(lanc.valor || 0);
       }
     });
@@ -42,9 +43,9 @@ export default function FinanceiroCharts({ lancamentos, categorias, mesAno, vend
         map.set(dia, { dia, entradas: 0, saidas: 0 });
       }
       const current = map.get(dia);
-      if (lanc.tipo === 'Entrada' || lanc.tipo === 'receita') {
+      if (normalizeTipo(lanc.tipo) === "entrada") {
         current.entradas += lanc.valor || 0;
-      } else {
+      } else if (normalizeTipo(lanc.tipo) === "saida") {
         current.saidas += Math.abs(lanc.valor || 0);
       }
     });
@@ -56,10 +57,10 @@ export default function FinanceiroCharts({ lancamentos, categorias, mesAno, vend
     const map = new Map();
 
     lancamentosMes
-      .filter(l => l.tipo === 'Entrada' || l.tipo === 'receita')
-      .forEach(lanc => {
+      .filter((l) => normalizeTipo(l.tipo) === "entrada")
+      .forEach((lanc) => {
         const catNome = lanc.categoria_nome || 'Sem categoria';
-        map.set(catNome, (map.get(catNome) || 0) + lanc.valor);
+        map.set(catNome, (map.get(catNome) || 0) + (lanc.valor || 0));
       });
 
     return Array.from(map.entries()).map(([name, value]) => ({
@@ -72,8 +73,8 @@ export default function FinanceiroCharts({ lancamentos, categorias, mesAno, vend
     const map = new Map();
 
     lancamentosMes
-      .filter(l => l.tipo !== 'Entrada' && l.tipo !== 'receita')
-      .forEach(lanc => {
+      .filter((l) => normalizeTipo(l.tipo) === "saida")
+      .forEach((lanc) => {
         const catNome = lanc.categoria_nome || 'Sem categoria';
         map.set(catNome, (map.get(catNome) || 0) + Math.abs(lanc.valor || 0));
       });
@@ -87,7 +88,9 @@ export default function FinanceiroCharts({ lancamentos, categorias, mesAno, vend
   const COLORS = ['#07593f', '#f38a4c', '#3b82f6', '#ec4899', '#8b5cf6', '#10b981', '#f59e0b', '#6366f1'];
 
   const formatCurrency = (value) => {
-    return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+    const numero = Number(value);
+    if (!Number.isFinite(numero)) return '-';
+    return `R$ ${numero.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
   };
 
   return (

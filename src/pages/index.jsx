@@ -54,6 +54,8 @@ import RastreioPublico from "./RastreioPublico.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation, Navigate } from 'react-router-dom';
 import { hasAnyRole, getUserRoles } from "@/config/permissions";
+import { MENU_ITEMS } from "@/config/permissions";
+import { useTenant } from "@/contexts/TenantContext";
 
 // ============================================================================
 // COMPONENTE DE LOADING - Exibido enquanto páginas lazy são carregadas
@@ -101,8 +103,17 @@ function _getCurrentPage(url) {
 
 function PagesContent() {
     const location = useLocation();
-    const { user, loading } = useAuth();
+    const { user, loading, can } = useAuth();
+    const { isModuleActive } = useTenant();
     const currentPage = _getCurrentPage(location.pathname);
+
+    const menuFiltrado = MENU_ITEMS.filter((item) => {
+        if (!can(item.permission)) return false;
+        if (item.module && !isModuleActive(item.module)) return false;
+        return true;
+    });
+
+    const firstAllowedAdminUrl = menuFiltrado[0]?.url || "/admin/Dashboard";
 
     // Mover lógica de loading para o final do "processamento de hooks"
     // ou garantir que as rotas públicas que não usam hooks extras venham depois do loading se necessário.
@@ -165,7 +176,7 @@ function PagesContent() {
         if (user && getUserRoles(user).length > 0 && !user.primeiro_acesso) {
             const params = new URLSearchParams(location.search);
             const redirect = params.get('redirect');
-            return <Navigate to={redirect || "/admin/Dashboard"} replace />;
+            return <Navigate to={redirect || firstAllowedAdminUrl} replace />;
         }
 
         // Se está logado mas sem permissão, força logout ou mostra erro (aqui deixamos ficar no login para evitar loop)
@@ -198,6 +209,15 @@ function PagesContent() {
         const MOBILE_ONLY_ROLES = ['Entregador', 'Montador', 'Montador Externo'];
         const userRoles = getUserRoles(user);
         const isMobileOnlyUser = userRoles.length > 0 && userRoles.every(role => MOBILE_ONLY_ROLES.includes(role));
+
+        // Para perfis administrativos/comerciais, /admin deve abrir na primeira tela visível do menu.
+        if (location.pathname === '/admin') {
+            return <Navigate to={firstAllowedAdminUrl} replace />;
+        }
+
+        if (location.pathname.toLowerCase().startsWith('/admin/montagem') && !can('view_montagem')) {
+            return <Navigate to={firstAllowedAdminUrl} replace />;
+        }
 
         // Montador Externo só pode acessar /admin/MontadorExterno
         if (isMobileOnlyUser && hasAnyRole(user, ['Montador Externo'])) {
@@ -234,6 +254,11 @@ function PagesContent() {
             // Permite outras rotas
         }
 
+        // Se o usuário não tiver acesso ao Dashboard padrão, evita cair nele como primeira tela.
+        if (location.pathname === '/admin/Dashboard' && firstAllowedAdminUrl !== '/admin/Dashboard') {
+            return <Navigate to={firstAllowedAdminUrl} replace />;
+        }
+
         // Montador Interno só pode acessar /admin/Montagem
         if (isMobileOnlyUser && hasAnyRole(user, ['Montador'])) {
             if (!location.pathname.toLowerCase().includes('montagem')) {
@@ -250,7 +275,7 @@ function PagesContent() {
             <Layout currentPageName={currentPage}>
                 <Suspense fallback={<PageLoadingFallback />}>
                     <Routes>
-                        <Route path="/admin" element={<Dashboard />} />
+                        <Route path="/admin" element={<Navigate to={firstAllowedAdminUrl} replace />} />
 
                         {/* Rotas Principais */}
                         <Route path="/admin/Dashboard" element={<Dashboard />} />
@@ -298,7 +323,7 @@ function PagesContent() {
                         <Route path="/admin/ModoReuniao" element={<ModoReuniao />} />
 
                         {/* Fallback para Dashboard */}
-                        <Route path="/admin/*" element={<Dashboard />} />
+                        <Route path="/admin/*" element={<Navigate to={firstAllowedAdminUrl} replace />} />
                     </Routes>
                 </Suspense>
             </Layout>

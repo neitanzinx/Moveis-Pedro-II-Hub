@@ -1,6 +1,7 @@
 import localforage from 'localforage';
 import { supabase } from '@/api/base44Client';
 import { base44 } from '@/api/base44Client';
+import { applyDeliveryPayment } from '@/utils/deliveryPayment';
 
 export const deliveryOfflineDB = localforage.createInstance({
     name: 'moveis_pedro_ii',
@@ -102,6 +103,17 @@ export const syncOfflineDeliveries = async () => {
 
             // Agora atualiza no Supabase via API principal
             await base44.entities.Entrega.update(item.entregaId, finalUpdateData);
+
+            if (payload.financialPayload) {
+                await applyDeliveryPayment({
+                    ...payload.financialPayload,
+                    entrega: {
+                        ...payload.financialPayload.entrega,
+                        id: item.entregaId,
+                    },
+                    comprovanteUrl: finalUpdateData.comprovante_pagamento_url || payload.financialPayload.comprovanteUrl || null,
+                });
+            }
 
             // Remove da fila offline
             await removeOfflineDelivery(item.entregaId);

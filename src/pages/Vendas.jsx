@@ -69,6 +69,7 @@ export default function Vendas() {
 
     // Hook de Autenticação e Controle de Acesso
     const { user, filterData, can } = useAuth();
+    const canCancelVendas = can('cancel_vendas');
 
 
     const { data: vendas = [], isLoading } = useQuery({
@@ -149,6 +150,10 @@ export default function Vendas() {
     // Mutation para cancelar venda
     const cancelarVendaMutation = useMutation({
         mutationFn: async (venda) => {
+            if (!canCancelVendas) {
+                throw new Error('Sem permissão para cancelar vendas.');
+            }
+
             // 1. Atualizar status da venda para Cancelado
             await base44.entities.Venda.update(venda.id, { status: 'Cancelado' });
 
@@ -379,6 +384,11 @@ export default function Vendas() {
     };
 
     const handleCancelarVenda = async (venda) => {
+        if (!canCancelVendas) {
+            toast.error('Você não tem permissão para cancelar vendas.');
+            return;
+        }
+
         const confirmed = await confirm({
             title: "Cancelar Venda",
             message: `Tem certeza que deseja CANCELAR a venda #${venda.numero_pedido}?\n\nIsso também cancelará todos os lançamentos financeiros, entregas, montagens e assistências vinculadas.`,
@@ -696,7 +706,7 @@ export default function Vendas() {
                                                     </Button>
 
                                                     {/* Botão de Cancelar */}
-                                                    {venda.status !== 'Cancelado' && (
+                                                    {canCancelVendas && venda.status !== 'Cancelado' && (
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"

@@ -183,11 +183,11 @@ _Móveis Pedro II_`;
      * @param {string} linkRastreio
      */
     sendDeliveryNextStop: async (telefone, entrega, linkRastreio) => {
-        if (!entrega?.id) return false;
+        if (!entrega?.id) return { status: 'failed' };
 
         if (!navigator.onLine) {
             await enqueueForLater('sendDeliveryNextStop', [telefone, entrega, linkRastreio], 'Sem internet: aviso de próxima parada salvo para envio posterior.');
-            return true;
+            return { status: 'queued' };
         }
 
         try {
@@ -205,19 +205,19 @@ _Móveis Pedro II_`;
                 const errData = await response.json().catch(() => ({}));
                 if (isLikelyBotOfflineResponse(response.status, errData)) {
                     await enqueueForLater('sendDeliveryNextStop', [telefone, entrega, linkRastreio], 'WhatsApp indisponível: aviso de próxima parada salvo para envio posterior.');
-                    return true;
+                    return { status: 'queued' };
                 }
                 throw new Error(errData.error || 'Falha ao enviar próxima parada');
             }
 
-            return true;
+            return { status: 'sent' };
         } catch (error) {
             if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
                 await enqueueForLater('sendDeliveryNextStop', [telefone, entrega, linkRastreio], 'Servidor inacessível: aviso de próxima parada salvo para envio posterior.');
-                return true;
+                return { status: 'queued' };
             }
             console.error('Erro ao enviar próxima parada:', error);
-            return false;
+            return { status: 'failed' };
         }
     },
 
@@ -293,7 +293,7 @@ _Móveis Pedro II_`;
     notifyDeliveryCompletion: async (idConcluida, updateData) => {
         if (!navigator.onLine) {
             await enqueueForLater('notifyDeliveryCompletion', [idConcluida, updateData], "Sem internet: Confirmação de entrega salva para envio posterior.");
-            return true;
+            return { status: 'queued' };
         }
 
         try {
@@ -309,17 +309,17 @@ _Móveis Pedro II_`;
                 const errData = await response.json().catch(() => ({}));
                 if (isLikelyBotOfflineResponse(response.status, errData)) {
                     await enqueueForLater('notifyDeliveryCompletion', [idConcluida, updateData], "WhatsApp indisponível: Confirmação de entrega salva para envio posterior.");
-                    return true;
+                    return { status: 'queued' };
                 }
             }
-            return response.ok;
+            return response.ok ? { status: 'sent' } : { status: 'failed' };
         } catch (error) {
             if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
                 await enqueueForLater('notifyDeliveryCompletion', [idConcluida, updateData], "Servidor inacessível: Confirmação de entrega salva para posterior.");
-                return true;
+                return { status: 'queued' };
             }
             console.error("Erro ao notificar conclusão:", error);
-            throw error; // Re-throw para fallback no frontend
+            return { status: 'failed' };
         }
     },
     /**
