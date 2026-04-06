@@ -12,6 +12,8 @@ import ModalDetalhesEntrega from "./ModalDetalhesEntrega";
 import { PackageOpen, Search, Clock, Truck, AlertTriangle, ChevronLeft, ChevronRight, Wrench, Calendar, MessageCircle, Loader2, Server, WifiOff, CheckCircle, Sun, Sunset, Route } from "lucide-react";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -360,7 +362,13 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
   const [activeId, setActiveId] = useState(null);
   const [entregaSelecionada, setEntregaSelecionada] = useState(null);
   const [searchTriagem, setSearchTriagem] = useState("");
+  const [pedidoEnvioManual, setPedidoEnvioManual] = useState("");
+  const [caminhaoEnvioManual, setCaminhaoEnvioManual] = useState("");
+  const [turnoEnvioManual, setTurnoEnvioManual] = useState("Comercial");
+  const [dataEnvioManual, setDataEnvioManual] = useState("");
   const [semanaOffset, setSemanaOffset] = useState(0);
+  const [weekNavDirection, setWeekNavDirection] = useState(null);
+  const [weekNavAnimationKey, setWeekNavAnimationKey] = useState(0);
   const [diaSelecionado, setDiaSelecionado] = useState(null); // null = nenhum dia selecionado
 
   // Estados para modais
@@ -409,6 +417,12 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
   const inicioSemanaAtual = getWeekRange(semanaOffset);
 
+  const navigateSemana = (direction) => {
+    setWeekNavDirection(direction);
+    setSemanaOffset((s) => s + direction);
+    setWeekNavAnimationKey((k) => k + 1);
+  };
+
   // Gerar os 7 dias da semana (Segunda a Domingo)
   const diasDisponiveis = useMemo(() => {
     const dias = [];
@@ -436,6 +450,13 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
   const dataAtual = diaSelecionado !== null ? diasDisponiveis[diaSelecionado]?.id : null;
 
+  useEffect(() => {
+    if (!dataEnvioManual && diasDisponiveis.length > 0) {
+      const hojeDaSemana = diasDisponiveis.find(d => d.isHoje);
+      setDataEnvioManual(hojeDaSemana?.id || diasDisponiveis[0].id);
+    }
+  }, [diasDisponiveis, dataEnvioManual]);
+
   // Filtra a triagem pela busca
   const pendentesFiltrados = (entregasPendentes || []).filter(e => {
     const termo = searchTriagem.toLowerCase();
@@ -446,6 +467,48 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
     const matchProduto = venda?.itens?.some(i => i.produto_nome?.toLowerCase().includes(termo));
     return matchCliente || matchPedido || matchProduto;
   });
+
+  const entregasConfirmadasNaoEntregues = useMemo(() => {
+    return (entregas || [])
+      .filter((e) =>
+        e.status_confirmacao === 'Confirmada' &&
+        e.data_agendada &&
+        e.status !== 'Entregue' &&
+        e.status !== 'Cancelada'
+      )
+      .sort((a, b) => (a.data_agendada || '').localeCompare(b.data_agendada || ''));
+  }, [entregas]);
+
+  const buscaPedidoInfo = useMemo(() => {
+    const termo = (searchTriagem || '').trim();
+    if (!termo) return null;
+
+    const entrega = (entregas || []).find((e) => String(e.numero_pedido) === termo);
+    if (!entrega) return null;
+
+    const dataAgendada = entrega.data_agendada?.split('T')[0] || null;
+    const diaIndex = dataAgendada ? diasDisponiveis.findIndex((d) => d.id === dataAgendada) : -1;
+    const caminhao = caminhoes.find((c) => String(c.id) === String(entrega.caminhao_id));
+
+    return {
+      entrega,
+      caminhao,
+      dataAgendada,
+      diaIndex,
+      localizadaEmCaminhao: Boolean(entrega.caminhao_id && dataAgendada && caminhao)
+    };
+  }, [searchTriagem, entregas, diasDisponiveis, caminhoes]);
+
+  useEffect(() => {
+    if (buscaPedidoInfo?.localizadaEmCaminhao && buscaPedidoInfo.diaIndex >= 0) {
+      setDiaSelecionado(buscaPedidoInfo.diaIndex);
+    }
+  }, [buscaPedidoInfo]);
+
+  const caminhoesFiltradosPorBusca = useMemo(() => {
+    if (!buscaPedidoInfo?.localizadaEmCaminhao) return caminhoes;
+    return caminhoes.filter((c) => String(c.id) === String(buscaPedidoInfo.entrega.caminhao_id));
+  }, [caminhoes, buscaPedidoInfo]);
 
 
   // Assistências não agendadas (sem data_visita ou caminhao_id) - aparecem na triagem
@@ -884,13 +947,44 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
     setMotivoReagendamento("");
   };
 
+  const enviarPedidoManual = async () => {
+    const pedido = (pedidoEnvioManual || '').trim();
+    if (!pedido || !caminhaoEnvioManual || !turnoEnvioManual || !dataEnvioManual) {
+      toast.error("Preencha pedido, caminhão, data e turno para enviar.");
+      return;
+    }
+
+    const entrega = (entregasPendentes || []).find((e) => String(e.numero_pedido) === pedido);
+    if (!entrega) {
+      toast.error("Pedido não está na triagem pendente ou não foi encontrado.");
+      return;
+    }
+
+    const updateData = {
+      data_agendada: dataEnvioManual,
+      turno: turnoEnvioManual,
+      caminhao_id: Number(caminhaoEnvioManual),
+      status: 'Agendada',
+      ordem_rota: null
+    };
+
+    try {
+      await atualizarEntregaMutation.mutateAsync({ id: entrega.id, data: updateData });
+      toast.success(`Pedido #${pedido} enviado para caminhão e turno selecionados.`);
+      setPedidoEnvioManual("");
+      queryClient.invalidateQueries({ queryKey: ['entregas'] });
+    } catch (error) {
+      toast.error("Erro ao enviar pedido para o caminhão.");
+    }
+  };
+
   return (
     <>
       <DndContext sensors={sensors} collisionDetection={rectIntersection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div className="h-full flex flex-col gap-4 p-4 rounded-2xl bg-gray-50">
 
           {/* --- TRIAGEM + AGUARDANDO --- */}
-          <div className="flex gap-3 h-[180px] flex-shrink-0">
+          <div className="flex gap-3 h-[250px] flex-shrink-0">
             {/* Triagem */}
             <Card
               ref={setTriagemRef}
@@ -910,7 +1004,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
                   <Input
                     className="h-7 text-xs pl-7 bg-white border-gray-200"
-                    placeholder="Buscar..."
+                    placeholder="Buscar (cliente/produto/pedido)"
                     value={searchTriagem}
                     onChange={e => setSearchTriagem(e.target.value)}
                   />
@@ -928,10 +1022,84 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
                 </div>
               </div>
 
-              <ScrollArea className="flex-1 w-full p-2 overflow-y-hidden">
+              <div className="px-3 py-2 border-b bg-slate-50/60">
+                <div className="grid grid-cols-1 lg:grid-cols-[160px_1fr_1fr_1fr_auto] gap-2 items-end">
+                  <div>
+                    <Label className="text-[10px] text-gray-600">Pedido</Label>
+                    <Input
+                      className="h-8 text-xs bg-white"
+                      placeholder="#12345"
+                      value={pedidoEnvioManual}
+                      onChange={(e) => setPedidoEnvioManual(e.target.value.replace(/\D/g, ''))}
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-[10px] text-gray-600">Enviar para caminhão</Label>
+                    <Select value={caminhaoEnvioManual} onValueChange={setCaminhaoEnvioManual}>
+                      <SelectTrigger className="h-8 text-xs bg-white">
+                        <SelectValue placeholder="Selecione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {caminhoes.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.nome || c.placa}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-[10px] text-gray-600">Data</Label>
+                    <Select value={dataEnvioManual} onValueChange={setDataEnvioManual}>
+                      <SelectTrigger className="h-8 text-xs bg-white">
+                        <SelectValue placeholder="Selecione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {diasDisponiveis.map((d) => (
+                          <SelectItem key={d.id} value={d.id}>
+                            {d.label} - {d.dataFormatada}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-[10px] text-gray-600">Horário</Label>
+                    <Select value={turnoEnvioManual} onValueChange={setTurnoEnvioManual}>
+                      <SelectTrigger className="h-8 text-xs bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TURNOS.map((turno) => (
+                          <SelectItem key={turno.id} value={turno.id}>
+                            {turno.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <Button className="h-8 text-xs" onClick={enviarPedidoManual}>
+                    Enviar para rota
+                  </Button>
+                </div>
+
+                {buscaPedidoInfo && (
+                  <div className={`mt-2 rounded-md border px-2 py-1.5 text-xs ${buscaPedidoInfo.localizadaEmCaminhao ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                    {buscaPedidoInfo.localizadaEmCaminhao
+                      ? `Pedido #${buscaPedidoInfo.entrega.numero_pedido} está no caminhão ${buscaPedidoInfo.caminhao?.nome || buscaPedidoInfo.caminhao?.placa}, turno ${buscaPedidoInfo.entrega.turno}, dia ${new Date(`${buscaPedidoInfo.dataAgendada}T12:00:00`).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}.`
+                      : `Pedido #${buscaPedidoInfo.entrega.numero_pedido} localizado, mas ainda não está alocado em caminhão/data.`}
+                  </div>
+                )}
+              </div>
+
+              <ScrollArea className="flex-1 min-h-[128px] w-full p-2 overflow-y-hidden">
                 <div className="flex gap-2 pb-2 pl-1 h-full items-start">
                   {pendentesFiltrados.map(entrega => (
-                    <div key={entrega.id} className="w-[220px] flex-shrink-0 h-full">
+                    <div key={entrega.id} className="w-[248px] flex-shrink-0 h-full">
                       <EntregaCard
                         entrega={entrega}
                         venda={(vendas || []).find(v => v.id === entrega.venda_id)}
@@ -943,7 +1111,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
 
                   {assistenciasNaoAgendadas.map(at => (
-                    <div key={`at-${at.id}`} className="w-[220px] flex-shrink-0 h-full">
+                    <div key={`at-${at.id}`} className="w-[248px] flex-shrink-0 h-full">
                       <AssistenciaCard assistencia={at} isColumn={false} />
                     </div>
                   ))}
@@ -960,18 +1128,64 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
           </div>
 
+          <Card className="border-0 shadow-sm bg-white/90">
+            <div className="px-3 py-2 border-b flex items-center justify-between">
+              <h3 className="font-bold text-sm text-gray-800">Agendados e Confirmados (Pendentes de Entrega)</h3>
+              <Badge className="text-[10px] bg-emerald-600">{entregasConfirmadasNaoEntregues.length}</Badge>
+            </div>
+            <CardContent className="p-2">
+              {entregasConfirmadasNaoEntregues.length === 0 ? (
+                <p className="text-xs text-gray-400 px-1 py-2">Nenhum pedido confirmado pendente de entrega.</p>
+              ) : (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {entregasConfirmadasNaoEntregues.map((e) => {
+                    const cam = caminhoes.find((c) => String(c.id) === String(e.caminhao_id));
+                    return (
+                      <button
+                        key={e.id}
+                        onClick={() => {
+                          const dataAgendada = e.data_agendada?.split('T')[0];
+                          const idx = diasDisponiveis.findIndex((d) => d.id === dataAgendada);
+                          if (idx >= 0) setDiaSelecionado(idx);
+                          setSearchTriagem(String(e.numero_pedido || ''));
+                        }}
+                        className="min-w-[260px] text-left p-2 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-[11px] font-bold text-emerald-700">#{e.numero_pedido}</span>
+                          <Badge className="text-[9px] bg-emerald-600">Confirmada</Badge>
+                        </div>
+                        <p className="text-xs font-semibold text-gray-700 truncate mt-1">{e.cliente_nome}</p>
+                        <p className="text-[11px] text-gray-600 mt-1">
+                          {cam ? (cam.nome || cam.placa) : 'Sem caminhão'} • {e.turno || '-'} • {e.data_agendada ? new Date(e.data_agendada).toLocaleDateString('pt-BR') : '-'}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* --- ABAS DE DIAS --- */}
           <div className="flex items-center gap-2 bg-white rounded-xl p-2 shadow-sm">
             <Button
               variant="ghost"
               size="icon"
               className="h-8 w-8"
-              onClick={() => setSemanaOffset(s => s - 1)}
+              onClick={() => navigateSemana(-1)}
             >
               <ChevronLeft className="w-4 h-4" />
             </Button>
 
-            <div className="flex-1 flex gap-1 overflow-x-auto">
+            <div
+              key={weekNavAnimationKey}
+              className={`flex-1 flex gap-1 overflow-x-auto ${weekNavDirection === -1
+                ? 'animate-week-rotate-left'
+                : weekNavDirection === 1
+                  ? 'animate-week-rotate-right'
+                  : ''}`}
+            >
               {diasDisponiveis.map((dia, index) => (
                 <DateTabVisual
                   key={dia.id}
@@ -989,7 +1203,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
               variant="ghost"
               size="icon"
               className="h-8 w-8"
-              onClick={() => setSemanaOffset(s => s + 1)}
+              onClick={() => navigateSemana(1)}
             >
               <ChevronRight className="w-4 h-4" />
             </Button>
@@ -1004,14 +1218,14 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
                   <p className="font-medium text-lg">Selecione um dia</p>
                   <p className="text-sm">Clique em um dia acima para ver as entregas</p>
                 </div>
-              ) : caminhoes.length === 0 ? (
+              ) : caminhoesFiltradosPorBusca.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
                   <Truck className="w-12 h-12 mb-3 opacity-30" />
-                  <p className="font-medium">Nenhum caminhão cadastrado</p>
-                  <p className="text-sm">Cadastre caminhões para organizar as entregas</p>
+                  <p className="font-medium">Nenhum caminhão encontrado para o filtro atual</p>
+                  <p className="text-sm">Verifique a busca pelo número do pedido</p>
                 </div>
               ) : (
-                caminhoes.map((caminhao, index) => (
+                caminhoesFiltradosPorBusca.map((caminhao, index) => (
                   <ColunaCaminhao
                     key={caminhao.id}
                     caminhao={caminhao}
@@ -1140,6 +1354,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
           open={!!modalOtimizacao}
           onClose={() => setModalOtimizacao(null)}
           entregas={modalOtimizacao}
+          onRotaAplicada={() => queryClient.invalidateQueries({ queryKey: ['entregas'] })}
         />
       )}
 

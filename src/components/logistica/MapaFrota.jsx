@@ -1,7 +1,7 @@
 import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Truck, Clock, MapPin, User, Navigation, ExternalLink } from "lucide-react";
+import { Truck, Clock, MapPin, User, Navigation, ExternalLink, AlertTriangle } from "lucide-react";
 
 export default function MapaFrota({ caminhoes = [] }) {
     const formatarHora = (isoString) => {
@@ -20,6 +20,18 @@ export default function MapaFrota({ caminhoes = [] }) {
         if (diffMin < 1) return 'Agora mesmo';
         if (diffMin < 60) return `Há ${diffMin} min`;
         return `Há ${Math.floor(diffMin / 60)}h`;
+    };
+
+    // 🔍 Detectar dados suspeitos: motorista atribuído mas sem GPS > 12h
+    const temDadosSuspeitos = (caminhao) => {
+        if (!caminhao.motorista_atual_nome) return false;
+        if (!caminhao.ultima_atualizacao) return true; // Motorista sem última atualização é suspeito
+
+        const agora = new Date();
+        const ultima = new Date(caminhao.ultima_atualizacao);
+        const LIMITE_ATIVO_MS = 12 * 60 * 60 * 1000; // 12 horas
+
+        return (agora - ultima) > LIMITE_ATIVO_MS;
     };
 
     const agora = new Date();
@@ -189,30 +201,62 @@ export default function MapaFrota({ caminhoes = [] }) {
                         {caminhoes.map(caminhao => {
                             const emTransito = caminhao.status_rota === 'Em Trânsito';
                             const temLocalizacao = caminhao.latitude && caminhao.longitude;
+                            const suspeito = temDadosSuspeitos(caminhao);
 
                             return (
                                 <div
                                     key={caminhao.id}
-                                    className={`rounded-xl border overflow-hidden ${emTransito
-                                        ? 'bg-green-50 border-green-200'
-                                        : 'bg-gray-50 border-gray-200'
-                                        }`}
+                                    className={`rounded-xl border overflow-hidden ${suspeito
+                                        ? 'bg-red-50 border-red-300 border-2'
+                                        : emTransito
+                                            ? 'bg-green-50 border-green-200'
+                                            : 'bg-gray-50 border-gray-200'
+                                    }`}
                                 >
+                                    {/* ⚠️ Aviso de dados suspeitos */}
+                                    {suspeito && (
+                                        <div className="bg-red-100 border-b border-red-300 px-3 py-2 flex items-center gap-2">
+                                            <AlertTriangle className="w-4 h-4 text-red-600" />
+                                            <span className="text-xs font-semibold text-red-700">
+                                                Possível dados inconsistentes
+                                            </span>
+                                        </div>
+                                    )}
+
                                     <div className="p-3">
                                         <div className="flex items-center justify-between mb-2">
                                             <div className="flex items-center gap-2">
-                                                <div className={`w-3 h-3 rounded-full ${emTransito ? 'bg-green-500 animate-pulse' : 'bg-gray-400'
+                                                <div className={`w-3 h-3 rounded-full ${suspeito
+                                                    ? 'bg-red-500 animate-pulse'
+                                                    : emTransito
+                                                        ? 'bg-green-500 animate-pulse'
+                                                        : 'bg-gray-400'
                                                     }`} />
                                                 <span className="font-bold">🚚 {caminhao.placa || caminhao.nome}</span>
                                             </div>
-                                            <Badge variant={emTransito ? 'default' : 'secondary'} className="text-xs">
-                                                {caminhao.status_rota || 'Parado'}
+                                            <Badge variant={suspeito ? 'destructive' : emTransito ? 'default' : 'secondary'} className="text-xs">
+                                                {suspeito ? '⚠️ Verificar' : (caminhao.status_rota || 'Parado')}
                                             </Badge>
                                         </div>
 
                                         <p className="text-xs text-gray-500 mb-2">
                                             {caminhao.modelo || 'Caminhão'}
-                                            {caminhao.motorista_atual_nome && ` • ${caminhao.motorista_atual_nome}`}
+                                            {caminhao.motorista_atual_nome && (
+                                                <>
+                                                    <br />
+                                                    <span className={suspeito ? 'text-red-600 font-semibold' : ''}>
+                                                        Motorista: {caminhao.motorista_atual_nome}
+                                                    </span>
+                                                </>
+                                            )}
+                                            {caminhao.ultima_atualizacao && (
+                                                <>
+                                                    <br />
+                                                    <span className={suspeito ? 'text-red-600 font-semibold' : 'text-gray-400'}>
+                                                        Último GPS: {tempoDesdeAtualizacao(caminhao.ultima_atualizacao)}
+                                                    </span>
+                                                </>
+                                            )}
                                         </p>
 
                                         {temLocalizacao && (

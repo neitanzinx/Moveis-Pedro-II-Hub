@@ -29,13 +29,15 @@ import { base44 } from "@/api/base44Client";
  * - Exibe preview antes/depois
  */
 export default function RouteOptimizer({
+    open,
+    onClose,
     entregas,
     caminhaoId,
     turno,
     data,
     onRotaAplicada
 }) {
-    const [modalAberto, setModalAberto] = useState(false);
+    const [modalAbertoInterno, setModalAbertoInterno] = useState(false);
     const [comparacao, setComparacao] = useState(null);
     const [aplicando, setAplicando] = useState(false);
 
@@ -48,13 +50,26 @@ export default function RouteOptimizer({
         e.status !== 'Cancelada'
     ) || [];
 
+    const modalControlado = typeof open === 'boolean';
+    const modalAberto = modalControlado ? open : modalAbertoInterno;
+
+    const fecharModal = () => {
+        if (modalControlado) {
+            onClose?.();
+        } else {
+            setModalAbertoInterno(false);
+        }
+    };
+
     const handleOtimizar = async () => {
         if (entregasValidas.length < 2) {
             toast.info('Mínimo de 2 entregas para otimizar');
             return;
         }
 
-        setModalAberto(true);
+        if (!modalControlado) {
+            setModalAbertoInterno(true);
+        }
         limpar();
 
         // Endereço da loja como origem (pode ser configurável)
@@ -79,6 +94,12 @@ export default function RouteOptimizer({
         }
     };
 
+    useEffect(() => {
+        if (modalControlado && modalAberto && entregasValidas.length >= 2) {
+            handleOtimizar();
+        }
+    }, [modalControlado, modalAberto, entregasValidas.length]);
+
     const aplicarOrdem = async () => {
         if (!rotaOtimizada?.ordemOtimizada) return;
 
@@ -95,7 +116,7 @@ export default function RouteOptimizer({
             await Promise.all(promises);
 
             toast.success('Rota otimizada aplicada com sucesso!');
-            setModalAberto(false);
+            fecharModal();
             onRotaAplicada?.();
 
         } catch (error) {
@@ -108,22 +129,24 @@ export default function RouteOptimizer({
 
     return (
         <>
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={handleOtimizar}
-                disabled={entregasValidas.length < 2 || loading}
-                className="gap-2"
-            >
-                {loading ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                    <Route className="w-4 h-4" />
-                )}
-                Otimizar Rota ({entregasValidas.length})
-            </Button>
+            {!modalControlado && (
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleOtimizar}
+                    disabled={entregasValidas.length < 2 || loading}
+                    className="gap-2"
+                >
+                    {loading ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                        <Route className="w-4 h-4" />
+                    )}
+                    Otimizar Rota ({entregasValidas.length})
+                </Button>
+            )}
 
-            <Dialog open={modalAberto} onOpenChange={setModalAberto}>
+            <Dialog open={modalAberto} onOpenChange={(value) => { if (!value) fecharModal(); }}>
                 <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
@@ -269,7 +292,7 @@ export default function RouteOptimizer({
                                 <div className="flex gap-3 pt-2">
                                     <Button
                                         variant="outline"
-                                        onClick={() => setModalAberto(false)}
+                                        onClick={fecharModal}
                                         className="flex-1"
                                     >
                                         Cancelar

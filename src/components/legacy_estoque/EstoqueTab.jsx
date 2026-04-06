@@ -277,32 +277,30 @@ export default function EstoqueTab({ user }) {
     <div className="space-y-4">
       {/* Filters */}
       <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-sm border border-gray-100 dark:border-neutral-800">
-        <div className="p-4 border-b border-gray-100 dark:border-neutral-800">
-          <div className="flex flex-col sm:flex-row gap-3 justify-between items-center">
-            <div className="relative w-full sm:w-96">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                placeholder="Buscar por nome, codigo ou categoria..."
-                className="pl-9 border-gray-200 dark:border-neutral-700"
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-gray-500" />
-                <Select value={selectedCategoria} onValueChange={setSelectedCategoria}>
-                  <SelectTrigger className="w-48 border-gray-200 dark:border-neutral-700">
-                    <SelectValue placeholder="Filtrar por categoria" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="todas">Todas as Categorias</SelectItem>
-                    {categorias.map(cat => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+        <div className="p-4 border-b border-gray-100 dark:border-neutral-800 space-y-3">
+          {/* Linha 1: Campo de busca full-width */}
+          <div className="relative w-full">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Input
+              placeholder="Buscar por palavras-chave: nome, cor, material, categoria, ambiente..."
+              className="pl-10 h-11 text-base border-gray-200 dark:border-neutral-700"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
+          </div>
+          {/* Linha 2: Filtros e ações */}
+          <div className="flex flex-wrap items-center gap-3">
+              <Select value={selectedCategoria} onValueChange={setSelectedCategoria}>
+                <SelectTrigger className="w-48 border-gray-200 dark:border-neutral-700">
+                  <SelectValue placeholder="Filtrar por categoria" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todas as Categorias</SelectItem>
+                  {categorias.map(cat => (
+                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Select value={selectedFabricante} onValueChange={setSelectedFabricante}>
                 <SelectTrigger className="w-48 border-gray-200 dark:border-neutral-700">
                   <SelectValue placeholder="Filtrar por fabricante" />
@@ -374,7 +372,6 @@ export default function EstoqueTab({ user }) {
                 </>
               )}
             </div>
-          </div>
         </div>
 
         {/* Table */}

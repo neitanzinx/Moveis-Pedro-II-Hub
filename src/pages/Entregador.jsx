@@ -663,6 +663,40 @@ export default function Entregador() {
 
         setEnviando(true);
         try {
+            // 🔧 SAFEGUARD: Atualizar motorista_atual_nome no caminhão
+            if (user?.full_name) {
+                console.log(`🚗 Registrando motorista "${user.full_name}" no caminhão...`);
+                let motoristaSincronizado = false;
+                let tentativas = 0;
+                const MAX_TENTATIVAS = 3;
+
+                while (tentativas < MAX_TENTATIVAS && !motoristaSincronizado) {
+                    try {
+                        await updateCaminhao.mutateAsync({
+                            id: caminhaoSelecionado,
+                            data: {
+                                motorista_atual_nome: user.full_name,
+                                turno_atual: turnoSelecionado,
+                                status_rota: 'Em Trânsito'
+                            }
+                        });
+                        console.log(`✅ Motorista registrado com sucesso em "${turnoSelecionado}"`);
+                        motoristaSincronizado = true;
+                    } catch (erro) {
+                        tentativas++;
+                        console.warn(`⚠️  Erro ao registrar motorista (tentativa ${tentativas}/${MAX_TENTATIVAS}):`, erro);
+                        if (tentativas < MAX_TENTATIVAS) {
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        }
+                    }
+                }
+
+                if (!motoristaSincronizado) {
+                    console.error('❌ Falha ao registrar motorista após 3 tentativas.');
+                    toast.warning('Aviso: Não conseguimos registrar o motorista no sistema. Contate um administrador se o problema persistir.');
+                }
+            }
+
             for (const entrega of entregasRota) {
                 if (!entrega.caminhao_id) {
                     await base44.entities.Entrega.update(entrega.id, { caminhao_id: caminhaoSelecionado });
@@ -707,6 +741,49 @@ export default function Entregador() {
         if (!confirmed) return;
 
         pararRastreamento();
+        
+        // 🔧 SAFEGUARD: Limpar motorista_atual_nome do caminhão com retry
+        if (caminhaoSelecionado) {
+            let tentativas = 0;
+            const MAX_TENTATIVAS = 3;
+            let sucesso = false;
+
+            while (tentativas < MAX_TENTATIVAS && !sucesso) {
+                try {
+                    console.log(`🧹 Tentativa ${tentativas + 1}: Limpando motorista_atual_nome do caminhão...`);
+                    await updateCaminhao.mutateAsync({
+                        id: caminhaoSelecionado,
+                        data: {
+                            motorista_atual_nome: null,
+                            turno_atual: null,
+                            status_rota: 'Parado'
+                        }
+                    });
+                    console.log('✅ Caminhão atualizado com sucesso (motorista_atual_nome limpado)');
+                    sucesso = true;
+                } catch (erro) {
+                    tentativas++;
+                    console.warn(`⚠️  Erro ao atualizar caminhão (tentativa ${tentativas}/${MAX_TENTATIVAS}):`, erro);
+                    
+                    // Aguardar 500ms antes de tentar novamente
+                    if (tentativas < MAX_TENTATIVAS) {
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                }
+            }
+
+            if (!sucesso) {
+                console.error('❌ Falha ao limpar motorista_atual_nome após 3 tentativas. Dados podem ficar inconsistentes.');
+                toast.warning('Aviso: Não conseguimos limpar os dados do caminhão. A inconsistência pode ocorrer sem ação manual.');
+                // Mesmo com erro, continuamos finalizando a rota localmente
+                // Mas o usuário é alertado para contatar um admin se necessário
+            }
+
+            // Invalidar cache de caminhões para forçar refetch na próxima visualização
+            queryClient.invalidateQueries({ queryKey: ['caminhoes-rastreamento'] });
+            queryClient.invalidateQueries({ queryKey: ['caminhoes'] });
+        }
+
         localStorage.removeItem(ENTREGADOR_SESSION_KEY);
         setRotaIniciada(false);
         setEtapa('selecao');

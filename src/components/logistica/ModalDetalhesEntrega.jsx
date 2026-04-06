@@ -5,25 +5,91 @@ import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea"; // Added Textarea
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
-import { Package, MapPin, User, Phone, Wrench, Save, RefreshCw, Ban, Clock } from "lucide-react"; // Added RefreshCw, Ban, Clock
-import { toast } from "sonner"; // Added toast
+import { base44 } from "@/lib/supabase";
+import { formatarCEP, formatarEndereco } from "@/utils/formatters";
+import { Package, MapPin, User, Phone, Wrench, Save, RefreshCw, Ban, Clock, Search, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+
+const getEntregaAddressState = (entrega = {}) => ({
+  cep: entrega.endereco_entrega_cep || "",
+  rua: entrega.endereco_entrega_rua || "",
+  numero: entrega.endereco_entrega_numero || "",
+  complemento: entrega.endereco_entrega_complemento || "",
+  ponto_referencia: entrega.endereco_entrega_ponto_referencia || "",
+  bairro: entrega.endereco_entrega_bairro || "",
+  cidade: entrega.endereco_entrega_cidade || "",
+  estado: entrega.endereco_entrega_estado || "",
+});
+
+const getClienteDeliveryAddressState = (cliente = {}) => {
+  const usarMesmoEndereco = cliente.usar_mesmo_endereco !== false;
+
+  if (usarMesmoEndereco) {
+    return {
+      cep: cliente.cep || "",
+      rua: cliente.endereco || "",
+      numero: cliente.numero || "",
+      complemento: cliente.complemento || "",
+      ponto_referencia: cliente.ponto_referencia || "",
+      bairro: cliente.bairro || "",
+      cidade: cliente.cidade || "",
+      estado: cliente.estado || "",
+    };
+  }
+
+  return {
+    cep: cliente.endereco_entrega_cep || "",
+    rua: cliente.endereco_entrega_rua || "",
+    numero: cliente.endereco_entrega_numero || "",
+    complemento: cliente.endereco_entrega_complemento || "",
+    ponto_referencia: cliente.endereco_entrega_ponto_referencia || "",
+    bairro: cliente.endereco_entrega_bairro || "",
+    cidade: cliente.endereco_entrega_cidade || "",
+    estado: cliente.endereco_entrega_estado || "",
+  };
+};
+
+const buildEnderecoEntregaText = (endereco = {}) => {
+  if (!endereco.rua) return "";
+
+  let enderecoTexto = `${endereco.rua}, ${endereco.numero || "s/n"}`;
+
+  if (endereco.complemento) enderecoTexto += ` - ${endereco.complemento}`;
+  if (endereco.bairro) enderecoTexto += ` - ${endereco.bairro}`;
+  if (endereco.cidade) enderecoTexto += `, ${endereco.cidade}`;
+  if (endereco.estado) enderecoTexto += `/${endereco.estado}`;
+  if (endereco.ponto_referencia) enderecoTexto += ` (Ref: ${endereco.ponto_referencia})`;
+
+  return enderecoTexto;
+};
+
+const hasStructuredAddressData = (endereco = {}) =>
+  Object.values(endereco).some((value) => Boolean(String(value || "").trim()));
+
+const normalizeEmptyValue = (value) => {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  return normalized ? normalized : null;
+};
 
 export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
   const queryClient = useQueryClient();
   const [itensMontagem, setItensMontagem] = useState(
     entrega.itens_montagem_interna || []
   );
-  const [endereco, setEndereco] = useState(entrega.endereco_entrega || "");
+  const [enderecoEntrega, setEnderecoEntrega] = useState(() => getEntregaAddressState(entrega));
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSearchingCep, setIsSearchingCep] = useState(false);
 
-  // Update local state if prop changes (though usually modal unmounts)
   useEffect(() => {
-    setEndereco(entrega.endereco_entrega || "");
-  }, [entrega.endereco_entrega]);
+    setEnderecoEntrega(getEntregaAddressState(entrega));
+  }, [entrega]);
+
+  const enderecoPreview = buildEnderecoEntregaText(enderecoEntrega) || entrega.endereco_entrega || "";
+  const isLegacyAddressOnly = !hasStructuredAddressData(enderecoEntrega) && Boolean(entrega.endereco_entrega);
 
   const atualizarEntregaMutation = useMutation({
     mutationFn: ({ id, data }) => base44.entities.Entrega.update(id, data),
@@ -37,6 +103,66 @@ export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
       toast.error("Erro ao salvar entrega");
     }
   });
+
+  const fetchWithTimeout = async (resource, options = {}) => {
+    const { timeout = 5000 } = options;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      return await fetch(resource, {
+        ...options,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  const updateEnderecoField = (field, value) => {
+    setEnderecoEntrega((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const buscarCEP = async (cep) => {
+    const cepLimpo = String(cep || "").replace(/\D/g, "");
+    if (cepLimpo.length !== 8) return;
+
+    setIsSearchingCep(true);
+
+    const aplicarResultado = (dados) => {
+      setEnderecoEntrega((prev) => ({
+        ...prev,
+        cep: formatarCEP(cepLimpo),
+        rua: formatarEndereco(dados.logradouro || dados.street || ""),
+        bairro: formatarEndereco(dados.bairro || dados.neighborhood || ""),
+        cidade: formatarEndereco(dados.localidade || dados.city || ""),
+        estado: (dados.uf || dados.state || "").toUpperCase(),
+      }));
+    };
+
+    try {
+      const responseViaCep = await fetchWithTimeout(`https://viacep.com.br/ws/${cepLimpo}/json/`, { timeout: 3000 });
+      if (!responseViaCep.ok) throw new Error("ViaCEP indisponível");
+
+      const dataViaCep = await responseViaCep.json();
+      if (dataViaCep.erro) throw new Error("CEP não encontrado");
+
+      aplicarResultado(dataViaCep);
+    } catch (errorViaCep) {
+      try {
+        const responseBrasilApi = await fetchWithTimeout(`https://brasilapi.com.br/api/cep/v1/${cepLimpo}`, { timeout: 3000 });
+        if (!responseBrasilApi.ok) throw new Error("BrasilAPI indisponível");
+
+        const dataBrasilApi = await responseBrasilApi.json();
+        aplicarResultado(dataBrasilApi);
+      } catch (errorBrasilApi) {
+        console.error("Erro ao buscar CEP da entrega:", errorBrasilApi);
+        toast.error("Não foi possível localizar o CEP informado.");
+      }
+    } finally {
+      setIsSearchingCep(false);
+    }
+  };
 
   const toggleItemMontagem = (itemNome) => {
     const itemExiste = (itensMontagem || []).find(i => i.produto_nome === itemNome);
@@ -59,65 +185,24 @@ export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
     setIsSyncing(true);
     try {
       let cliente = null;
+      const clientes = await base44.entities.Cliente.list();
 
       // Tentativa 1: Pelo ID do cliente na venda
       if (venda && venda.cliente_id) {
         try {
-          // Fetch single client if ID exists
-          const response = await base44.entities.Cliente.list(); // List is inefficient but filter might be better if available
-          // Optimization: using filter if available or finding in list
-          // Since we don't have a direct get(id) exposed in the simple wrapper shown in previous turns, 
-          // we might need to filter.
-          // Re-reading base44Client.js... it has filter() and list(). 
-          // Let's use filter to be safe or list and find.
-
-          const clientes = await base44.entities.Cliente.list();
           cliente = clientes.find(c => String(c.id) === String(venda.cliente_id));
         } catch (e) { console.warn("Erro ao buscar cliente por ID", e); }
       }
 
       // Tentativa 2: Pelo Nome (caso venda_id falhe ou não exista)
       if (!cliente && entrega.cliente_nome) {
-        const clientes = await base44.entities.Cliente.list();
-        // Fuzzy match or exact match
         cliente = clientes.find(c => c.nome_completo === entrega.cliente_nome);
       }
 
       if (cliente) {
-        const construirEndereco = (c) => {
-          const usarMesmo = c.usar_mesmo_endereco !== false;
-          const end = usarMesmo ? {
-            rua: c.endereco,
-            numero: c.numero,
-            complemento: c.complemento,
-            ponto_referencia: c.ponto_referencia,
-            bairro: c.bairro,
-            cidade: c.cidade,
-            estado: c.estado
-          } : {
-            rua: c.endereco_entrega_rua,
-            numero: c.endereco_entrega_numero,
-            complemento: c.endereco_entrega_complemento,
-            ponto_referencia: c.endereco_entrega_ponto_referencia,
-            bairro: c.endereco_entrega_bairro,
-            cidade: c.endereco_entrega_cidade,
-            estado: c.endereco_entrega_estado
-          };
-
-          if (!end.rua) return "";
-
-          let enderecoStr = `${end.rua}, ${end.numero || 's/n'}`;
-          if (end.complemento) enderecoStr += ` - ${end.complemento}`;
-          if (end.bairro) enderecoStr += ` - ${end.bairro}`;
-          if (end.cidade) enderecoStr += `, ${end.cidade}`;
-          if (end.estado) enderecoStr += `/${end.estado}`;
-          if (end.ponto_referencia) enderecoStr += ` (Ref: ${end.ponto_referencia})`;
-
-          return enderecoStr;
-        };
-        const novoEnd = construirEndereco(cliente);
-        if (novoEnd) {
-          setEndereco(novoEnd);
+        const enderecoCliente = getClienteDeliveryAddressState(cliente);
+        if (enderecoCliente.rua) {
+          setEnderecoEntrega(enderecoCliente);
           toast.success("Endereço atualizado do cadastro do cliente!");
         } else {
           toast.warning("Cliente encontrado, mas endereço está incompleto.");
@@ -135,12 +220,22 @@ export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
   };
 
   const salvarMontagem = async () => {
+    const enderecoFormatado = buildEnderecoEntregaText(enderecoEntrega) || entrega.endereco_entrega || null;
+
     await atualizarEntregaMutation.mutateAsync({
       id: entrega.id,
       data: {
         itens_montagem_interna: itensMontagem,
         montagem_concluida: false,
-        endereco_entrega: endereco // Save the updated address
+        endereco_entrega: enderecoFormatado,
+        endereco_entrega_cep: normalizeEmptyValue(enderecoEntrega.cep),
+        endereco_entrega_rua: normalizeEmptyValue(enderecoEntrega.rua),
+        endereco_entrega_numero: normalizeEmptyValue(enderecoEntrega.numero),
+        endereco_entrega_complemento: normalizeEmptyValue(enderecoEntrega.complemento),
+        endereco_entrega_ponto_referencia: normalizeEmptyValue(enderecoEntrega.ponto_referencia),
+        endereco_entrega_bairro: normalizeEmptyValue(enderecoEntrega.bairro),
+        endereco_entrega_cidade: normalizeEmptyValue(enderecoEntrega.cidade),
+        endereco_entrega_estado: normalizeEmptyValue(enderecoEntrega.estado),
       }
     });
   };
@@ -173,7 +268,7 @@ export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-2 text-blue-700 dark:text-blue-400 font-medium">
                 <MapPin className="w-4 h-4" />
-                <Label htmlFor="endereco_entrega">Endereço de Entrega</Label>
+                <Label htmlFor="endereco_entrega_cep">Endereço de Entrega</Label>
               </div>
               <Button
                 variant="ghost"
@@ -186,14 +281,123 @@ export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
                 Sincronizar com Cliente
               </Button>
             </div>
-            <Textarea
-              id="endereco_entrega"
-              value={endereco}
-              onChange={(e) => setEndereco(e.target.value)}
-              className="bg-white dark:bg-neutral-900 border-blue-200 dark:border-blue-800/50 resize-none"
-              rows={2}
-              placeholder="Endereço de entrega..."
-            />
+
+            <div className="grid md:grid-cols-3 gap-3">
+              <div>
+                <Label htmlFor="endereco_entrega_cep">CEP</Label>
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    id="endereco_entrega_cep"
+                    value={enderecoEntrega.cep}
+                    onChange={(e) => updateEnderecoField("cep", formatarCEP(e.target.value))}
+                    onBlur={() => buscarCEP(enderecoEntrega.cep)}
+                    className="bg-white dark:bg-neutral-900 border-blue-200 dark:border-blue-800/50"
+                    placeholder="00000-000"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => buscarCEP(enderecoEntrega.cep)}
+                    disabled={isSearchingCep}
+                    className="border-blue-200 dark:border-blue-800/50"
+                  >
+                    {isSearchingCep ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="md:col-span-2">
+                <Label htmlFor="endereco_entrega_rua">Rua / Logradouro</Label>
+                <Input
+                  id="endereco_entrega_rua"
+                  value={enderecoEntrega.rua}
+                  onChange={(e) => updateEnderecoField("rua", formatarEndereco(e.target.value))}
+                  className="bg-white dark:bg-neutral-900 border-blue-200 dark:border-blue-800/50 mt-1"
+                  placeholder="Rua, avenida, travessa..."
+                />
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-4 gap-3">
+              <div>
+                <Label htmlFor="endereco_entrega_numero">Número</Label>
+                <Input
+                  id="endereco_entrega_numero"
+                  value={enderecoEntrega.numero}
+                  onChange={(e) => updateEnderecoField("numero", e.target.value)}
+                  className="bg-white dark:bg-neutral-900 border-blue-200 dark:border-blue-800/50 mt-1"
+                  placeholder="123"
+                />
+              </div>
+
+              <div className="md:col-span-3">
+                <Label htmlFor="endereco_entrega_complemento">Complemento</Label>
+                <Input
+                  id="endereco_entrega_complemento"
+                  value={enderecoEntrega.complemento}
+                  onChange={(e) => updateEnderecoField("complemento", formatarEndereco(e.target.value))}
+                  className="bg-white dark:bg-neutral-900 border-blue-200 dark:border-blue-800/50 mt-1"
+                  placeholder="Casa 06, bloco A, apto 101..."
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="endereco_entrega_ponto_referencia">Referência</Label>
+              <Input
+                id="endereco_entrega_ponto_referencia"
+                value={enderecoEntrega.ponto_referencia}
+                onChange={(e) => updateEnderecoField("ponto_referencia", formatarEndereco(e.target.value))}
+                className="bg-white dark:bg-neutral-900 border-blue-200 dark:border-blue-800/50 mt-1"
+                placeholder="Próximo ao mercado, portão de grade vinho..."
+              />
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-3">
+              <div>
+                <Label htmlFor="endereco_entrega_bairro">Bairro</Label>
+                <Input
+                  id="endereco_entrega_bairro"
+                  value={enderecoEntrega.bairro}
+                  onChange={(e) => updateEnderecoField("bairro", formatarEndereco(e.target.value))}
+                  className="bg-white dark:bg-neutral-900 border-blue-200 dark:border-blue-800/50 mt-1"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="endereco_entrega_cidade">Cidade</Label>
+                <Input
+                  id="endereco_entrega_cidade"
+                  value={enderecoEntrega.cidade}
+                  onChange={(e) => updateEnderecoField("cidade", formatarEndereco(e.target.value))}
+                  className="bg-white dark:bg-neutral-900 border-blue-200 dark:border-blue-800/50 mt-1"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="endereco_entrega_estado">UF</Label>
+                <Input
+                  id="endereco_entrega_estado"
+                  value={enderecoEntrega.estado}
+                  onChange={(e) => updateEnderecoField("estado", e.target.value.toUpperCase().slice(0, 2))}
+                  className="bg-white dark:bg-neutral-900 border-blue-200 dark:border-blue-800/50 mt-1"
+                  maxLength={2}
+                  placeholder="RJ"
+                />
+              </div>
+            </div>
+
+            {enderecoPreview && (
+              <div className="rounded-md border border-blue-200 dark:border-blue-800/50 bg-white/80 dark:bg-neutral-950/40 p-2">
+                <p className="text-sm text-gray-700 dark:text-gray-300">{enderecoPreview}</p>
+                {isLegacyAddressOnly && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Endereço atual salvo no formato antigo. Ao salvar, ele passa a usar os campos separados.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Itens da Venda */}

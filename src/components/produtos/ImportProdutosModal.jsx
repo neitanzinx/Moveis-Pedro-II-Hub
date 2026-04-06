@@ -207,17 +207,33 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         return `${CSV_TEMPLATE_HEADER},${lojasHeaders}${CSV_TEMPLATE_FOOTER}\nAltaro,Sofá 3 Lugares,ALT-SF3R,1200,220,95,100,,Cinza,Suede,5${',0'.repeat(lojas.length)},12,150,5,100,2640,5,15,SIM`;
     }, [lojas]);
 
+    const buildVariationToken = (value, fallback = '') => {
+        const token = String(value || '').substring(0, 10).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        return token || fallback;
+    };
+
+    const buildVariationSuffix = (cor = null, tecido = null) => {
+        const parts = [];
+        const corPart = buildVariationToken(cor);
+        const tecidoPart = buildVariationToken(tecido);
+
+        if (corPart) parts.push(corPart);
+        if (tecidoPart) parts.push(tecidoPart);
+
+        return parts.join('-');
+    };
+
     // Gerar SKU único e DETERMINÍSTICO
-    // Formato: FOR-MOD-COR (sanitizado)
-    const generateSKU = (fornecedor, modelo, cor = null) => {
+    // Formato: FOR-MOD-COR-TECIDO (sanitizado)
+    const generateSKU = (fornecedor, modelo, cor = null, tecido = null) => {
         const forPart = (fornecedor || 'GEN').substring(0, 3).toUpperCase().replace(/[^A-Z0-9]/g, '');
         const modPart = (modelo || 'PRD').substring(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, '');
 
         let sku = `${forPart}-${modPart}`;
 
-        if (cor) {
-            const corPart = String(cor).substring(0, 10).toUpperCase().replace(/[^A-Z0-9]/g, '');
-            sku += `-${corPart}`;
+        const variationSuffix = buildVariationSuffix(cor, tecido);
+        if (variationSuffix) {
+            sku += `-${variationSuffix}`;
         }
 
         return sku;
@@ -486,6 +502,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
     };
 
     // Explode variações de cor e tecido separadas por vírgula em linhas individuais
+    // Regra: quando ambas existirem, gera combinação cartesiana (cor x tecido)
     const prepareProducts = (data) => {
         const result = [];
 
@@ -495,48 +512,66 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
             // Se tiver vírgula, split em múltiplas variações
             // NOTA: "/" dentro de um nome (ex: "Branco HP/Nature") NÃO é separador, só vírgula
-            let variacoes = [];
+            const cores = corRaw
+                ? [...new Set(corRaw.split(',').map(c => c.trim()).filter(c => c.length > 0))]
+                : [];
+            const tecidos = tecidoRaw
+                ? [...new Set(tecidoRaw.split(',').map(c => c.trim()).filter(c => c.length > 0))]
+                : [];
 
-            if (corRaw) {
-                variacoes = variacoes.concat(corRaw.split(',').map(c => c.trim()).filter(c => c.length > 0));
+            const combinacoes = [];
+            if (cores.length > 0 && tecidos.length > 0) {
+                for (const cor of cores) {
+                    for (const tecido of tecidos) {
+                        combinacoes.push({ cor, tecido });
+                    }
+                }
+            } else if (cores.length > 0) {
+                cores.forEach(cor => combinacoes.push({ cor, tecido: '' }));
+            } else if (tecidos.length > 0) {
+                tecidos.forEach(tecido => combinacoes.push({ cor: '', tecido }));
+            } else {
+                combinacoes.push({ cor: '', tecido: '' });
             }
-            if (tecidoRaw) {
-                variacoes = variacoes.concat(tecidoRaw.split(',').map(c => c.trim()).filter(c => c.length > 0));
-            }
 
-            // Remove duplicatas
-            variacoes = [...new Set(variacoes)];
+            const estoqueZerado = Object.keys(row).reduce((acc, key) => {
+                if (key.startsWith('estoque_')) {
+                    acc[key] = 0;
+                }
+                return acc;
+            }, {});
 
-            if (variacoes.length === 0) {
-                variacoes = [''];
-            }
-
-            if (variacoes.length <= 1) {
+            if (combinacoes.length <= 1) {
                 // Produto único (sem variação ou variação única)
+                const unica = combinacoes[0];
                 result.push({
                     ...row,
-                    cor: variacoes[0] || '',
-                    cor_hex: variacoes[0] ? getColorHex(variacoes[0]) : null,
+                    ...estoqueZerado,
+                    cor: unica.cor || '',
+                    modelos_tecidos: unica.tecido || '',
+                    cor_hex: unica.cor ? getColorHex(unica.cor) : null,
                     id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
                     variacoes: []
                 });
             } else {
                 // Múltiplas variações → duplica o produto para cada variação
-                console.log(`[Import] Linha ${row.linha}: Explodindo ${variacoes.length} variações de "${row.nome}":`, variacoes);
-                for (const v of variacoes) {
+                console.log(`[Import] Linha ${row.linha}: Explodindo ${combinacoes.length} variações de "${row.nome}"`);
+                for (const variacao of combinacoes) {
                     let uniqueCodigoBarras = row.codigo_barras;
                     if (uniqueCodigoBarras) {
-                        const corPart = String(v).substring(0, 10).toUpperCase().replace(/[^A-Z0-9]/g, '');
-                        if (corPart) {
-                            uniqueCodigoBarras = `${uniqueCodigoBarras}-${corPart}`;
+                        const variationSuffix = buildVariationSuffix(variacao.cor, variacao.tecido);
+                        if (variationSuffix) {
+                            uniqueCodigoBarras = `${uniqueCodigoBarras}-${variationSuffix}`;
                         }
                     }
 
                     result.push({
                         ...row,
+                        ...estoqueZerado,
                         codigo_barras: uniqueCodigoBarras,
-                        cor: v,
-                        cor_hex: getColorHex(v),
+                        cor: variacao.cor,
+                        modelos_tecidos: variacao.tecido,
+                        cor_hex: variacao.cor ? getColorHex(variacao.cor) : null,
                         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
                         variacoes: []
                     });
@@ -705,6 +740,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                     let nomeUnico = product.nome;
                     const variaveisNome = [];
                     if (product.cor) variaveisNome.push(product.cor);
+                    if (product.modelos_tecidos) variaveisNome.push(product.modelos_tecidos);
                     if (product.tamanho) variaveisNome.push(product.tamanho);
                     if (product.dimensao_extra) variaveisNome.push(product.dimensao_extra);
 
@@ -713,7 +749,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                     }
 
                     // Gera SKU único e DETERMINÍSTICO
-                    const rawSku = product.codigo_barras || generateSKU(product.fornecedor_nome, product.modelo_referencia, product.cor);
+                    const rawSku = product.codigo_barras || generateSKU(product.fornecedor_nome, product.modelo_referencia, product.cor, product.modelos_tecidos);
                     const sku = String(rawSku || '').trim() || `SKU-${Date.now()}-${index}`;
                     codigoBarrasFinal = sku;
 
@@ -721,16 +757,6 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                     const detected = detectCategoryAndAmbiente(product.nome);
                     const categoria = product.categoria || detected.categoria;
                     const ambiente = product.ambiente || detected.ambiente;
-
-                    // CÁLCULO DE ESTOQUE TOTAL
-                    let totalEstoque = 0;
-                    lojas.forEach(loja => {
-                        if (!loja) return;
-                        const identifier = (loja.codigo || loja.nome || '').toLowerCase().replace(/\s+/g, '_');
-                        if (!identifier) return;
-                        const fieldName = `estoque_${identifier}`;
-                        totalEstoque += (parseInt(product[fieldName]) || 0);
-                    });
 
                     const produtoData = {
                         codigo_barras: sku,
@@ -765,7 +791,8 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                         desconto_max_vendedor: sanitizeNumeric52(product.desconto_max_vendedor, 5),
                         desconto_max_gerencial: sanitizeNumeric52(product.desconto_max_gerencial, 15),
 
-                        quantidade_estoque: totalEstoque,
+                        // Regra de negócio: estoque do CSV é ignorado na importação
+                        quantidade_estoque: 0,
                         estoque_minimo: 0,
                         estoque_ideal: 0,
 
@@ -850,7 +877,8 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                             codigo_barras_final: codigoBarrasFinal,
                             fornecedor_nome: product.fornecedor_nome,
                             modelo_referencia: product.modelo_referencia,
-                            cor: product.cor
+                            cor: product.cor,
+                            modelos_tecidos: product.modelos_tecidos
                         },
                         raw: err
                     });
@@ -967,7 +995,8 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                             <Alert>
                                 <AlertDescription>
                                     Faça upload de um arquivo CSV com os produtos.
-                                    Produtos com o mesmo nome serão agrupados como variações.
+                                    Quando houver listas de cores e tecidos, o sistema gera combinações (cor x tecido).
+                                    Os estoques informados no CSV são ignorados e devem ser lançados depois no sistema.
                                 </AlertDescription>
                             </Alert>
 
@@ -1017,6 +1046,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                         ))}
                                     </div>
                                     <p className="text-xs text-gray-500 mt-2">* Campos obrigatórios. Sistema aceita múltiplos formatos de cabeçalho.</p>
+                                    <p className="text-xs text-amber-700 mt-1">Campos de estoque no CSV são aceitos apenas para compatibilidade e não são importados.</p>
                                 </CardContent>
                             </Card>
                         </div>
@@ -1051,7 +1081,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                         {parsedData.length} linha(s) no CSV
                                         {groupedProducts.length > parsedData.length && (
                                             <span className="text-blue-600 ml-1">
-                                                (expandido de {parsedData.length} por variações de cor)
+                                                (expandido de {parsedData.length} por variações de cor/tecido)
                                             </span>
                                         )}
                                     </p>
@@ -1062,15 +1092,16 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                 </Button>
                             </div>
 
+                            <Alert>
+                                <AlertDescription>
+                                    Estoque inicial dos itens importados será 0. Preencha os saldos por CD/loja diretamente no sistema após concluir a importação.
+                                </AlertDescription>
+                            </Alert>
+
                             <div className="space-y-3 max-h-[400px] overflow-y-auto">
                                 {groupedProducts.slice(0, 200).map((product, index) => {
-                                    // === CÁLCULO DE ESTOQUE TOTAL ===
+                                    // Regra de importação: estoque CSV é ignorado e inicia em 0
                                     let estoqueTotal = 0;
-                                    (lojas || []).filter(l => l?.codigo).forEach(loja => {
-                                        const codigoNorm = (loja?.codigo || '').toLowerCase().replace(/\s+/g, '_');
-                                        const fieldName = `estoque_${codigoNorm}`;
-                                        estoqueTotal += (parseInt(product[fieldName]) || 0);
-                                    });
 
                                     // Se houver variações, calcula o range. Se não, usa o preço do produto.
                                     let precoMin = 0;
@@ -1083,12 +1114,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
                                         // Somar estoque das variações se existirem
                                         estoqueTotal = product.variacoes.reduce((sum, v) => {
-                                            let estVar = 0;
-                                            (lojas || []).filter(l => l?.codigo).forEach(loja => {
-                                            const codigoNorm = (loja?.codigo || '').toLowerCase().replace(/\s+/g, '_');
-                                                const fieldName = `estoque_${codigoNorm}`;
-                                                estVar += (parseInt(v[fieldName]) || 0);
-                                            });
+                                            const estVar = 0;
                                             return sum + estVar;
                                         }, 0);
                                     } else {
@@ -1175,12 +1201,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                                             </thead>
                                                             <tbody>
                                                                 {product.variacoes.map((v, i) => {
-                                                                    let estVar = 0;
-                                                                    (lojas || []).filter(l => l?.codigo).forEach(loja => {
-                                                    const codigoNorm = (loja?.codigo || '').toLowerCase().replace(/\s+/g, '_');
-                                                                        const fieldName = `estoque_${codigoNorm}`;
-                                                                        estVar += (parseInt(v[fieldName]) || 0);
-                                                                    });
+                                                                    const estVar = 0;
 
                                                                     const dims = [v.largura, v.altura, v.profundidade].filter(d => d).join('×');
 

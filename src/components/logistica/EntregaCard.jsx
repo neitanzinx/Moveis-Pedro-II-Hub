@@ -64,10 +64,21 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
   // const bgClass = entrega._notificado ? 'bg-green-50' : 'bg-white'; // Old logic
 
   const listaItens = venda?.itens?.map(i => i.produto_nome).join(', ') || "Itens não informados";
+  const temPreferencias = entrega.preferencias_entrega && (
+    entrega.preferencias_entrega.dias?.length > 0 ||
+    entrega.preferencias_entrega.turnos?.length > 0 ||
+    entrega.preferencias_entrega.obs ||
+    entrega.data_restricao
+  );
 
   // Formatar restrição se houver
   const temRestricao = entrega.data_restricao;
   const dataRestricaoFormatada = temRestricao ? new Date(entrega.data_restricao).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '';
+  const resumoAgendamento = entrega.data_agendada
+    ? `${format(new Date(`${entrega.data_agendada.split('T')[0]}T12:00:00`), 'EEE dd/MM', { locale: ptBR })} • ${entrega.turno || 'Sem turno'}`
+        .replace('.', '')
+        .replace(/^./, (char) => char.toUpperCase())
+    : null;
 
   return (
     <div
@@ -75,21 +86,21 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
       {...listeners}
       {...attributes}
       onClick={() => onClick && onClick(entrega)}
-      className={`cursor-grab active:cursor-grabbing transition-all group mb-2 ${isDragging ? 'opacity-50 scale-95' : ''} ${isColumn ? '' : 'h-full'}`}
+      className={`cursor-grab active:cursor-grabbing transition-all group mb-2 ${isDragging ? 'opacity-50 scale-95' : ''} ${isColumn ? '' : 'h-full min-h-[118px]'}`}
     >
-      <Card className={`relative overflow-hidden hover:shadow-lg transition-all border-0 shadow-sm ring-1 ${ringColor} ${borderClass} ${bgColor} flex flex-col justify-start ${isColumn ? 'p-2 min-h-[90px]' : 'p-2.5 h-full'} gap-1.5`}>
+      <Card className={`relative overflow-hidden hover:shadow-lg transition-all border-0 shadow-sm ring-1 ${ringColor} ${borderClass} ${bgColor} flex flex-col justify-start ${isColumn ? 'p-2 min-h-[90px]' : 'p-3 h-full min-h-[118px]'} gap-1.5`}>
 
         {/* Topo: Cliente E Num Pedido/Badge */}
-        <div className="flex justify-between items-start">
+        <div className="flex justify-between items-start gap-2">
           <div className="flex items-center gap-1.5 overflow-hidden flex-1 min-w-0">
             <User className="w-3 h-3 text-gray-400 shrink-0" />
-            <span className="font-bold text-[10px] text-gray-700 truncate uppercase" title={entrega.cliente_nome}>
+            <span className={`font-bold text-gray-700 truncate uppercase ${isColumn ? 'text-[10px]' : 'text-[11px]'}`} title={entrega.cliente_nome}>
               {entrega.cliente_nome}
             </span>
           </div>
 
-          <div className="flex items-center gap-1 shrink-0 bg-white/50 px-1 py-0.5 rounded ml-1 border border-gray-100">
-            <span className="font-mono text-[9px] text-blue-700 font-bold">#{entrega.numero_pedido}</span>
+          <div className="flex flex-wrap items-center justify-end gap-1 shrink-0 bg-white/60 px-1.5 py-1 rounded-md ml-1 border border-gray-100 max-w-[56%]">
+            <span className={`font-mono text-blue-700 font-bold ${isColumn ? 'text-[9px]' : 'text-[10px]'}`}>#{entrega.numero_pedido}</span>
             {/* Badge de Confirmação - VISÍVEL AGORA */}
             {isConfirmado && (
               <Badge className="text-[8px] px-1 py-0 h-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-none border-0 flex items-center gap-0.5" title="Entrega Confirmada">
@@ -122,14 +133,14 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
               </Badge>
             )}
             {/* Badge de Preferências de Entrega (Simplificado para evitar bugs visuais) */}
-            {entrega.preferencias_entrega && (entrega.preferencias_entrega.dias?.length > 0 || entrega.preferencias_entrega.turnos?.length > 0 || entrega.preferencias_entrega.obs || entrega.data_restricao) && (
+            {temPreferencias && (
               <div className="inline-block" onClick={(e) => e.stopPropagation()}>
                 <Badge
                   className="text-[8px] px-1 py-0 h-4 bg-purple-100 text-purple-700 font-bold shadow-none border border-purple-200 flex items-center gap-0.5 cursor-help"
                   title={`PREFERÊNCIAS DE ENTREGA:\n${entrega.data_restricao ? `• DATA BLOQUEADA: ${new Date(entrega.data_restricao).toLocaleDateString('pt-BR')}\n` : ''}${entrega.preferencias_entrega.dias?.length ? `• DIAS PERMITIDOS: ${[...new Set(entrega.preferencias_entrega.dias)].map(d => ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][Number(d)]).join(', ')}\n` : ''}${entrega.preferencias_entrega.turnos?.length ? `• TURNOS PERMITIDOS: ${entrega.preferencias_entrega.turnos.join(', ')}\n` : ''}${entrega.preferencias_entrega.obs ? `• OBS: ${entrega.preferencias_entrega.obs}` : ''}`}
                 >
                   <Settings className="w-2 h-2" />
-                  Preferências
+                  {isColumn ? 'Preferências' : 'Prefer.'}
                 </Badge>
               </div>
             )}
@@ -150,7 +161,7 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
           title="Abrir no Google Maps"
         >
           <Map className="w-3 h-3 group-hover/map:animate-bounce shrink-0 text-blue-400" />
-          <span className="text-[10px] font-medium truncate leading-tight">
+          <span className={`font-medium truncate leading-tight ${isColumn ? 'text-[10px]' : 'text-[10px]'}`}>
             {entrega.endereco_entrega || "Sem endereço"}
           </span>
         </div>
@@ -158,14 +169,24 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
         {/* Meio: Produtos (Compacto) */}
         <div className="flex-1 min-h-0 flex items-start gap-1.5 overflow-hidden">
           <Package className="w-3 h-3 text-gray-300 mt-0.5 shrink-0" />
-          <p className="text-[10px] font-normal text-gray-600 leading-3 line-clamp-3" title={listaItens}>
+          <p className={`text-[10px] font-normal text-gray-600 leading-3 ${isColumn ? 'line-clamp-3' : 'line-clamp-2'}`} title={listaItens}>
             {listaItens}
           </p>
         </div>
 
         {/* Bottom: Ações/Status se necessário */}
-        {(isNotificado || isProblema || (isColumn && (isPendente || entrega.data_agendada))) && (
-          <div className="mt-auto pt-1 border-t border-dashed border-gray-300/50 flex items-center justify-end gap-1">
+        {(resumoAgendamento || isNotificado || isProblema || (isColumn && (isPendente || entrega.data_agendada))) && (
+          <div className="mt-auto pt-1 border-t border-dashed border-gray-300/50 flex items-center justify-between gap-2">
+            <div className="min-w-0 flex items-center gap-1 text-[9px] text-gray-500">
+              {resumoAgendamento && (
+                <>
+                  <Clock className="w-3 h-3 shrink-0 text-gray-400" />
+                  <span className="truncate" title={resumoAgendamento}>{resumoAgendamento}</span>
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-1 shrink-0">
             {isNotificado && !isConfirmado && (
               <Badge variant="outline" className="text-[8px] px-1 h-4 border-emerald-300 bg-emerald-100/50 text-emerald-700">
                 Notificada
@@ -201,6 +222,7 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
                 </Button>
               </>
             )}
+            </div>
           </div>
         )}
 

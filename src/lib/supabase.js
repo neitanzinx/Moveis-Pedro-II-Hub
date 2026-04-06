@@ -365,9 +365,24 @@ const createHandler = (tableName) => ({
             // Mas como é genérico, vamos focar no que sabemos que existe na tabela Produto e Cliente
             // ou deixar que o erro aconteça se a coluna não existir (o que é ruim).
 
-            // Melhor abordagem: Se for Produto, busca em nome, codigo_barras, categoria
+            // Para Produto: busca por múltiplas palavras-chave em todos os campos descritivos.
+            // Cada palavra deve bater em pelo menos um dos campos (OR dentro de keyword).
+            // Encadeamento de .or() = AND entre keywords → ex: "rosa sofá" exige ambas.
             if (tableName === 'produtos') {
-                query = query.or(`nome.ilike.%${search}%,codigo_barras.ilike.%${search}%,categoria.ilike.%${search}%,modelo_referencia.ilike.%${search}%`);
+                const keywords = search.trim().split(/\s+/).filter(Boolean);
+                keywords.forEach((kw) => {
+                    query = query.or(
+                        `nome.ilike.%${kw}%,` +
+                        `codigo_barras.ilike.%${kw}%,` +
+                        `categoria.ilike.%${kw}%,` +
+                        `modelo_referencia.ilike.%${kw}%,` +
+                        `cor.ilike.%${kw}%,` +
+                        `material.ilike.%${kw}%,` +
+                        `ambiente.ilike.%${kw}%,` +
+                        `fornecedor_nome.ilike.%${kw}%,` +
+                        `descricao.ilike.%${kw}%`
+                    );
+                });
             } else if (tableName === 'clientes') {
                 query = query.or(`nome.ilike.%${search}%,cpf_cnpj.ilike.%${search}%,email.ilike.%${search}%`);
             } else {
