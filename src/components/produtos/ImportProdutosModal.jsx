@@ -391,7 +391,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         throw lastErr;
     };
 
-    // Parse CSV
+    // Parse CSV com reagrupamento inteligente de campos de variação
     const parseCSV = (text) => {
         const lines = text.trim().split('\n');
 
@@ -403,7 +403,26 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
         console.log('[Import] Separador detectado:', separator, '(vírgulas:', commaCount, 'ponto-e-vírgulas:', semicolonCount, ')');
 
-        const rawHeaders = firstLine.split(separator).map(h => h.trim().replace(/"/g, ''));
+        // Função auxiliar: parse de uma linha CSV respeitando aspas
+        const parseLine = (line) => {
+            const vals = [];
+            let cur = '';
+            let inQuotes = false;
+            for (const char of line) {
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === separator && !inQuotes) {
+                    vals.push(cur.trim());
+                    cur = '';
+                } else {
+                    cur += char;
+                }
+            }
+            vals.push(cur.trim());
+            return vals;
+        };
+
+        const rawHeaders = parseLine(firstLine).map(h => h.replace(/"/g, ''));
         console.log('[Import] Headers encontrados:', rawHeaders.slice(0, 5), '...');
 
         const headers = rawHeaders.map((h, index) => {
@@ -415,27 +434,78 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
             }
             return mapped;
         });
-        console.log('[Import] Headers mapeados:', headers.slice(0, 5), '...');
+        console.log('[Import] Headers mapeados:', headers);
+
+        // Colunas de variação com posição FIXA na planilha:
+        // J (índice 9) = VARIAÇÃO DE CORES
+        // K (índice 10) = MODELOS DE TECIDOS
+        // Essas colunas podem conter valores separados por vírgula e precisam
+        // ser reagrupadas quando o CSV usa vírgula como separador.
+        const VARIATION_COL_INDICES = [9, 10];
+        const expectedCols = headers.length;
+
+        console.log('[Import] Colunas esperadas:', expectedCols, '| Colunas de variação (fixas): J(9) e K(10)');
 
         const data = [];
         const parseErrors = [];
 
         for (let i = 1; i < lines.length; i++) {
-            // Parse CSV considerando aspas
-            const values = [];
-            let current = '';
-            let inQuotes = false;
-            for (const char of lines[i]) {
-                if (char === '"') {
-                    inQuotes = !inQuotes;
-                } else if (char === separator && !inQuotes) {
-                    values.push(current.trim());
-                    current = '';
-                } else {
-                    current += char;
+            let values = parseLine(lines[i]);
+
+            // ========================
+            // REAGRUPAMENTO INTELIGENTE
+            // ========================
+            // Quando o CSV usa vírgula como separador E a linha tem MAIS valores
+            // que colunas no header, significa que vírgulas dentro das colunas J/K
+            // (VARIAÇÃO DE CORES / MODELOS DE TECIDOS) foram interpretadas como
+            // separadores de coluna. Reagrupamos os excedentes de volta.
+            if (separator === ',' && values.length > expectedCols && VARIATION_COL_INDICES.length > 0) {
+                const excess = values.length - expectedCols;
+                console.log(`[Import] Linha ${i + 1}: ${values.length} valores (esperado ${expectedCols}), reagrupando ${excess} excedentes`);
+
+                const rebuilt = [];
+                let vi = 0; // índice atual em values[]
+
+                for (let hi = 0; hi < expectedCols; hi++) {
+                    if (vi >= values.length) {
+                        rebuilt.push('');
+                        continue;
+                    }
+
+                    if (VARIATION_COL_INDICES.includes(hi)) {
+                        // Coluna de variação (J ou K) — absorver valores extras
+                        let merged = values[vi];
+                        vi++;
+
+                        // Calcula excedentes restantes
+                        const remainingValues = values.length - vi;
+                        const remainingHeaders = expectedCols - hi - 1;
+                        let excessHere = remainingValues - remainingHeaders;
+
+                        while (excessHere > 0 && vi < values.length) {
+                            const nextVal = values[vi];
+                            const isNumeric = /^\s*[R$]*\s*[\d.,]+\s*$/.test(nextVal);
+                            const isEmpty = !nextVal || nextVal.trim() === '';
+
+                            // Se parece um número puro (preço, estoque), parar
+                            if (isNumeric && excessHere <= 2) break;
+                            if (isEmpty && excessHere <= 1) break;
+
+                            merged += ', ' + nextVal;
+                            vi++;
+                            excessHere--;
+                        }
+
+                        rebuilt.push(merged);
+                    } else {
+                        rebuilt.push(values[vi] || '');
+                        vi++;
+                    }
                 }
+
+                values = rebuilt;
+                console.log(`[Import] Linha ${i + 1}: Reagrupado → Cor: "${values[9] || ''}" | Tecido: "${values[10] || ''}"`);
             }
-            values.push(current.trim());
 
             const row = {};
             headers.forEach((header, index) => {
