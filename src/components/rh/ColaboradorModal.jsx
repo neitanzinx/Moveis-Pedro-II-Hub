@@ -1000,7 +1000,7 @@ export default function ColaboradorModal({
                                                 O vínculo com conta de acesso e a geração de
                                                 credenciais são realizados pelo Administrador na
                                                 área de Gestão de Acessos.
-                                            </div>
+                                            </p>
 
                                             <Button
                                                 variant="outline"
