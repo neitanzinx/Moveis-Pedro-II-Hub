@@ -197,7 +197,8 @@ export const MENU_ITEMS = [
   { title: "App Entregador", url: "/admin/Entregador", icon: Truck, permission: 'admin_only', section: "Mobile Modules" },
   { title: "App Montador", url: "/admin/MontadorExterno", icon: Wrench, permission: 'admin_only', section: "Mobile Modules", module: 'montagem' },
 
-  { title: "Configurações", url: "/admin/Configuracoes", icon: Settings, permission: '*', section: "Admin" }
+  { title: "Gestão de Acessos", url: "/admin/GerenciamentoUsuarios", icon: Users, permission: 'manage_user_access', section: "Admin" },
+  { title: "Configurações", url: "/admin/Configuracoes", icon: Settings, permission: 'manage_user_access', section: "Admin" }
 ];
 
 /**

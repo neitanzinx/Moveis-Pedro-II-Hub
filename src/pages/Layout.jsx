@@ -289,7 +289,7 @@ export default function Layout({ children, currentPageName }) {
             </div>
 
             {/* New User Button - hidden when collapsed */}
-            {user?.cargo === 'Administrador' && (
+            {can('manage_user_access') && (
               <Button
                 size="sm"
                 onClick={() => setNovoUsuarioModalOpen(true)}

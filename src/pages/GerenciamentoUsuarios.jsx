@@ -13,6 +13,8 @@ import ListaUsuarios from "@/components/usuarios/ListaUsuarios";
 import GerenciamentoCargos from "@/components/usuarios/GerenciamentoCargos";
 import ModalUsuario from "@/components/usuarios/ModalUsuario";
 import ModalCargo from "@/components/usuarios/ModalCargo";
+import { useAuth } from "@/hooks/useAuth";
+import { Navigate } from "react-router-dom";
 
 function buildCargoPadraoPayload(cargoConfig) {
   return {
@@ -55,6 +57,7 @@ async function createCargoWithSchemaFallback(payload, unsupportedColumns) {
 }
 
 export default function GerenciamentoUsuarios() {
+  const { loading, can } = useAuth();
   const [busca, setBusca] = useState("");
   const [modalUsuario, setModalUsuario] = useState(false);
   const [modalCargo, setModalCargo] = useState(false);
@@ -122,6 +125,10 @@ export default function GerenciamentoUsuarios() {
     setCargoSelecionado(cargo);
     setModalCargo(true);
   };
+
+  if (!loading && !can('manage_user_access')) {
+    return <Navigate to="/admin" replace />;
+  }
 
   if (loadingUsuarios || loadingCargos) {
     return (

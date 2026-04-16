@@ -9,7 +9,7 @@ export default function NovoUsuarioModal({ isOpen, onClose }) {
 
   const handleNavigate = () => {
     onClose();
-    navigate("/admin/RecursosHumanos");
+    navigate("/admin/GerenciamentoUsuarios");
   };
 
   return (
@@ -21,7 +21,7 @@ export default function NovoUsuarioModal({ isOpen, onClose }) {
             Mudança no Processo
           </DialogTitle>
           <DialogDescription>
-            A criação de usuários foi unificada com o gerenciamento de colaboradores (RH).
+            O vínculo entre funcionário e acesso do sistema agora é feito na área administrativa.
           </DialogDescription>
         </DialogHeader>
 
@@ -31,9 +31,9 @@ export default function NovoUsuarioModal({ isOpen, onClose }) {
             <div className="text-sm text-gray-700">
               <p className="font-semibold text-amber-800 mb-1">Novo Fluxo:</p>
               <ol className="list-decimal pl-4 space-y-1">
-                <li>Acesse o menu <strong>RH</strong>.</li>
-                <li>Cadastre um novo <strong>Colaborador</strong> (ou edite um existente).</li>
-                <li>Vá até a aba <strong>Sistema</strong> para gerar o acesso.</li>
+                <li>O RH cadastra o <strong>funcionário</strong> no módulo de colaboradores.</li>
+                <li>O administrador acessa <strong>Gestão de Acessos</strong>.</li>
+                <li>Vincula funcionário e conta, e gera as credenciais.</li>
               </ol>
             </div>
           </div>
@@ -44,7 +44,7 @@ export default function NovoUsuarioModal({ isOpen, onClose }) {
             Cancelar
           </Button>
           <Button onClick={handleNavigate} className="bg-amber-600 hover:bg-amber-700 text-white gap-2">
-            Ir para RH <ArrowRight className="w-4 h-4" />
+            Ir para Gestão de Acessos <ArrowRight className="w-4 h-4" />
           </Button>
         </DialogFooter>
       </DialogContent>

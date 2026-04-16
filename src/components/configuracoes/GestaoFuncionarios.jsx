@@ -1,4 +1,4 @@
-import React, { useState, createElement } from "react";
+import React, { useMemo, useState, createElement } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +40,7 @@ export default function GestaoFuncionarios({ currentUser }) {
     const [showPassword, setShowPassword] = useState(false);
     const [generatedPassword, setGeneratedPassword] = useState(null);
     const [generatedMatricula, setGeneratedMatricula] = useState(null);
+    const [linkColaboradorId, setLinkColaboradorId] = useState("none");
 
     // Estado de edição
     const [editData, setEditData] = useState(null);
@@ -57,6 +58,11 @@ export default function GestaoFuncionarios({ currentUser }) {
                 !['Cliente'].includes(u.cargo)
             );
         }
+    });
+
+    const { data: colaboradores = [] } = useQuery({
+        queryKey: ['colaboradores'],
+        queryFn: () => base44.entities.Colaborador.list('-created_at')
     });
 
     // [FEATURE] Real-time updates
@@ -227,6 +233,52 @@ export default function GestaoFuncionarios({ currentUser }) {
         onError: () => toast.error("Erro ao remover funcionário")
     });
 
+    const linkColaboradorMutation = useMutation({
+        mutationFn: async ({ userId, colaboradorId }) => {
+            const colaboradorAtual = colaboradores.find((c) => c.user_id === userId);
+
+            if (colaboradorId === 'none') {
+                if (colaboradorAtual) {
+                    await base44.entities.Colaborador.update(colaboradorAtual.id, { user_id: null });
+                }
+                return;
+            }
+
+            const colaboradorDestino = colaboradores.find((c) => c.id === colaboradorId);
+            if (!colaboradorDestino) {
+                throw new Error('Colaborador não encontrado para vínculo.');
+            }
+
+            if (colaboradorDestino.user_id && colaboradorDestino.user_id !== userId) {
+                throw new Error('Este colaborador já está vinculado a outro usuário.');
+            }
+
+            if (colaboradorAtual && colaboradorAtual.id !== colaboradorDestino.id) {
+                await base44.entities.Colaborador.update(colaboradorAtual.id, { user_id: null });
+            }
+
+            await base44.entities.Colaborador.update(colaboradorDestino.id, { user_id: userId });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['funcionarios-gestao'] });
+            queryClient.invalidateQueries({ queryKey: ['colaboradores'] });
+            queryClient.invalidateQueries({ queryKey: ['usuarios'] });
+            toast.success('Vínculo de funcionário atualizado com sucesso.');
+            handleCloseModal();
+        },
+        onError: (error) => {
+            toast.error(error.message || 'Erro ao atualizar vínculo do funcionário.');
+        }
+    });
+
+    const getLinkedColaborador = (userId) => colaboradores.find((c) => c.user_id === userId);
+
+    const colaboradoresDisponiveisParaUsuario = useMemo(() => {
+        if (!selectedUser) return [];
+
+        return colaboradores.filter((c) => !c.user_id || c.user_id === selectedUser.id);
+    }, [colaboradores, selectedUser]);
+
     // Filtrar usuários
     const filteredUsers = users.filter(user => {
         const matchesSearch =
@@ -268,6 +320,10 @@ export default function GestaoFuncionarios({ currentUser }) {
                 meta_mensal: user.meta_mensal || 0
             });
         }
+        if (type === 'link') {
+            const colaboradorVinculado = colaboradores.find((c) => c.user_id === user.id);
+            setLinkColaboradorId(colaboradorVinculado?.id || 'none');
+        }
     };
 
     // Config do cargo selecionado no modal de edição rápida
@@ -280,6 +336,7 @@ export default function GestaoFuncionarios({ currentUser }) {
         setGeneratedMatricula(null);
         setShowPassword(false);
         setEditData(null);
+        setLinkColaboradorId('none');
     };
 
     const handleSaveEdit = () => {
@@ -470,6 +527,7 @@ export default function GestaoFuncionarios({ currentUser }) {
                             <TableBody>
                                 {filteredUsers.map((user) => {
                                     const cargoConfig = getCargoConfig(user.cargo);
+                                    const colaboradorVinculado = getLinkedColaborador(user.id);
                                     return (
                                         <TableRow key={user.id}>
                                             <TableCell>
@@ -486,6 +544,9 @@ export default function GestaoFuncionarios({ currentUser }) {
                                                     <div>
                                                         <p className="font-semibold text-sm">{user.full_name || 'Sem nome'}</p>
                                                         <p className="text-xs text-gray-500">{user.email}</p>
+                                                        <p className="text-xs text-gray-400">
+                                                            Funcionário RH: {colaboradorVinculado?.nome_completo || 'Não vinculado'}
+                                                        </p>
                                                     </div>
                                                 </div>
                                             </TableCell>
@@ -578,6 +639,15 @@ export default function GestaoFuncionarios({ currentUser }) {
                                                         size="sm"
                                                         variant="outline"
                                                         className="h-8"
+                                                        onClick={() => handleOpenModal(user, 'link')}
+                                                        title="Vincular Funcionário RH"
+                                                    >
+                                                        <Users className="w-4 h-4" />
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-8"
                                                         onClick={() => handleOpenModal(user, 'cargo')}
                                                         title="Alterar Cargo"
                                                     >
@@ -619,6 +689,59 @@ export default function GestaoFuncionarios({ currentUser }) {
                     </CardContent>
                 </Card>
             )}
+
+            {/* Modal: Ativar Acesso */}
+            <Dialog open={modalType === 'link'} onOpenChange={handleCloseModal}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Users className="w-5 h-5 text-blue-600" />
+                            Vincular Funcionário RH
+                        </DialogTitle>
+                        <DialogDescription>
+                            Selecione o funcionário de RH correspondente a {selectedUser?.full_name}.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="py-4 space-y-4">
+                        <Alert className="bg-blue-50 border-blue-200">
+                            <AlertCircle className="w-4 h-4 text-blue-600" />
+                            <AlertDescription className="text-blue-800">
+                                Este vínculo conecta o cadastro de acesso ao cadastro de colaborador do RH.
+                            </AlertDescription>
+                        </Alert>
+
+                        <div className="space-y-2">
+                            <Label>Funcionário RH</Label>
+                            <Select value={linkColaboradorId} onValueChange={setLinkColaboradorId}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Selecione um funcionário" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">Sem vínculo</SelectItem>
+                                    {colaboradoresDisponiveisParaUsuario.map((colaborador) => (
+                                        <SelectItem key={colaborador.id} value={colaborador.id}>
+                                            {colaborador.nome_completo} {colaborador.cargo ? `- ${colaborador.cargo}` : ''}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={handleCloseModal}>Cancelar</Button>
+                        <Button
+                            onClick={() => linkColaboradorMutation.mutate({ userId: selectedUser?.id, colaboradorId: linkColaboradorId })}
+                            disabled={linkColaboradorMutation.isPending}
+                            className="bg-blue-600 hover:bg-blue-700"
+                        >
+                            {linkColaboradorMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                            Salvar Vínculo
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Modal: Ativar Acesso */}
             <Dialog open={modalType === 'create'} onOpenChange={() => !generatedPassword && handleCloseModal()}>

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { CARGOS, getCargoConfig } from "@/config/cargos";
 import { useLojas } from "@/hooks/useLojas";
+import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -80,6 +81,8 @@ export default function ColaboradorModal({
 }) {
     const queryClient = useQueryClient();
     const navigate = useNavigate();
+    const { can } = useAuth();
+    const canManageAccess = can("manage_user_access");
     const { data: lojasReal = [] } = useLojas();
     const isEditing = !!colaborador && !colaborador.isAcessoRapido;
 
@@ -267,7 +270,9 @@ export default function ColaboradorModal({
 
             const payload = {
                 ...formData,
-                user_id: formData.user_id || suggestedUser?.id || "",
+                user_id: canManageAccess
+                    ? formData.user_id || suggestedUser?.id || ""
+                    : colaborador?.user_id || "",
             };
 
             if (isEditing) {
@@ -991,44 +996,10 @@ export default function ColaboradorModal({
                                                 Vínculo de Usuário
                                             </h3>
                                             <p className="text-sm text-gray-500">
-                                                Você pode vincular um usuário já existente para
-                                                que a matrícula apareça no RH. Se já existir
-                                                conta com o mesmo email, o vínculo é aplicado
-                                                automaticamente ao salvar.
-                                            </p>
-
-                                            <div>
-                                                <Label htmlFor="user_id">
-                                                    Vincular Usuário Existente
-                                                </Label>
-                                                <Select
-                                                    value={formData.user_id || "none"}
-                                                    onValueChange={(v) =>
-                                                        handleChange(
-                                                            "user_id",
-                                                            v === "none" ? "" : v
-                                                        )
-                                                    }
-                                                >
-                                                    <SelectTrigger>
-                                                        <SelectValue placeholder="Selecione um usuário..." />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="none">
-                                                            Nenhum
-                                                        </SelectItem>
-                                                        {usuariosDisponiveis.map((u) => (
-                                                            <SelectItem
-                                                                key={u.id}
-                                                                value={u.id}
-                                                            >
-                                                                {u.full_name || u.email} —{" "}
-                                                                {u.matricula ||
-                                                                    "S/ Matrícula"}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
+                                                O RH realiza somente o cadastro do funcionário.
+                                                O vínculo com conta de acesso e a geração de
+                                                credenciais são realizados pelo Administrador na
+                                                área de Gestão de Acessos.
                                             </div>
 
                                             <Button
@@ -1039,7 +1010,7 @@ export default function ColaboradorModal({
                                                 }
                                             >
                                                 <ExternalLink className="w-4 h-4" />
-                                                Abrir Gestão de Usuários
+                                                Abrir Gestão de Acessos (Admin)
                                             </Button>
                                         </div>
                                     </CardContent>
@@ -1123,17 +1094,19 @@ export default function ColaboradorModal({
                                                 Gerenciar Credenciais no Admin
                                             </Button>
 
-                                            <div className="pt-3 border-t">
-                                                <Button
-                                                    variant="ghost"
-                                                    className="w-full text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                    onClick={() =>
-                                                        handleChange("user_id", "")
-                                                    }
-                                                >
-                                                    Desvincular Usuário (apenas remove link)
-                                                </Button>
-                                            </div>
+                                            {canManageAccess && (
+                                                <div className="pt-3 border-t">
+                                                    <Button
+                                                        variant="ghost"
+                                                        className="w-full text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                        onClick={() =>
+                                                            handleChange("user_id", "")
+                                                        }
+                                                    >
+                                                        Desvincular Usuário (apenas remove link)
+                                                    </Button>
+                                                </div>
+                                            )}
                                         </div>
                                     </CardContent>
                                 </Card>

@@ -142,6 +142,7 @@ export default function ColaboradoresTab() {
     const navigate = useNavigate();
     const { can } = useAuth();
     const canManageRH = can("manage_rh");
+    const canManageAccess = can("manage_user_access");
 
     const [busca, setBusca] = useState("");
     const [filtroStatus, setFiltroStatus] = useState("todos");
@@ -317,10 +318,11 @@ export default function ColaboradoresTab() {
                             variant="outline"
                             size="sm"
                             className="border-blue-300 text-blue-800 shrink-0"
+                            disabled={!canManageAccess}
                             onClick={() => navigate("/admin/GerenciamentoUsuarios")}
                         >
                             <ExternalLink className="w-4 h-4 mr-1.5" />
-                            Gerenciar
+                            {canManageAccess ? "Gerenciar" : "Somente Admin"}
                         </Button>
                     </AlertDescription>
                 </Alert>
@@ -373,7 +375,8 @@ export default function ColaboradoresTab() {
                     <Button
                         variant="outline"
                         size="icon"
-                        title="Gerenciar Contas de Acesso"
+                        title={canManageAccess ? "Gerenciar Contas de Acesso" : "Apenas administrador pode vincular acesso"}
+                        disabled={!canManageAccess}
                         onClick={() => navigate("/admin/GerenciamentoUsuarios")}
                     >
                         <Shield className="w-4 h-4" />

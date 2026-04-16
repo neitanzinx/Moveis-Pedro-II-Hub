@@ -72,7 +72,7 @@ const MENU_CONFIG = {
 };
 
 export default function Configuracoes() {
-  const { user, loading } = useAuth();
+  const { user, loading, can } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeCategory, setActiveCategory] = useState("empresa");
   const [activeItem, setActiveItem] = useState("logo");
@@ -102,7 +102,7 @@ export default function Configuracoes() {
     );
   }
 
-  const isAdmin = user.cargo === 'Administrador';
+  const isAdmin = can('manage_user_access');
 
   if (!isAdmin) {
     return (
