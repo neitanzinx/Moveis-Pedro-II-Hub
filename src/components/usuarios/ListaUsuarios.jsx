@@ -5,14 +5,14 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Edit, Trash2, Crown, Truck } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
+import { base44 } from "@/lib/supabase";
 import { formatarNome } from "@/utils/formatters";
 
 export default function ListaUsuarios({ usuarios, cargos, caminhoes, onEditar }) {
   const queryClient = useQueryClient();
 
   const deletarUsuarioMutation = useMutation({
-    mutationFn: (id) => base44.asServiceRole.entities.User.delete(id),
+    mutationFn: (id) => base44.entities.User.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['usuarios'] });
       alert('Usuário removido com sucesso!');
