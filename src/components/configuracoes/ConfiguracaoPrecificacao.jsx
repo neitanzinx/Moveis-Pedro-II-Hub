@@ -1,13 +1,17 @@
 import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { base44 } from "@/lib/supabase";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DollarSign, Package, TrendingUp, Loader2 } from "lucide-react";
 import AjustePrecoModal from "./AjustePrecoModal";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function ConfiguracaoPrecificacao() {
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const { can } = useAuth();
+
+    const canManageBulkPrice = can('manage_bulk_price_adjustment');
 
     const { data: produtos = [], isLoading } = useQuery({
         queryKey: ['produtos'],
@@ -31,7 +35,7 @@ export default function ConfiguracaoPrecificacao() {
                 </CardHeader>
                 <CardContent>
                     <p className="text-gray-500 mb-6">
-                        Ajuste os preços de venda de múltiplos produtos de uma só vez.
+                        Ajuste preço de venda ou custo tabela com filtros avançados, exceções e simulação obrigatória.
                     </p>
 
                     {/* Stats */}
@@ -65,11 +69,17 @@ export default function ConfiguracaoPrecificacao() {
                     <Button
                         onClick={() => setIsModalOpen(true)}
                         size="lg"
+                        disabled={!canManageBulkPrice}
                         className="w-full h-14 bg-green-700 hover:bg-green-800 text-lg"
                     >
                         <DollarSign className="w-5 h-5 mr-2" />
                         Ajustar Preços em Massa
                     </Button>
+                    {!canManageBulkPrice && (
+                        <p className="text-xs text-amber-700 mt-2">
+                            Apenas Administrador e Gerente Geral podem executar reajuste em massa.
+                        </p>
+                    )}
                 </CardContent>
             </Card>
 

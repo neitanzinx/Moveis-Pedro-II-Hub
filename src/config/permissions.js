@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Warehouse, Users, ShoppingCart, Truck, Building2,
-  FileText, DollarSign, UserCog, BarChart3, Receipt, MessageCircle, CreditCard,
-  Settings, CalendarDays, Tag, Smartphone, Wrench, PieChart, Package, FileSpreadsheet, Target, ScanBarcode, TrendingUp
+  FileText, DollarSign, UserCog, MessageCircle, CreditCard,
+  Settings, CalendarDays, Tag, Wrench, Target, TrendingUp
 } from "lucide-react";
 
 // Níveis de Acesso aos Dados
@@ -31,7 +31,11 @@ export const ROLE_RULES = {
       'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
       'view_montagem', 'view_marketing',
-      'view_compras', 'create_oc', 'manage_compras', 'approve_oc'
+      'view_compras', 'create_oc', 'manage_compras', 'approve_oc',
+      'solicitar_nfe', 'aprovar_nfe', 'emitir_nfe', 'cancelar_nfe', 'corrigir_nfe', 'view_nfe',
+      'solicitar_cancelamento_nfe', 'aprovar_cancelamento_nfe',
+      'solicitar_cce_nfe', 'aprovar_cce_nfe',
+      'solicitar_inutilizacao_nfe', 'aprovar_inutilizacao_nfe'
     ],
     scope: SCOPES.STORE
   },
@@ -43,7 +47,12 @@ export const ROLE_RULES = {
       'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
       'view_montagem', 'view_marketing',
-      'view_compras', 'create_oc', 'manage_compras', 'send_oc', 'receive_oc'
+      'view_compras', 'create_oc', 'manage_compras', 'send_oc', 'receive_oc',
+      'manage_bulk_price_adjustment',
+      'solicitar_nfe', 'aprovar_nfe', 'emitir_nfe', 'cancelar_nfe', 'corrigir_nfe', 'view_nfe',
+      'solicitar_cancelamento_nfe', 'aprovar_cancelamento_nfe',
+      'solicitar_cce_nfe', 'aprovar_cce_nfe',
+      'solicitar_inutilizacao_nfe', 'aprovar_inutilizacao_nfe'
     ],
     scope: SCOPES.ALL
   },
@@ -51,7 +60,9 @@ export const ROLE_RULES = {
     can: [
       'view_dashboard', 'view_vendas', 'create_vendas',
       'view_produtos', 'view_clientes', 'create_clientes',
-      'view_orcamentos', 'create_orcamentos', 'view_catalogo'
+      'view_orcamentos', 'create_orcamentos', 'view_catalogo',
+      'solicitar_nfe', 'view_nfe',
+      'solicitar_cancelamento_nfe', 'solicitar_cce_nfe'
     ],
     scope: SCOPES.OWN
   },
@@ -65,7 +76,11 @@ export const ROLE_RULES = {
   'Financeiro': {
     can: [
       'view_financeiro', 'manage_financeiro', 'view_vendas',
-      'view_clientes', 'view_compras', 'approve_oc'
+      'view_clientes', 'view_compras', 'approve_oc',
+      'solicitar_nfe', 'aprovar_nfe', 'view_nfe',
+      'solicitar_cancelamento_nfe', 'aprovar_cancelamento_nfe',
+      'solicitar_cce_nfe', 'aprovar_cce_nfe',
+      'solicitar_inutilizacao_nfe', 'aprovar_inutilizacao_nfe'
     ],
     scope: SCOPES.ALL
   },
@@ -172,12 +187,9 @@ export const MENU_ITEMS = [
   { title: "Assistência Técnica", url: "/admin/AssistenciaTecnica", icon: Wrench, permission: 'view_assistencia', section: "Operacional", module: 'assistencia_tecnica' },
 
   { title: "Financeiro", url: "/admin/Financeiro", icon: DollarSign, permission: 'view_financeiro', section: "Gestão" },
-  { title: "Comissões", url: "/admin/RelatorioComissoes", icon: DollarSign, permission: 'view_relatorios', section: "Gestão" },
+  { title: "Central Analítica", url: "/admin/CentralAnalitica", icon: TrendingUp, permission: ['view_relatorios', 'view_financeiro'], section: "Gestão" },
   { title: "Marketing", url: "/admin/Marketing", icon: Tag, permission: 'view_marketing', section: "Gestão", module: 'marketing' },
-  { title: "Relatórios", url: "/admin/RelatoriosAvancados", icon: BarChart3, permission: 'view_relatorios', section: "Gestão" },
   { title: "RH", url: "/admin/RecursosHumanos", icon: UserCog, permission: 'view_rh', section: "Gestão", module: 'rh' },
-  { title: "Visão Estratégica (BI)", url: "/admin/DashboardBI", icon: PieChart, permission: 'view_relatorios', section: "Gestão", module: 'bi_dashboard' },
-  { title: "Exportação Contábil", url: "/admin/ExportacaoContabil", icon: FileSpreadsheet, permission: 'view_financeiro', section: "Gestão" },
 
   { title: "WhatsApp", url: "/admin/CatalogoWhatsApp", icon: MessageCircle, permission: 'view_catalogo', section: "Ferramentas", module: 'catalogo_whatsapp' },
 
@@ -250,6 +262,10 @@ export function getUserEffectivePermissions(user) {
  * @returns {boolean}
  */
 export function userCan(user, permission) {
+  if (Array.isArray(permission)) {
+    return permission.some((item) => userCan(user, item));
+  }
+
   const { permissions } = getUserEffectivePermissions(user);
 
   // Wildcard tem acesso total
@@ -268,17 +284,19 @@ export function getVisibleMenuItems(user) {
   const { permissions } = getUserEffectivePermissions(user);
 
   return MENU_ITEMS.filter(item => {
+    const itemPermissions = Array.isArray(item.permission) ? item.permission : [item.permission];
+
     // Itens com * sao visiveis para todos
-    if (item.permission === '*') return true;
+    if (itemPermissions.includes('*')) return true;
 
     // Admin only items
-    if (item.permission === 'admin_only') {
+    if (itemPermissions.includes('admin_only')) {
       return permissions.includes('*');
     }
 
     // Verifica permissao
     if (permissions.includes('*')) return true;
-    return permissions.includes(item.permission);
+    return itemPermissions.some((permission) => permissions.includes(permission));
   });
 }
 
@@ -290,9 +308,12 @@ export function getAllPermissions() {
   const permSet = new Set();
 
   MENU_ITEMS.forEach(item => {
-    if (item.permission && item.permission !== '*' && item.permission !== 'admin_only') {
-      permSet.add(item.permission);
-    }
+    const itemPermissions = Array.isArray(item.permission) ? item.permission : [item.permission];
+    itemPermissions.forEach((permission) => {
+      if (permission && permission !== '*' && permission !== 'admin_only') {
+        permSet.add(permission);
+      }
+    });
   });
 
   // Adiciona permissoes extras que nao estao no menu

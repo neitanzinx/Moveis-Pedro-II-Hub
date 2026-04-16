@@ -13,7 +13,11 @@ import {
     AlertCircle, Clock, CheckCircle, Package, Filter, Link as LinkIcon
 } from "lucide-react";
 import AssistenciaTecnicaModal from "../components/assistencia/AssistenciaTecnicaModal";
+import SelecionarLojaReposicaoModal from "../components/assistencia/SelecionarLojaReposicaoModal";
 import { toast } from "sonner";
+
+const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000001';
+const TIPOS_COM_REPOSICAO = ['Troca', 'Peça Faltante'];
 
 const TIPOS_ASSISTENCIA = [
     { value: "Devolução", label: "Devolução", color: "bg-red-100 text-red-800 border-red-200" },
@@ -47,6 +51,8 @@ export default function AssistenciaTecnica() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingAssistencia, setEditingAssistencia] = useState(null);
     const [saving, setSaving] = useState(false);
+    const [reposicaoPendente, setReposicaoPendente] = useState(null);
+    const [isReposicaoModalOpen, setIsReposicaoModalOpen] = useState(false);
     const { user } = useAuth();
     const queryClient = useQueryClient();
 
@@ -66,14 +72,49 @@ export default function AssistenciaTecnica() {
         queryFn: () => base44.entities.Produto.list()
     });
 
+    const { data: lojas = [] } = useQuery({
+        queryKey: ['lojas'],
+        queryFn: () => base44.entities.Loja.list('nome')
+    });
+
     // ==============================================
     // FUNÇÃO PRINCIPAL DE SAVE COM INTEGRAÇÕES
     // ==============================================
     const handleSave = async (formData) => {
-        setSaving(true);
         const isEditing = !!editingAssistencia;
         const statusAnterior = editingAssistencia?.status;
         const mudouParaConcluida = formData.status === 'Concluída' && statusAnterior !== 'Concluída';
+        const exigeReposicao =
+            mudouParaConcluida &&
+            TIPOS_COM_REPOSICAO.includes(formData.tipo) &&
+            (formData.itens_envolvidos?.length ?? 0) > 0;
+
+        // Se exige reposição, interceptar e abrir modal de seleção de loja antes de salvar
+        if (exigeReposicao) {
+            setReposicaoPendente({ formData, isEditing, statusAnterior, mudouParaConcluida });
+            setIsReposicaoModalOpen(true);
+            return;
+        }
+
+        await _executarSave({ formData, isEditing, statusAnterior, mudouParaConcluida, selecaoLojas: null });
+    };
+
+    // Chamado pelo SelecionarLojaReposicaoModal ao confirmar seleção de lojas
+    const handleConfirmarReposicao = async (selecaoLojas) => {
+        setIsReposicaoModalOpen(false);
+        if (!reposicaoPendente) return;
+        const { formData, isEditing, statusAnterior, mudouParaConcluida } = reposicaoPendente;
+        setReposicaoPendente(null);
+        await _executarSave({ formData, isEditing, statusAnterior, mudouParaConcluida, selecaoLojas });
+    };
+
+    const handleCancelarReposicao = () => {
+        setIsReposicaoModalOpen(false);
+        setReposicaoPendente(null);
+    };
+
+    const _executarSave = async ({ formData, isEditing, statusAnterior, mudouParaConcluida, selecaoLojas }) => {
+        setSaving(true);
         const hoje = new Date().toISOString().split('T')[0];
 
         try {
@@ -151,7 +192,7 @@ export default function AssistenciaTecnica() {
                 }
 
                 // 5. INTEGRAÇÃO ESTOQUE - Devolver itens ao estoque quando for Devolução
-                if ((formData.tipo === 'Devolução' || formData.tipo === 'Troca') && formData.itens_envolvidos?.length > 0) {
+                if (formData.tipo === 'Devolução' && formData.itens_envolvidos?.length > 0) {
                     for (const item of formData.itens_envolvidos) {
                         const produto = produtos.find(p => p.id === item.produto_id);
                         if (produto) {
@@ -163,7 +204,6 @@ export default function AssistenciaTecnica() {
                                 });
 
                                 // Sincronização Local (Scanner/Estoque Loja)
-                                // Usamos 'CD' como padrão se o usuário não tiver loja, similar ao EntradaEstoque.jsx
                                 const tenantId = user?.loja || 'CD';
                                 await supabase.from('estoque_loja').insert({
                                     gtin: produto.gtin,
@@ -178,6 +218,89 @@ export default function AssistenciaTecnica() {
                             }
                         }
                     }
+                }
+
+                // 6. INTEGRAÇÃO REPOSIÇÃO - Descontar estoque e criar solicitação de reposição para Troca / Peça Faltante
+                if (selecaoLojas && TIPOS_COM_REPOSICAO.includes(formData.tipo) && formData.itens_envolvidos?.length > 0) {
+                    const assistenciaSalva = await base44.entities.AssistenciaTecnica.list(
+                        '-created_at'
+                    ).then(list => list.find(a => a.numero_pedido === formData.numero_pedido));
+
+                    for (const item of formData.itens_envolvidos) {
+                        const lojaInfo = selecaoLojas[item.produto_id];
+                        if (!lojaInfo) continue;
+
+                        try {
+                            // a) Buscar estoque atual da loja selecionada
+                            const { data: estoqueRows } = await supabase
+                                .from('estoque_loja')
+                                .select('id, quantidade')
+                                .eq('produto_id', item.produto_id)
+                                .eq('loja_id', lojaInfo.loja_id)
+                                .maybeSingle();
+
+                            const qtdAtual = estoqueRows?.quantidade ?? 0;
+                            const qtdNova = Math.max(0, qtdAtual - item.quantidade);
+
+                            if (estoqueRows?.id) {
+                                // b) Decrementar estoque_loja
+                                await supabase
+                                    .from('estoque_loja')
+                                    .update({ quantidade: qtdNova, updated_at: new Date().toISOString() })
+                                    .eq('id', estoqueRows.id);
+                            }
+
+                            // c) Recalcular produtos.quantidade_estoque (soma de todas as lojas)
+                            const { data: todasLojas } = await supabase
+                                .from('estoque_loja')
+                                .select('quantidade')
+                                .eq('produto_id', item.produto_id);
+
+                            const totalEstoque = (todasLojas || []).reduce(
+                                (sum, row) => sum + (row.quantidade || 0), 0
+                            );
+
+                            await supabase
+                                .from('produtos')
+                                .update({ quantidade_estoque: totalEstoque })
+                                .eq('id', item.produto_id);
+
+                            // d) Registrar movimentação de auditoria
+                            await supabase.from('movimentacoes_estoque').insert({
+                                produto_id: item.produto_id,
+                                evento_tipo: 'assistencia_troca',
+                                modulo_origem: 'assistencia',
+                                quantidade: item.quantidade,
+                                estoque_antes_total: qtdAtual,
+                                estoque_depois_total: qtdNova,
+                                loja_origem: lojaInfo.loja_nome,
+                                referencia_numero: formData.numero_pedido,
+                                usuario_id: user?.id,
+                                usuario_nome: user?.full_name || user?.email || 'Sistema',
+                                organization_id: DEFAULT_TENANT_ID
+                            });
+
+                            // e) Criar solicitação de reposição para o setor de compras
+                            await base44.entities.SolicitacaoReposicao.create({
+                                assistencia_id: assistenciaSalva?.id || null,
+                                numero_assistencia: formData.numero_pedido,
+                                produto_id: item.produto_id,
+                                produto_nome: item.produto_nome,
+                                quantidade: item.quantidade,
+                                loja_id: lojaInfo.loja_id,
+                                loja_nome: lojaInfo.loja_nome,
+                                status: 'Pendente',
+                                observacoes: `Gerado ao concluir assistência #${formData.numero_pedido} - ${formData.tipo} - ${formData.cliente_nome}`,
+                                tenant_id: DEFAULT_TENANT_ID
+                            });
+
+                            console.log('✅ Reposição criada e estoque decrementado:', item.produto_nome, 'loja:', lojaInfo.loja_nome);
+                        } catch (err) {
+                            console.error('Erro ao processar reposição para item:', item.produto_nome, err);
+                        }
+                    }
+
+                    queryClient.invalidateQueries({ queryKey: ['solicitacoes-reposicao'] });
                 }
             }
 
@@ -450,7 +573,7 @@ export default function AssistenciaTecnica() {
                 </Table>
             </div>
 
-            {/* Modal */}
+            {/* Modal principal */}
             <AssistenciaTecnicaModal
                 isOpen={isModalOpen}
                 onClose={() => { setIsModalOpen(false); setEditingAssistencia(null); }}
@@ -458,6 +581,15 @@ export default function AssistenciaTecnica() {
                 assistencia={editingAssistencia}
                 vendas={vendas}
                 isLoading={saving}
+            />
+
+            {/* Modal de seleção de loja para reposição */}
+            <SelecionarLojaReposicaoModal
+                isOpen={isReposicaoModalOpen}
+                onClose={handleCancelarReposicao}
+                onConfirm={handleConfirmarReposicao}
+                itens={reposicaoPendente?.formData?.itens_envolvidos || []}
+                lojas={lojas}
             />
         </div>
     );

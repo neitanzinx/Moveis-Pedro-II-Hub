@@ -2,54 +2,65 @@ import { productService } from '@/services/productService';
 import { supabase } from '@/lib/supabase';
 
 /**
+ * Normaliza dados retornados pela API externa para formato consistente.
+ */
+function normalizeApiData(apiData, gtin) {
+    if (!apiData) return null;
+    return {
+        nome: apiData.description || apiData.nome || '',
+        ncm: apiData.ncm?.codigo || apiData.ncm || '',
+        gtin: gtin,
+        marca: apiData.brand?.name || apiData.marca || '',
+        foto_url: apiData.thumbnail || apiData.foto_url || '',
+        specs: apiData
+    };
+}
+
+/**
  * Service to identify products by EAN.
  * 1. Checks internal DB.
  * 2. Checks existing External APIs (Cosmos etc via productService).
- * 3. Fallback to Gemini 3.0 Flash for "smart guess" (if configured).
+ * Returns both internal match and API data when available for comparison.
  */
 export const eanService = {
     /**
-     * Looks up an EAN.
+     * Looks up an EAN. Always attempts API lookup to enable data comparison.
      * @param {string} gtin - Barcode
-     * @returns {Promise<{found: boolean, source: 'internal'|'api'|'gemini', product: object}>}
+     * @returns {Promise<{found: boolean, source: 'internal'|'api'|'none', product: object|null, apiData: object|null}>}
      */
     async lookup(gtin) {
-        if (!gtin) return { found: false };
+        if (!gtin) return { found: false, source: 'none', product: null, apiData: null };
 
         try {
-            // 1. Internal Search
-            const { data: internal, error } = await supabase
-                .from('produtos')
-                .select('*')
-                .eq('codigo_barras', gtin)
-                .maybeSingle();
+            // Run internal DB check and external API lookup in parallel
+            const [internalResult, apiRaw] = await Promise.all([
+                supabase
+                    .from('produtos')
+                    .select('*')
+                    .eq('codigo_barras', gtin)
+                    .maybeSingle(),
+                productService.fetchProductByGtin(gtin).catch(err => {
+                    console.warn('API lookup failed:', err);
+                    return null;
+                })
+            ]);
+
+            const internal = internalResult.data;
+            const apiData = normalizeApiData(apiRaw, gtin);
 
             if (internal) {
-                return { found: true, source: 'internal', product: internal };
+                return { found: true, source: 'internal', product: internal, apiData };
             }
 
-            // 2. External API (Cosmos/Table via existing service)
-            // Adapting from EntradaEstoque logic
-            const apiData = await productService.fetchProductByGtin(gtin);
-            if (apiData && apiData.description) { // Normalizing return checks
-                return {
-                    found: true,
-                    source: 'api',
-                    product: {
-                        nome: apiData.description || apiData.nome,
-                        ncm: apiData.ncm,
-                        gtin: gtin,
-                        foto_url: apiData.thumbnail || apiData.foto_url,
-                        specs: apiData // Keep raw data just in case
-                    }
-                };
+            if (apiData && apiData.nome) {
+                return { found: true, source: 'api', product: apiData, apiData };
             }
 
-            return { found: false };
+            return { found: false, source: 'none', product: null, apiData: null };
 
         } catch (err) {
             console.error("EAN Lookup Error:", err);
-            return { found: false, error: err };
+            return { found: false, source: 'none', product: null, apiData: null, error: err };
         }
     }
 };

@@ -126,7 +126,10 @@ const tableMap = {
     ComprasCentroCusto: 'compras_centro_custos',
     ComprasWorkflow: 'compras_workflows',
     MovimentacaoEstoque: 'movimentacoes_estoque',
-    EstoqueMovimentacao: 'estoque_movimentacoes'
+    EstoqueMovimentacao: 'estoque_movimentacoes',
+    PaymentProviderConfig: 'payment_provider_configs',
+    PaymentTransaction: 'payment_transactions',
+    SolicitacaoReposicao: 'solicitacoes_reposicao'
 };
 
 // O Adaptador Mágico (Handler)

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/api/base44Client";
+import { usePixCobrancaStatus } from "@/hooks/usePaymentStatus";
 
 /**
  * Modal para exibir QR Code PIX Stone com:
@@ -45,6 +46,21 @@ export default function PixQRCodeModal({
     const [tempoRestante, setTempoRestante] = useState(null);
     const [status, setStatus] = useState('gerando'); // gerando | ativo | pago | expirado
     const [numeroAlternativo, setNumeroAlternativo] = useState("");
+
+    const { status: realtimeStatus } = usePixCobrancaStatus(
+        pixData?.cobranca_id,
+        {
+            showToast: false,
+            onPaid: () => {
+                setStatus('pago');
+                toast.success('Pagamento PIX confirmado!');
+                onPaymentConfirmed?.();
+            },
+            onExpired: () => {
+                setStatus('expirado');
+            }
+        }
+    );
 
     // Gerar PIX ao abrir modal
     useEffect(() => {
@@ -77,31 +93,24 @@ export default function PixQRCodeModal({
         return () => clearInterval(interval);
     }, [pixData?.expiracao]);
 
-    // Polling para verificar status do pagamento
+    // Atualizacao em tempo real via Realtime + webhook
     useEffect(() => {
-        if (!pixData?.cobranca_id || status !== 'ativo') return;
+        if (!realtimeStatus) return;
 
-        const checkPaymentStatus = async () => {
-            try {
-                const { data, error } = await supabase
-                    .from('cobrancas_pix')
-                    .select('status')
-                    .eq('id', pixData.cobranca_id)
-                    .single();
+        if (realtimeStatus === 'CONCLUIDA') {
+            setStatus('pago');
+            return;
+        }
 
-                if (data?.status === 'CONCLUIDA') {
-                    setStatus('pago');
-                    toast.success('Pagamento PIX confirmado! ✅');
-                    onPaymentConfirmed?.();
-                }
-            } catch (e) {
-                console.error('Error checking payment:', e);
-            }
-        };
+        if (realtimeStatus === 'EXPIRADA') {
+            setStatus('expirado');
+            return;
+        }
 
-        const interval = setInterval(checkPaymentStatus, 5000); // A cada 5 segundos
-        return () => clearInterval(interval);
-    }, [pixData?.cobranca_id, status]);
+        if (status !== 'gerando' && status !== 'erro') {
+            setStatus('ativo');
+        }
+    }, [realtimeStatus, status]);
 
     const gerarPix = async () => {
         setLoading(true);

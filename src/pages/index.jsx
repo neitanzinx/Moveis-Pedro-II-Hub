@@ -51,6 +51,7 @@ import ClienteAuth from "./cliente/ClienteAuth.jsx";
 import ClienteDashboard from "./cliente/ClienteDashboard.jsx";
 import AutoAtendimento from "./AutoAtendimento.jsx";
 import RastreioPublico from "./RastreioPublico.jsx";
+import RadioLoja from "./RadioLoja.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation, Navigate } from 'react-router-dom';
 import { hasAnyRole, getUserRoles } from "@/config/permissions";
@@ -167,6 +168,11 @@ function PagesContent() {
     if (location.pathname.startsWith('/rastreio')) {
         const id = location.pathname.split('/').pop();
         return <RastreioPublico idProp={id !== 'rastreio' ? id : null} />;
+    }
+
+    // Tela de Rádio (TV/Kiosk) - Pública
+    if (location.pathname === '/radio') {
+        return <RadioLoja />;
     }
 
     // ===== LOGIN DE FUNCIONÁRIOS =====

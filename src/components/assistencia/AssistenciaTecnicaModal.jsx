@@ -13,7 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Plus, Trash2, Upload, X, FileText, Image } from "lucide-react";
+import { Loader2, Plus, Trash2, Upload, X, FileText, Image, HardHat } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { AlertCircle } from "lucide-react";
@@ -48,10 +49,11 @@ export default function AssistenciaTecnicaModal({
     onClose,
     onSave,
     assistencia,
+    initialValues,
     vendas = [],
     isLoading
 }) {
-    const [formData, setFormData] = useState({
+    const getDefaultFormData = () => ({
         venda_id: "",
         numero_pedido: "",
         cliente_nome: "",
@@ -67,7 +69,13 @@ export default function AssistenciaTecnicaModal({
         status: "Aberta",
         prioridade: "Normal",
         arquivos: [],
-        observacoes: ""
+        observacoes: "",
+        responsabilidade_montador: false,
+        montador_usuario_id: null
+    });
+
+    const [formData, setFormData] = useState({
+        ...getDefaultFormData()
     });
 
     const [vendaSelecionada, setVendaSelecionada] = useState(null);
@@ -87,27 +95,28 @@ export default function AssistenciaTecnicaModal({
             setVendaSelecionada(venda);
             setEntregue(true); // Se já existe assistência, assumimos que a entrega foi verificada ou já passou pelo filtro
         } else {
+            const prefill = initialValues || {};
+            // Se veio do painel de montagem com montador_usuario_id, auto-marcar como responsabilidade do montador
+            const autoResponsabilidade = !!prefill.montador_usuario_id;
             setFormData({
-                venda_id: "",
-                numero_pedido: "",
-                cliente_nome: "",
-                cliente_telefone: "",
-                tipo: "Devolução",
-                data_abertura: new Date().toISOString().split('T')[0],
-                data_resolucao: "",
-                descricao_problema: "",
-                solucao_aplicada: "",
-                itens_envolvidos: [],
-                valor_devolvido: 0,
-                valor_cobrado: 0,
-                status: "Aberta",
-                prioridade: "Normal",
-                arquivos: [],
-                observacoes: ""
+                ...getDefaultFormData(),
+                ...prefill,
+                itens_envolvidos: prefill.itens_envolvidos || [],
+                arquivos: prefill.arquivos || [],
+                responsabilidade_montador: autoResponsabilidade || prefill.responsabilidade_montador || false,
+                montador_usuario_id: prefill.montador_usuario_id || null
             });
-            setVendaSelecionada(null);
+
+            if (prefill.venda_id) {
+                const venda = vendas.find(v => String(v.id) === String(prefill.venda_id));
+                setVendaSelecionada(venda || null);
+                setEntregue(true);
+            } else {
+                setVendaSelecionada(null);
+                setEntregue(false);
+            }
         }
-    }, [assistencia, vendas, isOpen]);
+    }, [assistencia, vendas, isOpen, initialValues]);
 
     const handleVendaChange = async (vendaId) => {
         const venda = vendas.find(v => v.id === vendaId);
@@ -373,6 +382,42 @@ export default function AssistenciaTecnicaModal({
                                 </Select>
                             </div>
                         </div>
+
+                        {/* Responsabilidade do Montador — exibido apenas no painel admin/portal cliente (não quando auto-set pelo painel de montagem) */}
+                        {!assistencia && !initialValues?.montador_usuario_id && (
+                            <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                                <Checkbox
+                                    id="responsabilidade_montador"
+                                    checked={formData.responsabilidade_montador}
+                                    onCheckedChange={(checked) =>
+                                        setFormData({ ...formData, responsabilidade_montador: !!checked })
+                                    }
+                                    className="mt-0.5"
+                                />
+                                <div className="flex-1">
+                                    <label
+                                        htmlFor="responsabilidade_montador"
+                                        className="flex items-center gap-2 font-medium text-amber-900 cursor-pointer"
+                                    >
+                                        <HardHat className="w-4 h-4" />
+                                        Responsabilidade do Montador?
+                                    </label>
+                                    <p className="text-xs text-amber-700 mt-0.5">
+                                        Marque caso o problema seja decorrente da montagem realizada. A assistência aparecerá no portal do montador responsável.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Indicador quando auto-vinculado pelo painel de montagem */}
+                        {!assistencia && !!initialValues?.montador_usuario_id && (
+                            <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                <HardHat className="w-4 h-4 text-amber-700" />
+                                <p className="text-sm text-amber-800">
+                                    Esta assistência será vinculada ao montador responsável e aparecerá no portal dele.
+                                </p>
+                            </div>
+                        )}
 
                         {/* Descrição do Problema */}
                         <div>

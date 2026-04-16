@@ -26,6 +26,7 @@ import {
   Truck,
   CheckCircle,
   DollarSign,
+  Wrench,
 } from 'lucide-react';
 import {
   Table,
@@ -41,6 +42,7 @@ import { useConfirm } from '@/hooks/useConfirm';
 import { comprasService } from '@/services/comprasService';
 import OcTable from '@/components/compras/OcTable';
 import OcModal from '@/components/compras/OcModal';
+import SolicitacoesReposicaoTab from '@/components/compras/SolicitacoesReposicaoTab';
 import RecebimentoModal from '@/components/compras/RecebimentoModal';
 import EnviarOcModal from '@/components/compras/EnviarOcModal';
 import { VendaDetalhesModal } from '@/components/vendas/VendaDetalhesModal';
@@ -209,6 +211,15 @@ export default function Compras() {
     queryKey: ['vendas'],
     queryFn: () => base44.entities.Venda.list('-data_venda'),
   });
+
+  // Query: Solicitações de Reposição (contagem pendente para badge no tab)
+  const { data: solicitacoesReposicao = [] } = useQuery({
+    queryKey: ['solicitacoes-reposicao'],
+    queryFn: () => base44.entities.SolicitacaoReposicao.list('-created_at'),
+    enabled: temPermissaoVisualizacao,
+    staleTime: 30000,
+  });
+  const totalReposicoesPendentes = solicitacoesReposicao.filter(s => s.status === 'Pendente').length;
 
   // Query: Histórico de Preços
   const { data: historicoPrecos = [] } = useQuery({
@@ -1166,14 +1177,21 @@ export default function Compras() {
         </Card>
       )}
 
-      {/* Abas: Ordens | Encomendas | Preços | Performance | Recomendações */}
+      {/* Abas: Ordens | Encomendas | Reposições | Preços | Performance | Recomendações */}
       <Tabs value={abaAtiva} onValueChange={setAbaAtiva} className="w-full">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="ordens" className="gap-2">
             <Package className="w-4 h-4" /> Ordens ({ocsFiltradas.length})
           </TabsTrigger>
           <TabsTrigger value="encomendas" className="gap-2">
             <ShoppingCart className="w-4 h-4" /> Encomendas ({encomendas.length})
+          </TabsTrigger>
+          <TabsTrigger value="reposicoes" className="gap-1">
+            <Wrench className="w-4 h-4" /> Reposições{totalReposicoesPendentes > 0 && (
+              <span className="ml-1 bg-orange-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5">
+                {totalReposicoesPendentes}
+              </span>
+            )}
           </TabsTrigger>
           <TabsTrigger value="precos" className="gap-2">
             <DollarSign className="w-4 h-4" /> Preços
@@ -1563,6 +1581,11 @@ export default function Compras() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* TAB: Reposições de Assistência */}
+        <TabsContent value="reposicoes" className="space-y-4">
+          <SolicitacoesReposicaoTab />
         </TabsContent>
       </Tabs>
 

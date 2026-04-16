@@ -8,10 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
     Calendar, MapPin, Phone, User, Clock, Package,
-    CheckCircle, AlertCircle, Navigation, MessageCircle,
+    CheckCircle, AlertCircle, AlertTriangle, Navigation, MessageCircle,
     Wrench, CalendarDays, ListTodo, ExternalLink, LogOut, XCircle, Search, ShoppingBag
 } from "lucide-react";
 import { toast } from "sonner";
@@ -25,6 +26,7 @@ import {
 import { whatsappService } from "@/services/whatsappService";
 import { supabase } from "@/lib/supabase";
 import { useConfirm } from "@/hooks/useConfirm";
+import AssistenciaTecnicaModal from "@/components/assistencia/AssistenciaTecnicaModal";
 
 export default function MontadorExterno() {
     const MONTAGEM_ITEM_NULLABLE_FIELDS = new Set([
@@ -119,6 +121,9 @@ export default function MontadorExterno() {
     const [selectedMontagem, setSelectedMontagem] = useState(null);
     const [agendamentoModal, setAgendamentoModal] = useState(false);
     const [agendamentoData, setAgendamentoData] = useState({ data: "", horario: "" });
+    const [assistenciaModalOpen, setAssistenciaModalOpen] = useState(false);
+    const [montagemParaAssistencia, setMontagemParaAssistencia] = useState(null);
+    const [salvandoAssistencia, setSalvandoAssistencia] = useState(false);
 
     const queryClient = useQueryClient();
     const confirm = useConfirm();
@@ -219,6 +224,25 @@ export default function MontadorExterno() {
         enabled: !!user && (!!montador || user?.cargo === 'Administrador' || user?.cargo === 'Montador Externo')
     });
     
+    // Buscar assistências vinculadas a este montador
+    const { data: assistenciasMontador = [] } = useQuery({
+        queryKey: ['assistencias-montador', montador?.usuario_id],
+        queryFn: async () => {
+            const todas = await base44.entities.AssistenciaTecnica.list('-created_at');
+            return todas.filter(a =>
+                a.responsabilidade_montador === true &&
+                a.montador_usuario_id &&
+                String(a.montador_usuario_id) === String(montador?.usuario_id || '')
+            );
+        },
+        enabled: !!montador?.usuario_id,
+        refetchInterval: 30000
+    });
+
+    const assistenciasAbertas = assistenciasMontador.filter(a =>
+        !['Concluída', 'Cancelada'].includes(a.status)
+    );
+
     // Buscar todas as vendas para associar vendedor e data
     const { data: vendas = [] } = useQuery({
         queryKey: ['vendas-resumo'],
@@ -389,6 +413,47 @@ export default function MontadorExterno() {
         }
     };
 
+    const abrirAssistenciaDaMontagem = (montagem) => {
+        setMontagemParaAssistencia(montagem);
+        setAssistenciaModalOpen(true);
+    };
+
+    const fecharAssistenciaDaMontagem = () => {
+        setAssistenciaModalOpen(false);
+        setMontagemParaAssistencia(null);
+    };
+
+    const salvarAssistenciaDaMontagem = async (formData) => {
+        if (!montagemParaAssistencia) return;
+
+        setSalvandoAssistencia(true);
+        try {
+            const assistenciaCriada = await base44.entities.AssistenciaTecnica.create(formData);
+
+            await updateMontagemItemWithSchemaFallback({
+                id: montagemParaAssistencia.id,
+                data: {
+                    tem_problema: true,
+                    assistencia_id: assistenciaCriada.id,
+                    updated_at: new Date().toISOString()
+                }
+            });
+
+            await queryClient.invalidateQueries({ queryKey: ['montagens-disponiveis'] });
+            await queryClient.invalidateQueries({ queryKey: ['minhas-montagens'] });
+            await queryClient.invalidateQueries({ queryKey: ['assistencias'] });
+            await queryClient.invalidateQueries({ queryKey: ['assistencias-montador'] });
+
+            toast.success("Assistência aberta com sucesso para esta montagem.");
+            fecharAssistenciaDaMontagem();
+        } catch (e) {
+            console.error("Erro ao abrir assistência da montagem:", e);
+            toast.error("Erro ao abrir assistência");
+        } finally {
+            setSalvandoAssistencia(false);
+        }
+    };
+
     // Cancelar montagem (volta para triagem)
     const cancelarMontagem = async (montagem) => {
         const confirmar = await confirm({
@@ -450,6 +515,12 @@ export default function MontadorExterno() {
     const [reagendarModal, setReagendarModal] = useState(false);
     const [reagendarData, setReagendarData] = useState({ data: "", horario: "" });
     const [montagemReagendar, setMontagemReagendar] = useState(null);
+
+    // Estado para aba Assistências
+    const [obsAssistenciaOpen, setObsAssistenciaOpen] = useState(false);
+    const [assistenciaParaObs, setAssistenciaParaObs] = useState(null);
+    const [novaObservacao, setNovaObservacao] = useState("");
+    const [atualizandoAssistencia, setAtualizandoAssistencia] = useState(false);
 
     // Abrir modal de reagendamento
     const abrirReagendar = (montagem) => {
@@ -527,6 +598,43 @@ export default function MontadorExterno() {
         }
     };
 
+
+    // Adicionar observação a uma assistência
+    const salvarObservacao = async () => {
+        if (!assistenciaParaObs || !novaObservacao.trim()) return;
+        setAtualizandoAssistencia(true);
+        try {
+            const dataHora = new Date().toLocaleString('pt-BR');
+            const textoNovo = `[${dataHora} - ${montador?.nome || 'Montador'}] ${novaObservacao.trim()}`;
+            const obsAtual = assistenciaParaObs.observacoes ? assistenciaParaObs.observacoes + '\n\n' + textoNovo : textoNovo;
+            await base44.entities.AssistenciaTecnica.update(assistenciaParaObs.id, { observacoes: obsAtual });
+            await queryClient.invalidateQueries({ queryKey: ['assistencias-montador'] });
+            await queryClient.invalidateQueries({ queryKey: ['assistencias'] });
+            toast.success("Observação adicionada");
+            setNovaObservacao("");
+            setObsAssistenciaOpen(false);
+            setAssistenciaParaObs(null);
+        } catch (e) {
+            toast.error("Erro ao salvar observação");
+        } finally {
+            setAtualizandoAssistencia(false);
+        }
+    };
+
+    // Atualizar status de uma assistência
+    const atualizarStatusAssistencia = async (assistencia, novoStatus) => {
+        setAtualizandoAssistencia(true);
+        try {
+            await base44.entities.AssistenciaTecnica.update(assistencia.id, { status: novoStatus });
+            await queryClient.invalidateQueries({ queryKey: ['assistencias-montador'] });
+            await queryClient.invalidateQueries({ queryKey: ['assistencias'] });
+            toast.success("Status atualizado");
+        } catch (e) {
+            toast.error("Erro ao atualizar status");
+        } finally {
+            setAtualizandoAssistencia(false);
+        }
+    };
 
     // Abrir Google Maps com endereço
     const abrirMapa = (endereco) => {
@@ -703,7 +811,7 @@ export default function MontadorExterno() {
             <div className="px-4 -mt-4">
                 <div className="bg-white rounded-2xl shadow-md overflow-hidden">
                     <Tabs value={activeTab} onValueChange={setActiveTab}>
-                        <TabsList className="grid grid-cols-3 bg-gray-100 p-1 m-2 rounded-xl">
+                        <TabsList className="grid grid-cols-4 bg-gray-100 p-1 m-2 rounded-xl">
                             <TabsTrigger
                                 value="disponiveis"
                                 className="rounded-lg text-xs py-2 data-[state=active]:bg-green-600 data-[state=active]:text-white"
@@ -724,6 +832,18 @@ export default function MontadorExterno() {
                             >
                                 <CalendarDays className="w-4 h-4 mr-1" />
                                 Agenda
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="assistencias"
+                                className="rounded-lg text-xs py-2 data-[state=active]:bg-red-500 data-[state=active]:text-white relative"
+                            >
+                                <AlertTriangle className="w-4 h-4 mr-1" />
+                                Prob.
+                                {assistenciasAbertas.length > 0 && (
+                                    <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">
+                                        {assistenciasAbertas.length}
+                                    </span>
+                                )}
                             </TabsTrigger>
                         </TabsList>
 
@@ -780,6 +900,14 @@ export default function MontadorExterno() {
                                         >
                                             <Calendar className="w-5 h-5 mr-2" />
                                             Pegar Montagem
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            className="w-full mt-2 border-red-200 text-red-700 hover:bg-red-50"
+                                            onClick={() => abrirAssistenciaDaMontagem(montagem)}
+                                        >
+                                            <AlertTriangle className="w-4 h-4 mr-2" />
+                                            Reportar Problema
                                         </Button>
                                     </div>
                                 ))
@@ -949,6 +1077,17 @@ export default function MontadorExterno() {
                                                                     Desistir desta Montagem
                                                                 </Button>
                                                             )}
+
+                                                            {montagem.status !== 'concluida' && (
+                                                                <Button
+                                                                    variant="outline"
+                                                                    className="w-full mt-2 border-red-200 text-red-700 hover:bg-red-50"
+                                                                    onClick={() => abrirAssistenciaDaMontagem(montagem)}
+                                                                >
+                                                                    <AlertTriangle className="w-4 h-4 mr-2" />
+                                                                    Reportar Problema
+                                                                </Button>
+                                                            )}
                                                         </div>
                                                     ))}
                                                 </div>
@@ -1045,6 +1184,114 @@ export default function MontadorExterno() {
                                             </Badge>
                                         </div>
                                     ))
+                            )}
+                        </TabsContent>
+
+                        {/* Aba Assist\u00eancias */}
+                        <TabsContent value="assistencias" className="p-4 space-y-3">
+                            <div className="flex items-center justify-between mb-1">
+                                <h3 className="font-bold text-gray-900 flex items-center gap-2">
+                                    <AlertTriangle className="w-4 h-4 text-red-500" />
+                                    Minhas Assist\u00eancias
+                                </h3>
+                                {assistenciasAbertas.length > 0 && (
+                                    <Badge className="bg-red-100 text-red-800 text-xs">
+                                        {assistenciasAbertas.length} em aberto
+                                    </Badge>
+                                )}
+                            </div>
+
+                            {assistenciasMontador.length === 0 ? (
+                                <div className="text-center py-10">
+                                    <CheckCircle className="w-14 h-14 mx-auto text-green-400 mb-3" />
+                                    <p className="text-gray-500 font-medium">Sem assist\u00eancias atribu\u00eddas</p>
+                                    <p className="text-gray-400 text-xs mt-1">Quando um problema da sua montagem for registrado, aparecer\u00e1 aqui.</p>
+                                </div>
+                            ) : (
+                                assistenciasMontador.map(ass => {
+                                    const statusConfig = {
+                                        'Aberta': 'bg-blue-100 text-blue-800',
+                                        'Em Andamento': 'bg-yellow-100 text-yellow-800',
+                                        'Aguardando Pe\u00e7a': 'bg-orange-100 text-orange-800',
+                                        'Aguardando Cliente': 'bg-purple-100 text-purple-800',
+                                        'Conclu\u00edda': 'bg-green-100 text-green-800',
+                                        'Cancelada': 'bg-red-100 text-red-800'
+                                    };
+                                    const tipoConfig = {
+                                        'Devolu\u00e7\u00e3o': 'bg-red-100 text-red-800',
+                                        'Troca': 'bg-orange-100 text-orange-800',
+                                        'Pe\u00e7a Faltante': 'bg-yellow-100 text-yellow-800',
+                                        'Conserto': 'bg-blue-100 text-blue-800',
+                                        'Visita T\u00e9cnica': 'bg-purple-100 text-purple-800',
+                                        'Outros': 'bg-gray-100 text-gray-800'
+                                    };
+                                    const isClosed = ['Conclu\u00edda', 'Cancelada'].includes(ass.status);
+                                    return (
+                                        <div key={ass.id} className={`bg-gray-50 rounded-xl p-4 border-l-4 ${isClosed ? 'border-gray-300 opacity-70' : 'border-red-400'}`}>
+                                            <div className="flex justify-between items-start mb-2 gap-2">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-bold text-gray-900 text-sm truncate">#{ass.numero_pedido} \u2014 {ass.cliente_nome}</p>
+                                                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{ass.descricao_problema}</p>
+                                                </div>
+                                                <div className="flex flex-col items-end gap-1 shrink-0">
+                                                    <Badge className={`text-[10px] px-2 ${tipoConfig[ass.tipo] || 'bg-gray-100 text-gray-800'}`}>
+                                                        {ass.tipo}
+                                                    </Badge>
+                                                    <Badge className={`text-[10px] px-2 ${statusConfig[ass.status] || 'bg-gray-100 text-gray-800'}`}>
+                                                        {ass.status}
+                                                    </Badge>
+                                                </div>
+                                            </div>
+
+                                            {ass.itens_envolvidos?.length > 0 && (
+                                                <div className="mb-3">
+                                                    {ass.itens_envolvidos.map((item, idx) => (
+                                                        <p key={idx} className="text-[11px] text-gray-600 bg-white rounded px-2 py-1 mb-1">
+                                                            {item.produto_nome}{item.problema ? ` \u2014 ${item.problema}` : ''}
+                                                        </p>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {ass.observacoes && (
+                                                <div className="text-[11px] text-gray-500 bg-white rounded px-2 py-1 mb-3 whitespace-pre-wrap line-clamp-3">
+                                                    {ass.observacoes}
+                                                </div>
+                                            )}
+
+                                            {!isClosed && (
+                                                <div className="flex gap-2 mt-1">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="flex-1 h-8 text-xs border-blue-200 text-blue-700 hover:bg-blue-50"
+                                                        onClick={() => {
+                                                            setAssistenciaParaObs(ass);
+                                                            setNovaObservacao('');
+                                                            setObsAssistenciaOpen(true);
+                                                        }}
+                                                    >
+                                                        Adicionar Obs.
+                                                    </Button>
+                                                    <Select
+                                                        value={ass.status}
+                                                        onValueChange={(val) => atualizarStatusAssistencia(ass, val)}
+                                                        disabled={atualizandoAssistencia}
+                                                    >
+                                                        <SelectTrigger className="flex-1 h-8 text-xs rounded-lg">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {['Aberta', 'Em Andamento', 'Aguardando Pe\u00e7a', 'Aguardando Cliente', 'Conclu\u00edda', 'Cancelada'].map(s => (
+                                                                <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })
                             )}
                         </TabsContent>
                     </Tabs>
@@ -1190,6 +1437,66 @@ export default function MontadorExterno() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog >
+
+            {/* Dialog: Adicionar Observa\u00e7\u00e3o em Assist\u00eancia */}
+            <Dialog open={obsAssistenciaOpen} onOpenChange={(open) => { if (!open) { setObsAssistenciaOpen(false); setAssistenciaParaObs(null); setNovaObservacao(''); } }}>
+                <DialogContent className="mx-4 rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-base">Adicionar Observa\u00e7\u00e3o</DialogTitle>
+                    </DialogHeader>
+                    {assistenciaParaObs && (
+                        <div className="space-y-3">
+                            <div className="bg-gray-50 rounded-lg p-3">
+                                <p className="text-sm font-medium text-gray-900">#{assistenciaParaObs.numero_pedido} \u2014 {assistenciaParaObs.cliente_nome}</p>
+                                <p className="text-xs text-gray-500 mt-0.5">{assistenciaParaObs.descricao_problema}</p>
+                            </div>
+                            <Textarea
+                                value={novaObservacao}
+                                onChange={e => setNovaObservacao(e.target.value)}
+                                placeholder="Descreva o andamento, o que foi feito ou qualquer informa\u00e7\u00e3o relevante..."
+                                rows={4}
+                                className="rounded-xl"
+                            />
+                        </div>
+                    )}
+                    <DialogFooter className="flex-col gap-2 sm:flex-col">
+                        <Button
+                            onClick={salvarObservacao}
+                            disabled={!novaObservacao.trim() || atualizandoAssistencia}
+                            className="w-full h-11 rounded-xl bg-green-600 hover:bg-green-700"
+                        >
+                            {atualizandoAssistencia ? 'Salvando...' : 'Salvar Observa\u00e7\u00e3o'}
+                        </Button>
+                        <Button variant="ghost" onClick={() => { setObsAssistenciaOpen(false); setNovaObservacao(''); }} className="w-full h-11">
+                            Cancelar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <AssistenciaTecnicaModal
+                isOpen={assistenciaModalOpen}
+                onClose={fecharAssistenciaDaMontagem}
+                onSave={salvarAssistenciaDaMontagem}
+                assistencia={null}
+                initialValues={montagemParaAssistencia ? {
+                    venda_id: montagemParaAssistencia.venda_id || '',
+                    numero_pedido: montagemParaAssistencia.numero_pedido || '',
+                    cliente_nome: montagemParaAssistencia.cliente_nome || '',
+                    cliente_telefone: montagemParaAssistencia.cliente_telefone || '',
+                    tipo: 'Conserto',
+                    montador_usuario_id: montador?.usuario_id || '',
+                    itens_envolvidos: [{
+                        produto_id: montagemParaAssistencia.produto_id,
+                        produto_nome: montagemParaAssistencia.produto_nome,
+                        quantidade: montagemParaAssistencia.quantidade || 1,
+                        problema: ''
+                    }],
+                    observacoes: `Aberta no painel do montador externo. Item montagem #${montagemParaAssistencia.id}`
+                } : null}
+                vendas={vendas}
+                isLoading={salvandoAssistencia}
+            />
         </div >
     );
 }

@@ -20,6 +20,7 @@ import { whatsappService } from "@/services/whatsappService";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenant } from "@/contexts/TenantContext";
 import { supabase } from "@/lib/supabase";
+import AssistenciaTecnicaModal from "@/components/assistencia/AssistenciaTecnicaModal";
 
 export default function MontagemInterna() {
   const queryClient = useQueryClient();
@@ -42,6 +43,9 @@ export default function MontagemInterna() {
   const [montadorSelecionado, setMontadorSelecionado] = React.useState('');
   const [modalDetalhesOpen, setModalDetalhesOpen] = React.useState(false);
   const [montagemDetalhes, setMontagemDetalhes] = React.useState(null);
+  const [assistenciaModalOpen, setAssistenciaModalOpen] = React.useState(false);
+  const [montagemParaAssistencia, setMontagemParaAssistencia] = React.useState(null);
+  const [salvandoAssistencia, setSalvandoAssistencia] = React.useState(false);
   const [selectedMontagemIds, setSelectedMontagemIds] = React.useState([]);
   const [modalAtribuirLoteOpen, setModalAtribuirLoteOpen] = React.useState(false);
   const [montadorLoteId, setMontadorLoteId] = React.useState('');
@@ -119,6 +123,11 @@ export default function MontagemInterna() {
     queryKey: ['entregas'],
     queryFn: () => base44.entities.Entrega.list('-data_agendada'),
     refetchInterval: 10000 // Atualiza a cada 10 segundos
+  });
+
+  const { data: vendas = [] } = useQuery({
+    queryKey: ['vendas'],
+    queryFn: () => base44.entities.Venda.list('-data_venda')
   });
 
   const updateMutation = useMutation({
@@ -610,6 +619,43 @@ export default function MontagemInterna() {
     setModalDetalhesOpen(true);
   };
 
+  const abrirAssistenciaDaMontagem = (montagem, event) => {
+    event?.stopPropagation?.();
+    setMontagemParaAssistencia(montagem);
+    setAssistenciaModalOpen(true);
+  };
+
+  const fecharAssistenciaDaMontagem = () => {
+    setAssistenciaModalOpen(false);
+    setMontagemParaAssistencia(null);
+  };
+
+  const salvarAssistenciaDaMontagem = async (formData) => {
+    if (!montagemParaAssistencia) return;
+
+    setSalvandoAssistencia(true);
+    try {
+      const assistenciaCriada = await base44.entities.AssistenciaTecnica.create(formData);
+
+      await base44.entities.MontagemItem.update(montagemParaAssistencia.id, {
+        tem_problema: true,
+        assistencia_id: assistenciaCriada.id,
+        updated_at: new Date().toISOString()
+      });
+
+      await queryClient.invalidateQueries({ queryKey: ['montagens-internas-todas'] });
+      await queryClient.invalidateQueries({ queryKey: ['assistencias'] });
+
+      toast.success('Assistência aberta com sucesso para esta montagem.');
+      fecharAssistenciaDaMontagem();
+    } catch (error) {
+      console.error('Erro ao abrir assistência da montagem:', error);
+      toast.error('Erro ao abrir assistência.');
+    } finally {
+      setSalvandoAssistencia(false);
+    }
+  };
+
   const toggleSelecionarMontagem = (montagem) => {
     const id = String(montagem.id);
 
@@ -847,6 +893,14 @@ export default function MontagemInterna() {
               Pedido {montagem.numero_pedido ? `#${montagem.numero_pedido}` : '-'}
             </button>
 
+            {montagem.tem_problema && (
+              <div className="mt-1">
+                <Badge className="bg-red-100 text-red-700 border-red-200 text-[10px] uppercase tracking-wide">
+                  Com Problema
+                </Badge>
+              </div>
+            )}
+
             {/* Mostrar atribuição */}
             {montagem.montador_nome && montagem.status !== 'concluida' && (
               <div className="flex items-center gap-1 mt-1 text-xs text-blue-600">
@@ -881,6 +935,21 @@ export default function MontagemInterna() {
                 >
                   <CheckCircle className="w-3 h-3 mr-1" />
                   Concluir
+                </Button>
+              </div>
+            )}
+
+            {montagem.status !== 'concluida' && (
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs border-red-200 text-red-700 hover:bg-red-50"
+                  onClick={(e) => abrirAssistenciaDaMontagem(montagem, e)}
+                >
+                  <AlertTriangle className="w-3 h-3 mr-1" />
+                  Problema
                 </Button>
               </div>
             )}
@@ -1349,6 +1418,14 @@ export default function MontagemInterna() {
           )}
 
           <DialogFooter>
+            <Button
+              variant="outline"
+              className="border-red-200 text-red-700 hover:bg-red-50"
+              onClick={() => abrirAssistenciaDaMontagem(montagemDetalhes)}
+            >
+              <AlertTriangle className="w-4 h-4 mr-2" />
+              Abrir Assistência
+            </Button>
             <Button variant="outline" onClick={() => setModalDetalhesOpen(false)}>
               Fechar
             </Button>
@@ -1520,6 +1597,30 @@ export default function MontagemInterna() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AssistenciaTecnicaModal
+        isOpen={assistenciaModalOpen}
+        onClose={fecharAssistenciaDaMontagem}
+        onSave={salvarAssistenciaDaMontagem}
+        assistencia={null}
+        initialValues={montagemParaAssistencia ? {
+          venda_id: montagemParaAssistencia.venda_id || '',
+          numero_pedido: montagemParaAssistencia.numero_pedido || '',
+          cliente_nome: montagemParaAssistencia.cliente_nome || '',
+          cliente_telefone: montagemParaAssistencia.cliente_telefone || '',
+          tipo: 'Conserto',
+          montador_usuario_id: montagemParaAssistencia.montador_id || '',
+          itens_envolvidos: [{
+            produto_id: montagemParaAssistencia.produto_id,
+            produto_nome: montagemParaAssistencia.produto_nome,
+            quantidade: montagemParaAssistencia.quantidade || 1,
+            problema: ''
+          }],
+          observacoes: `Aberta no painel de montagens. Item montagem #${montagemParaAssistencia.id}`
+        } : null}
+        vendas={vendas}
+        isLoading={salvandoAssistencia}
+      />
 
       {/* CSS para animação */}
       <style>{`
