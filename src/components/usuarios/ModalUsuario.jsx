@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44, supabase } from "@/api/base44Client";
+import { supabaseUrl, supabaseKey } from "@/lib/supabase";
 import { useLojas } from "@/hooks/useLojas";
 import { formatarNome, formatarTelefone } from "@/utils/formatters";
 import { Truck, User, Mail, Phone, Building2, Briefcase, KeyRound, RotateCcw, Copy, Eye, EyeOff, Loader2, CheckCircle2 } from "lucide-react";
@@ -112,8 +113,8 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
 
       // 2. Criar cliente temporário para signup (evita sobrescrever sessão atual)
       const tempSupabase = createClient(
-        import.meta.env.VITE_SUPABASE_URL,
-        import.meta.env.VITE_SUPABASE_ANON_KEY,
+        supabaseUrl,
+        supabaseKey,
         { auth: { persistSession: false, storageKey: 'temp-signup-session' } }
       );
 
@@ -222,14 +223,14 @@ export default function ModalUsuario({ usuario, cargos, caminhoes, onClose }) {
   const resetarSenhaMutation = useMutation({
     mutationFn: async () => {
       const accessToken = await getFreshAccessToken();
-      const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-actions`;
+      const fnUrl = `${supabaseUrl}/functions/v1/admin-actions`;
 
       const response = await fetch(fnUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${accessToken}`,
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
+          'apikey': supabaseKey
         },
         body: JSON.stringify({ action: 'reset_password', user_id: usuario.id })
       });

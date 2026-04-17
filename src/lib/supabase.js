@@ -1,8 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Configuração do Supabase
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+export const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL;
+export const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+    const missingVars = [];
+    if (!supabaseUrl) missingVars.push('VITE_SUPABASE_URL/SUPABASE_URL');
+    if (!supabaseKey) missingVars.push('VITE_SUPABASE_ANON_KEY/SUPABASE_ANON_KEY');
+    throw new Error(`Configuração do Supabase ausente: ${missingVars.join(', ')}.`);
+}
 
 // Criar cliente com configurações que garantem persistência de autenticação
 // Singleton para garantir que só exista uma instância do cliente Supabase no browser

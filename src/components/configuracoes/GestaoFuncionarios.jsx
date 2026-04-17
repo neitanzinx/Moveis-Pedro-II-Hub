@@ -25,7 +25,7 @@ import { CARGOS, getCargoConfig } from "@/config/cargos";
 import { useLojas } from "@/hooks/useLojas";
 import { toast } from "sonner";
 
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseUrl, supabaseKey } from "@/lib/supabase";
 
 const API_URL = getZapApiUrl();
 
@@ -105,13 +105,13 @@ export default function GestaoFuncionarios({ currentUser }) {
             const accessToken = await getFreshAccessToken();
 
             // Chamar Edge Function via fetch direto (garante Authorization header correto)
-            const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-actions`;
+            const fnUrl = `${supabaseUrl}/functions/v1/admin-actions`;
             const response = await fetch(fnUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${accessToken}`,
-                    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
+                    'apikey': supabaseKey
                 },
                 body: JSON.stringify({ action: 'create_credentials', user_id: userId })
             });
@@ -140,13 +140,13 @@ export default function GestaoFuncionarios({ currentUser }) {
             const accessToken = await getFreshAccessToken();
 
             // Chamar Edge Function via fetch direto (garante Authorization header correto)
-            const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-actions`;
+            const fnUrl = `${supabaseUrl}/functions/v1/admin-actions`;
             const response = await fetch(fnUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${accessToken}`,
-                    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
+                    'apikey': supabaseKey
                 },
                 body: JSON.stringify({ action: 'reset_password', user_id: userId })
             });

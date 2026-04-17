@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/api/base44Client";
+import { supabaseUrl } from "@/lib/supabase";
 
 export default function ConfiguracaoStone() {
     const [loading, setLoading] = useState(true);
@@ -48,7 +49,6 @@ export default function ConfiguracaoStone() {
     };
 
     // Webhook URL para configurar na Stone (Supabase Edge Function)
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://stgatkuwnouzwczkpphs.supabase.co';
     const webhookUrl = `${supabaseUrl}/functions/v1/stone-payment-link/webhook`;
 
     useEffect(() => {
