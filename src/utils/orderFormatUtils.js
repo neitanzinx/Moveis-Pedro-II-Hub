@@ -2,8 +2,9 @@ import { format } from "date-fns";
 
 /**
  * Monta a linha de exibição de um item da OC no texto operacional.
- * Usa nome_completo_produto quando disponível, senão produto_nome.
- * Inclui cor específica do item (cor_item) e não todas as variações.
+ * Usa nome_completo_produto (que já vem consolidado com Ref, Medidas e Material).
+ * Inclui cor específica do item (cor_item) para precisão máxima.
+ * Garante que o fornecedor saiba EXATAMENTE qual item é.
  * @param {Object} item
  * @param {number} index
  * @returns {string}

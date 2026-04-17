@@ -62,6 +62,21 @@ function buildProductSummary(produto) {
   return detalhes.join(' | ');
 }
 
+function buildNomeConsolidadoProduto(produto) {
+  if (!produto || !produto.nome) return '';
+
+  const detalhes = [
+    produto.modelo_referencia ? `Ref: ${produto.modelo_referencia}` : null,
+    (produto.largura || produto.altura || produto.profundidade)
+      ? `Medidas: ${produto.largura || '-'}x${produto.altura || '-'}x${produto.profundidade || '-'} cm`
+      : null,
+    produto.material ? `Material: ${produto.material}` : null,
+  ].filter(Boolean);
+
+  if (detalhes.length === 0) return produto.nome;
+  return `${produto.nome} - ${detalhes.join(' | ')}`;
+}
+
 function extractItemFieldsFromProduct(produto) {
   return {
     modelo_referencia: produto?.modelo_referencia || '',
@@ -380,7 +395,7 @@ export default function OcModal({
       ...prev,
       produto_id: produto.id,
       produto_nome: produto.nome || '',
-      nome_completo_produto: produto.nome || '',
+      nome_completo_produto: buildNomeConsolidadoProduto(produto),
       preco_tabela: produto.preco_venda || 0,
       preco_unitario: prev.preco_unitario > 0 ? prev.preco_unitario : precoCusto,
       ...camposProduto,
