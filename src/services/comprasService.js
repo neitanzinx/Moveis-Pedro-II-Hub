@@ -660,7 +660,7 @@ export const comprasService = {
   async cancelOc(ocId, motivo = '') {
     try {
       // Buscar OC para verificar seu status
-      const oc = await base44.entities.ComprasOrden.read(ocId);
+      const oc = await base44.entities.ComprasOrden.get(ocId);
 
       // Validação: Não permite cancelar OCs que já foram recebidas
       if (oc.status === 'Recebido' || oc.status === 'Parcialmente Recebido') {
