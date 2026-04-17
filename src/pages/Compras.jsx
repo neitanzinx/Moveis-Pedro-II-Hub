@@ -228,7 +228,6 @@ export default function Compras() {
       const { data, error } = await supabase
         .from('historico_precos')
         .select('*')
-        .not('numero_oc', 'is', null)
         .not('produto_id', 'is', null)
         .gte('created_at', dataInicioAnalise)
         .order('created_at', { ascending: false });
