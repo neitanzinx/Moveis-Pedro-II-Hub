@@ -1102,9 +1102,10 @@ export default function OcModal({
                                 const uploads = [];
                                 for (const file of files) {
                                   try {
-                                    const { url } = await base44.integrations.Core.UploadFile(file);
-                                    uploads.push({ nome: file.name, url, tipo: file.type, uploaded_at: new Date().toISOString() });
-                                  } catch {
+                                    const { file_url } = await base44.integrations.Core.UploadFile({ file });
+                                    uploads.push({ nome: file.name, url: file_url, tipo: file.type, uploaded_at: new Date().toISOString() });
+                                  } catch (error) {
+                                    console.error('Upload error:', error);
                                     toast.error(`Falha ao enviar ${file.name}`);
                                   }
                                 }
