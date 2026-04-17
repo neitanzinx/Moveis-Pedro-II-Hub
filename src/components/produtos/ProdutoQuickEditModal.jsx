@@ -28,17 +28,46 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { CATEGORIAS, AMBIENTES } from '@/constants/productConstants';
+import { getProductTotalStock, resolveStockField } from '@/utils/stockUtils';
 
-export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave }) {
-    const [formData, setFormData] = useState({});
+const INITIAL_FORM_DATA = {
+    nome: '',
+    categoria: '',
+    ambiente: '',
+    fornecedor_nome: '',
+    modelo_referencia: '',
+    descricao: '',
+    material: '',
+    largura: '',
+    altura: '',
+    profundidade: '',
+    ncm: '',
+    cest: '',
+    cfop: '',
+    origem_mercadoria: '0',
+    preco_venda: 0,
+    preco_custo: 0,
+    markup_aplicado: 0,
+    quantidade_estoque: 0,
+    estoque_cd: 0,
+    estoque_minimo: 0,
+    estoque_ideal: 0,
+};
+
+export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave, lojaAtual }) {
+    const [formData, setFormData] = useState(INITIAL_FORM_DATA);
     const [saving, setSaving] = useState(false);
 
     const { user, isGerente } = useAuth();
     const isGerencial = isGerente?.() || user?.cargo === 'Gerente Geral' || user?.cargo === 'Administrador';
+    const campoLojaAtual = resolveStockField(lojaAtual || 'CD');
+    const estoqueLojaAtual = Number(produto?.[campoLojaAtual] || 0);
+    const nomeExibicaoLoja = lojaAtual || 'CD';
 
     useEffect(() => {
         if (produto) {
             setFormData({
+                ...INITIAL_FORM_DATA,
                 nome: produto.nome || '',
                 categoria: produto.categoria || '',
                 ambiente: produto.ambiente || '',
@@ -63,17 +92,30 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                 estoque_cd: produto.estoque_cd || 0,
                 estoque_minimo: produto.estoque_minimo || 0,
                 estoque_ideal: produto.estoque_ideal || 0,
+                estoque_loja_atual: estoqueLojaAtual,
             });
+        } else {
+            setFormData(INITIAL_FORM_DATA);
         }
-    }, [produto]);
+    }, [produto, estoqueLojaAtual]);
 
     const handleSave = async () => {
         setSaving(true);
         try {
             const getVal = (v) => parseInt(v) || 0;
-            const estoqueTotal = getVal(formData.estoque_cd);
+            const estoqueLoja = getVal(formData.estoque_loja_atual);
 
-            const updatedData = { ...formData, quantidade_estoque: estoqueTotal };
+            const updatedData = {
+                ...formData,
+                [campoLojaAtual]: estoqueLoja,
+            };
+
+            delete updatedData.estoque_loja_atual;
+
+            // Recalcula o total agregado com base nos campos reais de estoque
+            const produtoParaTotal = { ...produto, ...updatedData };
+            updatedData.quantidade_estoque = getProductTotalStock(produtoParaTotal);
+
             await onSave(updatedData);
             toast.success('Produto atualizado com sucesso!');
             onClose();
@@ -357,18 +399,18 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                         <CardContent>
                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                                 <div className="space-y-2 col-span-2 md:col-span-3 lg:col-span-2">
-                                    <Label className="font-bold cursor-help text-xs" title="Quantidade total de estoque controlada neste modal">Estoque Total</Label>
+                                    <Label className="font-bold cursor-help text-xs" title="Quantidade de estoque da loja selecionada no PDV">Estoque Loja ({nomeExibicaoLoja})</Label>
                                     <div className="h-8 flex items-center px-3 bg-blue-50 border border-blue-100 rounded-md text-blue-700 font-bold">
-                                        {parseInt(formData.estoque_cd) || 0}
+                                        {parseInt(formData.estoque_loja_atual) || 0}
                                     </div>
                                 </div>
                                 <div className="space-y-1">
-                                    <Label className="text-[10px] text-gray-500 uppercase">Estoque CD</Label>
+                                    <Label className="text-[10px] text-gray-500 uppercase">Ajustar Estoque ({nomeExibicaoLoja})</Label>
                                     <Input
                                         type="number"
                                         className="h-8"
-                                        value={formData.estoque_cd || 0}
-                                        onChange={e => setFormData({ ...formData, estoque_cd: parseInt(e.target.value) || 0 })}
+                                        value={formData.estoque_loja_atual || 0}
+                                        onChange={e => setFormData({ ...formData, estoque_loja_atual: parseInt(e.target.value) || 0 })}
                                     />
                                 </div>
                             </div>

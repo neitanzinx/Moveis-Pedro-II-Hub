@@ -7,10 +7,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-    Building2, Save, CheckCircle, Edit, AlertCircle, Search
+    Building2, Save, CheckCircle, Edit, AlertCircle, Search, Loader2
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
+import { useTenant } from "@/contexts/TenantContext";
+
+const DEFAULT_ORG_ID = "00000000-0000-0000-0000-000000000001";
 
 // Empresas base para emissao de NFe
 const EMPRESAS_BASE = [
@@ -26,8 +30,8 @@ const REGIMES_TRIBUTARIOS = [
     { value: "3", label: "Regime Normal (Lucro Presumido/Real)" },
 ];
 
-// Carrega dados fiscais das empresas do localStorage
-const carregarDadosFiscais = () => {
+// Lê do localStorage como fallback (dados legados)
+const carregarDadosFiscaisLocal = () => {
     try {
         const dados = localStorage.getItem("nfe_empresas_fiscais");
         return dados ? JSON.parse(dados) : {};
@@ -36,20 +40,51 @@ const carregarDadosFiscais = () => {
     }
 };
 
-// Salva dados fiscais no localStorage
-const salvarDadosFiscais = (dados) => {
-    localStorage.setItem("nfe_empresas_fiscais", JSON.stringify(dados));
-};
+// Mapeia colunas do banco → objeto formEmpresa
+const dbConfigParaForm = (config) => ({
+    ie: config.emitente_ie || "",
+    regimeTributario: String(config.emitente_crt || "1"),
+    logradouro: config.emitente_logradouro || "",
+    numero: config.emitente_numero || "",
+    complemento: config.emitente_complemento || "",
+    bairro: config.emitente_bairro || "",
+    municipio: config.emitente_municipio || "",
+    codigoMunicipio: config.emitente_codigo_municipio || "",
+    uf: config.emitente_uf || "ES",
+    cep: config.emitente_cep || "",
+});
 
 export default function ConfiguracaoNfe() {
+    const { organization } = useTenant();
+    const orgId = organization?.id || DEFAULT_ORG_ID;
+
     const [empresaPadrao, setEmpresaPadrao] = useState(() => {
         return localStorage.getItem("nfe_empresa_padrao") || EMPRESAS_BASE[0].cnpj;
     });
 
-    const [dadosFiscais, setDadosFiscais] = useState(carregarDadosFiscais);
+    const [dadosFiscais, setDadosFiscais] = useState(carregarDadosFiscaisLocal);
     const [editandoEmpresa, setEditandoEmpresa] = useState(null);
     const [formEmpresa, setFormEmpresa] = useState({});
     const [highlightEmitente, setHighlightEmitente] = useState(false);
+    const [savingDb, setSavingDb] = useState(false);
+    const [nuvemCredentials, setNuvemCredentials] = useState({ client_id: '', client_secret: '' });
+    const [savingCredentials, setSavingCredentials] = useState(false);
+
+    // ─── Padrões Fiscais (org-level defaults) ────────────────────────────────
+    const [fiscalDefaults, setFiscalDefaults] = useState({
+        csosn_padrao: '102',
+        cst_icms_padrao: '00',
+        cst_pis_padrao: '49',
+        cst_cofins_padrao: '49',
+        aliquota_icms_padrao: '17.00',
+        aliquota_icms_interestadual_padrao: '12.00',
+        aliquota_pis_padrao: '0.65',
+        aliquota_cofins_padrao: '3.00',
+        percentual_tributos_padrao: '17.00',
+        mod_frete_padrao: '9',
+    });
+    const [savingFiscal, setSavingFiscal] = useState(false);
+    const [fiscalLoaded, setFiscalLoaded] = useState(false);
 
     // Check for highlight signal from EmitirNFeModal
     useEffect(() => {
@@ -60,10 +95,83 @@ export default function ConfiguracaoNfe() {
         }
     }, []);
 
-    // Atualiza dados fiscais no localStorage quando mudam
+    // ─── Carregar emitente ativo do banco ────────────────────────────────────
     useEffect(() => {
-        salvarDadosFiscais(dadosFiscais);
-    }, [dadosFiscais]);
+        async function carregarDoDb() {
+            const { data, error } = await supabase
+                .from('organization_nfe_configs')
+                .select('emitente_cnpj, emitente_nome, emitente_ie, emitente_uf, emitente_crt, emitente_logradouro, emitente_numero, emitente_bairro, emitente_municipio, emitente_cep, emitente_codigo_municipio, nuvem_client_id, nuvem_client_secret, csosn_padrao, cst_icms_padrao, cst_pis_padrao, cst_cofins_padrao, aliquota_icms_padrao, aliquota_icms_interestadual_padrao, aliquota_pis_padrao, aliquota_cofins_padrao, percentual_tributos_padrao, mod_frete_padrao')
+                .eq('organization_id', orgId)
+                .maybeSingle();
+
+            if (error || !data) return;
+
+            // Credenciais Nuvem Fiscal
+            if (data.nuvem_client_id || data.nuvem_client_secret) {
+                setNuvemCredentials({
+                    client_id: data.nuvem_client_id || '',
+                    client_secret: data.nuvem_client_secret || '',
+                });
+            }
+
+            // Padrões Fiscais
+            setFiscalDefaults(prev => ({
+                csosn_padrao: data.csosn_padrao || prev.csosn_padrao,
+                cst_icms_padrao: data.cst_icms_padrao || prev.cst_icms_padrao,
+                cst_pis_padrao: data.cst_pis_padrao || prev.cst_pis_padrao,
+                cst_cofins_padrao: data.cst_cofins_padrao || prev.cst_cofins_padrao,
+                aliquota_icms_padrao: data.aliquota_icms_padrao != null ? String(data.aliquota_icms_padrao) : prev.aliquota_icms_padrao,
+                aliquota_icms_interestadual_padrao: data.aliquota_icms_interestadual_padrao != null ? String(data.aliquota_icms_interestadual_padrao) : prev.aliquota_icms_interestadual_padrao,
+                aliquota_pis_padrao: data.aliquota_pis_padrao != null ? String(data.aliquota_pis_padrao) : prev.aliquota_pis_padrao,
+                aliquota_cofins_padrao: data.aliquota_cofins_padrao != null ? String(data.aliquota_cofins_padrao) : prev.aliquota_cofins_padrao,
+                percentual_tributos_padrao: data.percentual_tributos_padrao != null ? String(data.percentual_tributos_padrao) : prev.percentual_tributos_padrao,
+                mod_frete_padrao: data.mod_frete_padrao != null ? String(data.mod_frete_padrao) : prev.mod_frete_padrao,
+            }));
+            setFiscalLoaded(true);
+
+            const { emitente_cnpj } = data;
+            if (!emitente_cnpj) return;
+
+            // Empresa padrão vem do banco
+            const cnpjLimpo = emitente_cnpj.replace(/\D/g, '');
+            setEmpresaPadrao(cnpjLimpo);
+            localStorage.setItem("nfe_empresa_padrao", cnpjLimpo);
+
+            // Dados fiscais come do banco (sobrescreve localStorage para esta empresa)
+            setDadosFiscais(prev => ({
+                ...prev,
+                [cnpjLimpo]: dbConfigParaForm(data),
+            }));
+        }
+
+        carregarDoDb();
+    }, [orgId]);
+
+    // Helper: upsert emitente no banco
+    const salvarEmitenteNoBanco = async (empresa, form) => {
+        const cnpjLimpo = empresa.cnpj.replace(/\D/g, '');
+        const upsertData = {
+            emitente_cnpj: cnpjLimpo,
+            emitente_nome: empresa.nome,
+            emitente_ie: form.ie || null,
+            emitente_uf: form.uf || 'ES',
+            emitente_crt: parseInt(form.regimeTributario || '1'),
+            emitente_logradouro: form.logradouro || null,
+            emitente_numero: form.numero || null,
+            emitente_bairro: form.bairro || null,
+            emitente_municipio: form.municipio || null,
+            emitente_cep: (form.cep || '').replace(/\D/g, '') || null,
+            emitente_codigo_municipio: form.codigoMunicipio || null,
+        };
+
+        // Atualiza todos os rows da org (homologação + produção)
+        const { error } = await supabase
+            .from('organization_nfe_configs')
+            .update(upsertData)
+            .eq('organization_id', orgId);
+
+        return error;
+    };
 
     const abrirEdicaoEmpresa = (empresa) => {
         const dados = dadosFiscais[empresa.cnpj] || {};
@@ -152,14 +260,33 @@ export default function ConfiguracaoNfe() {
         }
     };
 
-    const salvarDadosEmpresa = () => {
+    const salvarDadosEmpresa = async () => {
         if (!editandoEmpresa) return;
-        setDadosFiscais(prev => ({
-            ...prev,
-            [editandoEmpresa.cnpj]: formEmpresa
-        }));
+
+        // 1. Atualiza state local + localStorage (backward compat)
+        const novosDados = { ...dadosFiscais, [editandoEmpresa.cnpj]: formEmpresa };
+        setDadosFiscais(novosDados);
+        localStorage.setItem("nfe_empresas_fiscais", JSON.stringify(novosDados));
+
+        // 2. Se for a empresa padrão, persiste no banco
+        if (editandoEmpresa.cnpj === empresaPadrao) {
+            setSavingDb(true);
+            try {
+                const err = await salvarEmitenteNoBanco(editandoEmpresa, formEmpresa);
+                if (err) {
+                    console.error('[ConfiguracaoNfe] Erro ao salvar no banco:', err);
+                    toast.warning(`Dados salvos localmente, mas não foi possível salvar no banco: ${err.message}`);
+                } else {
+                    toast.success(`Dados de ${editandoEmpresa.nome} salvos!`);
+                }
+            } finally {
+                setSavingDb(false);
+            }
+        } else {
+            toast.success(`Dados de ${editandoEmpresa.nome} salvos!`);
+        }
+
         setEditandoEmpresa(null);
-        toast.success(`Dados de ${editandoEmpresa.nome} salvos!`);
     };
 
     const getStatusEmpresa = (cnpj) => {
@@ -168,6 +295,63 @@ export default function ConfiguracaoNfe() {
             return { ok: false, msg: "Incompleto" };
         }
         return { ok: true, msg: "Configurado" };
+    };
+
+    // ─── Salvar Padrões Fiscais ─────────────────────────────────────────────
+    const handleSalvarFiscalDefaults = async () => {
+        setSavingFiscal(true);
+        try {
+            const updateData = {
+                csosn_padrao: fiscalDefaults.csosn_padrao || null,
+                cst_icms_padrao: fiscalDefaults.cst_icms_padrao || null,
+                cst_pis_padrao: fiscalDefaults.cst_pis_padrao || null,
+                cst_cofins_padrao: fiscalDefaults.cst_cofins_padrao || null,
+                aliquota_icms_padrao: fiscalDefaults.aliquota_icms_padrao ? parseFloat(fiscalDefaults.aliquota_icms_padrao) : null,
+                aliquota_icms_interestadual_padrao: fiscalDefaults.aliquota_icms_interestadual_padrao ? parseFloat(fiscalDefaults.aliquota_icms_interestadual_padrao) : null,
+                aliquota_pis_padrao: fiscalDefaults.aliquota_pis_padrao ? parseFloat(fiscalDefaults.aliquota_pis_padrao) : null,
+                aliquota_cofins_padrao: fiscalDefaults.aliquota_cofins_padrao ? parseFloat(fiscalDefaults.aliquota_cofins_padrao) : null,
+                percentual_tributos_padrao: fiscalDefaults.percentual_tributos_padrao ? parseFloat(fiscalDefaults.percentual_tributos_padrao) : null,
+                mod_frete_padrao: fiscalDefaults.mod_frete_padrao != null ? parseInt(fiscalDefaults.mod_frete_padrao) : null,
+            };
+
+            const { error } = await supabase
+                .from('organization_nfe_configs')
+                .update(updateData)
+                .eq('organization_id', orgId);
+
+            if (error) throw error;
+            toast.success('Padrões fiscais salvos com sucesso!');
+        } catch (err) {
+            toast.error('Erro ao salvar padrões fiscais: ' + err.message);
+        } finally {
+            setSavingFiscal(false);
+        }
+    };
+
+    const handleSalvarCredentials = async () => {
+        if (!nuvemCredentials.client_id.trim() || !nuvemCredentials.client_secret.trim()) {
+            toast.error('Preencha Client ID e Client Secret.');
+            return;
+        }
+        setSavingCredentials(true);
+        try {
+            const { error } = await supabase
+                .from('organization_nfe_configs')
+                .update({
+                    nuvem_client_id: nuvemCredentials.client_id.trim(),
+                    nuvem_client_secret: nuvemCredentials.client_secret.trim(),
+                    nuvem_access_token: null,
+                    nuvem_token_expires_at: null,
+                })
+                .eq('organization_id', orgId);
+
+            if (error) throw error;
+            toast.success('Credenciais da Nuvem Fiscal salvas com sucesso!');
+        } catch (err) {
+            toast.error('Erro ao salvar credenciais: ' + err.message);
+        } finally {
+            setSavingCredentials(false);
+        }
     };
 
     return (
@@ -179,6 +363,279 @@ export default function ConfiguracaoNfe() {
                 </h2>
                 <p className="text-gray-500 mt-1">Gerencie os dados fiscais obrigatórios para cada CNPJ emissor.</p>
             </div>
+
+            {/* ─── Credenciais Nuvem Fiscal ────────────────────────────── */}
+            <Card className="border-t-4 border-t-blue-600 shadow-sm">
+                <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5 text-blue-600" />
+                        Credenciais da Nuvem Fiscal (API)
+                    </CardTitle>
+                    <CardDescription>
+                        Client ID e Client Secret do painel da Nuvem Fiscal. Obrigatório para emissao via API.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="grid md:grid-cols-2 gap-4">
+                        <div>
+                            <Label>Client ID</Label>
+                            <Input
+                                value={nuvemCredentials.client_id}
+                                onChange={(e) => setNuvemCredentials(prev => ({ ...prev, client_id: e.target.value }))}
+                                placeholder="Obtido em nuvemfiscal.com.br"
+                                className="font-mono text-sm"
+                            />
+                        </div>
+                        <div>
+                            <Label>Client Secret</Label>
+                            <Input
+                                type="password"
+                                value={nuvemCredentials.client_secret}
+                                onChange={(e) => setNuvemCredentials(prev => ({ ...prev, client_secret: e.target.value }))}
+                                placeholder="Obtido em nuvemfiscal.com.br"
+                                className="font-mono text-sm"
+                            />
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <Button onClick={handleSalvarCredentials} disabled={savingCredentials} className="bg-blue-700 hover:bg-blue-800">
+                            {savingCredentials ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                            Salvar Credenciais
+                        </Button>
+                        {nuvemCredentials.client_id && nuvemCredentials.client_secret && (
+                            <Badge className="bg-green-100 text-green-800 border-green-200">Configurado</Badge>
+                        )}
+                        {(!nuvemCredentials.client_id || !nuvemCredentials.client_secret) && (
+                            <Badge variant="outline" className="text-red-600 bg-red-50 border-red-100">Pendente</Badge>
+                        )}
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* ─── Padrões Fiscais para Emissão de NF-e ───────────────── */}
+            <Card className="border-t-4 border-t-amber-500 shadow-sm">
+                <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5 text-amber-600" />
+                        Padrões Fiscais para Emissão de NF-e
+                    </CardTitle>
+                    <CardDescription>
+                        Valores padrão de CSOSN/CST, alíquotas e tributação usados na emissão. Produtos com valores próprios terão prioridade.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                    {(() => {
+                        const crtAtual = dadosFiscais[empresaPadrao]?.regimeTributario || '1';
+                        const isSimplesNacional = crtAtual === '1' || crtAtual === '2';
+
+                        return (
+                            <>
+                                {/* CSOSN ou CST ICMS dependendo do regime */}
+                                <div>
+                                    <h4 className="font-medium text-gray-700 mb-3">
+                                        {isSimplesNacional ? 'ICMS - Simples Nacional' : 'ICMS - Regime Normal'}
+                                    </h4>
+                                    <div className="grid md:grid-cols-3 gap-4">
+                                        {isSimplesNacional ? (
+                                            <div>
+                                                <Label>CSOSN Padrão</Label>
+                                                <Select
+                                                    value={fiscalDefaults.csosn_padrao}
+                                                    onValueChange={(v) => setFiscalDefaults(prev => ({ ...prev, csosn_padrao: v }))}
+                                                >
+                                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="102">102 - Tributada sem permissão de crédito</SelectItem>
+                                                        <SelectItem value="103">103 - Isenção do ICMS (faixa SN)</SelectItem>
+                                                        <SelectItem value="300">300 - Imune</SelectItem>
+                                                        <SelectItem value="400">400 - Não tributada</SelectItem>
+                                                        <SelectItem value="500">500 - ICMS cobrado por ST</SelectItem>
+                                                        <SelectItem value="900">900 - Outros</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div>
+                                                    <Label>CST ICMS Padrão</Label>
+                                                    <Select
+                                                        value={fiscalDefaults.cst_icms_padrao}
+                                                        onValueChange={(v) => setFiscalDefaults(prev => ({ ...prev, cst_icms_padrao: v }))}
+                                                    >
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="00">00 - Tributada integralmente</SelectItem>
+                                                            <SelectItem value="10">10 - Tributada com ST</SelectItem>
+                                                            <SelectItem value="20">20 - Com redução de base</SelectItem>
+                                                            <SelectItem value="40">40 - Isenta</SelectItem>
+                                                            <SelectItem value="41">41 - Não tributada</SelectItem>
+                                                            <SelectItem value="60">60 - ICMS cobrado por ST</SelectItem>
+                                                            <SelectItem value="90">90 - Outros</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div>
+                                                    <Label>Alíquota ICMS (%)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        step="0.01"
+                                                        value={fiscalDefaults.aliquota_icms_padrao}
+                                                        onChange={(e) => setFiscalDefaults(prev => ({ ...prev, aliquota_icms_padrao: e.target.value }))}
+                                                        placeholder="17.00"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <Label>Alíquota Interestadual (%)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        step="0.01"
+                                                        value={fiscalDefaults.aliquota_icms_interestadual_padrao}
+                                                        onChange={(e) => setFiscalDefaults(prev => ({ ...prev, aliquota_icms_interestadual_padrao: e.target.value }))}
+                                                        placeholder="12.00"
+                                                    />
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* PIS / COFINS */}
+                                <div className="border-t pt-4">
+                                    <h4 className="font-medium text-gray-700 mb-3">PIS / COFINS</h4>
+                                    <div className="grid md:grid-cols-2 gap-4">
+                                        <div>
+                                            <Label>CST PIS Padrão</Label>
+                                            <Select
+                                                value={fiscalDefaults.cst_pis_padrao}
+                                                onValueChange={(v) => setFiscalDefaults(prev => ({ ...prev, cst_pis_padrao: v }))}
+                                            >
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    {isSimplesNacional ? (
+                                                        <>
+                                                            <SelectItem value="49">49 - Outras saídas (SN)</SelectItem>
+                                                            <SelectItem value="99">99 - Outras operações</SelectItem>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <SelectItem value="01">01 - Tributável (alíquota normal)</SelectItem>
+                                                            <SelectItem value="04">04 - Monofásica (alíquota zero)</SelectItem>
+                                                            <SelectItem value="06">06 - Alíquota zero</SelectItem>
+                                                            <SelectItem value="07">07 - Isenta</SelectItem>
+                                                            <SelectItem value="08">08 - Sem incidência</SelectItem>
+                                                            <SelectItem value="09">09 - Com suspensão</SelectItem>
+                                                            <SelectItem value="49">49 - Outras saídas</SelectItem>
+                                                            <SelectItem value="99">99 - Outras operações</SelectItem>
+                                                        </>
+                                                    )}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div>
+                                            <Label>CST COFINS Padrão</Label>
+                                            <Select
+                                                value={fiscalDefaults.cst_cofins_padrao}
+                                                onValueChange={(v) => setFiscalDefaults(prev => ({ ...prev, cst_cofins_padrao: v }))}
+                                            >
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    {isSimplesNacional ? (
+                                                        <>
+                                                            <SelectItem value="49">49 - Outras saídas (SN)</SelectItem>
+                                                            <SelectItem value="99">99 - Outras operações</SelectItem>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <SelectItem value="01">01 - Tributável (alíquota normal)</SelectItem>
+                                                            <SelectItem value="04">04 - Monofásica (alíquota zero)</SelectItem>
+                                                            <SelectItem value="06">06 - Alíquota zero</SelectItem>
+                                                            <SelectItem value="07">07 - Isenta</SelectItem>
+                                                            <SelectItem value="08">08 - Sem incidência</SelectItem>
+                                                            <SelectItem value="09">09 - Com suspensão</SelectItem>
+                                                            <SelectItem value="49">49 - Outras saídas</SelectItem>
+                                                            <SelectItem value="99">99 - Outras operações</SelectItem>
+                                                        </>
+                                                    )}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    {!isSimplesNacional && (
+                                        <div className="grid md:grid-cols-2 gap-4 mt-4">
+                                            <div>
+                                                <Label>Alíquota PIS (%)</Label>
+                                                <Input
+                                                    type="number"
+                                                    step="0.01"
+                                                    value={fiscalDefaults.aliquota_pis_padrao}
+                                                    onChange={(e) => setFiscalDefaults(prev => ({ ...prev, aliquota_pis_padrao: e.target.value }))}
+                                                    placeholder="0.65"
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label>Alíquota COFINS (%)</Label>
+                                                <Input
+                                                    type="number"
+                                                    step="0.01"
+                                                    value={fiscalDefaults.aliquota_cofins_padrao}
+                                                    onChange={(e) => setFiscalDefaults(prev => ({ ...prev, aliquota_cofins_padrao: e.target.value }))}
+                                                    placeholder="3.00"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Tributos Aproximados + Frete */}
+                                <div className="border-t pt-4">
+                                    <h4 className="font-medium text-gray-700 mb-3">Outros Padrões</h4>
+                                    <div className="grid md:grid-cols-2 gap-4">
+                                        <div>
+                                            <Label>Percentual Tributos Aprox. (%)</Label>
+                                            <Input
+                                                type="number"
+                                                step="0.01"
+                                                value={fiscalDefaults.percentual_tributos_padrao}
+                                                onChange={(e) => setFiscalDefaults(prev => ({ ...prev, percentual_tributos_padrao: e.target.value }))}
+                                                placeholder="17.00"
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">Lei da Transparência (12.741/2012) - valor informado ao consumidor</p>
+                                        </div>
+                                        <div>
+                                            <Label>Modalidade de Frete Padrão</Label>
+                                            <Select
+                                                value={fiscalDefaults.mod_frete_padrao}
+                                                onValueChange={(v) => setFiscalDefaults(prev => ({ ...prev, mod_frete_padrao: v }))}
+                                            >
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="0">0 - CIF (emitente)</SelectItem>
+                                                    <SelectItem value="1">1 - FOB (destinatário)</SelectItem>
+                                                    <SelectItem value="2">2 - Terceiros</SelectItem>
+                                                    <SelectItem value="3">3 - Próprio por conta do remetente</SelectItem>
+                                                    <SelectItem value="4">4 - Próprio por conta do destinatário</SelectItem>
+                                                    <SelectItem value="9">9 - Sem frete</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Botão Salvar */}
+                                <div className="flex items-center gap-3 pt-2">
+                                    <Button onClick={handleSalvarFiscalDefaults} disabled={savingFiscal} className="bg-amber-600 hover:bg-amber-700">
+                                        {savingFiscal ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                                        Salvar Padrões Fiscais
+                                    </Button>
+                                    {fiscalLoaded && (
+                                        <Badge className="bg-green-100 text-green-800 border-green-200">Carregado do banco</Badge>
+                                    )}
+                                </div>
+                            </>
+                        );
+                    })()}
+                </CardContent>
+            </Card>
 
             <Card className="border-t-4 border-t-green-600 shadow-sm">
                 <CardHeader>
@@ -255,9 +712,17 @@ export default function ConfiguracaoNfe() {
                                             <Button
                                                 size="sm"
                                                 variant="ghost"
-                                                onClick={() => {
+                                                onClick={async () => {
                                                     setEmpresaPadrao(empresa.cnpj);
                                                     localStorage.setItem("nfe_empresa_padrao", empresa.cnpj);
+                                                    // Salva dados fiscais desta empresa no banco
+                                                    const dadosEmpresa = dadosFiscais[empresa.cnpj];
+                                                    if (dadosEmpresa) {
+                                                        const err = await salvarEmitenteNoBanco(empresa, dadosEmpresa);
+                                                        if (err) {
+                                                            toast.warning('Empresa padrão definida, mas erro ao salvar no banco.');
+                                                        }
+                                                    }
                                                     toast.success(`${empresa.nome} definida como padrão.`);
                                                 }}
                                             >
@@ -364,8 +829,9 @@ export default function ConfiguracaoNfe() {
 
                     <DialogFooter className="border-t pt-4">
                         <Button variant="ghost" onClick={() => setEditandoEmpresa(null)}>Cancelar</Button>
-                        <Button onClick={salvarDadosEmpresa} className="bg-green-700 hover:bg-green-800">
-                            <Save className="w-4 h-4 mr-2" /> Salvar Dados Fiscais
+                        <Button onClick={salvarDadosEmpresa} disabled={savingDb} className="bg-green-700 hover:bg-green-800">
+                            {savingDb ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                            Salvar Dados Fiscais
                         </Button>
                     </DialogFooter>
                 </DialogContent>

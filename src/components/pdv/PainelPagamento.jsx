@@ -11,8 +11,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { base44, supabase } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-
-const formasPagamentoBase = ["Dinheiro", "Crédito", "Débito", "Pix", "AFESP", "Multicrédito"];
+import {
+  PAYMENT_METHOD_OPTIONS,
+  PAYMENT_METHOD_OPTIONS_DELIVERY,
+  isInstallmentPaymentMethod,
+  normalizePaymentItem,
+} from "@/services/paymentOrchestrator";
 
 export default function PainelPagamento({
   valores,
@@ -89,13 +93,13 @@ export default function PainelPagamento({
     const valorAcrescimo = calcularAcrescimo(novoPagamento.forma, valorBase);
     const valorTotal = valorBase + valorAcrescimo;
 
-    onAddPagamento({
+    onAddPagamento(normalizePaymentItem({
       forma_pagamento: novoPagamento.forma,
       valor: valorTotal,
       valor_base: valorBase,
       acrescimo: valorAcrescimo,
       parcelas: novoPagamento.parcelas
-    });
+    }));
     setNovoPagamento({ forma: "", valor: "", parcelas: 1 });
   };
 
@@ -591,7 +595,7 @@ export default function PainelPagamento({
                       <SelectValue placeholder="Selecione" />
                     </SelectTrigger>
                     <SelectContent>
-                      {formasPagamentoBase.map(f => {
+                      {PAYMENT_METHOD_OPTIONS.map(f => {
                         const acr = getAcrescimo(f);
                         return (
                           <SelectItem key={f} value={f}>
@@ -610,7 +614,7 @@ export default function PainelPagamento({
                   </Select>
                 </div>
 
-                {['Crédito', 'Multicrédito', 'AFESP'].includes(novoPagamento.forma) && (
+                {isInstallmentPaymentMethod(novoPagamento.forma) && (
                   <div className="w-full sm:w-24">
                     <Label className="text-xs mb-1.5 block">Parcelas</Label>
                     <Select value={String(novoPagamento.parcelas)} onValueChange={v => setNovoPagamento({ ...novoPagamento, parcelas: Number(v) })}>
@@ -715,10 +719,9 @@ export default function PainelPagamento({
                                   <SelectValue placeholder="Selecione" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="Pix">Pix</SelectItem>
-                                  <SelectItem value="Dinheiro">Dinheiro</SelectItem>
-                                  <SelectItem value="Cartão de Crédito">Cartão de Crédito</SelectItem>
-                                  <SelectItem value="Cartão de Débito">Cartão de Débito</SelectItem>
+                                  {PAYMENT_METHOD_OPTIONS_DELIVERY.map((method) => (
+                                    <SelectItem key={method} value={method}>{method}</SelectItem>
+                                  ))}
                                 </SelectContent>
                               </Select>
 

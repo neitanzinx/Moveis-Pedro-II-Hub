@@ -88,8 +88,11 @@ serve(async (req) => {
         }
 
         const nfeData = await nfeResponse.json();
+        const motivoStatus = nfeData.motivo_status || nfeData.mensagem_sefaz || nfeData.autorizacao?.motivo_status || null;
+        const codigoStatus = nfeData.codigo_status || nfeData.autorizacao?.codigo_status || null;
 
         // ─── Update local records ────────────────────────────────────────────
+        let vendaId: string | null = null;
         if (nfeData.status) {
             const updateData: any = {
                 status: nfeData.status,
@@ -100,15 +103,19 @@ serve(async (req) => {
             if (nfeData.numero) updateData.numero_nota = String(nfeData.numero);
             if (nfeData.serie) updateData.serie = String(nfeData.serie);
             if (nfeData.protocolo) updateData.protocolo_autorizacao = nfeData.protocolo;
-            if (nfeData.codigo_status) updateData.codigo_status = String(nfeData.codigo_status);
-            if (nfeData.motivo_status || nfeData.mensagem_sefaz) {
-                updateData.motivo_status = nfeData.motivo_status || nfeData.mensagem_sefaz;
+            if (codigoStatus) updateData.codigo_status = String(codigoStatus);
+            if (motivoStatus) {
+                updateData.motivo_status = motivoStatus;
             }
 
-            await supabase
+            const { data: nfeRow } = await supabase
                 .from('notas_fiscais_emitidas')
                 .update(updateData)
-                .eq('nuvem_fiscal_id', nfe_ref);
+                .eq('nuvem_fiscal_id', nfe_ref)
+                .select('venda_id')
+                .single();
+
+            vendaId = nfeRow?.venda_id ?? null;
 
             // Also update vendas table
             await supabase
@@ -117,14 +124,25 @@ serve(async (req) => {
                     nfe_status: nfeData.status,
                     nfe_chave: nfeData.chave || null,
                     nfe_numero: nfeData.numero ? String(nfeData.numero) : null,
-                    nfe_mensagem: nfeData.motivo_status || nfeData.mensagem_sefaz || nfeData.status,
+                    nfe_mensagem: motivoStatus || nfeData.status,
                 })
                 .eq('nfe_ref', nfe_ref);
-        }
 
-        // ─── Build DANFE and XML URLs ────────────────────────────────────────
-        const danfeUrl = `${auth.baseUrl}/nfe/${nfe_ref}/pdf`;
-        const xmlUrl = `${auth.baseUrl}/nfe/${nfe_ref}/xml`;
+            // ─── Audit event for terminal status transitions ─────────────────
+            const terminalStatuses = ['autorizado', 'cancelado', 'rejeitado', 'denegado', 'erro_autorizacao'];
+            if (vendaId && terminalStatuses.includes(nfeData.status)) {
+                await supabase.from('nfe_eventos').insert({
+                    venda_id: vendaId,
+                    nfe_ref,
+                    tipo_evento: `consulta_${nfeData.status}`,
+                    status_novo: nfeData.status,
+                    codigo_sefaz: codigoStatus ? parseInt(String(codigoStatus)) : null,
+                    motivo_sefaz: motivoStatus,
+                    protocolo: nfeData.protocolo ?? null,
+                    dados_resposta: { codigo_status: codigoStatus },
+                });
+            }
+        }
 
         return new Response(
             JSON.stringify({
@@ -134,12 +152,8 @@ serve(async (req) => {
                 numero: nfeData.numero,
                 serie: nfeData.serie,
                 protocolo: nfeData.protocolo,
-                codigo_status: nfeData.codigo_status,
-                motivo_status: nfeData.motivo_status || nfeData.mensagem_sefaz,
-                caminho_danfe: danfeUrl,
-                caminho_xml: xmlUrl,
-                // Pass the token so frontend can download with auth
-                _auth_token: auth.accessToken,
+                codigo_status: codigoStatus,
+                motivo_status: motivoStatus,
             }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )

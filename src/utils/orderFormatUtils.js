@@ -1,6 +1,105 @@
 import { format } from "date-fns";
 
 /**
+ * Monta a linha de exibição de um item da OC no texto operacional.
+ * Usa nome_completo_produto quando disponível, senão produto_nome.
+ * Inclui cor específica do item (cor_item) e não todas as variações.
+ * @param {Object} item
+ * @param {number} index
+ * @returns {string}
+ */
+export function formatarLinhaItemOc(item, index) {
+  const nome = item.nome_completo_produto || item.produto_nome || 'Produto sem nome';
+  const cor = item.cor_item || item.cor || null;
+  const qtd = Number(item.quantidade_pedida || 0);
+  const qtdFormatada = new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: Number.isInteger(qtd) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(qtd);
+
+  const partes = [nome];
+  if (cor) partes.push(cor);
+
+  return `${index + 1}. ${partes.join(' - ')},  Qtd: ${qtdFormatada}`;
+}
+
+/**
+ * Monta o bloco de informações de assistência de um item, quando aplicável.
+ * @param {Object} item
+ * @returns {string|null} Bloco formatado ou null quando tipo for ordem comum.
+ */
+export function formatarBlocoAssistenciaItem(item) {
+  if (!item.tipo_item_oc || item.tipo_item_oc === 'ORDEM_COMUM_ENCOMENDA') return null;
+
+  const linhas = [];
+  linhas.push(`Assistência do Ped. ${item.pedido_origem_numero || 'N/I'}`);
+  linhas.push(`É reposição pela fábrica? ${item.reposicao_fabrica ? 'SIM' : 'NÃO'}`);
+  if (item.motivo_assistencia) {
+    linhas.push(`Motivo da assistência: ${item.motivo_assistencia}`);
+  }
+  linhas.push(`Imagens e Vídeos? ${item.possui_imagens_videos ? 'Sim' : 'Não'}`);
+  if (item.anexos_item && item.anexos_item.length > 0) {
+    const nomes = item.anexos_item.map(a => a.nome || a.url || 'anexo').join(', ');
+    linhas.push(`Anexo: ${nomes}`);
+  }
+  return linhas.join('\n');
+}
+
+/**
+ * Gera o texto operacional do pedido para cópia/envio ao fornecedor.
+ * Segue o formato esperado pelo negócio:
+ *   Pedido para [Fornecedor]
+ *   [bloco de assistência, se houver]
+ *   OC: [numero]
+ *   Data: [data]
+ *   [itens com nome completo e cor específica]
+ *   Total de itens: N
+ * @param {Object} oc  - Objeto OC com fornecedor_nome, numero_pedido, created_at/data_pedido
+ * @param {Array}  itens - Array de itens da OC (com novos campos quando disponíveis)
+ * @returns {string}
+ */
+export function gerarTextoPedidoOperacional(oc, itens = []) {
+  const dataFormatada = oc.created_at || oc.data_pedido
+    ? new Date(oc.created_at || oc.data_pedido).toLocaleDateString('pt-BR')
+    : new Date().toLocaleDateString('pt-BR');
+
+  const linhas = [];
+
+  linhas.push(`Pedido para ${oc.fornecedor_nome || 'Fornecedor não informado'}`);
+
+  // Bloco de assistência: usar dados do primeiro item de assistência encontrado (ou agregar)
+  const itensAssistencia = itens.filter(
+    i => i.tipo_item_oc && i.tipo_item_oc !== 'ORDEM_COMUM_ENCOMENDA'
+  );
+  if (itensAssistencia.length > 0) {
+    // Exibir bloco único representativo (primeiro item de assistência)
+    const blocoAssist = formatarBlocoAssistenciaItem(itensAssistencia[0]);
+    if (blocoAssist) {
+      linhas.push('');
+      linhas.push(blocoAssist);
+    }
+  }
+
+  linhas.push('');
+  linhas.push(`OC: ${oc.numero_pedido || 'Sem número'}`);
+  linhas.push(`Data: ${dataFormatada}`);
+  linhas.push('');
+
+  if (itens.length > 0) {
+    itens.forEach((item, index) => {
+      linhas.push(formatarLinhaItemOc(item, index));
+    });
+  } else {
+    linhas.push('(Sem itens cadastrados)');
+  }
+
+  linhas.push('');
+  linhas.push(`Total de itens: ${itens.length}`);
+
+  return linhas.join('\n');
+}
+
+/**
  * Generates a formatted, WhatsApp-ready text block for a purchase order.
  * @param {Object} pedidoData  - The order object, must include: numero_pedido, data_pedido,
  *                               fornecedor_id, fornecedor_nome, itens[], valor_total,

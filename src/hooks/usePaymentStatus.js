@@ -165,4 +165,103 @@ export function useVendaPaymentStatus(vendaId, options = {}) {
     };
 }
 
+/**
+ * Hook para monitorar uma cobranca PIX especifica via Realtime.
+ */
+export function usePixCobrancaStatus(cobrancaId, options = {}) {
+    const {
+        showToast = true,
+        onPaid,
+        onExpired,
+        onStatusChange
+    } = options;
+
+    const [status, setStatus] = useState('PENDENTE');
+    const [loading, setLoading] = useState(true);
+    const [cobranca, setCobranca] = useState(null);
+
+    const fetchStatus = useCallback(async () => {
+        if (!cobrancaId) {
+            setLoading(false);
+            return;
+        }
+
+        try {
+            const { data, error } = await supabase
+                .from('cobrancas_pix')
+                .select('*')
+                .eq('id', cobrancaId)
+                .single();
+
+            if (error) throw error;
+
+            setCobranca(data);
+            setStatus(data.status || 'PENDENTE');
+        } catch (error) {
+            console.error('Erro ao buscar status da cobranca PIX:', error);
+        } finally {
+            setLoading(false);
+        }
+    }, [cobrancaId]);
+
+    useEffect(() => {
+        fetchStatus();
+    }, [fetchStatus]);
+
+    useEffect(() => {
+        if (!cobrancaId) return;
+
+        const channel = supabase
+            .channel(`pix_cobranca_${cobrancaId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'cobrancas_pix',
+                    filter: `id=eq.${cobrancaId}`
+                },
+                (payload) => {
+                    const newData = payload.new;
+                    const oldStatus = status;
+                    const newStatus = newData.status || 'PENDENTE';
+
+                    setCobranca(newData);
+                    setStatus(newStatus);
+
+                    onStatusChange?.(newStatus, oldStatus, newData);
+
+                    if (newStatus === 'CONCLUIDA' && oldStatus !== 'CONCLUIDA') {
+                        if (showToast) {
+                            toast.success('Pagamento PIX confirmado!', { duration: 5000 });
+                        }
+                        onPaid?.(newData);
+                    }
+
+                    if (newStatus === 'EXPIRADA' && oldStatus !== 'EXPIRADA') {
+                        if (showToast) {
+                            toast.warning('Cobranca PIX expirada');
+                        }
+                        onExpired?.(newData);
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [cobrancaId, status, showToast, onPaid, onExpired, onStatusChange]);
+
+    return {
+        status,
+        loading,
+        cobranca,
+        isPaid: status === 'CONCLUIDA',
+        isPending: status === 'PENDENTE' || status === 'ATIVA',
+        isExpired: status === 'EXPIRADA',
+        refetch: fetchStatus,
+    };
+}
+
 export default usePaymentStatus;

@@ -12,14 +12,19 @@ import { Badge } from "@/components/ui/badge";
 import { Copy, Loader2, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
+import { gerarTextoPedidoOperacional } from '@/utils/orderFormatUtils';
 
-function formatarQuantidade(valor) {
-  const numero = Number(valor) || 0;
-  return new Intl.NumberFormat('pt-BR', {
-    minimumFractionDigits: Number.isInteger(numero) ? 0 : 2,
-    maximumFractionDigits: 2,
-  }).format(numero);
-}
+const TIPO_ITEM_LABELS = {
+  ASSISTENCIA_REPOSICAO_PECAS: 'Assistência - Reposição de Peças',
+  ASSISTENCIA_VENDA_CLIENTE: 'Assistência - Venda para Cliente',
+  ORDEM_COMUM_ENCOMENDA: 'Ordem Comum de Compra',
+};
+
+const ORIGEM_LABELS = {
+  VENDEDOR: 'Vendedor',
+  ESTOQUE: 'Estoque',
+  ASSISTENCIA: 'Assistência',
+};
 
 function formatarData(data) {
   if (!data) return new Date().toLocaleDateString('pt-BR');
@@ -82,24 +87,7 @@ export default function EnviarOcModal({
 
   const textoPedido = useMemo(() => {
     if (!oc) return '';
-
-    const linhasItens = itens.length > 0
-      ? itens.map((item, index) => {
-          const nome = item.produto_nome || 'Produto sem nome';
-          const quantidade = formatarQuantidade(item.quantidade_pedida || 0);
-          return `${index + 1}. ${nome} - Qtd: ${quantidade}`;
-        })
-      : ['(Sem itens cadastrados)'];
-
-    return [
-      `Pedido para ${oc.fornecedor_nome || 'Fornecedor não informado'}`,
-      `OC: ${oc.numero_pedido || 'Sem número'}`,
-      `Data: ${formatarData(oc.created_at || oc.data_pedido)}`,
-      '',
-      ...linhasItens,
-      '',
-      `Total de itens: ${itens.length}`,
-    ].join('\n');
+    return gerarTextoPedidoOperacional(oc, itens);
   }, [oc, itens]);
 
   const handleCopiarPedido = async () => {
@@ -152,12 +140,44 @@ export default function EnviarOcModal({
                 <p className="p-4 text-sm text-gray-500">Nenhum item encontrado para esta OC.</p>
               ) : (
                 <div className="divide-y">
-                  {itens.map((item, index) => (
-                    <div key={`${item.id || item.produto_id || index}`} className="px-3 py-2 text-sm flex justify-between gap-3">
-                      <span className="text-gray-800">{index + 1}. {item.produto_nome || 'Produto sem nome'}</span>
-                      <span className="font-mono text-gray-600">Qtd: {formatarQuantidade(item.quantidade_pedida || 0)}</span>
-                    </div>
-                  ))}
+                  {itens.map((item, index) => {
+                    const nome = item.nome_completo_produto || item.produto_nome || 'Produto sem nome';
+                    const cor = item.cor_item || item.cor || null;
+                    const qtd = Number(item.quantidade_pedida || 0);
+                    const tipoLabel = TIPO_ITEM_LABELS[item.tipo_item_oc] || null;
+                    const origemLabel = ORIGEM_LABELS[item.origem_solicitacao] || null;
+                    const ehAssistencia = item.tipo_item_oc && item.tipo_item_oc !== 'ORDEM_COMUM_ENCOMENDA';
+                    return (
+                      <div key={`${item.id || item.produto_id || index}`} className="px-3 py-2 text-sm space-y-1">
+                        <div className="flex justify-between gap-3">
+                          <span className="text-gray-800 font-medium">
+                            {index + 1}. {nome}{cor ? ` — ${cor}` : ''}
+                          </span>
+                          <span className="font-mono text-gray-600 shrink-0">Qtd: {qtd}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {tipoLabel && (
+                            <Badge variant="outline" className={`text-[10px] px-1 py-0 ${ehAssistencia ? 'border-amber-400 text-amber-700' : ''}`}>
+                              {tipoLabel}
+                            </Badge>
+                          )}
+                          {origemLabel && (
+                            <Badge variant="outline" className="text-[10px] px-1 py-0 text-blue-600 border-blue-300">
+                              {origemLabel}
+                            </Badge>
+                          )}
+                          {ehAssistencia && item.pedido_origem_numero && (
+                            <Badge variant="outline" className="text-[10px] px-1 py-0 text-gray-600">
+                              Ped. {item.pedido_origem_numero}
+                            </Badge>
+                          )}
+                        </div>
+                        {ehAssistencia && item.motivo_assistencia && (
+                          <p className="text-xs text-amber-700">Motivo: {item.motivo_assistencia}</p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

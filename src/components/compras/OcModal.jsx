@@ -37,7 +37,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Copy, Loader2, Plus, Trash2 } from 'lucide-react';
+import { Copy, Loader2, Paperclip, Plus, Trash2, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { comprasService } from '@/services/comprasService';
@@ -45,6 +45,7 @@ import { base44 } from "@/api/base44Client";
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import FornecedorModal from '@/components/cadastros/FornecedorModal';
+import { gerarTextoPedidoOperacional } from '@/utils/orderFormatUtils';
 
 function buildProductSummary(produto) {
   if (!produto) return '';
@@ -112,19 +113,6 @@ function matchProductByAnyOrder(produto, termoBusca) {
   return termos.every(termo => conteudoProduto.includes(termo));
 }
 
-function formatarQuantidade(valor) {
-  const numero = Number(valor) || 0;
-  return new Intl.NumberFormat('pt-BR', {
-    minimumFractionDigits: Number.isInteger(numero) ? 0 : 2,
-    maximumFractionDigits: 2,
-  }).format(numero);
-}
-
-function formatarData(data) {
-  if (!data) return new Date().toLocaleDateString('pt-BR');
-  return new Date(data).toLocaleDateString('pt-BR');
-}
-
 
 
 /**
@@ -163,16 +151,25 @@ export default function OcModal({
   const [novoItem, setNovoItem] = useState({
     produto_id: null,
     produto_nome: '',
+    nome_completo_produto: '',
     quantidade_pedida: 1,
     preco_unitario: 0,
     preco_tabela: 0,
     modelo_referencia: '',
     cor: '',
+    cor_item: '',
     material: '',
     largura: '',
     altura: '',
     profundidade: '',
     observacoes_item: '',
+    tipo_item_oc: 'ORDEM_COMUM_ENCOMENDA',
+    origem_solicitacao: 'VENDEDOR',
+    pedido_origem_numero: '',
+    reposicao_fabrica: false,
+    motivo_assistencia: '',
+    possui_imagens_videos: false,
+    anexos_item: [],
   });
 
   const [showAlertDelete, setShowAlertDelete] = useState(false);
@@ -198,7 +195,7 @@ export default function OcModal({
     queryFn: async () => {
       const { data, error } = await supabase
         .from('produtos')
-        .select('id, nome, preco_custo, preco_venda, modelo_referencia, cor, material, categoria, largura, altura, profundidade, fornecedor_id, fornecedor_nome')
+        .select('id, nome, preco_custo, preco_venda, modelo_referencia, cor, material, categoria, largura, altura, profundidade, fornecedor_id, fornecedor_nome, parent_id, is_parent')
         .eq('fornecedor_id', formData.fornecedor_id)
         .order('nome', { ascending: true });
       if (error) throw error;
@@ -206,6 +203,25 @@ export default function OcModal({
     },
     enabled: !!formData.fornecedor_id,
     staleTime: 30000,
+  });
+
+  // Query: variações de cor do produto selecionado (produto pai ou mesmo produto)
+  const { data: coresProduto = [] } = useQuery({
+    queryKey: ['cores-produto', novoItem.produto_id],
+    queryFn: async () => {
+      if (!novoItem.produto_id) return [];
+      // Busca produto selecionado + todas variações (mesmo parent_id ou parent_id = produto)
+      const { data, error } = await supabase
+        .from('produtos')
+        .select('id, cor')
+        .or(`id.eq.${novoItem.produto_id},parent_id.eq.${novoItem.produto_id}`)
+        .not('cor', 'is', null);
+      if (error) return [];
+      const cores = [...new Set((data || []).map(d => d.cor).filter(Boolean))].sort();
+      return cores;
+    },
+    enabled: !!novoItem.produto_id,
+    staleTime: 60000,
   });
 
   // Inicializar formulário ao abrir modal
@@ -280,17 +296,26 @@ export default function OcModal({
     setNovoItem({
       produto_id: null,
       produto_nome: '',
+      nome_completo_produto: '',
       quantidade_pedida: 1,
       preco_unitario: 0,
       preco_tabela: 0,
       modelo_referencia: '',
       cor: '',
+      cor_item: '',
       material: '',
       largura: '',
       altura: '',
       profundidade: '',
       observacoes_item: '',
       descricao_personalizada: '',
+      tipo_item_oc: 'ORDEM_COMUM_ENCOMENDA',
+      origem_solicitacao: 'VENDEDOR',
+      pedido_origem_numero: '',
+      reposicao_fabrica: false,
+      motivo_assistencia: '',
+      possui_imagens_videos: false,
+      anexos_item: [],
     });
     setLimiteProdutos(5);
     setMostrarSugestoesProduto(true); // Abre cascata automaticamente
@@ -315,17 +340,26 @@ export default function OcModal({
     setNovoItem({
       produto_id: null,
       produto_nome: '',
+      nome_completo_produto: '',
       quantidade_pedida: 1,
       preco_unitario: 0,
       preco_tabela: 0,
       modelo_referencia: '',
       cor: '',
+      cor_item: '',
       material: '',
       largura: '',
       altura: '',
       profundidade: '',
       observacoes_item: '',
       descricao_personalizada: '',
+      tipo_item_oc: 'ORDEM_COMUM_ENCOMENDA',
+      origem_solicitacao: 'VENDEDOR',
+      pedido_origem_numero: '',
+      reposicao_fabrica: false,
+      motivo_assistencia: '',
+      possui_imagens_videos: false,
+      anexos_item: [],
     });
     setBuscaProduto('');
     setMostrarSugestoesProduto(false);
@@ -346,9 +380,11 @@ export default function OcModal({
       ...prev,
       produto_id: produto.id,
       produto_nome: produto.nome || '',
+      nome_completo_produto: produto.nome || '',
       preco_tabela: produto.preco_venda || 0,
       preco_unitario: prev.preco_unitario > 0 ? prev.preco_unitario : precoCusto,
       ...camposProduto,
+      cor_item: camposProduto.cor || '',
       descricao_personalizada: buildStructuredItemDetails({
         ...prev,
         ...camposProduto,
@@ -371,24 +407,10 @@ export default function OcModal({
 
   const handleCopiarPedido = async () => {
     try {
-      const linhasItens = (itens || []).length > 0
-        ? itens.map((item, index) => {
-            const nome = item.produto_nome || 'Produto sem nome';
-            const quantidade = formatarQuantidade(item.quantidade_pedida || 0);
-            return `${index + 1}. ${nome} - Qtd: ${quantidade}`;
-          })
-        : ['(Sem itens cadastrados)'];
-
-      const textoPedido = [
-        `Pedido para ${formData.fornecedor_nome || oc?.fornecedor_nome || 'Fornecedor não informado'}`,
-        `OC: ${oc?.numero_pedido || 'Sem número'}`,
-        `Data: ${formatarData(oc?.created_at || oc?.data_pedido)}`,
-        '',
-        ...linhasItens,
-        '',
-        `Total de itens: ${itens.length}`,
-      ].join('\n');
-
+      const textoPedido = gerarTextoPedidoOperacional(
+        oc || { fornecedor_nome: formData.fornecedor_nome, numero_pedido: '', data_pedido: null },
+        itens
+      );
       await navigator.clipboard.writeText(textoPedido);
       toast.success('Pedido copiado para a área de transferência');
     } catch (error) {
@@ -441,7 +463,16 @@ export default function OcModal({
               ordem_compra_id: oc.id,
               produto_id: item.produto_id,
               produto_nome: item.produto_nome,
+              nome_completo_produto: item.nome_completo_produto || item.produto_nome || null,
+              cor_item: item.cor_item || item.cor || null,
               descricao_personalizada: item.descricao_personalizada || null,
+              tipo_item_oc: item.tipo_item_oc || 'ORDEM_COMUM_ENCOMENDA',
+              origem_solicitacao: item.origem_solicitacao || 'VENDEDOR',
+              pedido_origem_numero: item.pedido_origem_numero || null,
+              reposicao_fabrica: item.reposicao_fabrica || false,
+              motivo_assistencia: item.motivo_assistencia || null,
+              possui_imagens_videos: item.possui_imagens_videos || false,
+              anexos_item: item.anexos_item || [],
               quantidade_pedida: item.quantidade_pedida,
               preco_unitario: item.preco_unitario,
               preco_tabela: item.preco_tabela,
@@ -848,13 +879,51 @@ export default function OcModal({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-xs font-semibold text-gray-600">Cor</Label>
-                      <Input
-                        placeholder="Ex: Branco"
-                        className="bg-white"
-                        value={novoItem.cor || ''}
-                        onChange={(e) => setNovoItem(prev => ({ ...prev, cor: e.target.value }))}
-                      />
+                      <Label className="text-xs font-semibold text-gray-600">Cor do Item *</Label>
+                      {coresProduto.length > 0 && novoItem.cor_item !== '__nova_cor__' ? (
+                        <Select
+                          value={novoItem.cor_item || ''}
+                          onValueChange={(value) => {
+                            if (value === '__nova_cor__') {
+                              setNovoItem(prev => ({ ...prev, cor_item: '__nova_cor__' }));
+                            } else {
+                              setNovoItem(prev => ({ ...prev, cor_item: value, cor: value }));
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="bg-white">
+                            <SelectValue placeholder="Selecione a cor" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {coresProduto.map(cor => (
+                              <SelectItem key={cor} value={cor}>{cor}</SelectItem>
+                            ))}
+                            <SelectItem value="__nova_cor__">+ Outra cor...</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <div className="flex gap-1">
+                          <Input
+                            placeholder="Ex: Cedro/Areia"
+                            className="bg-white"
+                            value={novoItem.cor_item === '__nova_cor__' ? '' : (novoItem.cor_item || '')}
+                            onChange={(e) => setNovoItem(prev => ({ ...prev, cor_item: e.target.value, cor: e.target.value }))}
+                            autoFocus={novoItem.cor_item === '__nova_cor__'}
+                          />
+                          {coresProduto.length > 0 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="px-2 shrink-0"
+                              onClick={() => setNovoItem(prev => ({ ...prev, cor_item: '' }))}
+                              title="Voltar para lista"
+                            >
+                              <X className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs font-semibold text-gray-600">Material</Label>
@@ -890,7 +959,157 @@ export default function OcModal({
                     </div>
                   </div>
 
-                  {/* Terceira Linha: Observações */}
+                  {/* Terceira Linha: Classificação e Origem */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Tipo do Item *</Label>
+                      <Select
+                        value={novoItem.tipo_item_oc}
+                        onValueChange={(value) => setNovoItem(prev => ({ ...prev, tipo_item_oc: value }))}
+                      >
+                        <SelectTrigger className="bg-white">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ORDEM_COMUM_ENCOMENDA">Ordem Comum de Compra</SelectItem>
+                          <SelectItem value="ASSISTENCIA_REPOSICAO_PECAS">Assistência - Reposição de Peças</SelectItem>
+                          <SelectItem value="ASSISTENCIA_VENDA_CLIENTE">Assistência - Venda para Cliente</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Origem da Solicitação *</Label>
+                      <Select
+                        value={novoItem.origem_solicitacao}
+                        onValueChange={(value) => setNovoItem(prev => ({ ...prev, origem_solicitacao: value }))}
+                      >
+                        <SelectTrigger className="bg-white">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="VENDEDOR">Vendedor</SelectItem>
+                          <SelectItem value="ESTOQUE">Estoque</SelectItem>
+                          <SelectItem value="ASSISTENCIA">Assistência</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Nº Pedido de Origem</Label>
+                      <Input
+                        placeholder="Ex: 2809"
+                        className="bg-white"
+                        value={novoItem.pedido_origem_numero || ''}
+                        onChange={(e) => setNovoItem(prev => ({ ...prev, pedido_origem_numero: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Campos de Assistência (exibir apenas quando for assistência) */}
+                  {novoItem.tipo_item_oc !== 'ORDEM_COMUM_ENCOMENDA' && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 space-y-4">
+                      <span className="text-xs font-bold uppercase tracking-widest text-amber-700">
+                        Dados da Assistência
+                      </span>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-semibold text-gray-600">Reposição pela fábrica?</Label>
+                          <Select
+                            value={novoItem.reposicao_fabrica ? 'sim' : 'nao'}
+                            onValueChange={(value) => setNovoItem(prev => ({ ...prev, reposicao_fabrica: value === 'sim' }))}
+                          >
+                            <SelectTrigger className="bg-white">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="sim">Sim</SelectItem>
+                              <SelectItem value="nao">Não</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs font-semibold text-gray-600">Possui imagens / vídeos?</Label>
+                          <Select
+                            value={novoItem.possui_imagens_videos ? 'sim' : 'nao'}
+                            onValueChange={(value) => setNovoItem(prev => ({ ...prev, possui_imagens_videos: value === 'sim' }))}
+                          >
+                            <SelectTrigger className="bg-white">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="sim">Sim</SelectItem>
+                              <SelectItem value="nao">Não</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold text-gray-600">Motivo da Assistência *</Label>
+                        <Input
+                          placeholder="Ex: Lascado na ponta"
+                          className="bg-white"
+                          value={novoItem.motivo_assistencia || ''}
+                          onChange={(e) => setNovoItem(prev => ({ ...prev, motivo_assistencia: e.target.value }))}
+                        />
+                      </div>
+                      {/* Upload de Anexos */}
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold text-gray-600">Anexos</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {(novoItem.anexos_item || []).map((anexo, idx) => (
+                            <div key={idx} className="flex items-center gap-1 bg-white border rounded px-2 py-1 text-xs">
+                              <Paperclip className="w-3 h-3 text-gray-500" />
+                              <a href={anexo.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-[120px] truncate">
+                                {anexo.nome || 'Anexo'}
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => setNovoItem(prev => ({
+                                  ...prev,
+                                  anexos_item: prev.anexos_item.filter((_, i) => i !== idx),
+                                }))}
+                                className="text-gray-400 hover:text-red-500"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                          <label className="flex items-center gap-1 cursor-pointer bg-white border border-dashed rounded px-2 py-1 text-xs text-gray-500 hover:border-blue-400 hover:text-blue-500 transition-colors">
+                            <Paperclip className="w-3 h-3" />
+                            Anexar
+                            <input
+                              type="file"
+                              accept="image/*,video/*,.pdf"
+                              multiple
+                              className="hidden"
+                              onChange={async (e) => {
+                                const files = Array.from(e.target.files || []);
+                                if (!files.length) return;
+                                const uploads = [];
+                                for (const file of files) {
+                                  try {
+                                    const { url } = await base44.integrations.Core.UploadFile(file);
+                                    uploads.push({ nome: file.name, url, tipo: file.type, uploaded_at: new Date().toISOString() });
+                                  } catch {
+                                    toast.error(`Falha ao enviar ${file.name}`);
+                                  }
+                                }
+                                if (uploads.length > 0) {
+                                  setNovoItem(prev => ({
+                                    ...prev,
+                                    anexos_item: [...(prev.anexos_item || []), ...uploads],
+                                    possui_imagens_videos: true,
+                                  }));
+                                }
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Observações */}
                   <div className="space-y-2">
                     <Label className="text-xs font-semibold text-gray-600">Observações Adicionais</Label>
                     <Textarea

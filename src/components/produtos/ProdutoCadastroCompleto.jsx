@@ -108,7 +108,15 @@ const INITIAL_FORM_DATA = {
     ncm: '',
     cest: '',
     cfop: '',
+    unidade: 'UN', // Unidade comercial: UN, PC, CX, KG, MT
     origem_mercadoria: '0', // 0=Nacional, 1=Estrangeira importação direta, etc
+    // Override fiscal por produto (vazio = usa padrão da org)
+    csosn: '',
+    cst_icms: '',
+    cst_pis: '',
+    cst_cofins: '',
+    aliquota_icms: '',
+    percentual_tributos: '',
     // === DADOS LOGÍSTICOS (Cubagem/Peso) ===
     peso_bruto: '',
     peso_liquido: '',
@@ -222,6 +230,13 @@ export default function ProdutoCadastroCompleto({
                 altura: produto.altura?.toString() || '',
                 profundidade: produto.profundidade?.toString() || '',
                 cfop: produto.cfop || '',
+                unidade: produto.unidade || 'UN',
+                origem_mercadoria: produto.origem_mercadoria || produto.origem || '0',
+                peso_bruto: produto.peso_bruto?.toString() || '',
+                peso_liquido: produto.peso_liquido?.toString() || '',
+                altura_embalagem: produto.altura_embalagem?.toString() || '',
+                largura_embalagem: produto.largura_embalagem?.toString() || '',
+                profundidade_embalagem: produto.profundidade_embalagem?.toString() || '',
                 fotos: produto.fotos || [],
                 variacoes: produto.variacoes || [],
             });
@@ -475,6 +490,19 @@ export default function ProdutoCadastroCompleto({
             ncm: formData.ncm || null,
             cest: formData.cest || null,
             cfop: formData.cfop || null,
+            unidade: formData.unidade || 'UN',
+            origem_mercadoria: formData.origem_mercadoria || '0',
+            csosn: formData.csosn || null,
+            cst_icms: formData.cst_icms || null,
+            cst_pis: formData.cst_pis || null,
+            cst_cofins: formData.cst_cofins || null,
+            aliquota_icms: formData.aliquota_icms ? parseFloat(formData.aliquota_icms) : null,
+            percentual_tributos: formData.percentual_tributos ? parseFloat(formData.percentual_tributos) : null,
+            peso_bruto: formData.peso_bruto ? parseFloat(formData.peso_bruto) : null,
+            peso_liquido: formData.peso_liquido ? parseFloat(formData.peso_liquido) : null,
+            altura_embalagem: formData.altura_embalagem ? parseFloat(formData.altura_embalagem) : null,
+            largura_embalagem: formData.largura_embalagem ? parseFloat(formData.largura_embalagem) : null,
+            profundidade_embalagem: formData.profundidade_embalagem ? parseFloat(formData.profundidade_embalagem) : null,
             // Preços de custo
             preco_custo_tabela: parseFloat(formData.preco_custo_tabela) || null,
             // Promoção removida da interface - limpando dados antigos
@@ -919,6 +947,26 @@ export default function ProdutoCadastroCompleto({
                                                     placeholder="5102"
                                                 />
                                             </div>
+                                            <div>
+                                                <Label>Unidade Comercial</Label>
+                                                <Select
+                                                    value={formData.unidade}
+                                                    onValueChange={(value) => handleChange('unidade', value)}
+                                                >
+                                                    <SelectTrigger id="unidade">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="UN">UN - Unidade</SelectItem>
+                                                        <SelectItem value="PC">PC - Peça</SelectItem>
+                                                        <SelectItem value="CX">CX - Caixa</SelectItem>
+                                                        <SelectItem value="KG">KG - Quilograma</SelectItem>
+                                                        <SelectItem value="MT">MT - Metro</SelectItem>
+                                                        <SelectItem value="JG">JG - Jogo</SelectItem>
+                                                        <SelectItem value="CON">CON - Conjunto</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
                                             <div className="md:col-span-2">
                                                 <Label>Origem da Mercadoria</Label>
                                                 <Select
@@ -936,14 +984,87 @@ export default function ProdutoCadastroCompleto({
                                                 </Select>
                                             </div>
                                         </div>
-                                    </CardContent>
-                                </Card>
 
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="text-base text-gray-700">Logística de Transporte</CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="space-y-4">
+                                        {/* Override fiscal por produto */}
+                                        <div className="border-t pt-4 mt-4">
+                                            <p className="text-sm text-gray-500 mb-3">Tributação específica do produto (vazio = usa padrão da organização)</p>
+                                            <div className="grid md:grid-cols-3 gap-4">
+                                                <div>
+                                                    <Label>CSOSN (Simples Nacional)</Label>
+                                                    <Select
+                                                        value={formData.csosn || '_empty'}
+                                                        onValueChange={(v) => handleChange('csosn', v === '_empty' ? '' : v)}
+                                                    >
+                                                        <SelectTrigger><SelectValue placeholder="Padrão da org" /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="_empty">Padrão da org</SelectItem>
+                                                            <SelectItem value="102">102 - Tributada sem crédito</SelectItem>
+                                                            <SelectItem value="103">103 - Isenção (faixa SN)</SelectItem>
+                                                            <SelectItem value="300">300 - Imune</SelectItem>
+                                                            <SelectItem value="400">400 - Não tributada</SelectItem>
+                                                            <SelectItem value="500">500 - ICMS cobrado por ST</SelectItem>
+                                                            <SelectItem value="900">900 - Outros</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div>
+                                                    <Label>CST PIS</Label>
+                                                    <Select
+                                                        value={formData.cst_pis || '_empty'}
+                                                        onValueChange={(v) => handleChange('cst_pis', v === '_empty' ? '' : v)}
+                                                    >
+                                                        <SelectTrigger><SelectValue placeholder="Padrão da org" /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="_empty">Padrão da org</SelectItem>
+                                                            <SelectItem value="01">01 - Tributável</SelectItem>
+                                                            <SelectItem value="04">04 - Monofásica</SelectItem>
+                                                            <SelectItem value="06">06 - Alíquota zero</SelectItem>
+                                                            <SelectItem value="49">49 - Outras saídas</SelectItem>
+                                                            <SelectItem value="99">99 - Outras operações</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div>
+                                                    <Label>CST COFINS</Label>
+                                                    <Select
+                                                        value={formData.cst_cofins || '_empty'}
+                                                        onValueChange={(v) => handleChange('cst_cofins', v === '_empty' ? '' : v)}
+                                                    >
+                                                        <SelectTrigger><SelectValue placeholder="Padrão da org" /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="_empty">Padrão da org</SelectItem>
+                                                            <SelectItem value="01">01 - Tributável</SelectItem>
+                                                            <SelectItem value="04">04 - Monofásica</SelectItem>
+                                                            <SelectItem value="06">06 - Alíquota zero</SelectItem>
+                                                            <SelectItem value="49">49 - Outras saídas</SelectItem>
+                                                            <SelectItem value="99">99 - Outras operações</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div>
+                                                    <Label>Alíquota ICMS (%)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        step="0.01"
+                                                        value={formData.aliquota_icms}
+                                                        onChange={(e) => handleChange('aliquota_icms', e.target.value)}
+                                                        placeholder="Padrão da org"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <Label>% Tributos Aprox.</Label>
+                                                    <Input
+                                                        type="number"
+                                                        step="0.01"
+                                                        value={formData.percentual_tributos}
+                                                        onChange={(e) => handleChange('percentual_tributos', e.target.value)}
+                                                        placeholder="Padrão da org"
+                                                    />
+                                                    <p className="text-xs text-gray-400 mt-1">Lei 12.741/2012</p>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
                                                 <Label className="text-xs">Peso Bruto (kg)</Label>
@@ -953,16 +1074,6 @@ export default function ProdutoCadastroCompleto({
                                                     step="0.01"
                                                     value={formData.peso_bruto}
                                                     onChange={(e) => handleChange('peso_bruto', e.target.value)}
-                                                />
-                                            </div>
-                                            <div>
-                                                <Label className="text-xs">Peso Líquido (kg)</Label>
-                                                <Input
-                                                    id="peso_liquido"
-                                                    type="number"
-                                                    step="0.01"
-                                                    value={formData.peso_liquido}
-                                                    onChange={(e) => handleChange('peso_liquido', e.target.value)}
                                                 />
                                             </div>
                                         </div>
