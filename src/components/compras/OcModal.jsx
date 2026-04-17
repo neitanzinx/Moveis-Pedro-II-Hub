@@ -1071,21 +1071,44 @@ export default function OcModal({
                         <Label className="text-xs font-semibold text-gray-600">Anexos</Label>
                         <div className="flex flex-wrap gap-2">
                           {(novoItem.anexos_item || []).map((anexo, idx) => (
-                            <div key={idx} className="flex items-center gap-1 bg-white border rounded px-2 py-1 text-xs">
-                              <Paperclip className="w-3 h-3 text-gray-500" />
-                              <a href={anexo.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-[120px] truncate">
-                                {anexo.nome || 'Anexo'}
-                              </a>
-                              <button
-                                type="button"
-                                onClick={() => setNovoItem(prev => ({
-                                  ...prev,
-                                  anexos_item: prev.anexos_item.filter((_, i) => i !== idx),
-                                }))}
-                                className="text-gray-400 hover:text-red-500"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
+                            <div key={idx} className="relative group">
+                              {anexo.tipo?.startsWith('image/') ? (
+                                <div className="relative w-20 h-20 border rounded overflow-hidden bg-gray-100">
+                                  <img
+                                    src={anexo.url}
+                                    alt={anexo.nome}
+                                    className="w-full h-full object-cover hover:opacity-80 transition-opacity cursor-pointer"
+                                    title={anexo.nome}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => setNovoItem(prev => ({
+                                      ...prev,
+                                      anexos_item: prev.anexos_item.filter((_, filterIdx) => filterIdx !== idx),
+                                    }))}
+                                    className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1 bg-white border rounded px-2 py-1 text-xs">
+                                  <Paperclip className="w-3 h-3 text-gray-500" />
+                                  <a href={anexo.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-[120px] truncate">
+                                    {anexo.nome || 'Anexo'}
+                                  </a>
+                                  <button
+                                    type="button"
+                                    onClick={() => setNovoItem(prev => ({
+                                      ...prev,
+                                      anexos_item: prev.anexos_item.filter((_, filterIdx) => filterIdx !== idx),
+                                    }))}
+                                    className="text-gray-400 hover:text-red-500"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           ))}
                           <label className="flex items-center gap-1 cursor-pointer bg-white border border-dashed rounded px-2 py-1 text-xs text-gray-500 hover:border-blue-400 hover:text-blue-500 transition-colors">
