@@ -48,54 +48,58 @@ export function formatarBlocoAssistenciaItem(item) {
 
 /**
  * Gera o texto operacional do pedido para cópia/envio ao fornecedor.
- * Segue o formato esperado pelo negócio:
- *   Pedido para [Fornecedor]
- *   [bloco de assistência, se houver]
- *   OC: [numero]
- *   Data: [data]
- *   [itens com nome completo e cor específica]
- *   Total de itens: N
- * @param {Object} oc  - Objeto OC com fornecedor_nome, numero_pedido, created_at/data_pedido
- * @param {Array}  itens - Array de itens da OC (com novos campos quando disponíveis)
+ * Formato profissional com saudação, dados completos da OC e assinatura.
+ * @param {Object} oc  - Objeto OC com fornecedor_nome, numero_pedido, created_at/data_pedido, metadata
+ * @param {Array}  itens - Array de itens da OC
+ * @param {Object} user - Usuário logado { nome, nome_usuario, id, ... }
+ * @param {string} lojaName - Nome da loja (nunca hardcoded, sempre das configurações)
  * @returns {string}
  */
-export function gerarTextoPedidoOperacional(oc, itens = []) {
+export function gerarTextoPedidoOperacional(oc, itens = [], user = {}, lojaName = '') {
   const dataFormatada = oc.created_at || oc.data_pedido
     ? new Date(oc.created_at || oc.data_pedido).toLocaleDateString('pt-BR')
     : new Date().toLocaleDateString('pt-BR');
 
+  const metadata = oc.metadata || {};
+  const vendedorNome = metadata.vendedor_nome || user.nome || user.nome_usuario || 'Não informado';
+  const ocNumero = oc.numero_pedido || 'Sem número';
+  const refPedido = metadata.pedido_origem_numero || metadata.origem || '';
+  const marca = metadata.marca || 'N/I';
+
   const linhas = [];
 
-  linhas.push(`Pedido para ${oc.fornecedor_nome || 'Fornecedor não informado'}`);
+  // Cabeçalho com nome da loja
+  linhas.push(`Segue encomenda da loja *${lojaName || 'Não informado'}*:\n`);
 
-  // Bloco de assistência: usar dados do primeiro item de assistência encontrado (ou agregar)
-  const itensAssistencia = itens.filter(
-    i => i.tipo_item_oc && i.tipo_item_oc !== 'ORDEM_COMUM_ENCOMENDA'
-  );
-  if (itensAssistencia.length > 0) {
-    // Exibir bloco único representativo (primeiro item de assistência)
-    const blocoAssist = formatarBlocoAssistenciaItem(itensAssistencia[0]);
-    if (blocoAssist) {
-      linhas.push('');
-      linhas.push(blocoAssist);
-    }
+  // Linha do pedido OC com referências
+  let linhaOc = `Pedido OC-${ocNumero}`;
+  if (refPedido) {
+    linhaOc += `, (ref. ao pedido ${refPedido})`;
   }
-
+  linhaOc += `, vend. ${vendedorNome} - ${marca}`;
+  linhas.push(linhaOc);
   linhas.push('');
-  linhas.push(`OC: ${oc.numero_pedido || 'Sem número'}`);
-  linhas.push(`Data: ${dataFormatada}`);
+
+  // Produtos
+  linhas.push('Produto:');
   linhas.push('');
 
   if (itens.length > 0) {
     itens.forEach((item, index) => {
-      linhas.push(formatarLinhaItemOc(item, index));
+      linhas.push(`- ${formatarLinhaItemOc(item, index)}`);
     });
   } else {
     linhas.push('(Sem itens cadastrados)');
   }
 
   linhas.push('');
-  linhas.push(`Total de itens: ${itens.length}`);
+  linhas.push('POR GENTILEZA, ENVIAR CÓPIA DO PEDIDO');
+  linhas.push('');
+  linhas.push('ATENCIOSAMENTE,');
+  linhas.push('');
+  linhas.push(vendedorNome);
+  linhas.push('Departamento de Compras');
+  linhas.push(lojaName || 'Não informado');
 
   return linhas.join('\n');
 }

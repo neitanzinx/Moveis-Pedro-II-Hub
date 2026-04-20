@@ -114,6 +114,7 @@ export const ROLE_RULES = {
     ],
     scope: SCOPES.ALL
   }
+  // 'approve_payment_oc' — concedida apenas ao Administrador via wildcard can: ['*']
 };
 
 function normalizeRoleValue(value) {

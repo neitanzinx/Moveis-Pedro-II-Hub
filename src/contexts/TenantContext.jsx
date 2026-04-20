@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = {
     comissao_sobre: 'bruto',
     comissao_prioridade_estrategia: 'mais_especifica',
     comissao_recalculo_politica: 'nao_recalcular',
+    compras_aprovacao_automatica: ['a_vista'],
     modulos_ativos: {
         montagem: true,
         assistencia_tecnica: true,

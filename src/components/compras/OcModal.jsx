@@ -37,14 +37,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Copy, Loader2, Paperclip, Plus, Trash2, X } from 'lucide-react';
+import { Copy, Loader2, Lock, Paperclip, Plus, Trash2, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { comprasService } from '@/services/comprasService';
 import { base44 } from "@/api/base44Client";
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
+import { useTenant } from '@/contexts/TenantContext';
 import FornecedorModal from '@/components/cadastros/FornecedorModal';
+import ProdutoModal from '@/components/produtos/ProdutoModal';
 import { gerarTextoPedidoOperacional } from '@/utils/orderFormatUtils';
 
 function buildProductSummary(produto) {
@@ -148,6 +150,7 @@ export default function OcModal({
 }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { lojas } = useTenant();
   const isNovoOuDuplicar = !oc || oc.duplicar;
   const isVer = modo === 'ver';
 
@@ -158,9 +161,25 @@ export default function OcModal({
     centro_custo_id: null,
     data_previsao_entrega: '',
     observacoes: '',
+    observacoes_internas: '',
     pedido_faturado: false,
     data_faturamento: '',
+    forma_pagamento_oc: 'a_vista',
+    observacoes_aprovacao: '',
+    anexos_aprovacao: [],
+    anexo_fornecedor: [],
+    canal_solicitacao: '',
+    data_hora_criado: '',
+    data_hora_enviado: '',
+    canal_envio: '',
+    quem_aceitou: '',
+    pendencias: '',
   });
+
+  const [uploadingAnexosAprovacao, setUploadingAnexosAprovacao] = useState(false);
+  const [uploadingAnexoFornecedor, setUploadingAnexoFornecedor] = useState(false);
+  const [novoProdutoModalOpen, setNovoProdutoModalOpen] = useState(false);
+  const [salvandoNovoProduto, setSalvandoNovoProduto] = useState(false);
 
   const [itens, setItens] = useState([]);
   const [novoItem, setNovoItem] = useState({
@@ -254,8 +273,19 @@ export default function OcModal({
             centro_custo_id: ocDetalhada.centro_custo_id,
             data_previsao_entrega: ocDetalhada.data_previsao_entrega || '',
             observacoes: ocDetalhada.observacoes || '',
+            observacoes_internas: ocDetalhada.observacoes_internas || '',
             pedido_faturado: Boolean(metadata.pedido_faturado),
             data_faturamento: metadata.data_faturamento || '',
+            forma_pagamento_oc: ocDetalhada.forma_pagamento_oc || 'a_vista',
+            observacoes_aprovacao: ocDetalhada.observacoes_aprovacao || '',
+            anexos_aprovacao: ocDetalhada.anexos_aprovacao || [],
+            anexo_fornecedor: ocDetalhada.anexo_fornecedor || [],
+            canal_solicitacao: metadata.canal_solicitacao || '',
+            data_hora_criado: metadata.data_hora_criado || '',
+            data_hora_enviado: metadata.data_hora_enviado || '',
+            canal_envio: metadata.canal_envio || '',
+            quem_aceitou: metadata.quem_aceitou || '',
+            pendencias: metadata.pendencias || '',
           });
           setItens(ocDetalhada.itens || []);
         })
@@ -267,17 +297,51 @@ export default function OcModal({
     }
 
     const metadata = oc?.metadata || {};
+    const agora = new Date().toISOString();
     setFormData({
       fornecedor_id: oc?.fornecedor_id || null,
       fornecedor_nome: oc?.fornecedor_nome || '',
       centro_custo_id: oc?.centro_custo_id || user?.centro_custo_id || null,
       data_previsao_entrega: oc?.data_previsao_entrega || '',
       observacoes: oc?.observacoes || '',
+      observacoes_internas: '',
       pedido_faturado: Boolean(metadata.pedido_faturado),
       data_faturamento: metadata.data_faturamento || '',
+      forma_pagamento_oc: 'a_vista',
+      observacoes_aprovacao: '',
+      anexos_aprovacao: [],
+      anexo_fornecedor: [],
+      canal_solicitacao: metadata.canal_solicitacao || '',
+      data_hora_criado: metadata.data_hora_criado || agora,
+      data_hora_enviado: metadata.data_hora_enviado || '',
+      canal_envio: metadata.canal_envio || '',
+      quem_aceitou: metadata.quem_aceitou || '',
+      pendencias: metadata.pendencias || '',
     });
     setItens(oc?.itens?.map(i => ({ ...i, id: undefined })) || []);
   }, [isOpen, oc, isNovoOuDuplicar, user?.centro_custo_id]);
+
+  // Cadastrar novo produto direto no OC
+  const handleSalvarNovoProduto = async (data) => {
+    setSalvandoNovoProduto(true);
+    try {
+      const produtoData = {
+        ...data,
+        fornecedor_id: formData.fornecedor_id || null,
+        fornecedor_nome: formData.fornecedor_nome || null,
+      };
+      const novoProduto = await base44.entities.Produto.create(produtoData);
+      toast.success(`Produto "${novoProduto.nome}" cadastrado com sucesso`);
+      queryClient.invalidateQueries({ queryKey: ['produtos-fornecedor', formData.fornecedor_id] });
+      // Auto-selecionar o produto recem cadastrado
+      handleProdutoSelect(novoProduto);
+      setNovoProdutoModalOpen(false);
+    } catch (error) {
+      toast.error('Erro ao cadastrar produto: ' + error.message);
+    } finally {
+      setSalvandoNovoProduto(false);
+    }
+  };
 
   // Validação
   const isFormValido = formData.fornecedor_id && itens.length > 0;
@@ -422,9 +486,15 @@ export default function OcModal({
 
   const handleCopiarPedido = async () => {
     try {
+      // Obter nome da loja
+      const lojaId = oc?.metadata?.loja_id || null;
+      const lojaName = lojaId && lojas ? (lojas.find(l => l.id === lojaId)?.nome || '') : '';
+      
       const textoPedido = gerarTextoPedidoOperacional(
-        oc || { fornecedor_nome: formData.fornecedor_nome, numero_pedido: '', data_pedido: null },
-        itens
+        oc || { fornecedor_nome: formData.fornecedor_nome, numero_pedido: '', data_pedido: null, metadata: {} },
+        itens,
+        user,
+        lojaName
       );
       await navigator.clipboard.writeText(textoPedido);
       toast.success('Pedido copiado para a área de transferência');
@@ -446,6 +516,11 @@ export default function OcModal({
             data_previsao_entrega: formData.data_previsao_entrega || null,
             itens,
             loja_id: user?.loja_id || null,
+            forma_pagamento_oc: formData.forma_pagamento_oc || 'a_vista',
+            observacoes_internas: formData.observacoes_internas || null,
+            observacoes_aprovacao: formData.observacoes_aprovacao || null,
+            anexos_aprovacao: formData.anexos_aprovacao || [],
+            anexo_fornecedor: formData.anexo_fornecedor || [],
             metadata: {
               pedido_faturado: formData.pedido_faturado,
               data_faturamento: formData.data_faturamento || null,
@@ -461,6 +536,11 @@ export default function OcModal({
             centro_custo_id: formData.centro_custo_id,
             data_previsao_entrega: formData.data_previsao_entrega || null,
             observacoes: formData.observacoes,
+            observacoes_internas: formData.observacoes_internas || null,
+            forma_pagamento_oc: formData.forma_pagamento_oc,
+            observacoes_aprovacao: formData.observacoes_aprovacao || null,
+            anexos_aprovacao: formData.anexos_aprovacao || [],
+            anexo_fornecedor: formData.anexo_fornecedor || [],
             metadata: {
               ...(oc.metadata || {}),
               pedido_faturado: formData.pedido_faturado,
@@ -503,9 +583,18 @@ export default function OcModal({
             centro_custo_id: formData.centro_custo_id,
             data_previsao_entrega: formData.data_previsao_entrega || null,
             observacoes: formData.observacoes,
+            observacoes_internas: formData.observacoes_internas || null,
             pedido_faturado: formData.pedido_faturado,
             data_faturamento: formData.data_faturamento || null,
             metadata: oc.metadata || {},
+          });
+
+          // Salvar campos de pagamento/anexos separadamente (updateOcTracking não os cobre)
+          await comprasService.updateOcPaymentFields(oc.id, {
+            forma_pagamento_oc: formData.forma_pagamento_oc,
+            observacoes_aprovacao: formData.observacoes_aprovacao || null,
+            anexos_aprovacao: formData.anexos_aprovacao || [],
+            anexo_fornecedor: formData.anexo_fornecedor || [],
           });
 
           toast.success(`Acompanhamento da OC ${oc.numero_pedido} atualizado`);
@@ -630,10 +719,10 @@ export default function OcModal({
 
               {/* Observações */}
               <div>
-                <Label htmlFor="observacoes">Observações</Label>
+                <Label htmlFor="observacoes">Observações (para o fornecedor)</Label>
                 <Textarea
                   id="observacoes"
-                  placeholder="Adicione observações sobre esta OC..."
+                  placeholder="Observações que irão para o fornecedor..."
                   value={formData.observacoes}
                   onChange={(e) => setFormData(prev => ({
                     ...prev,
@@ -642,6 +731,279 @@ export default function OcModal({
                   disabled={isVer}
                   rows={3}
                 />
+              </div>
+
+              {/* Observações Internas */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="observacoes_internas" className="text-blue-800 font-semibold text-sm">Observações Internas</Label>
+                  <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full font-medium">Não vai para o fornecedor</span>
+                </div>
+                <Textarea
+                  id="observacoes_internas"
+                  placeholder="Anotações internas da equipe (visível para todos os colaboradores)..."
+                  value={formData.observacoes_internas}
+                  onChange={(e) => setFormData(prev => ({
+                    ...prev,
+                    observacoes_internas: e.target.value,
+                  }))}
+                  disabled={isVer}
+                  rows={2}
+                  className="border-blue-300 focus:border-blue-500 bg-white"
+                />
+              </div>
+
+              {/* Forma de Pagamento */}
+              <div>
+                <Label htmlFor="forma_pagamento_oc">Forma de Pagamento</Label>
+                <Select
+                  value={formData.forma_pagamento_oc || 'a_vista'}
+                  onValueChange={(value) => setFormData(prev => ({
+                    ...prev,
+                    forma_pagamento_oc: value,
+                  }))}
+                  disabled={isVer}
+                >
+                  <SelectTrigger id="forma_pagamento_oc">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="a_vista">A Vista</SelectItem>
+                    <SelectItem value="pix">PIX</SelectItem>
+                    <SelectItem value="boleto">Boleto</SelectItem>
+                    <SelectItem value="parcelado">Parcelado</SelectItem>
+                    <SelectItem value="cartao_debito">Cartão Débito</SelectItem>
+                    <SelectItem value="cartao_credito">Cartão Crédito</SelectItem>
+                    <SelectItem value="transferencia">Transferência Bancária</SelectItem>
+                    <SelectItem value="cheque">Cheque</SelectItem>
+                    <SelectItem value="a_definir">A Definir</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Campos visíveis apenas quando pagamento não é a vista */}
+              {formData.forma_pagamento_oc !== 'a_vista' && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Lock className="w-4 h-4 text-amber-600" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-amber-700">
+                      Informações para Aprovação (visível apenas ao master)
+                    </span>
+                  </div>
+
+                  {/* Observações para Aprovação */}
+                  <div>
+                    <Label htmlFor="observacoes_aprovacao">Observações para Aprovação</Label>
+                    <Textarea
+                      id="observacoes_aprovacao"
+                      placeholder="Detalhe informações sobre o pagamento, condições negociadas, etc..."
+                      value={formData.observacoes_aprovacao || ''}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        observacoes_aprovacao: e.target.value,
+                      }))}
+                      disabled={isVer}
+                      rows={3}
+                    />
+                  </div>
+
+                  {/* Anexos para Aprovação */}
+                  {!isVer && (
+                    <div className="space-y-2">
+                      <Label>Anexos para Aprovação</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {(formData.anexos_aprovacao || []).map((anexo, idx) => (
+                          <div key={idx} className="relative group">
+                            {anexo.tipo?.startsWith('image/') ? (
+                              <div className="relative w-20 h-20 border rounded overflow-hidden bg-gray-100">
+                                <img
+                                  src={anexo.url}
+                                  alt={anexo.nome}
+                                  className="w-full h-full object-cover hover:opacity-80 transition-opacity cursor-pointer"
+                                  title={anexo.nome}
+                                  onClick={() => window.open(anexo.url, '_blank')}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setFormData(prev => ({
+                                    ...prev,
+                                    anexos_aprovacao: prev.anexos_aprovacao.filter((_, i) => i !== idx),
+                                  }))}
+                                  className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1 bg-white border rounded px-2 py-1 text-xs">
+                                <Paperclip className="w-3 h-3 text-gray-500" />
+                                <a href={anexo.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-[120px] truncate">
+                                  {anexo.nome || 'Anexo'}
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => setFormData(prev => ({
+                                    ...prev,
+                                    anexos_aprovacao: prev.anexos_aprovacao.filter((_, i) => i !== idx),
+                                  }))}
+                                  className="text-gray-400 hover:text-red-500"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        <label className={`flex items-center gap-1 cursor-pointer bg-white border border-dashed rounded px-2 py-1 text-xs text-gray-500 hover:border-amber-400 hover:text-amber-600 transition-colors ${uploadingAnexosAprovacao ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                          {uploadingAnexosAprovacao ? <Loader2 className="w-3 h-3 animate-spin" /> : <Paperclip className="w-3 h-3" />}
+                          {uploadingAnexosAprovacao ? 'Enviando...' : 'Anexar'}
+                          <input
+                            type="file"
+                            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                            multiple
+                            disabled={uploadingAnexosAprovacao}
+                            className="hidden"
+                            onChange={async (e) => {
+                              const files = Array.from(e.target.files || []);
+                              if (!files.length) return;
+                              setUploadingAnexosAprovacao(true);
+                              const uploads = [];
+                              for (const file of files) {
+                                try {
+                                  const { file_url } = await base44.integrations.Core.UploadFile({ file });
+                                  uploads.push({ nome: file.name, url: file_url, tipo: file.type, uploaded_at: new Date().toISOString() });
+                                } catch (err) {
+                                  console.error('Upload error:', err);
+                                  toast.error(`Falha ao enviar ${file.name}`);
+                                }
+                              }
+                              setUploadingAnexosAprovacao(false);
+                              if (uploads.length > 0) {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  anexos_aprovacao: [...(prev.anexos_aprovacao || []), ...uploads],
+                                }));
+                              }
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                  {/* Modo visualização: mostrar anexos como links */}
+                  {isVer && (formData.anexos_aprovacao || []).length > 0 && (
+                    <div className="space-y-2">
+                      <Label>Anexos para Aprovação</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {formData.anexos_aprovacao.map((anexo, idx) => (
+                          <a key={idx} href={anexo.url} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 bg-white border rounded px-2 py-1 text-xs text-blue-600 hover:underline">
+                            <Paperclip className="w-3 h-3" />
+                            {anexo.nome || 'Anexo'}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Documento do Fornecedor (sempre visível) */}
+              <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Paperclip className="w-4 h-4 text-gray-500" />
+                  <span className="text-xs font-bold uppercase tracking-widest text-gray-600">
+                    Documento do Fornecedor
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(formData.anexo_fornecedor || []).map((anexo, idx) => (
+                    <div key={idx} className="relative group">
+                      {anexo.tipo?.startsWith('image/') ? (
+                        <div className="relative w-20 h-20 border rounded overflow-hidden bg-white">
+                          <img
+                            src={anexo.url}
+                            alt={anexo.nome}
+                            className="w-full h-full object-cover hover:opacity-80 transition-opacity cursor-pointer"
+                            title={anexo.nome}
+                            onClick={() => window.open(anexo.url, '_blank')}
+                          />
+                          {!isVer && (
+                            <button
+                              type="button"
+                              onClick={() => setFormData(prev => ({
+                                ...prev,
+                                anexo_fornecedor: prev.anexo_fornecedor.filter((_, i) => i !== idx),
+                              }))}
+                              className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 bg-white border rounded px-2 py-1 text-xs">
+                          <Paperclip className="w-3 h-3 text-gray-500" />
+                          <a href={anexo.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-[140px] truncate">
+                            {anexo.nome || 'Documento'}
+                          </a>
+                          {!isVer && (
+                            <button
+                              type="button"
+                              onClick={() => setFormData(prev => ({
+                                ...prev,
+                                anexo_fornecedor: prev.anexo_fornecedor.filter((_, i) => i !== idx),
+                              }))}
+                              className="text-gray-400 hover:text-red-500"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {!isVer && (
+                    <label className={`flex items-center gap-1 cursor-pointer bg-white border border-dashed rounded px-2 py-1 text-xs text-gray-500 hover:border-blue-400 hover:text-blue-500 transition-colors ${uploadingAnexoFornecedor ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                      {uploadingAnexoFornecedor ? <Loader2 className="w-3 h-3 animate-spin" /> : <Paperclip className="w-3 h-3" />}
+                      {uploadingAnexoFornecedor ? 'Enviando...' : 'Anexar PDF / Doc'}
+                      <input
+                        type="file"
+                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                        multiple
+                        disabled={uploadingAnexoFornecedor}
+                        className="hidden"
+                        onChange={async (e) => {
+                          const files = Array.from(e.target.files || []);
+                          if (!files.length) return;
+                          setUploadingAnexoFornecedor(true);
+                          const uploads = [];
+                          for (const file of files) {
+                            try {
+                              const { file_url } = await base44.integrations.Core.UploadFile({ file });
+                              uploads.push({ nome: file.name, url: file_url, tipo: file.type, uploaded_at: new Date().toISOString() });
+                            } catch (err) {
+                              console.error('Upload error:', err);
+                              toast.error(`Falha ao enviar ${file.name}`);
+                            }
+                          }
+                          setUploadingAnexoFornecedor(false);
+                          if (uploads.length > 0) {
+                            setFormData(prev => ({
+                              ...prev,
+                              anexo_fornecedor: [...(prev.anexo_fornecedor || []), ...uploads],
+                            }));
+                          }
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  )}
+                  {(formData.anexo_fornecedor || []).length === 0 && isVer && (
+                    <span className="text-xs text-gray-400">Nenhum documento anexado</span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -770,7 +1132,17 @@ export default function OcModal({
                   {/* Primeira Linha: Seleção e Financeiro */}
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                     <div className="md:col-span-6 space-y-2">
-                      <Label className="text-xs font-semibold text-gray-600">Produto *</Label>
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold text-gray-600">Produto *</Label>
+                        <button
+                          type="button"
+                          onClick={() => setNovoProdutoModalOpen(true)}
+                          className="text-[10px] text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors"
+                          title="Cadastrar novo produto"
+                        >
+                          <Plus size={11} /> Cadastrar novo
+                        </button>
+                      </div>
                       <div className="relative">
                         <Input
                           placeholder="Buscar produto por nome, ref, cor..."
@@ -824,10 +1196,15 @@ export default function OcModal({
                                 <Loader2 className="w-3 h-3 animate-spin" /> Carregando produtos...
                               </div>
                             ) : produtosFiltradosNovoItem.length === 0 ? (
-                              <div className="px-3 py-3 text-xs text-gray-500">
-                                {buscaProduto.trim()
-                                  ? 'Nenhum item encontrado com esse termo.'
-                                  : 'Nenhum produto cadastrado para este fornecedor.'}
+                              <div className="px-3 py-3 text-xs text-gray-500 space-y-2">
+                                <div>{buscaProduto.trim() ? 'Nenhum item encontrado com esse termo.' : 'Nenhum produto cadastrado para este fornecedor.'}</div>
+                                <button
+                                  type="button"
+                                  onMouseDown={() => { setMostrarSugestoesProduto(false); setNovoProdutoModalOpen(true); }}
+                                  className="w-full text-left text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                                >
+                                  <Plus size={11} /> Cadastrar novo produto
+                                </button>
                               </div>
                             ) : (
                               produtosFiltradosNovoItem.map((produto) => (
@@ -1191,6 +1568,120 @@ export default function OcModal({
               </>
               )}
             </div>
+
+            {/* Resumo do Andamento - Apenas em modo "ver" */}
+            {isVer && (
+              <div className="space-y-4">
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-6 space-y-4">
+                  <h3 className="font-bold text-green-900 flex items-center gap-2">
+                    <span className="inline-block w-3 h-3 bg-green-500 rounded-full" />
+                    Histórico de Andamento
+                  </h3>
+
+                  {/* Timeline de eventos */}
+                  <div className="space-y-3 ml-1">
+                    {/* Criação */}
+                    <div className="flex gap-3">
+                      <div className="flex flex-col items-center">
+                        <div className="w-3 h-3 bg-green-400 rounded-full"></div>
+                        <div className="w-0.5 h-12 bg-green-200 mt-1"></div>
+                      </div>
+                      <div className="pb-3 pt-0.5">
+                        <p className="text-sm font-semibold text-gray-800">Pedido Criado</p>
+                        <p className="text-xs text-gray-500">
+                          {formData.data_hora_criado ? new Date(formData.data_hora_criado).toLocaleString('pt-BR') : 'Data não registrada'}
+                        </p>
+                        {formData.canal_solicitacao && (
+                          <p className="text-xs text-gray-600 mt-1">
+                            <span className="inline-block px-2 py-0.5 bg-white rounded border border-gray-300 text-gray-700">
+                              Canal: {formData.canal_solicitacao}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Envio */}
+                    {formData.data_hora_enviado && (
+                      <div className="flex gap-3">
+                        <div className="flex flex-col items-center">
+                          <div className="w-3 h-3 bg-blue-400 rounded-full"></div>
+                          <div className="w-0.5 h-12 bg-blue-200 mt-1"></div>
+                        </div>
+                        <div className="pb-3 pt-0.5">
+                          <p className="text-sm font-semibold text-gray-800">Pedido Enviado ao Fornecedor</p>
+                          <p className="text-xs text-gray-500">
+                            {new Date(formData.data_hora_enviado).toLocaleString('pt-BR')}
+                          </p>
+                          {formData.canal_envio && (
+                            <p className="text-xs text-gray-600 mt-1">
+                              <span className="inline-block px-2 py-0.5 bg-white rounded border border-gray-300 text-gray-700">
+                                Via: {formData.canal_envio}
+                              </span>
+                            </p>
+                          )}
+                          {formData.quem_aceitou && (
+                            <p className="text-xs text-gray-600 mt-1">
+                              <span className="inline-block px-2 py-0.5 bg-white rounded border border-gray-300 text-gray-700">
+                                Aceito por: {formData.quem_aceitou}
+                              </span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Faturamento */}
+                    {formData.pedido_faturado && (
+                      <div className="flex gap-3">
+                        <div className="flex flex-col items-center">
+                          <div className="w-3 h-3 bg-amber-400 rounded-full"></div>
+                          {!formData.data_hora_enviado && <div className="w-0.5 h-12 bg-amber-200 mt-1"></div>}
+                        </div>
+                        <div className="pt-0.5">
+                          <p className="text-sm font-semibold text-gray-800">Pedido Faturado</p>
+                          <p className="text-xs text-gray-500">
+                            {formData.data_faturamento ? new Date(formData.data_faturamento).toLocaleString('pt-BR') : 'Data não registrada'}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Pendências */}
+                    {formData.pendencias && (
+                      <div className="flex gap-3 mt-4 p-3 bg-amber-100 rounded-lg border border-amber-300">
+                        <div>
+                          <p className="text-sm font-semibold text-amber-900">Pendências Identificadas</p>
+                          <p className="text-xs text-amber-800 mt-1">{formData.pendencias}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Resumo de status */}
+                  <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-green-200">
+                    <Badge variant="outline" className="bg-white">
+                      Status: {oc?.status || 'Desconhecido'}
+                    </Badge>
+                    {formData.pedido_faturado && (
+                      <Badge className="bg-green-100 text-green-800 border-green-300">
+                        Faturado
+                      </Badge>
+                    )}
+                    {formData.data_hora_enviado && (
+                      <Badge className="bg-blue-100 text-blue-800 border-blue-300">
+                        Enviado
+                      </Badge>
+                    )}
+                    {formData.pendencias && (
+                      <Badge className="bg-amber-100 text-amber-800 border-amber-300">
+                        Com Pendências
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Footer */}
@@ -1268,6 +1759,13 @@ export default function OcModal({
           }));
           toast.success(`Fornecedor ${novoFornecedor.nome_empresa || ''} selecionado na OC`);
         }}
+      />
+
+      <ProdutoModal
+        isOpen={novoProdutoModalOpen}
+        onClose={() => setNovoProdutoModalOpen(false)}
+        onSave={handleSalvarNovoProduto}
+        isLoading={salvandoNovoProduto}
       />
     </>
   );

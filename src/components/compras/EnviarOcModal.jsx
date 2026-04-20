@@ -9,9 +9,19 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { Copy, Loader2, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/hooks/useAuth';
+import { useTenant } from '@/contexts/TenantContext';
 import { gerarTextoPedidoOperacional } from '@/utils/orderFormatUtils';
 
 const TIPO_ITEM_LABELS = {
@@ -38,8 +48,18 @@ export default function EnviarOcModal({
   onConfirmarEnvio,
   isConfirmando = false,
 }) {
+  const { user } = useAuth();
+  const { lojas } = useTenant();
   const [itensOc, setItensOc] = useState([]);
   const [isLoadingItens, setIsLoadingItens] = useState(false);
+  const [canalEnvio, setCanalEnvio] = useState('email');
+
+  // Obter nome da loja da OC (se disponível)
+  const lojaName = useMemo(() => {
+    if (!oc?.metadata?.loja_id || !lojas) return '';
+    const loja = lojas.find(l => l.id === oc.metadata.loja_id);
+    return loja?.nome || '';
+  }, [oc?.metadata?.loja_id, lojas]);
 
   useEffect(() => {
     if (!open || !oc?.id) {
@@ -87,8 +107,8 @@ export default function EnviarOcModal({
 
   const textoPedido = useMemo(() => {
     if (!oc) return '';
-    return gerarTextoPedidoOperacional(oc, itens);
-  }, [oc, itens]);
+    return gerarTextoPedidoOperacional(oc, itens, user, lojaName);
+  }, [oc, itens, user, lojaName]);
 
   const handleCopiarPedido = async () => {
     try {
@@ -105,7 +125,10 @@ export default function EnviarOcModal({
       toast.warning('Aguarde o carregamento dos itens antes de enviar');
       return;
     }
-    onConfirmarEnvio?.(oc);
+    onConfirmarEnvio?.(oc, {
+      canal_envio: canalEnvio,
+      data_hora_enviado: new Date().toISOString(),
+    });
   };
 
   return (
@@ -181,6 +204,23 @@ export default function EnviarOcModal({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Canal de Envio */}
+          <div className="rounded-lg border bg-blue-50 p-4 space-y-2">
+            <Label htmlFor="canal_envio" className="text-blue-800 font-semibold text-sm">Como será enviado?</Label>
+            <Select value={canalEnvio} onValueChange={setCanalEnvio}>
+              <SelectTrigger id="canal_envio" className="bg-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="email">Email</SelectItem>
+                <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                <SelectItem value="sms">SMS</SelectItem>
+                <SelectItem value="pessoalmente">Pessoalmente</SelectItem>
+                <SelectItem value="outro">Outro</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

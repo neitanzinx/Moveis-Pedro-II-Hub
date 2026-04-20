@@ -39,12 +39,14 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { useConfirm } from '@/hooks/useConfirm';
+import { useTenant } from '@/contexts/TenantContext';
 import { comprasService } from '@/services/comprasService';
 import OcTable from '@/components/compras/OcTable';
 import OcModal from '@/components/compras/OcModal';
 import SolicitacoesReposicaoTab from '@/components/compras/SolicitacoesReposicaoTab';
 import RecebimentoModal from '@/components/compras/RecebimentoModal';
 import EnviarOcModal from '@/components/compras/EnviarOcModal';
+import PaymentApprovalModal from '@/components/compras/PaymentApprovalModal';
 import { VendaDetalhesModal } from '@/components/vendas/VendaDetalhesModal';
 import { base44 } from '@/api/base44Client';
 import { supabase } from '@/lib/supabase';
@@ -80,12 +82,17 @@ export default function Compras() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { user, can, filterData } = useAuth();
+  const { settings } = useTenant();
 
   // Verificar permissões
   const temPermissaoVisualizacao = can('view_compras') || can('manage_compras');
   const temPermissaoCriacao = can('create_oc') || can('manage_compras');
   const temPermissaoEnvio = can('send_oc') || can('manage_compras');
   const temPermissaoRecebimento = can('receive_oc') || can('manage_compras');
+  const temPermissaoAprovacaoPagamento = can('approve_payment_oc');
+  const formasAutoAprovadas = Array.isArray(settings?.compras_aprovacao_automatica)
+    ? settings.compras_aprovacao_automatica
+    : ['a_vista'];
 
   // Hook: Monitoramento de alertas de estoque (background job a cada 5 min)
   const { alertasAtivos, totalAlertas } = useAlertasEstoque(
@@ -110,14 +117,20 @@ export default function Compras() {
   const [abaAtiva, setAbaAtiva] = useState('ordens');
   const [isVendaDetalhesOpen, setIsVendaDetalhesOpen] = useState(false);
   const [vendaSelecionada, setVendaSelecionada] = useState(null);
+  const [paymentApprovalOpen, setPaymentApprovalOpen] = useState(false);
+  const [ocParaAprovacaoPagamento, setOcParaAprovacaoPagamento] = useState(null);
+  const [filtroAprovacaoPagamento, setFiltroAprovacaoPagamento] = useState('pendente_aprovacao');
+  const [aprovacaoUltimaContagem, setAprovacaoUltimaContagem] = useState(0);
 
   // Estados para Análise de Preços
   const [searchProduto, setSearchProduto] = useState('');
   const [searchFornecedorAnalise, setSearchFornecedorAnalise] = useState('');
   const [ordenacaoAnalise, setOrdenacaoAnalise] = useState('data_desc');
+  const [paginaAnalisePrecos, setPaginaAnalisePrecos] = useState(1);
   const [dataInicioAnalise] = useState(
     new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   );
+  const itensPorPaginaAnalise = 10;
 
   // Query: OCs (Ordens de Compra)
   const { data: ocsRaw = [], isLoading: ocIsLoading } = useQuery({
@@ -437,8 +450,51 @@ export default function Compras() {
   }, [ocs]);
 
   // Processamento: Análise de Preços
+  const produtosPedidosRecentes = useMemo(() => {
+    const chavesProdutos = new Set();
+    const ocsOrdenadas = [...ocs]
+      .filter(oc => !oc.deleted_at)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    ocsOrdenadas.forEach(oc => {
+      (oc.itens || []).forEach(item => {
+        if (item?.produto_id) {
+          chavesProdutos.add(`id:${item.produto_id}`);
+          return;
+        }
+
+        const nomeNormalizado = normalizeProductName(item?.produto_nome);
+        if (nomeNormalizado) {
+          chavesProdutos.add(`nome:${nomeNormalizado}`);
+        }
+      });
+    });
+
+    return chavesProdutos;
+  }, [ocs]);
+
   const analisePrecos = useMemo(() => {
-    let resultado = [...historicoPrecos];
+    const historicoProdutosPedidos = historicoPrecos.filter((h) => {
+      const chaveProdutoId = h?.produto_id ? `id:${h.produto_id}` : null;
+      const chaveNome = `nome:${normalizeProductName(h?.produto_nome)}`;
+      return (chaveProdutoId && produtosPedidosRecentes.has(chaveProdutoId)) || produtosPedidosRecentes.has(chaveNome);
+    });
+
+    const ultimosRegistrosPorProduto = new Map();
+    [...historicoProdutosPedidos]
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .forEach((registro) => {
+        const chave = registro?.produto_id
+          ? `id:${registro.produto_id}`
+          : `nome:${normalizeProductName(registro?.produto_nome)}`;
+
+        if (!chave.endsWith(':') && !ultimosRegistrosPorProduto.has(chave)) {
+          ultimosRegistrosPorProduto.set(chave, registro);
+        }
+      });
+
+    let resultado = Array.from(ultimosRegistrosPorProduto.values());
+
     if (searchProduto) {
       resultado = resultado.filter(h =>
         h.produto_nome?.toLowerCase().includes(searchProduto.toLowerCase())
@@ -463,7 +519,24 @@ export default function Compras() {
         break;
     }
     return resultado;
-  }, [historicoPrecos, searchProduto, searchFornecedorAnalise, ordenacaoAnalise]);
+  }, [historicoPrecos, produtosPedidosRecentes, searchProduto, searchFornecedorAnalise, ordenacaoAnalise]);
+
+  const totalPaginasAnalisePrecos = Math.max(1, Math.ceil(analisePrecos.length / itensPorPaginaAnalise));
+
+  const analisePrecosPaginada = useMemo(() => {
+    const inicio = (paginaAnalisePrecos - 1) * itensPorPaginaAnalise;
+    return analisePrecos.slice(inicio, inicio + itensPorPaginaAnalise);
+  }, [analisePrecos, paginaAnalisePrecos]);
+
+  useEffect(() => {
+    setPaginaAnalisePrecos(1);
+  }, [searchProduto, searchFornecedorAnalise, ordenacaoAnalise]);
+
+  useEffect(() => {
+    if (paginaAnalisePrecos > totalPaginasAnalisePrecos) {
+      setPaginaAnalisePrecos(totalPaginasAnalisePrecos);
+    }
+  }, [paginaAnalisePrecos, totalPaginasAnalisePrecos]);
 
   // Processamento: Performance de Fornecedores (mais detalhada)
   const performanceFornecedores = useMemo(() => {
@@ -702,8 +775,9 @@ export default function Compras() {
 
   // Mutations
   const confirmarEnvioMutation = useMutation({
-    mutationFn: async (oc) => {
-      await comprasService.updateOcStatus(oc.id, 'Pedido Enviado');
+    mutationFn: async (data) => {
+      const { oc, trackingData } = data;
+      await comprasService.updateOcStatus(oc.id, 'Pedido Enviado', trackingData);
       return true;
     },
     onSuccess: (sucesso) => {
@@ -799,9 +873,9 @@ export default function Compras() {
     }
   };
 
-  const handleConfirmarEnvioOc = (oc) => {
+  const handleConfirmarEnvioOc = (oc, trackingData = {}) => {
     if (!oc) return;
-    confirmarEnvioMutation.mutate(oc);
+    confirmarEnvioMutation.mutate({ oc, trackingData });
   };
 
   const handleReceberOc = (oc) => {
@@ -1177,8 +1251,13 @@ export default function Compras() {
       )}
 
       {/* Abas: Ordens | Encomendas | Reposições | Preços | Performance | Recomendações */}
-      <Tabs value={abaAtiva} onValueChange={setAbaAtiva} className="w-full">
-        <TabsList className="grid w-full grid-cols-6">
+      <Tabs value={abaAtiva} onValueChange={(val) => {
+        setAbaAtiva(val);
+        if (val === 'aprovacao-pagamento') {
+          setAprovacaoUltimaContagem(ocs.filter(o => o.pagamento_status === 'pendente_aprovacao').length);
+        }
+      }} className="w-full">
+        <TabsList className={`grid w-full ${temPermissaoAprovacaoPagamento ? 'grid-cols-7' : 'grid-cols-6'}`}>
           <TabsTrigger value="ordens" className="gap-2">
             <Package className="w-4 h-4" /> Ordens ({ocsFiltradas.length})
           </TabsTrigger>
@@ -1201,6 +1280,21 @@ export default function Compras() {
           <TabsTrigger value="recomendacoes" className="gap-2">
             <AlertTriangle className="w-4 h-4" /> Recomendações
           </TabsTrigger>
+          {temPermissaoAprovacaoPagamento && (() => {
+              const pendentes = ocs.filter(o => o.pagamento_status === 'pendente_aprovacao').length;
+              const naoLidas = abaAtiva !== 'aprovacao-pagamento' && pendentes > 0;
+              return (
+                <TabsTrigger value="aprovacao-pagamento" className="gap-2 text-amber-700 data-[state=active]:bg-amber-50 relative">
+                  <DollarSign className="w-4 h-4" /> Aprovação
+                  {pendentes > 0 && (
+                    <span className="relative flex h-4 w-4 ml-0.5">
+                      {naoLidas && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />}
+                      <span className="relative inline-flex items-center justify-center rounded-full h-4 w-4 bg-red-500 text-white text-[9px] font-bold">{pendentes}</span>
+                    </span>
+                  )}
+                </TabsTrigger>
+              );
+            })()}
         </TabsList>
 
         {/* TAB 1: Ordens de Compra */}
@@ -1266,7 +1360,24 @@ export default function Compras() {
               <CardTitle>Ordens de Compra <Badge variant="outline" className="ml-2">{ocsFiltradas.length} encontradas</Badge></CardTitle>
             </CardHeader>
             <CardContent>
-              <OcTable ocs={ocsFiltradas} isLoading={ocIsLoading} onEdit={handleEditarOc} onDelete={handleDeletarOc} onReceive={handleReceberOc} onSend={handleEnviarOc} onCancel={handleCancelarOc} />
+          <OcTable ocs={ocsFiltradas} isLoading={ocIsLoading} onEdit={handleEditarOc} onDelete={handleDeletarOc} onReceive={handleReceberOc} onSend={handleEnviarOc} onCancel={handleCancelarOc}
+              formasAutoAprovadas={formasAutoAprovadas}
+              onSubmitPaymentApproval={(oc) => {
+                if (formasAutoAprovadas.includes(oc.forma_pagamento_oc)) {
+                  toast.info('Esta forma de pagamento está configurada para aprovação automática');
+                  return;
+                }
+                if (window.confirm(`Enviar OC ${oc.numero_pedido} para aprovação de pagamento do master?`)) {
+                  comprasService.submitForPaymentApproval(oc.id, {
+                    observacoes_aprovacao: oc.observacoes_aprovacao,
+                    anexos_aprovacao: oc.anexos_aprovacao,
+                  }).then(() => {
+                    queryClient.invalidateQueries({ queryKey: ['compras'] });
+                    toast.success(`OC ${oc.numero_pedido} enviada para aprovação de pagamento`);
+                  }).catch((err) => toast.error(err.message));
+                }
+              }}
+            />
             </CardContent>
           </Card>
         </TabsContent>
@@ -1395,7 +1506,7 @@ export default function Compras() {
                         <TableCell colSpan="6" className="text-center text-gray-500 py-4">Nenhum histórico de preços encontrado</TableCell>
                       </TableRow>
                     ) : (
-                      analisePrecos.map((hp, idx) => {
+                      analisePrecosPaginada.map((hp, idx) => {
                         const delta = hp.delta_percentual || 0;
                         const isAumento = delta > 0;
                         return (
@@ -1415,6 +1526,37 @@ export default function Compras() {
                   </TableBody>
                 </Table>
               </div>
+
+              {analisePrecos.length > 0 && (
+                <div className="flex items-center justify-between mt-4 gap-3">
+                  <p className="text-sm text-gray-600">
+                    Exibindo {analisePrecosPaginada.length} de {analisePrecos.length} produtos
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPaginaAnalisePrecos((prev) => Math.max(1, prev - 1))}
+                      disabled={paginaAnalisePrecos === 1}
+                    >
+                      Anterior
+                    </Button>
+                    <span className="text-sm text-gray-700 min-w-[90px] text-center">
+                      Página {paginaAnalisePrecos} de {totalPaginasAnalisePrecos}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPaginaAnalisePrecos((prev) => Math.min(totalPaginasAnalisePrecos, prev + 1))}
+                      disabled={paginaAnalisePrecos >= totalPaginasAnalisePrecos}
+                    >
+                      Próxima
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1586,6 +1728,133 @@ export default function Compras() {
         <TabsContent value="reposicoes" className="space-y-4">
           <SolicitacoesReposicaoTab />
         </TabsContent>
+
+        {/* TAB: Aprovação de Pagamento (apenas master) */}
+        {temPermissaoAprovacaoPagamento && (
+          <TabsContent value="aprovacao-pagamento" className="space-y-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <DollarSign className="w-5 h-5 text-amber-600" />
+                      Aprovação de Pagamento
+                    </CardTitle>
+                    <p className="text-xs text-gray-500 mt-1">Pedidos de compra aguardando confirmação de pagamento</p>
+                  </div>
+                  <Select value={filtroAprovacaoPagamento} onValueChange={setFiltroAprovacaoPagamento}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pendente_aprovacao">Aguardando Aprovação</SelectItem>
+                      <SelectItem value="pago">Pagas</SelectItem>
+                      <SelectItem value="todos">Todos</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {(() => {
+                  const ocsPagamento = ocs.filter(o => {
+                    if (filtroAprovacaoPagamento === 'todos') return o.pagamento_status && o.pagamento_status !== 'nao_aplicavel';
+                    return o.pagamento_status === filtroAprovacaoPagamento;
+                  });
+
+                  if (ocsPagamento.length === 0) {
+                    return (
+                      <div className="text-center py-12">
+                        <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-2" />
+                        <p className="text-gray-500">
+                          {filtroAprovacaoPagamento === 'pendente_aprovacao'
+                            ? 'Nenhum pedido aguardando aprovação de pagamento'
+                            : 'Nenhum resultado encontrado'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="rounded-lg border overflow-hidden">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-gray-50">
+                            <TableHead>OC</TableHead>
+                            <TableHead>Fornecedor</TableHead>
+                            <TableHead className="text-right">Valor</TableHead>
+                            <TableHead>Forma Solicitada</TableHead>
+                            <TableHead>Status OC</TableHead>
+                            <TableHead>Status Pagamento</TableHead>
+                            <TableHead>Data</TableHead>
+                            <TableHead className="text-center">Ação</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {ocsPagamento.map(oc => {
+                            const FORMAS = {
+                              'a_vista': 'A Vista', 'pix': 'PIX', 'boleto': 'Boleto',
+                              'parcelado': 'Parcelado', 'cartao_debito': 'Cartão Débito',
+                              'cartao_credito': 'Cartão Crédito', 'transferencia': 'Transferência',
+                              'cheque': 'Cheque', 'a_definir': 'A Definir',
+                            };
+                            return (
+                              <TableRow key={oc.id}>
+                                <TableCell className="font-mono font-semibold text-sm">{oc.numero_pedido}</TableCell>
+                                <TableCell className="text-sm">{oc.fornecedor_nome}</TableCell>
+                                <TableCell className="text-right font-mono text-sm font-bold">
+                                  R$ {(oc.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </TableCell>
+                                <TableCell className="text-sm">{FORMAS[oc.forma_pagamento_oc] || oc.forma_pagamento_oc || '-'}</TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className="text-xs">{oc.status}</Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {oc.pagamento_status === 'pendente_aprovacao' && (
+                                    <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium bg-yellow-100 text-yellow-700 border border-yellow-300">
+                                      Aguard. Aprovação
+                                    </span>
+                                  )}
+                                  {oc.pagamento_status === 'pago' && (
+                                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700 border border-green-300">
+                                      <CheckCircle className="w-3 h-3" /> Pago
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-sm text-gray-500">
+                                  {oc.created_at ? new Date(oc.created_at).toLocaleDateString('pt-BR') : '-'}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  {oc.pagamento_status === 'pendente_aprovacao' ? (
+                                    <Button
+                                      size="sm"
+                                      className="bg-green-600 hover:bg-green-700 gap-1 text-xs"
+                                      onClick={() => {
+                                        setOcParaAprovacaoPagamento(oc);
+                                        setPaymentApprovalOpen(true);
+                                      }}
+                                    >
+                                      <DollarSign className="w-3 h-3" /> Aprovar Pagamento
+                                    </Button>
+                                  ) : (
+                                    <span className="text-xs text-gray-400">
+                                      {oc.pagamento_aprovado_em
+                                        ? new Date(oc.pagamento_aprovado_em).toLocaleDateString('pt-BR')
+                                        : 'Pago'}
+                                    </span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Modais */}
@@ -1633,6 +1902,15 @@ export default function Compras() {
           setVendaSelecionada(null);
         }}
         venda={vendaSelecionada}
+      />
+
+      <PaymentApprovalModal
+        isOpen={paymentApprovalOpen}
+        onClose={() => {
+          setPaymentApprovalOpen(false);
+          setOcParaAprovacaoPagamento(null);
+        }}
+        oc={ocParaAprovacaoPagamento}
       />
     </div>
   );

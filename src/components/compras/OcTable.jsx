@@ -26,6 +26,7 @@ import {
   Clock,
   CheckCircle,
   XCircle,
+  CreditCard,
 } from "lucide-react";
 import { formatarData } from "@/utils/formatters";
 
@@ -40,6 +41,8 @@ export default function OcTable({
   onReceive,
   onSend,
   onCancel,
+  onSubmitPaymentApproval,
+  formasAutoAprovadas = ['a_vista'],
   isLoading = false,
 }) {
   // Mapeamento status -> Badge color
@@ -51,6 +54,13 @@ export default function OcTable({
     'Parcialmente Recebido': { variant: 'default', icon: Package, className: 'bg-blue-600' },
     'Recebido': { variant: 'default', icon: CheckCircle, className: 'bg-green-600' },
     'Cancelada': { variant: 'destructive', icon: XCircle },
+  };
+
+  // Badge de status de pagamento
+  const pagamentoBadgeConfig = {
+    'nao_aplicavel': { label: 'Dispensado', className: 'bg-gray-100 text-gray-500 border border-gray-200' },
+    'pendente_aprovacao': { label: 'Aguard. Aprovação', className: 'bg-yellow-100 text-yellow-700 border border-yellow-300' },
+    'pago': { label: 'Pago', className: 'bg-green-100 text-green-700 border border-green-300' },
   };
 
   // Detectar atraso (7+ dias)
@@ -88,6 +98,7 @@ export default function OcTable({
               <TableHead className="w-28">Vendedor</TableHead>
               <TableHead className="w-20 text-right">Valor</TableHead>
               <TableHead className="w-28">Status</TableHead>
+              <TableHead className="w-28">Pagamento</TableHead>
               <TableHead className="w-24">Data Criação</TableHead>
               <TableHead className="w-24">Previsão Entrega</TableHead>
               <TableHead className="w-24 text-center">Ações</TableHead>
@@ -133,6 +144,20 @@ export default function OcTable({
                         <span>Atrasado</span>
                       </div>
                     )}
+                  </TableCell>
+
+                  {/* Pagamento Badge */}
+                  <TableCell>
+                    {(() => {
+                      const pStatus = oc.pagamento_status || 'nao_aplicavel';
+                      const cfg = pagamentoBadgeConfig[pStatus] || pagamentoBadgeConfig['nao_aplicavel'];
+                      return (
+                        <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${cfg.className}`}>
+                          <CreditCard className="w-3 h-3" />
+                          {cfg.label}
+                        </span>
+                      );
+                    })()}
                   </TableCell>
 
                   {/* Data Criação */}
@@ -191,6 +216,18 @@ export default function OcTable({
                           <Copy className="w-4 h-4 mr-2" />
                           Duplicar OC
                         </DropdownMenuItem>
+
+                        {/* Enviar para Aprovação de Pagamento */}
+                        {oc.forma_pagamento_oc && !formasAutoAprovadas.includes(oc.forma_pagamento_oc) &&
+                          oc.pagamento_status === 'nao_aplicavel' && (
+                          <DropdownMenuItem
+                            onClick={() => onSubmitPaymentApproval?.(oc)}
+                            className="text-amber-700 font-medium"
+                          >
+                            <CreditCard className="w-4 h-4 mr-2" />
+                            Enviar para Aprovação de Pagamento
+                          </DropdownMenuItem>
+                        )}
 
                         {/* Deletar (apenas Rascunho) */}
                         {oc.status === 'Rascunho' && (

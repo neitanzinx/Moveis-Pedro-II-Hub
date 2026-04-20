@@ -16,6 +16,7 @@ import AuditLogPage from "./AuditLog";
 import ConfiguracaoWhatsAppBot from "../components/configuracoes/ConfiguracaoWhatsAppBot";
 import GestaoFuncionarios from "../components/configuracoes/GestaoFuncionarios";
 import ConfiguracaoPrazos from "../components/configuracoes/ConfiguracaoPrazos";
+import ConfiguracaoComprasPagamento from "../components/configuracoes/ConfiguracaoComprasPagamento";
 
 
 const MENU_CONFIG = {
@@ -44,6 +45,7 @@ const MENU_CONFIG = {
     items: [
       { id: "frota", label: "Frota de Veículos", icon: Truck },
       { id: "prazos", label: "Prazos de Entrega", icon: ClipboardList },
+      { id: "compras-pagamento", label: "Aprovação de Compras", icon: CreditCard },
     ]
 
   },
@@ -136,6 +138,7 @@ export default function Configuracoes() {
       case "cargos": return <GestaoCargos />;
       case "auditoria": return <AuditLogPage />;
       case "prazos": return <ConfiguracaoPrazos />;
+      case "compras-pagamento": return <ConfiguracaoComprasPagamento />;
 
       default: return null;
     }

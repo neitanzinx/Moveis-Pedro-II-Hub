@@ -113,7 +113,11 @@ export const comprasService = {
         data_previsao_entrega,
         observacoes,
         loja_id,
-        metadata = {}
+        metadata = {},
+        forma_pagamento_oc = 'a_vista',
+        observacoes_aprovacao = null,
+        anexos_aprovacao = [],
+        anexo_fornecedor = [],
       } = data;
 
       if (!fornecedor_id || itens.length === 0) {
@@ -141,6 +145,11 @@ export const comprasService = {
         valor_total,
         status: 'Rascunho',
         approval_status: 'Pendente',
+        forma_pagamento_oc,
+        pagamento_status: 'nao_aplicavel',
+        observacoes_aprovacao: observacoes_aprovacao || null,
+        anexos_aprovacao: anexos_aprovacao || [],
+        anexo_fornecedor: anexo_fornecedor || [],
         metadata: mergeOcMetadata({}, metadata, loja_id),
         data_pedido: new Date().toISOString().split('T')[0]
       });
@@ -286,7 +295,7 @@ export const comprasService = {
    * @param {string} novoStatus - Novo status
    * @returns {Promise<Object>}
    */
-  async updateOcStatus(ocId, novoStatus) {
+  async updateOcStatus(ocId, novoStatus, trackingData = null) {
     try {
       const statusValidos = [
         'Rascunho',
@@ -319,10 +328,29 @@ export const comprasService = {
         throw new Error(`Transição inválida de ${oc.status} para ${novoStatus}`);
       }
 
-      return await base44.entities.ComprasOrden.update(ocId, {
+      const updateData = {
         status: novoStatus,
         updated_at: new Date().toISOString()
-      });
+      };
+
+      // Auto-capture send timestamp and channel when transitioning to 'Pedido Enviado'
+      if (novoStatus === 'Pedido Enviado' && trackingData) {
+        const metadataAtual = oc.metadata || {};
+        const metadataNova = mergeOcMetadata(
+          metadataAtual,
+          {
+            data_hora_enviado: trackingData.data_hora_enviado || new Date().toISOString(),
+            canal_envio: trackingData.canal_envio || '',
+            canal_solicitacao: trackingData.canal_solicitacao || metadataAtual.canal_solicitacao || '',
+            quem_aceitou: trackingData.quem_aceitou || metadataAtual.quem_aceitou || '',
+            pendencias: trackingData.pendencias || metadataAtual.pendencias || '',
+          },
+          metadataAtual.loja_id || null
+        );
+        updateData.metadata = metadataNova;
+      }
+
+      return await base44.entities.ComprasOrden.update(ocId, updateData);
     } catch (error) {
       console.error('Erro ao atualizar status da OC:', error);
       throw error;
@@ -772,6 +800,151 @@ export const comprasService = {
       });
     } catch (error) {
       console.error('Erro ao deletar OC:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Envia OC para aprovação de pagamento pelo master
+   * Só aplicável para pagamentos não-a-vista
+   * @param {string} ocId
+   * @param {Object} data - { observacoes_aprovacao?, anexos_aprovacao? }
+   * @returns {Promise<Object>}
+   */
+  async submitForPaymentApproval(ocId, data = {}) {
+    try {
+      const oc = await base44.entities.ComprasOrden.get(ocId);
+
+      if (oc.pagamento_status === 'pago') {
+        throw new Error('Este pedido já está marcado como pago');
+      }
+
+      return await base44.entities.ComprasOrden.update(ocId, {
+        pagamento_status: 'pendente_aprovacao',
+        observacoes_aprovacao: data.observacoes_aprovacao ?? oc.observacoes_aprovacao ?? null,
+        anexos_aprovacao: data.anexos_aprovacao ?? oc.anexos_aprovacao ?? [],
+        updated_at: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Erro ao enviar OC para aprovação de pagamento:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Master aprova e registra pagamento de uma OC
+   * @param {string} ocId
+   * @param {Object} data - {
+   *   pagamento_forma_final, pagamento_formas_multiplas?,
+   *   pagamento_parcelas?, pagamento_valor_pago?,
+   *   pagamento_data_pagamento?, pagamento_observacoes?,
+   *   aprovado_por?
+   * }
+   * @returns {Promise<Object>}
+   */
+  async approvePayment(ocId, data = {}) {
+    try {
+      const oc = await base44.entities.ComprasOrden.get(ocId);
+
+      if (oc.pagamento_status !== 'pendente_aprovacao') {
+        throw new Error(`OC não está aguardando aprovação de pagamento. Status atual: ${oc.pagamento_status}`);
+      }
+
+      const ocAtualizada = await base44.entities.ComprasOrden.update(ocId, {
+        pagamento_status: 'pago',
+        pagamento_aprovado_por: data.aprovado_por || null,
+        pagamento_aprovado_em: new Date().toISOString(),
+        pagamento_forma_final: data.pagamento_forma_final || null,
+        pagamento_formas_multiplas: data.pagamento_formas_multiplas || [],
+        pagamento_parcelas: data.pagamento_parcelas || null,
+        pagamento_valor_pago: data.pagamento_valor_pago || null,
+        pagamento_data_pagamento: data.pagamento_data_pagamento || null,
+        pagamento_observacoes: data.pagamento_observacoes || null,
+        updated_at: new Date().toISOString(),
+      });
+
+      // Atualizar ou criar lançamento financeiro correspondente
+      try {
+        const { data: lancamentos } = await supabase
+          .from('lancamentos_financeiros')
+          .select('id')
+          .ilike('descricao', `%OC #${oc.numero_pedido}%`)
+          .is('deleted_at', null)
+          .limit(1);
+
+        const dataFormaDesc = data.pagamento_forma_final
+          ? ` — ${data.pagamento_forma_final}`
+          : '';
+        const dataPagamento = data.pagamento_data_pagamento || new Date().toISOString().split('T')[0];
+
+        if (lancamentos && lancamentos.length > 0) {
+          await base44.entities.LancamentoFinanceiro.update(lancamentos[0].id, {
+            status: 'Pago',
+            data_pagamento: dataPagamento,
+            forma_pagamento: data.pagamento_forma_final || null,
+            observacao: `Aprovado pelo master.${dataFormaDesc}${data.pagamento_observacoes ? ' ' + data.pagamento_observacoes : ''}`,
+          });
+        } else {
+          // Lançamento ainda não existe (OC talvez não tenha sido totalmente recebida)
+          const { data: categoriasCompra } = await supabase
+            .from('categorias_financeiras')
+            .select('id, nome')
+            .eq('nome', 'Compras de Estoque')
+            .single();
+
+          const lancamentoPayload = {
+            tipo: 'DESPESA',
+            descricao: `Compra OC #${oc.numero_pedido}${dataFormaDesc}`,
+            valor: data.pagamento_valor_pago || oc.valor_total,
+            data_vencimento: dataPagamento,
+            data_lancamento: new Date().toISOString().split('T')[0],
+            data_pagamento: dataPagamento,
+            status: 'Pago',
+            forma_pagamento: data.pagamento_forma_final || null,
+            observacao: `Lançamento gerado na aprovação de pagamento da OC ${oc.numero_pedido}.${data.pagamento_observacoes ? ' ' + data.pagamento_observacoes : ''}`,
+          };
+          if (categoriasCompra?.id) {
+            lancamentoPayload.categoria_id = categoriasCompra.id;
+            lancamentoPayload.categoria_nome = categoriasCompra.nome;
+          }
+          await base44.entities.LancamentoFinanceiro.create(lancamentoPayload);
+        }
+      } catch (financeiroError) {
+        console.warn('Aviso: não foi possível atualizar lançamento financeiro:', financeiroError);
+        // Não lança erro para não reverter a aprovação
+      }
+
+      return ocAtualizada;
+    } catch (error) {
+      console.error('Erro ao aprovar pagamento da OC:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Atualiza apenas campos de anexo e pagamento de uma OC (qualquer status)
+   * @param {string} ocId
+   * @param {Object} dados - { forma_pagamento_oc?, anexo_fornecedor?, observacoes_aprovacao?, anexos_aprovacao? }
+   * @returns {Promise<Object>}
+   */
+  async updateOcPaymentFields(ocId, dados) {
+    try {
+      const updatePayload = { updated_at: new Date().toISOString() };
+
+      if (dados.forma_pagamento_oc !== undefined) {
+        updatePayload.forma_pagamento_oc = dados.forma_pagamento_oc;
+        // Reset controlado pela UI de acordo com as regras de auto aprovação
+        if (dados.pagamento_status_reset === true) {
+          updatePayload.pagamento_status = 'nao_aplicavel';
+        }
+      }
+      if (dados.anexo_fornecedor !== undefined) updatePayload.anexo_fornecedor = dados.anexo_fornecedor;
+      if (dados.observacoes_aprovacao !== undefined) updatePayload.observacoes_aprovacao = dados.observacoes_aprovacao;
+      if (dados.anexos_aprovacao !== undefined) updatePayload.anexos_aprovacao = dados.anexos_aprovacao;
+
+      return await base44.entities.ComprasOrden.update(ocId, updatePayload);
+    } catch (error) {
+      console.error('Erro ao atualizar campos de pagamento da OC:', error);
       throw error;
     }
   },
