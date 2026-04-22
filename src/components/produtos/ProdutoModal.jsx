@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Loader2, Sparkles, Info, ChevronRight, FileText } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { calculateSuggestedMarkup, calculateMarkupDetails } from "@/utils/markupCalculator";
+import { calculateSuggestedMarkup, calculateMarkupDetails, calculateFinalPriceFromMarkup, toMultiplierFromPercent, toPercentFromMultiplier } from "@/utils/markupCalculator";
 import { useAuth } from '@/hooks/useAuth';
 const categorias = [
   "Sofa",
@@ -49,6 +49,11 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
     foto_url: "",
     preco_venda: "",
     preco_custo: "",
+    markup_multiplicador: "",
+    markup_percentual: "",
+    preco_final_sugerido: "",
+    preco_final_manual: "",
+    usar_markup_fornecedor: false,
     quantidade_estoque: "",
     estoque_minimo: "",
     tipo_entrega_padrao: "desmontado",
@@ -65,19 +70,33 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
   useEffect(() => {
     const hasCost = parseFloat(formData.preco_custo) > 0;
     if (hasCost && formData.categoria) {
-      const suggestion = calculateSuggestedMarkup(formData);
+      const suggestionByMarkup = calculateFinalPriceFromMarkup(
+        formData.preco_custo,
+        formData.markup_multiplicador,
+        formData.markup_percentual
+      );
+      const suggestion = suggestionByMarkup > 0 ? suggestionByMarkup : calculateSuggestedMarkup(formData);
       setSuggestedPrice(suggestion);
-      const details = calculateMarkupDetails(formData);
+      const details = calculateMarkupDetails({
+        ...formData,
+        markup_multiplicador: formData.markup_multiplicador,
+        markup_percentual: formData.markup_percentual,
+      });
       setMarkupDetails(details);
+      setFormData((prev) => ({
+        ...prev,
+        preco_final_sugerido: suggestion > 0 ? suggestion.toString() : "",
+      }));
     } else {
       setSuggestedPrice(0);
       setMarkupDetails(null);
     }
-  }, [formData.preco_custo, formData.categoria, formData.quantidade_estoque, formData.estoque_minimo, formData.fornecedor_id]);
+  }, [formData.preco_custo, formData.markup_multiplicador, formData.markup_percentual, formData.categoria, formData.quantidade_estoque, formData.estoque_minimo, formData.fornecedor_id]);
 
   const applySuggestedMarkup = () => {
     if (suggestedPrice) {
       handleChange('preco_venda', suggestedPrice.toString());
+      handleChange('preco_final_manual', suggestedPrice.toString());
     }
   };
 
@@ -91,6 +110,11 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
         foto_url: produto.fotos?.[0] || produto.foto_url || "",
         preco_venda: produto.preco_venda || "",
         preco_custo: produto.preco_custo || "",
+        markup_multiplicador: produto.markup_multiplicador || "",
+        markup_percentual: produto.markup_percentual || "",
+        preco_final_sugerido: produto.preco_final_sugerido || "",
+        preco_final_manual: produto.preco_final_manual || "",
+        usar_markup_fornecedor: Boolean(produto.usar_markup_fornecedor),
         quantidade_estoque: produto.quantidade_estoque || "",
         estoque_minimo: produto.estoque_minimo?.toString() || "",
         tipo_entrega_padrao: produto.tipo_entrega_padrao || "desmontado",
@@ -105,6 +129,11 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
         foto_url: "",
         preco_venda: "",
         preco_custo: "",
+        markup_multiplicador: "",
+        markup_percentual: "",
+        preco_final_sugerido: "",
+        preco_final_manual: "",
+        usar_markup_fornecedor: false,
         quantidade_estoque: "",
         estoque_minimo: "",
         tipo_entrega_padrao: "desmontado",
@@ -168,8 +197,13 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
 
     const dataToSave = {
       ...formData,
-      preco_venda: parseFloat(formData.preco_venda),
+      preco_venda: parseFloat(formData.preco_final_manual || formData.preco_venda),
       preco_custo: formData.preco_custo ? parseFloat(formData.preco_custo) : undefined,
+      markup_multiplicador: formData.markup_multiplicador ? parseFloat(formData.markup_multiplicador) : null,
+      markup_percentual: formData.markup_percentual ? parseFloat(formData.markup_percentual) : null,
+      preco_final_sugerido: formData.preco_final_sugerido ? parseFloat(formData.preco_final_sugerido) : null,
+      preco_final_manual: formData.preco_final_manual ? parseFloat(formData.preco_final_manual) : null,
+      usar_markup_fornecedor: Boolean(formData.usar_markup_fornecedor),
       quantidade_estoque: parseInt(formData.quantidade_estoque),
       estoque_minimo: formData.estoque_minimo ? parseInt(formData.estoque_minimo) : 0,
       fotos: formData.foto_url ? [formData.foto_url] : [],
@@ -367,6 +401,70 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
               )}
             </div>
           </div>
+
+          {showFinancials && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="markup_multiplicador">Markup Multiplicador</Label>
+                <Input
+                  id="markup_multiplicador"
+                  type="number"
+                  step="0.0001"
+                  min="1"
+                  value={formData.markup_multiplicador}
+                  onChange={(e) => {
+                    const multiplierText = e.target.value;
+                    const multiplier = parseFloat(multiplierText || 0);
+                    handleChange("markup_multiplicador", multiplierText);
+                    handleChange("markup_percentual", multiplier > 0 ? toPercentFromMultiplier(multiplier).toString() : "");
+                  }}
+                  placeholder="Ex: 1.45"
+                />
+              </div>
+              <div>
+                <Label htmlFor="markup_percentual">Markup Percentual (%)</Label>
+                <Input
+                  id="markup_percentual"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.markup_percentual}
+                  onChange={(e) => {
+                    const percentText = e.target.value;
+                    const percent = parseFloat(percentText || 0);
+                    handleChange("markup_percentual", percentText);
+                    handleChange("markup_multiplicador", percentText === "" ? "" : toMultiplierFromPercent(percent).toString());
+                  }}
+                  placeholder="Ex: 45"
+                />
+              </div>
+              <div>
+                <Label htmlFor="preco_final_sugerido">Preco Final Sugerido (R$)</Label>
+                <Input
+                  id="preco_final_sugerido"
+                  type="number"
+                  step="0.01"
+                  value={formData.preco_final_sugerido || ""}
+                  disabled
+                />
+              </div>
+              <div>
+                <Label htmlFor="preco_final_manual">Preco Final Manual (R$)</Label>
+                <Input
+                  id="preco_final_manual"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.preco_final_manual || ""}
+                  onChange={(e) => {
+                    handleChange("preco_final_manual", e.target.value);
+                    handleChange("preco_venda", e.target.value);
+                  }}
+                  placeholder="Opcional"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Estoque */}
           <div className="grid grid-cols-2 gap-4">

@@ -78,6 +78,16 @@ export function calculateSuggestedMarkup(product) {
     const custo = parseFloat(product.preco_custo || 0);
     if (custo <= 0) return 0;
 
+    const multiplierFromProduct = parseFloat(product.markup_multiplicador || 0);
+    if (multiplierFromProduct > 0) {
+        return Math.round(custo * multiplierFromProduct * 100) / 100;
+    }
+
+    const percentFromProduct = parseFloat(product.markup_percentual || 0);
+    if (percentFromProduct > 0) {
+        return Math.round(custo * (1 + (percentFromProduct / 100)) * 100) / 100;
+    }
+
     const categoria = product.categoria;
 
     // 1. Base margin target
@@ -102,6 +112,43 @@ export function calculateMarkupDetails(product) {
     const custo = parseFloat(product.preco_custo || 0);
     if (custo <= 0) {
         return null;
+    }
+
+    const multiplierFromProduct = parseFloat(product.markup_multiplicador || 0);
+    if (multiplierFromProduct > 0) {
+        const precoFinalMultiplicador = custo * multiplierFromProduct;
+        return {
+            custo,
+            categoria: product.categoria || 'Outros',
+            steps: [
+                {
+                    label: 'Markup Definido',
+                    factor: `${multiplierFromProduct.toFixed(2)}x`,
+                    value: Math.round(precoFinalMultiplicador * 100) / 100,
+                    description: `R$ ${custo.toFixed(2)} × ${multiplierFromProduct.toFixed(2)}`
+                }
+            ],
+            precoFinal: Math.round(precoFinalMultiplicador * 100) / 100
+        };
+    }
+
+    const percentFromProduct = parseFloat(product.markup_percentual || 0);
+    if (percentFromProduct > 0) {
+        const multiplier = 1 + (percentFromProduct / 100);
+        const precoFinalPercentual = custo * multiplier;
+        return {
+            custo,
+            categoria: product.categoria || 'Outros',
+            steps: [
+                {
+                    label: 'Markup Definido',
+                    factor: `+${percentFromProduct.toFixed(2)}%`,
+                    value: Math.round(precoFinalPercentual * 100) / 100,
+                    description: `R$ ${custo.toFixed(2)} × ${multiplier.toFixed(4)}`
+                }
+            ],
+            precoFinal: Math.round(precoFinalPercentual * 100) / 100
+        };
     }
 
     const categoria = product.categoria || 'Outros';
@@ -168,6 +215,35 @@ function normalizePercent(val) {
     const num = parseFloat(val || 0);
     if (isNaN(num)) return 0;
     return num > 1 ? num / 100 : num;
+}
+
+export function toPercentFromMultiplier(multiplier) {
+    const numericMultiplier = parseFloat(multiplier || 0);
+    if (!numericMultiplier || numericMultiplier <= 0) return 0;
+    return Math.round((numericMultiplier - 1) * 10000) / 100;
+}
+
+export function toMultiplierFromPercent(percent) {
+    const numericPercent = parseFloat(percent || 0);
+    if (isNaN(numericPercent)) return 1;
+    return Math.round((1 + (numericPercent / 100)) * 10000) / 10000;
+}
+
+export function calculateFinalPriceFromMarkup(custo, markupMultiplicador, markupPercentual) {
+    const custoNumerico = parseFloat(custo || 0);
+    if (custoNumerico <= 0) return 0;
+
+    const multiplicador = parseFloat(markupMultiplicador || 0);
+    if (multiplicador > 0) {
+        return Math.round(custoNumerico * multiplicador * 100) / 100;
+    }
+
+    const percentual = parseFloat(markupPercentual || 0);
+    if (percentual > 0) {
+        return Math.round(custoNumerico * (1 + (percentual / 100)) * 100) / 100;
+    }
+
+    return 0;
 }
 
 /**

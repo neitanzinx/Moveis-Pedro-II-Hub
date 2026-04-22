@@ -48,6 +48,7 @@ import { useTenant } from '@/contexts/TenantContext';
 import FornecedorModal from '@/components/cadastros/FornecedorModal';
 import ProdutoModal from '@/components/produtos/ProdutoModal';
 import { gerarTextoPedidoOperacional } from '@/utils/orderFormatUtils';
+import { calculateFinalPriceFromMarkup, toMultiplierFromPercent, toPercentFromMultiplier } from '@/utils/markupCalculator';
 
 function buildProductSummary(produto) {
   if (!produto) return '';
@@ -130,6 +131,51 @@ function matchProductByAnyOrder(produto, termoBusca) {
   return termos.every(termo => conteudoProduto.includes(termo));
 }
 
+function buildItemPricingFromCostAndMarkup(custo, markupMultiplicador, markupPercentual) {
+  const custoNumerico = Number(custo) || 0;
+  const precoSugerido = calculateFinalPriceFromMarkup(custoNumerico, markupMultiplicador, markupPercentual);
+  const precoFinal = precoSugerido > 0 ? precoSugerido : custoNumerico;
+
+  return {
+    preco_custo_item: custoNumerico,
+    preco_final_sugerido: precoSugerido > 0 ? precoSugerido : null,
+    preco_final_manual: precoFinal > 0 ? precoFinal : null,
+    preco_unitario: precoFinal,
+  };
+}
+
+function createOcItemDefault() {
+  return {
+    produto_id: null,
+    produto_nome: '',
+    nome_completo_produto: '',
+    quantidade_pedida: 1,
+    preco_custo_item: 0,
+    preco_unitario: 0,
+    preco_tabela: 0,
+    markup_multiplicador: '',
+    markup_percentual: '',
+    preco_final_sugerido: null,
+    preco_final_manual: null,
+    modelo_referencia: '',
+    categoria: '',
+    cor: '',
+    cor_item: '',
+    material: '',
+    largura: '',
+    altura: '',
+    profundidade: '',
+    observacoes_item: '',
+    descricao_personalizada: '',
+    tipo_item_oc: 'ORDEM_COMUM_ENCOMENDA',
+    origem_solicitacao: 'VENDEDOR',
+    pedido_origem_numero: '',
+    reposicao_fabrica: false,
+    motivo_assistencia: '',
+    possui_imagens_videos: false,
+    anexos_item: [],
+  };
+}
 
 
 /**
@@ -182,29 +228,11 @@ export default function OcModal({
   const [salvandoNovoProduto, setSalvandoNovoProduto] = useState(false);
 
   const [itens, setItens] = useState([]);
-  const [novoItem, setNovoItem] = useState({
-    produto_id: null,
-    produto_nome: '',
-    nome_completo_produto: '',
-    quantidade_pedida: 1,
-    preco_unitario: 0,
-    preco_tabela: 0,
-    modelo_referencia: '',
-    cor: '',
-    cor_item: '',
-    material: '',
-    largura: '',
-    altura: '',
-    profundidade: '',
-    observacoes_item: '',
-    tipo_item_oc: 'ORDEM_COMUM_ENCOMENDA',
-    origem_solicitacao: 'VENDEDOR',
-    pedido_origem_numero: '',
-    reposicao_fabrica: false,
-    motivo_assistencia: '',
-    possui_imagens_videos: false,
-    anexos_item: [],
-  });
+  const [novoItem, setNovoItem] = useState(createOcItemDefault());
+  const [bulkMarkupPercentual, setBulkMarkupPercentual] = useState('');
+  const [bulkFiltroSerieTipo, setBulkFiltroSerieTipo] = useState('todos');
+  const [bulkFiltroSerieValor, setBulkFiltroSerieValor] = useState('todos');
+  const [bulkPersistirCadastro, setBulkPersistirCadastro] = useState(false);
 
   const [showAlertDelete, setShowAlertDelete] = useState(false);
   const [itemParaDeleter, setItemParaDeleter] = useState(null);
@@ -229,7 +257,7 @@ export default function OcModal({
     queryFn: async () => {
       const { data, error } = await supabase
         .from('produtos')
-        .select('id, nome, preco_custo, preco_venda, modelo_referencia, cor, material, categoria, largura, altura, profundidade, fornecedor_id, fornecedor_nome, parent_id, is_parent')
+        .select('id, nome, preco_custo, preco_venda, markup_multiplicador, markup_percentual, modelo_referencia, cor, material, categoria, largura, altura, profundidade, fornecedor_id, fornecedor_nome, parent_id, is_parent')
         .eq('fornecedor_id', formData.fornecedor_id)
         .order('nome', { ascending: true });
       if (error) throw error;
@@ -363,6 +391,23 @@ export default function OcModal({
     return buildStructuredItemDetails(novoItem);
   }, [novoItem]);
 
+  const fornecedorSelecionado = useMemo(
+    () => fornecedores.find((f) => String(f.id) === String(formData.fornecedor_id)),
+    [fornecedores, formData.fornecedor_id]
+  );
+
+  const seriesDisponiveis = useMemo(() => {
+    if (bulkFiltroSerieTipo === 'modelo') {
+      return Array.from(new Set(itens.map((item) => item.modelo_referencia).filter(Boolean))).sort();
+    }
+
+    if (bulkFiltroSerieTipo === 'categoria') {
+      return Array.from(new Set(itens.map((item) => item.categoria).filter(Boolean))).sort();
+    }
+
+    return [];
+  }, [itens, bulkFiltroSerieTipo]);
+
   // Handlers
   const handleFornecedorChange = (fornecedorId) => {
     if (itens.length > 0) {
@@ -372,30 +417,7 @@ export default function OcModal({
 
     const fornecedor = fornecedores.find(f => String(f.id) === String(fornecedorId));
     setBuscaProduto('');
-    setNovoItem({
-      produto_id: null,
-      produto_nome: '',
-      nome_completo_produto: '',
-      quantidade_pedida: 1,
-      preco_unitario: 0,
-      preco_tabela: 0,
-      modelo_referencia: '',
-      cor: '',
-      cor_item: '',
-      material: '',
-      largura: '',
-      altura: '',
-      profundidade: '',
-      observacoes_item: '',
-      descricao_personalizada: '',
-      tipo_item_oc: 'ORDEM_COMUM_ENCOMENDA',
-      origem_solicitacao: 'VENDEDOR',
-      pedido_origem_numero: '',
-      reposicao_fabrica: false,
-      motivo_assistencia: '',
-      possui_imagens_videos: false,
-      anexos_item: [],
-    });
+    setNovoItem(createOcItemDefault());
     setLimiteProdutos(5);
     setMostrarSugestoesProduto(true); // Abre cascata automaticamente
     setFormData(prev => ({
@@ -416,30 +438,7 @@ export default function OcModal({
       descricao_personalizada: descricaoEstruturadaNovoItem,
       id: undefined,
     }]);
-    setNovoItem({
-      produto_id: null,
-      produto_nome: '',
-      nome_completo_produto: '',
-      quantidade_pedida: 1,
-      preco_unitario: 0,
-      preco_tabela: 0,
-      modelo_referencia: '',
-      cor: '',
-      cor_item: '',
-      material: '',
-      largura: '',
-      altura: '',
-      profundidade: '',
-      observacoes_item: '',
-      descricao_personalizada: '',
-      tipo_item_oc: 'ORDEM_COMUM_ENCOMENDA',
-      origem_solicitacao: 'VENDEDOR',
-      pedido_origem_numero: '',
-      reposicao_fabrica: false,
-      motivo_assistencia: '',
-      possui_imagens_videos: false,
-      anexos_item: [],
-    });
+    setNovoItem(createOcItemDefault());
     setBuscaProduto('');
     setMostrarSugestoesProduto(false);
   };
@@ -455,14 +454,25 @@ export default function OcModal({
     const camposProduto = extractItemFieldsFromProduct(produto);
     const precoCusto = Number(produto.preco_custo) || 0;
 
+    const usarMarkupFornecedor = Boolean(fornecedorSelecionado?.usar_markup_padrao);
+    const markupMultiplicador = produto.markup_multiplicador || (usarMarkupFornecedor ? fornecedorSelecionado?.markup_padrao_multiplicador : null);
+    const markupPercentual = produto.markup_percentual || (usarMarkupFornecedor ? fornecedorSelecionado?.markup_padrao_percentual : null);
+    const pricing = buildItemPricingFromCostAndMarkup(precoCusto, markupMultiplicador, markupPercentual);
+
     setNovoItem(prev => ({
       ...prev,
       produto_id: produto.id,
       produto_nome: produto.nome || '',
       nome_completo_produto: buildNomeConsolidadoProduto(produto),
+      preco_custo_item: precoCusto,
       preco_tabela: produto.preco_venda || 0,
-      preco_unitario: prev.preco_unitario > 0 ? prev.preco_unitario : precoCusto,
+      markup_multiplicador: markupMultiplicador ? String(markupMultiplicador) : '',
+      markup_percentual: markupPercentual ? String(markupPercentual) : '',
+      preco_final_sugerido: pricing.preco_final_sugerido,
+      preco_final_manual: pricing.preco_final_manual,
+      preco_unitario: prev.preco_unitario > 0 ? prev.preco_unitario : pricing.preco_unitario,
       ...camposProduto,
+      categoria: produto.categoria || '',
       cor_item: camposProduto.cor || '',
       descricao_personalizada: buildStructuredItemDetails({
         ...prev,
@@ -477,11 +487,116 @@ export default function OcModal({
   const handleItemChange = (index, field, value) => {
     setItens(prev => prev.map((item, itemIndex) => {
       if (itemIndex !== index) return item;
-      return {
+
+      const itemAtualizado = {
         ...item,
         [field]: value,
       };
+
+      if (field === 'markup_multiplicador') {
+        const percent = value ? toPercentFromMultiplier(value) : '';
+        const pricing = buildItemPricingFromCostAndMarkup(item.preco_custo_item, value, percent);
+        return {
+          ...itemAtualizado,
+          markup_percentual: percent ? String(percent) : '',
+          preco_final_sugerido: pricing.preco_final_sugerido,
+          preco_final_manual: pricing.preco_final_manual,
+          preco_unitario: pricing.preco_unitario,
+        };
+      }
+
+      if (field === 'markup_percentual') {
+        const multiplier = value ? toMultiplierFromPercent(value) : '';
+        const pricing = buildItemPricingFromCostAndMarkup(item.preco_custo_item, multiplier, value);
+        return {
+          ...itemAtualizado,
+          markup_multiplicador: multiplier ? String(multiplier) : '',
+          preco_final_sugerido: pricing.preco_final_sugerido,
+          preco_final_manual: pricing.preco_final_manual,
+          preco_unitario: pricing.preco_unitario,
+        };
+      }
+
+      if (field === 'preco_final_manual') {
+        return {
+          ...itemAtualizado,
+          preco_unitario: Number(value) || 0,
+        };
+      }
+
+      if (field === 'preco_unitario') {
+        return {
+          ...itemAtualizado,
+          preco_final_manual: Number(value) || 0,
+        };
+      }
+
+      return itemAtualizado;
     }));
+  };
+
+  const itemAtendeFiltroLote = (item) => {
+    if (bulkFiltroSerieTipo === 'todos') return true;
+    if (bulkFiltroSerieValor === 'todos') return true;
+
+    if (bulkFiltroSerieTipo === 'modelo') {
+      return String(item.modelo_referencia || '') === String(bulkFiltroSerieValor);
+    }
+
+    if (bulkFiltroSerieTipo === 'categoria') {
+      return String(item.categoria || '') === String(bulkFiltroSerieValor);
+    }
+
+    return true;
+  };
+
+  const applyBulkMarkup = async (escopo) => {
+    const percentual = parseFloat(bulkMarkupPercentual || 0);
+    if (!(percentual >= 0)) {
+      toast.error('Informe um markup válido para aplicar em lote');
+      return;
+    }
+
+    const multiplicador = toMultiplierFromPercent(percentual);
+    const itensAtualizados = itens.map((item) => {
+      const atendeFornecedor = escopo !== 'fornecedor' || String(item.fornecedor_id || formData.fornecedor_id) === String(formData.fornecedor_id);
+      const atendeFiltro = itemAtendeFiltroLote(item);
+      if (!atendeFornecedor || !atendeFiltro) {
+        return item;
+      }
+
+      const pricing = buildItemPricingFromCostAndMarkup(item.preco_custo_item || item.preco_unitario, multiplicador, percentual);
+      return {
+        ...item,
+        markup_percentual: percentual.toString(),
+        markup_multiplicador: multiplicador.toString(),
+        preco_final_sugerido: pricing.preco_final_sugerido,
+        preco_final_manual: pricing.preco_final_manual,
+        preco_unitario: pricing.preco_unitario,
+      };
+    });
+
+    setItens(itensAtualizados);
+
+    if (bulkPersistirCadastro) {
+      const produtosAtualizar = itensAtualizados
+        .filter((item) => item.produto_id && itemAtendeFiltroLote(item))
+        .map((item) => item.produto_id);
+
+      for (const produtoId of [...new Set(produtosAtualizar)]) {
+        await base44.entities.Produto.update(produtoId, {
+          markup_percentual: percentual,
+          markup_multiplicador: multiplicador,
+          usar_markup_fornecedor: false,
+        });
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['produtos-fornecedor', formData.fornecedor_id] });
+      toast.success('Markup aplicado na OC e persistido no cadastro dos produtos filtrados');
+      return;
+    }
+
+    toast.success('Markup aplicado em lote nos itens da OC');
   };
 
   const handleCopiarPedido = async () => {
@@ -569,6 +684,11 @@ export default function OcModal({
               possui_imagens_videos: item.possui_imagens_videos || false,
               anexos_item: item.anexos_item || [],
               quantidade_pedida: item.quantidade_pedida,
+              preco_custo_item: item.preco_custo_item || null,
+              markup_multiplicador: item.markup_multiplicador ? parseFloat(item.markup_multiplicador) : null,
+              markup_percentual: item.markup_percentual ? parseFloat(item.markup_percentual) : null,
+              preco_final_sugerido: item.preco_final_sugerido || null,
+              preco_final_manual: item.preco_final_manual || null,
               preco_unitario: item.preco_unitario,
               preco_tabela: item.preco_tabela,
             });
@@ -1033,7 +1153,9 @@ export default function OcModal({
                       <TableHead>Produto</TableHead>
                       <TableHead>Detalhes</TableHead>
                       <TableHead className="text-right w-24">Qtd</TableHead>
-                      <TableHead className="text-right w-32">Preço Unit.</TableHead>
+                      <TableHead className="text-right w-28">Custo</TableHead>
+                      <TableHead className="text-right w-24">Markup %</TableHead>
+                      <TableHead className="text-right w-32">Preço Final</TableHead>
                       <TableHead className="text-right w-32">Subtotal</TableHead>
                       {podeEditarItens && <TableHead className="w-12">Ações</TableHead>}
                     </TableRow>
@@ -1079,17 +1201,34 @@ export default function OcModal({
                           )}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm">
+                          R$ {(Number(item.preco_custo_item || 0)).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm">
                           {podeEditarItens ? (
                             <Input
                               type="number"
                               step="0.01"
                               min="0"
                               className="text-right"
-                              value={item.preco_unitario}
-                              onChange={(e) => handleItemChange(index, 'preco_unitario', parseFloat(e.target.value) || 0)}
+                              value={item.markup_percentual || ''}
+                              onChange={(e) => handleItemChange(index, 'markup_percentual', e.target.value)}
                             />
                           ) : (
-                            `R$ ${(item.preco_unitario || 0).toFixed(2)}`
+                            `${Number(item.markup_percentual || 0).toFixed(2)}%`
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm">
+                          {podeEditarItens ? (
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              className="text-right"
+                              value={item.preco_final_manual || item.preco_unitario || 0}
+                              onChange={(e) => handleItemChange(index, 'preco_final_manual', parseFloat(e.target.value) || 0)}
+                            />
+                          ) : (
+                            `R$ ${(Number(item.preco_final_manual || item.preco_unitario || 0)).toFixed(2)}`
                           )}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm font-semibold">
@@ -1115,6 +1254,82 @@ export default function OcModal({
                 </Table>
               </div>
             </div>
+
+            {podeEditarItens && itens.length > 0 && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-3">
+                <h4 className="text-sm font-semibold text-blue-800">Aplicação de Markup em Lote</h4>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div>
+                    <Label className="text-xs">Markup (%)</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={bulkMarkupPercentual}
+                      onChange={(e) => setBulkMarkupPercentual(e.target.value)}
+                      placeholder="Ex: 45"
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-xs">Filtro de Série</Label>
+                    <Select
+                      value={bulkFiltroSerieTipo}
+                      onValueChange={(value) => {
+                        setBulkFiltroSerieTipo(value);
+                        setBulkFiltroSerieValor('todos');
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="todos">Todos</SelectItem>
+                        <SelectItem value="modelo">Modelo/Referência</SelectItem>
+                        <SelectItem value="categoria">Categoria</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs">Valor do Filtro</Label>
+                    <Select value={bulkFiltroSerieValor} onValueChange={setBulkFiltroSerieValor}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Todos" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="todos">Todos</SelectItem>
+                        {seriesDisponiveis.map((valor) => (
+                          <SelectItem key={valor} value={valor}>{valor}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-end gap-2">
+                    <Button type="button" variant="outline" onClick={() => applyBulkMarkup('todos')}>
+                      Aplicar em Todos
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => applyBulkMarkup('fornecedor')}>
+                      Só Fornecedor
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    id="bulkPersistirCadastro"
+                    type="checkbox"
+                    checked={bulkPersistirCadastro}
+                    onChange={(e) => setBulkPersistirCadastro(e.target.checked)}
+                    className="rounded"
+                  />
+                  <Label htmlFor="bulkPersistirCadastro" className="text-xs">
+                    Persistir também no cadastro dos produtos afetados
+                  </Label>
+                </div>
+              </div>
+            )}
 
               {/* Adicionar novo item */}
               {podeEditarItens && (
@@ -1226,7 +1441,7 @@ export default function OcModal({
                       </div>
                     </div>
 
-                    <div className="md:col-span-3 space-y-2">
+                    <div className="md:col-span-2 space-y-2">
                       <Label className="text-xs font-semibold text-gray-600">Quantidade</Label>
                       <Input
                         type="number"
@@ -1240,8 +1455,64 @@ export default function OcModal({
                       />
                     </div>
 
-                    <div className="md:col-span-3 space-y-2">
-                      <Label className="text-xs font-semibold text-gray-600">Preço Unitário</Label>
+                    <div className="md:col-span-2 space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Preço de Custo</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="bg-gray-100"
+                        value={novoItem.preco_custo_item || 0}
+                        disabled
+                      />
+                    </div>
+
+                    <div className="md:col-span-1 space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Markup %</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="bg-white"
+                        value={novoItem.markup_percentual || ''}
+                        onChange={(e) => {
+                          const percentual = e.target.value;
+                          const multiplicador = percentual === '' ? '' : toMultiplierFromPercent(percentual).toString();
+                          const pricing = buildItemPricingFromCostAndMarkup(novoItem.preco_custo_item, multiplicador, percentual);
+                          setNovoItem(prev => ({
+                            ...prev,
+                            markup_percentual: percentual,
+                            markup_multiplicador: multiplicador,
+                            ...pricing,
+                          }));
+                        }}
+                      />
+                    </div>
+
+                    <div className="md:col-span-1 space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Markup x</Label>
+                      <Input
+                        type="number"
+                        step="0.0001"
+                        min="1"
+                        className="bg-white"
+                        value={novoItem.markup_multiplicador || ''}
+                        onChange={(e) => {
+                          const multiplicador = e.target.value;
+                          const percentual = multiplicador === '' ? '' : toPercentFromMultiplier(multiplicador).toString();
+                          const pricing = buildItemPricingFromCostAndMarkup(novoItem.preco_custo_item, multiplicador, percentual);
+                          setNovoItem(prev => ({
+                            ...prev,
+                            markup_percentual: percentual,
+                            markup_multiplicador: multiplicador,
+                            ...pricing,
+                          }));
+                        }}
+                      />
+                    </div>
+
+                    <div className="md:col-span-2 space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Preço Final (editável)</Label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">R$</span>
                         <Input
@@ -1249,11 +1520,15 @@ export default function OcModal({
                           step="0.01"
                           min="0"
                           className="pl-9 bg-white"
-                          value={novoItem.preco_unitario}
-                          onChange={(e) => setNovoItem(prev => ({
-                            ...prev,
-                            preco_unitario: parseFloat(e.target.value) || 0,
-                          }))}
+                          value={novoItem.preco_final_manual ?? novoItem.preco_unitario}
+                          onChange={(e) => {
+                            const precoFinal = parseFloat(e.target.value) || 0;
+                            setNovoItem(prev => ({
+                              ...prev,
+                              preco_final_manual: precoFinal,
+                              preco_unitario: precoFinal,
+                            }));
+                          }}
                         />
                       </div>
                     </div>

@@ -170,6 +170,8 @@ export default function EnviarOcModal({
                     const tipoLabel = TIPO_ITEM_LABELS[item.tipo_item_oc] || null;
                     const origemLabel = ORIGEM_LABELS[item.origem_solicitacao] || null;
                     const ehAssistencia = item.tipo_item_oc && item.tipo_item_oc !== 'ORDEM_COMUM_ENCOMENDA';
+                    const precoCusto = Number(item.preco_custo_item || 0);
+                    const precoFinal = Number(item.preco_final_manual || item.preco_unitario || 0);
                     return (
                       <div key={`${item.id || item.produto_id || index}`} className="px-3 py-2 text-sm space-y-1">
                         <div className="flex justify-between gap-3">
@@ -195,6 +197,9 @@ export default function EnviarOcModal({
                             </Badge>
                           )}
                         </div>
+                        <p className="text-xs text-gray-600">
+                          Custo: R$ {precoCusto.toFixed(2)} | Preço Final: R$ {precoFinal.toFixed(2)}
+                        </p>
                         {ehAssistencia && item.motivo_assistencia && (
                           <p className="text-xs text-amber-700">Motivo: {item.motivo_assistencia}</p>
                         )}

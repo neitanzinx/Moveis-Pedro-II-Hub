@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { toMultiplierFromPercent, toPercentFromMultiplier } from "@/utils/markupCalculator";
 
 export default function FornecedorModal({
     open,
@@ -33,7 +34,10 @@ export default function FornecedorModal({
         contato: "",
         observacoes: "",
         ativo: true,
-        encomendas_habilitadas: true
+        encomendas_habilitadas: true,
+        usar_markup_padrao: false,
+        markup_padrao_multiplicador: "",
+        markup_padrao_percentual: "",
     });
     const [novoCnpj, setNovoCnpj] = useState("");
 
@@ -51,7 +55,10 @@ export default function FornecedorModal({
                 contato: "",
                 observacoes: "",
                 ativo: true,
-                encomendas_habilitadas: true
+                encomendas_habilitadas: true,
+                usar_markup_padrao: false,
+                markup_padrao_multiplicador: "",
+                markup_padrao_percentual: "",
             });
         }
     }, [fornecedor, open]);
@@ -87,10 +94,20 @@ export default function FornecedorModal({
     const handleSubmit = (e) => {
         e.preventDefault();
 
+        const markupMultiplicador = parseFloat(formData.markup_padrao_multiplicador || 0);
+        const markupPercentual = parseFloat(formData.markup_padrao_percentual || 0);
+
+        const payload = {
+            ...formData,
+            markup_padrao_multiplicador: markupMultiplicador > 0 ? markupMultiplicador : null,
+            markup_padrao_percentual: markupPercentual > 0 ? markupPercentual : null,
+            usar_markup_padrao: Boolean(formData.usar_markup_padrao),
+        };
+
         if (fornecedor?.id) {
-            updateMutation.mutate({ id: fornecedor.id, data: formData });
+            updateMutation.mutate({ id: fornecedor.id, data: payload });
         } else {
-            createMutation.mutate(formData);
+            createMutation.mutate(payload);
         }
     };
 
@@ -259,6 +276,64 @@ export default function FornecedorModal({
                             <span className="text-xs text-gray-400">
                                 (permite venda por encomenda quando estoque zerado)
                             </span>
+                        </div>
+
+                        <div className="rounded-lg border p-3 space-y-3 bg-gray-50">
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    id="usar_markup_padrao"
+                                    checked={Boolean(formData.usar_markup_padrao)}
+                                    onChange={(e) => setFormData({ ...formData, usar_markup_padrao: e.target.checked })}
+                                    className="rounded"
+                                />
+                                <Label htmlFor="usar_markup_padrao" className="cursor-pointer">
+                                    Usar markup fixo deste fornecedor
+                                </Label>
+                            </div>
+
+                            <div className="grid md:grid-cols-2 gap-3">
+                                <div>
+                                    <Label htmlFor="markup_padrao_multiplicador">Markup Multiplicador</Label>
+                                    <Input
+                                        id="markup_padrao_multiplicador"
+                                        type="number"
+                                        step="0.0001"
+                                        min="1"
+                                        value={formData.markup_padrao_multiplicador ?? ""}
+                                        onChange={(e) => {
+                                            const multiplierText = e.target.value;
+                                            const multiplier = parseFloat(multiplierText || 0);
+                                            setFormData((prev) => ({
+                                                ...prev,
+                                                markup_padrao_multiplicador: multiplierText,
+                                                markup_padrao_percentual: multiplier > 0 ? toPercentFromMultiplier(multiplier).toString() : "",
+                                            }));
+                                        }}
+                                        placeholder="Ex: 1.45"
+                                    />
+                                </div>
+                                <div>
+                                    <Label htmlFor="markup_padrao_percentual">Markup Percentual (%)</Label>
+                                    <Input
+                                        id="markup_padrao_percentual"
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={formData.markup_padrao_percentual ?? ""}
+                                        onChange={(e) => {
+                                            const percentText = e.target.value;
+                                            const percent = parseFloat(percentText || 0);
+                                            setFormData((prev) => ({
+                                                ...prev,
+                                                markup_padrao_percentual: percentText,
+                                                markup_padrao_multiplicador: percentText === "" ? "" : toMultiplierFromPercent(percent).toString(),
+                                            }));
+                                        }}
+                                        placeholder="Ex: 45"
+                                    />
+                                </div>
+                            </div>
                         </div>
                     </div>
 

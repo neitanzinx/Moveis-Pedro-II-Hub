@@ -54,7 +54,7 @@ import {
     formatDimensions,
     generateSKU
 } from '@/utils/productFormatters';
-import { calculateSuggestedMarkup, calculateMarkupDetails } from '@/utils/markupCalculator';
+import { calculateFinalPriceFromMarkup, toMultiplierFromPercent, toPercentFromMultiplier } from '@/utils/markupCalculator';
 import FurnitureColorPicker, { getColorHex } from './FurnitureColorPicker';
 import ProdutoHistoricoTab from './ProdutoHistoricoTab';
 
@@ -132,6 +132,11 @@ const INITIAL_FORM_DATA = {
     promocao_observacao: '', // Observação da promoção
     tem_promocao: false, // Toggle para ativar seção promocional
     preco_venda: '',
+    markup_multiplicador: '',
+    markup_percentual: '',
+    preco_final_sugerido: '',
+    preco_final_manual: '',
+    usar_markup_fornecedor: false,
     valor_montagem: '',
     // Dimensões do produto
     largura: '',
@@ -217,6 +222,11 @@ export default function ProdutoCadastroCompleto({
                 promocao_observacao: '',
                 tem_promocao: false, // Feature desabilitada
                 preco_venda: produto.preco_venda?.toString() || '',
+                markup_multiplicador: produto.markup_multiplicador?.toString() || '',
+                markup_percentual: produto.markup_percentual?.toString() || '',
+                preco_final_sugerido: produto.preco_final_sugerido?.toString() || '',
+                preco_final_manual: produto.preco_final_manual?.toString() || '',
+                usar_markup_fornecedor: Boolean(produto.usar_markup_fornecedor),
                 valor_montagem: produto.valor_montagem?.toString() || '',
                 // Estoque
                 estoque_cd: produto.estoque_cd?.toString() || '',
@@ -324,23 +334,47 @@ export default function ProdutoCadastroCompleto({
         produtosExistentes, produto?.id
     ]);
 
-    // Calcula markup sugerido (baseado no preço de custo de tabela e categoria)
+    const fornecedorSelecionado = useMemo(
+        () => fornecedores?.find((f) => String(f.id) === String(formData.fornecedor_id)),
+        [fornecedores, formData.fornecedor_id]
+    );
+
+    // Calcula markup sugerido com precedência: produto > fornecedor > regra da categoria
     const suggestedPrice = useMemo(() => {
-        // Usa apenas preço de tabela
-        const custoAtivo = parseFloat(formData.preco_custo_tabela);
+        const custoAtivo = parseFloat(formData.preco_custo_tabela || formData.preco_custo || 0);
+        if (!(custoAtivo > 0) || !formData.categoria) return 0;
 
-        const hasCost = custoAtivo > 0;
-        if (hasCost && formData.categoria) {
-            // Tenta usar markup dinâmico da organização primeiro
-            const markupCategorias = settings?.markup_categorias || {};
-            const markupCategoria = markupCategorias[formData.categoria] || markupCategorias['default'] || 45;
+        const usaMarkupFornecedor = Boolean(formData.usar_markup_fornecedor) && Boolean(fornecedorSelecionado?.usar_markup_padrao);
+        const multiplicadorFornecedor = fornecedorSelecionado?.markup_padrao_multiplicador;
+        const percentualFornecedor = fornecedorSelecionado?.markup_padrao_percentual;
 
-            // Calcula preço sugerido: custo * (1 + markup/100)
-            const precoSugerido = custoAtivo * (1 + markupCategoria / 100);
-            return Math.ceil(precoSugerido); // Arredonda para cima
+        const multiplicadorProduto = formData.markup_multiplicador;
+        const percentualProduto = formData.markup_percentual;
+
+        const precoViaMarkup = calculateFinalPriceFromMarkup(
+            custoAtivo,
+            multiplicadorProduto || (usaMarkupFornecedor ? multiplicadorFornecedor : null),
+            percentualProduto || (usaMarkupFornecedor ? percentualFornecedor : null)
+        );
+
+        if (precoViaMarkup > 0) {
+            return Math.round(precoViaMarkup * 100) / 100;
         }
-        return 0;
-    }, [formData.preco_custo_tabela, formData.categoria, settings?.markup_categorias]);
+
+        const markupCategorias = settings?.markup_categorias || {};
+        const markupCategoria = markupCategorias[formData.categoria] || markupCategorias.default || 45;
+        const precoSugerido = custoAtivo * (1 + markupCategoria / 100);
+        return Math.round(precoSugerido * 100) / 100;
+    }, [
+        formData.preco_custo_tabela,
+        formData.preco_custo,
+        formData.categoria,
+        formData.markup_multiplicador,
+        formData.markup_percentual,
+        formData.usar_markup_fornecedor,
+        fornecedorSelecionado,
+        settings?.markup_categorias,
+    ]);
 
     // Atualiza campo do formulário
     const handleChange = (field, value) => {
@@ -360,10 +394,17 @@ export default function ProdutoCadastroCompleto({
     // Atualiza fornecedor
     const handleFornecedorChange = (value) => {
         const fornecedor = fornecedores?.find(f => f.id.toString() === value);
+        const multiplicadorFornecedor = fornecedor?.markup_padrao_multiplicador;
+        const percentualFornecedor = fornecedor?.markup_padrao_percentual;
+        const usarMarkupFornecedor = Boolean(fornecedor?.usar_markup_padrao);
+
         setFormData(prev => ({
             ...prev,
             fornecedor_id: value,
-            fornecedor_nome: fornecedor?.nome || fornecedor?.nome_empresa || ''
+            fornecedor_nome: fornecedor?.nome || fornecedor?.nome_empresa || '',
+            usar_markup_fornecedor: usarMarkupFornecedor,
+            markup_multiplicador: usarMarkupFornecedor && multiplicadorFornecedor ? multiplicadorFornecedor.toString() : prev.markup_multiplicador,
+            markup_percentual: usarMarkupFornecedor && percentualFornecedor ? percentualFornecedor.toString() : prev.markup_percentual,
         }));
     };
 
@@ -450,6 +491,7 @@ export default function ProdutoCadastroCompleto({
     const applySuggestedMarkup = () => {
         if (suggestedPrice) {
             handleChange('preco_venda', suggestedPrice.toString());
+            handleChange('preco_final_manual', suggestedPrice.toString());
         }
     };
 
@@ -512,7 +554,12 @@ export default function ProdutoCadastroCompleto({
             promocao_observacao: null,
             // preco_custo agora é sempre igual ao preço de tabela
             preco_custo: parseFloat(formData.preco_custo_tabela) || precoCusto || null,
-            preco_venda: precoVenda,
+            markup_multiplicador: formData.markup_multiplicador ? parseFloat(formData.markup_multiplicador) : null,
+            markup_percentual: formData.markup_percentual ? parseFloat(formData.markup_percentual) : null,
+            preco_final_sugerido: suggestedPrice > 0 ? suggestedPrice : null,
+            preco_final_manual: formData.preco_final_manual ? parseFloat(formData.preco_final_manual) : null,
+            usar_markup_fornecedor: Boolean(formData.usar_markup_fornecedor),
+            preco_venda: parseFloat(formData.preco_final_manual) || precoVenda,
             valor_montagem: formData.valor_montagem ? parseFloat(formData.valor_montagem) : null,
             quantidade_estoque: estoqueTotal,
             estoque_cd: estoqueCd,
@@ -822,6 +869,85 @@ export default function ProdutoCadastroCompleto({
                                                     </Button>
                                                 )}
                                             </div>
+
+                                            {showFinancials && (
+                                                <>
+                                                    <div>
+                                                        <Label>Markup (Multiplicador)</Label>
+                                                        <Input
+                                                            id="markup_multiplicador"
+                                                            type="number"
+                                                            step="0.0001"
+                                                            min="1"
+                                                            value={formData.markup_multiplicador}
+                                                            onChange={(e) => {
+                                                                const multiplierText = e.target.value;
+                                                                const multiplier = parseFloat(multiplierText || 0);
+                                                                handleChange('markup_multiplicador', multiplierText);
+                                                                handleChange('markup_percentual', multiplier > 0 ? toPercentFromMultiplier(multiplier).toString() : '');
+                                                            }}
+                                                            placeholder="Ex: 1.45"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label>Markup (%)</Label>
+                                                        <Input
+                                                            id="markup_percentual"
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            value={formData.markup_percentual}
+                                                            onChange={(e) => {
+                                                                const percentText = e.target.value;
+                                                                const percent = parseFloat(percentText || 0);
+                                                                handleChange('markup_percentual', percentText);
+                                                                handleChange('markup_multiplicador', percentText === '' ? '' : toMultiplierFromPercent(percent).toString());
+                                                            }}
+                                                            placeholder="Ex: 45"
+                                                        />
+                                                    </div>
+
+                                                    <div>
+                                                        <Label>Preço Final Sugerido</Label>
+                                                        <Input
+                                                            id="preco_final_sugerido"
+                                                            type="number"
+                                                            step="0.01"
+                                                            value={suggestedPrice > 0 ? suggestedPrice : ''}
+                                                            disabled
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label>Preço Final Manual</Label>
+                                                        <Input
+                                                            id="preco_final_manual"
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            value={formData.preco_final_manual}
+                                                            onChange={(e) => {
+                                                                handleChange('preco_final_manual', e.target.value);
+                                                                handleChange('preco_venda', e.target.value);
+                                                            }}
+                                                            placeholder="Opcional"
+                                                        />
+                                                    </div>
+
+                                                    <div className="md:col-span-2 flex items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            id="usar_markup_fornecedor"
+                                                            checked={Boolean(formData.usar_markup_fornecedor)}
+                                                            onChange={(e) => handleChange('usar_markup_fornecedor', e.target.checked)}
+                                                            className="rounded"
+                                                        />
+                                                        <Label htmlFor="usar_markup_fornecedor" className="cursor-pointer">
+                                                            Usar markup padrão do fornecedor (com opção de sobrescrever)
+                                                        </Label>
+                                                    </div>
+                                                </>
+                                            )}
+
                                             <div>
                                                 <Label>Valor de Montagem</Label>
                                                 <Input

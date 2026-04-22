@@ -21,7 +21,10 @@ export function formatarLinhaItemOc(item, index) {
   const partes = [nome];
   if (cor) partes.push(cor);
 
-  return `${index + 1}. ${partes.join(' - ')},  Qtd: ${qtdFormatada}`;
+  const precoCusto = Number(item.preco_custo_item || 0);
+  const precoFinal = Number(item.preco_final_manual || item.preco_unitario || 0);
+
+  return `${index + 1}. ${partes.join(' - ')},  Qtd: ${qtdFormatada}, Custo: R$ ${precoCusto.toFixed(2)}, Preço Final: R$ ${precoFinal.toFixed(2)}`;
 }
 
 /**
