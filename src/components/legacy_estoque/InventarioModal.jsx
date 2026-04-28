@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { buildProductDisplayName } from "@/utils/productReference";
 
 // lojas constant removed to use dynamic data from useLojas
 
@@ -125,7 +126,7 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
 
     const novoItem = {
       produto_id: produto.id,
-      produto_nome: produto.nome,
+      produto_nome: buildProductDisplayName(produto.nome, produto.modelo_referencia),
       quantidade_sistema: qtdSistema,
       quantidade_contada: quantidadeContada,
       diferenca: quantidadeContada - qtdSistema,

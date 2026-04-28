@@ -23,6 +23,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { useTenant } from '@/contexts/TenantContext';
 import { gerarTextoPedidoOperacional } from '@/utils/orderFormatUtils';
+import { formatProductItemName } from '@/utils/productReference';
 
 const TIPO_ITEM_LABELS = {
   ASSISTENCIA_REPOSICAO_PECAS: 'Assistência - Reposição de Peças',
@@ -164,7 +165,7 @@ export default function EnviarOcModal({
               ) : (
                 <div className="divide-y">
                   {itens.map((item, index) => {
-                    const nome = item.nome_completo_produto || item.produto_nome || 'Produto sem nome';
+                    const nome = formatProductItemName(item);
                     const cor = item.cor_item || item.cor || null;
                     const qtd = Number(item.quantidade_pedida || 0);
                     const tipoLabel = TIPO_ITEM_LABELS[item.tipo_item_oc] || null;

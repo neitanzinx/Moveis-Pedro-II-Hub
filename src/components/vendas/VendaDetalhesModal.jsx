@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { buildProductDisplayName } from '@/utils/productReference';
 import { getEntregaFotos, getVendaFinanceiro, getVendaResumoLogistico } from '@/utils/vendaStatus';
 
 const TONE_CLASSES = {
@@ -153,7 +154,7 @@ export function VendaDetalhesModal({ venda, isOpen, onClose, entregas = [], mont
                                         {resumoLogistico.itensDetalhados.map((item, idx) => (
                                             <TableRow key={idx}>
                                                 <TableCell className="font-medium text-sm">
-                                                    {item.produto_nome}
+                                                    {buildProductDisplayName(item.produto_nome, item.modelo_referencia)}
                                                     {item.variacao_nome && (
                                                         <span className="text-xs text-muted-foreground block font-normal">
                                                             {item.variacao_nome}

@@ -17,6 +17,7 @@ import { Loader2, Plus, Trash2, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { formatarTelefone, formatarNome } from "@/utils/formatters";
+import { buildProductDisplayName } from "@/utils/productReference";
 
 
 
@@ -115,7 +116,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     const subtotal = produto.preco_venda * quantidade;
     const novoItem = {
       produto_id: produto.id,
-      produto_nome: produto.nome,
+      produto_nome: buildProductDisplayName(produto.nome, produto.modelo_referencia),
       quantidade: quantidade,
       preco_unitario: produto.preco_venda,
       subtotal: subtotal

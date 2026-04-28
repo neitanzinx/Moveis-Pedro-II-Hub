@@ -1,4 +1,5 @@
 import { format } from "date-fns";
+import { buildProductDisplayName, formatProductItemName } from "@/utils/productReference";
 
 /**
  * Monta a linha de exibição de um item da OC no texto operacional.
@@ -10,7 +11,7 @@ import { format } from "date-fns";
  * @returns {string}
  */
 export function formatarLinhaItemOc(item, index) {
-  const nome = item.nome_completo_produto || item.produto_nome || 'Produto sem nome';
+  const nome = formatProductItemName(item);
   const cor = item.cor_item || item.cor || null;
   const qtd = Number(item.quantidade_pedida || 0);
   const qtdFormatada = new Intl.NumberFormat('pt-BR', {
@@ -140,7 +141,7 @@ export function gerarTextoPedido(pedidoData, fornecedores = []) {
 
     (pedidoData.itens || []).forEach((item, index) => {
         const total = (item.quantidade_pedida || 0) * (item.preco_unitario || 0);
-        texto += `${index + 1}. ${item.produto_nome}\n`;
+      texto += `${index + 1}. ${buildProductDisplayName(item.produto_nome, item.modelo_referencia)}\n`;
         texto += `   Qtd: ${item.quantidade_pedida} | R$ ${(item.preco_unitario || 0).toFixed(2)} = R$ ${total.toFixed(2)}\n`;
     });
 

@@ -6,6 +6,7 @@ import { Plus, ArrowRight, Check, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import TransferenciaModal from "../components/legacy_estoque/TransferenciaModal";
+import { buildProductDisplayName } from "@/utils/productReference";
 
 export default function TransferenciaEstoque() {
   const [user, setUser] = useState(null);
@@ -57,7 +58,8 @@ export default function TransferenciaEstoque() {
   };
 
   const handleConfirmarRecebimento = async (transferencia) => {
-    if (confirm(`Confirmar recebimento de ${transferencia.quantidade} unidades de ${transferencia.produto_nome}?`)) {
+    const nomeProduto = buildProductDisplayName(transferencia.produto_nome, transferencia.modelo_referencia);
+    if (confirm(`Confirmar recebimento de ${transferencia.quantidade} unidades de ${nomeProduto}?`)) {
       await updateMutation.mutateAsync({
         id: transferencia.id,
         data: {
@@ -163,7 +165,7 @@ export default function TransferenciaEstoque() {
                     <div>
                       <p className="text-sm font-medium mb-2" style={{ color: '#8B8B8B' }}>Produto</p>
                       <p className="font-semibold" style={{ color: '#07593f' }}>
-                        {transferencia.produto_nome}
+                        {buildProductDisplayName(transferencia.produto_nome, transferencia.modelo_referencia)}
                       </p>
                       <p className="text-sm" style={{ color: '#8B8B8B' }}>
                         Quantidade: {transferencia.quantidade} unidades

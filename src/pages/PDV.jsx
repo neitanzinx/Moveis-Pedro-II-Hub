@@ -38,6 +38,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { adicionarDias } from "@/utils/dateUtils";
 import { formatarNome, formatarEndereco } from "@/utils/formatters";
 import { getProductTotalStock, resolveStockField } from "@/utils/stockUtils";
+import { buildProductDisplayName, stripInternalProductPrefixes } from "@/utils/productReference";
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -879,7 +880,7 @@ export default function PDV() {
 
       return [...prev, {
         produto_id: produto.id,
-        produto_nome: `${produto.nome}${produto.modelo_referencia ? ' ' + produto.modelo_referencia : ''}`,
+        produto_nome: buildProductDisplayName(produto.nome, produto.modelo_referencia),
         quantidade: 1,
         preco_unitario: produto.preco_venda,
         subtotal: produto.preco_venda,
@@ -984,7 +985,7 @@ export default function PDV() {
           if (item.produto_id === editingProdutoPDV.id) {
             return {
               ...item,
-              produto_nome: `${updatedData.nome || item.produto_nome}${updatedData.modelo_referencia ? ' ' + updatedData.modelo_referencia : ''}`,
+              produto_nome: buildProductDisplayName(updatedData.nome || item.produto_nome, updatedData.modelo_referencia),
               preco_unitario: updatedData.preco_venda || item.preco_unitario
             };
           }
@@ -1687,16 +1688,8 @@ export default function PDV() {
 
         setTimeout(async () => {
           try {
-            // Função para limpar nome do produto
-            const limparNomeProduto = (nome) => {
-              if (!nome) return '-';
-              return nome
-                .replace(/^\[SOLICITAÇÃO\]\s*/i, '')
-                .replace(/^\[PENDENTE CADASTRO\]\s*/i, '');
-            };
-
             // Formata lista de produtos
-            const listaProdutos = zapItens.map(item => `• ${item.quantidade}x ${limparNomeProduto(item.produto_nome)}`).join('\n');
+            const listaProdutos = zapItens.map(item => `• ${item.quantidade}x ${stripInternalProductPrefixes(item.produto_nome) || '-'}`).join('\n');
 
             console.log("📄 Gerando PDF para WhatsApp em background...");
             let pdfBase64 = null;

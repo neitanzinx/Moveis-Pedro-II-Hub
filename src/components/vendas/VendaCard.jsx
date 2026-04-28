@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pencil, Trash2, User, Calendar, CreditCard, Package, FileDown, MapPin, XCircle } from "lucide-react";
 import { format } from "date-fns";
+import { stripInternalProductPrefixes } from "@/utils/productReference";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -167,12 +168,7 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
     setBaixando(true);
 
     // Função para limpar nome do produto (remove prefixos internos)
-    const limparNomeProduto = (nome) => {
-      if (!nome) return '-';
-      return nome
-        .replace(/^\[SOLICITAÇÃO\]\s*/i, '')
-        .replace(/^\[PENDENTE CADASTRO\]\s*/i, '');
-    };
+    const limparNomeProduto = (nome) => stripInternalProductPrefixes(nome) || '-';
 
     let itensHTML = '';
     venda.itens?.forEach(item => {

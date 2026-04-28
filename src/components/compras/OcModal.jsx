@@ -45,6 +45,7 @@ import { base44 } from "@/api/base44Client";
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { useTenant } from '@/contexts/TenantContext';
+import { buildProductDisplayName } from '@/utils/productReference';
 import FornecedorModal from '@/components/cadastros/FornecedorModal';
 import ProdutoModal from '@/components/produtos/ProdutoModal';
 import { gerarTextoPedidoOperacional } from '@/utils/orderFormatUtils';
@@ -251,17 +252,40 @@ export default function OcModal({
     queryFn: () => base44.entities.Fornecedor.list('nome_empresa'),
   });
 
-  // Query: produtos do fornecedor selecionado (busca direta, sem depender de cache global)
+  // Query: produtos do fornecedor selecionado (suporta vínculo por ID e legados por nome)
   const { data: produtosDoFornecedor = [], isLoading: carregandoProdutos } = useQuery({
-    queryKey: ['produtos-fornecedor', formData.fornecedor_id],
+    queryKey: ['produtos-fornecedor', formData.fornecedor_id, formData.fornecedor_nome],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const selectColumns = 'id, nome, preco_custo, preco_venda, markup_multiplicador, markup_percentual, modelo_referencia, cor, material, categoria, largura, altura, profundidade, fornecedor_id, fornecedor_nome, parent_id, is_parent';
+
+      const { data: dataPorId, error: errorPorId } = await supabase
         .from('produtos')
-        .select('id, nome, preco_custo, preco_venda, markup_multiplicador, markup_percentual, modelo_referencia, cor, material, categoria, largura, altura, profundidade, fornecedor_id, fornecedor_nome, parent_id, is_parent')
+        .select(selectColumns)
         .eq('fornecedor_id', formData.fornecedor_id)
         .order('nome', { ascending: true });
-      if (error) throw error;
-      return data || [];
+
+      if (errorPorId) throw errorPorId;
+
+      const nomeFornecedor = String(formData.fornecedor_nome || '').trim();
+      if (!nomeFornecedor) {
+        return dataPorId || [];
+      }
+
+      const { data: dataPorNome, error: errorPorNome } = await supabase
+        .from('produtos')
+        .select(selectColumns)
+        .ilike('fornecedor_nome', nomeFornecedor)
+        .order('nome', { ascending: true });
+
+      if (errorPorNome) throw errorPorNome;
+
+      const mapaPorId = new Map();
+      [...(dataPorId || []), ...(dataPorNome || [])].forEach((produto) => {
+        if (!produto?.id) return;
+        mapaPorId.set(String(produto.id), produto);
+      });
+
+      return Array.from(mapaPorId.values());
     },
     enabled: !!formData.fornecedor_id,
     staleTime: 30000,
@@ -462,7 +486,7 @@ export default function OcModal({
     setNovoItem(prev => ({
       ...prev,
       produto_id: produto.id,
-      produto_nome: produto.nome || '',
+      produto_nome: buildProductDisplayName(produto.nome || '', produto.modelo_referencia),
       nome_completo_produto: buildNomeConsolidadoProduto(produto),
       preco_custo_item: precoCusto,
       preco_tabela: produto.preco_venda || 0,

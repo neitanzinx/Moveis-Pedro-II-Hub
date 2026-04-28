@@ -14,7 +14,6 @@ const Orcamentos = lazy(() => import("./Orcamentos.jsx"));
 const AssistenciaTecnica = lazy(() => import("./AssistenciaTecnica.jsx"));
 const Configuracoes = lazy(() => import("./Configuracoes.jsx"));
 const SelecaoVendedor = lazy(() => import("./SelecaoVendedor.jsx"));
-const RelatorioComissoes = lazy(() => import("./RelatorioComissoes.jsx"));
 const BoasVindas = lazy(() => import("./BoasVindas.jsx"));
 const GerenciamentoUsuarios = lazy(() => import("./GerenciamentoUsuarios.jsx"));
 const Financeiro = lazy(() => import("./Financeiro.jsx"));
@@ -22,7 +21,6 @@ const Montagem = lazy(() => import("./Montagem.jsx"));
 const Fornecedores = lazy(() => import("./Fornecedores.jsx"));
 const Compras = lazy(() => import("./Compras.jsx"));
 const RecursosHumanos = lazy(() => import("./RecursosHumanos.jsx"));
-const RelatoriosAvancados = lazy(() => import("./RelatoriosAvancados.jsx"));
 const TransferenciaEstoque = lazy(() => import("./TransferenciaEstoque.jsx"));
 const Inventario = lazy(() => import("./Inventario.jsx"));
 const Estoque = lazy(() => import("./Estoque.jsx"));
@@ -34,8 +32,7 @@ const Entregador = lazy(() => import("./Entregador.jsx"));
 const Marketing = lazy(() => import("./Marketing.jsx"));
 const MontadorExterno = lazy(() => import("./MontadorExterno.jsx"));
 const CadastroMobile = lazy(() => import("./CadastroMobile.jsx"));
-const ExportacaoContabil = lazy(() => import("./ExportacaoContabil.jsx"));
-const DashboardBI = lazy(() => import("./DashboardBI.jsx"));
+const CentralAnalitica = lazy(() => import("./CentralAnalitica.jsx"));
 const DashboardGerente = lazy(() => import("./DashboardGerente.jsx"));
 const AvaliacaoNPS = lazy(() => import("./AvaliacaoNPS.jsx"));
 const EntradaEstoque = lazy(() => import("./EntradaEstoque.jsx"));
@@ -51,7 +48,6 @@ import ClienteAuth from "./cliente/ClienteAuth.jsx";
 import ClienteDashboard from "./cliente/ClienteDashboard.jsx";
 import AutoAtendimento from "./AutoAtendimento.jsx";
 import RastreioPublico from "./RastreioPublico.jsx";
-import RadioLoja from "./RadioLoja.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation, Navigate } from 'react-router-dom';
 import { hasAnyRole, getUserRoles } from "@/config/permissions";
@@ -76,11 +72,11 @@ import { useAuth } from "@/hooks/useAuth";
 
 const PAGES = {
     Dashboard, Produtos, Clientes, Vendas, Orcamentos, AssistenciaTecnica,
-    Configuracoes, SelecaoVendedor, RelatorioComissoes,
+    Configuracoes, SelecaoVendedor,
     BoasVindas, GerenciamentoUsuarios, Financeiro, Montagem, Fornecedores, Compras,
     Inventario, Estoque, ModoReuniao, PDV, CatalogoWhatsApp,
     LogisticaSemanal, Entregador, Marketing, MontadorExterno,
-    ExportacaoContabil, DashboardBI, DashboardGerente,
+    CentralAnalitica, DashboardGerente,
     EntradaEstoque, PoliticasEstoque, AprovacaoSemEstoque
 };
 
@@ -170,11 +166,6 @@ function PagesContent() {
         return <RastreioPublico idProp={id !== 'rastreio' ? id : null} />;
     }
 
-    // Tela de Rádio (TV/Kiosk) - Pública
-    if (location.pathname === '/radio') {
-        return <RadioLoja />;
-    }
-
     // ===== LOGIN DE FUNCIONÁRIOS =====
     if (location.pathname === '/login') {
         // Se já está logado como funcionário E tem cargo válido (qualquer cargo não vazio), redireciona
@@ -218,6 +209,14 @@ function PagesContent() {
 
         // Para perfis administrativos/comerciais, /admin deve abrir na primeira tela visível do menu.
         if (location.pathname === '/admin') {
+            return <Navigate to={firstAllowedAdminUrl} replace />;
+        }
+
+        if (location.pathname.toLowerCase().startsWith('/admin/gerenciamentousuarios') && !can('manage_user_access')) {
+            return <Navigate to={firstAllowedAdminUrl} replace />;
+        }
+
+        if (location.pathname.toLowerCase().startsWith('/admin/configuracoes') && !can('manage_user_access')) {
             return <Navigate to={firstAllowedAdminUrl} replace />;
         }
 
@@ -310,12 +309,13 @@ function PagesContent() {
 
                         {/* Gestão e Financeiro */}
                         <Route path="/admin/Financeiro" element={<Financeiro />} />
-                        <Route path="/admin/RelatorioComissoes" element={<RelatorioComissoes />} />
-                        <Route path="/admin/RelatoriosAvancados" element={<RelatoriosAvancados />} />
+                        <Route path="/admin/CentralAnalitica" element={<CentralAnalitica />} />
+                        <Route path="/admin/RelatorioComissoes" element={<Navigate to="/admin/CentralAnalitica?aba=comissoes" replace />} />
+                        <Route path="/admin/RelatoriosAvancados" element={<Navigate to="/admin/CentralAnalitica?aba=relatorios" replace />} />
                         <Route path="/admin/RecursosHumanos" element={<RecursosHumanos />} />
                         <Route path="/admin/Marketing" element={<Marketing />} />
-                        <Route path="/admin/ExportacaoContabil" element={<ExportacaoContabil />} />
-                        <Route path="/admin/DashboardBI" element={<DashboardBI />} />
+                        <Route path="/admin/ExportacaoContabil" element={<Navigate to="/admin/CentralAnalitica?aba=exportacao" replace />} />
+                        <Route path="/admin/DashboardBI" element={<Navigate to="/admin/CentralAnalitica?aba=bi" replace />} />
                         <Route path="/admin/DashboardGerente" element={<DashboardGerente />} />
 
                         {/* Estoque - Políticas e Aprovações */}

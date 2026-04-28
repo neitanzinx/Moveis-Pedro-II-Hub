@@ -1,4 +1,5 @@
 import { getEntregaFotos } from '@/utils/vendaStatus';
+import { stripInternalProductPrefixes } from '@/utils/productReference';
 
 /**
  * Gera PDF de comprovante de entrega com:
@@ -21,12 +22,7 @@ export function gerarComprovanteEntregaPDF(entrega, venda) {
   };
 
   // Função para limpar nome do produto (remove prefixos internos)
-  const limparNomeProduto = (nome) => {
-    if (!nome) return '-';
-    return nome
-      .replace(/^\[SOLICITAÇÃO\]\s*/i, '')
-      .replace(/^\[PENDENTE CADASTRO\]\s*/i, '');
-  };
+  const limparNomeProduto = (nome) => stripInternalProductPrefixes(nome) || '-';
 
   const fotosEntrega = getEntregaFotos(entrega);
 

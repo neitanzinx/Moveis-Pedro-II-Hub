@@ -25,6 +25,7 @@ import EmitirNFeModal from "../components/vendas/EmitirNFeModal";
 import TransferirMontagemModal from "../components/vendas/TransferirMontagemModal";
 import { VendaDetalhesModal } from "@/components/vendas/VendaDetalhesModal";
 import { getVendaFinanceiro, getVendaResumoLogistico } from "@/utils/vendaStatus";
+import { buildProductDisplayName } from "@/utils/productReference";
 
 export default function Vendas() {
     const [search, setSearch] = useState("");
@@ -612,7 +613,7 @@ export default function Vendas() {
                                                 <div className="max-w-[200px]">
                                                     {(venda.itens || []).slice(0, 2).map((item, idx) => (
                                                         <div key={idx} className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                                                            {item.quantidade}x {item.produto_nome || item.nome}
+                                                            {item.quantidade}x {buildProductDisplayName(item.produto_nome || item.nome, item.modelo_referencia)}
                                                         </div>
                                                     ))}
                                                     {(venda.itens || []).length > 2 && (
@@ -902,7 +903,7 @@ export default function Vendas() {
                                                 <div className="max-w-[200px]">
                                                     {(venda.itens || []).slice(0, 2).map((item, idx) => (
                                                         <div key={idx} className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                                                            {item.quantidade}x {item.produto_nome || item.nome}
+                                                            {item.quantidade}x {buildProductDisplayName(item.produto_nome || item.nome, item.modelo_referencia)}
                                                         </div>
                                                     ))}
                                                     {(venda.itens || []).length > 2 && (

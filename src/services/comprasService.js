@@ -1,5 +1,6 @@
 import { base44 } from "@/api/base44Client";
 import { supabase } from "@/lib/supabase";
+import { buildProductDisplayName } from "@/utils/productReference";
 
 const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -628,7 +629,7 @@ export const comprasService = {
               .insert({
                 tenant_id: tenantId,
                 produto_id: itemOc.produto_id,
-                produto_nome: produto.nome || 'Sem nome',
+                produto_nome: buildProductDisplayName(produto.nome || 'Sem nome', produto.modelo_referencia),
                 fornecedor_id: oc.fornecedor_id,
                 fornecedor_nome: oc.fornecedor_nome,
                 ordem_compra_id: ocId,

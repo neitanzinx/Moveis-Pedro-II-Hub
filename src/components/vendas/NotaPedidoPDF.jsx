@@ -1,5 +1,6 @@
 import { EMPRESA } from "@/config/empresa";
 import html2pdf from 'html2pdf.js';
+import { stripInternalProductPrefixes } from "@/utils/productReference";
 
 const clampProgress = (value) => {
   const numericValue = Number(value);
@@ -51,14 +52,7 @@ const getLogoSrc = () => {
   return LOGO_URL;
 };
 
-// Função para limpar nome do produto (remove prefixos internos)
-// Garante retrocompatibilidade com vendas antigas que têm [SOLICITAÇÃO] no nome
-const limparNomeProduto = (nome) => {
-  if (!nome) return '-';
-  return nome
-    .replace(/^\[SOLICITAÇÃO\]\s*/i, '')
-    .replace(/^\[PENDENTE CADASTRO\]\s*/i, '');
-};
+const limparNomeProduto = (nome) => stripInternalProductPrefixes(nome) || '-';
 
 // Cache a logo em base64 para uso offline (chamado uma vez quando online)
 if (typeof window !== 'undefined') {

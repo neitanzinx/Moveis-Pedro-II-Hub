@@ -91,6 +91,22 @@ export default function Produtos() {
     queryKey: ['produtos', debouncedSearch, selectedCategoria, selectedFabricante, filtroAtencao],
     queryFn: async () => {
       let allProdutos = await base44.entities.Produto.list('nome');
+
+      // Resolve manufacturer name for legacy rows that only have fornecedor_id.
+      const fornecedorIds = [...new Set((allProdutos || []).map((p) => p.fornecedor_id).filter(Boolean))];
+      let fornecedorMap = new Map();
+
+      if (fornecedorIds.length > 0) {
+        const fornecedores = await base44.entities.Fornecedor.list('nome_empresa');
+        fornecedorMap = new Map(
+          (fornecedores || []).map((fornecedor) => [String(fornecedor.id), String(fornecedor.nome_empresa || '').trim()])
+        );
+      }
+
+      allProdutos = (allProdutos || []).map((produto) => ({
+        ...produto,
+        fornecedor_nome: String(produto.fornecedor_nome || fornecedorMap.get(String(produto.fornecedor_id)) || '').trim(),
+      }));
       
       // Apply filters
       return allProdutos.filter(p => {

@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { supabase } from "@/api/base44Client";
 import { base44 } from "@/api/base44Client";
+import { buildProductDisplayName } from "@/utils/productReference";
 
 /**
  * Hook para validar disponibilidade de estoque antes de confirmar uma venda.
@@ -97,7 +98,7 @@ export function useEstoqueValidacao() {
       await base44.entities.SolicitacaoEncomenda.create({
         venda_id: vendaId,
         produto_id: produto.id,
-        produto_nome: produto.nome,
+        produto_nome: buildProductDisplayName(produto.nome, produto.modelo_referencia),
         fornecedor_nome: produto.fornecedor_nome,
         quantidade,
         cliente_nome: clienteNome,

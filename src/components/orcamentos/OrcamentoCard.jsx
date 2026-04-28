@@ -9,6 +9,7 @@ import { createPageUrl } from "@/utils";
 import { base44 } from "@/api/base44Client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { buildProductDisplayName } from "@/utils/productReference";
 
 const statusColors = {
   "Pendente": { bg: "#FEF3C7", text: "#92400E", border: "#FCD34D" },
@@ -130,7 +131,7 @@ export default function OrcamentoCard({ orcamento, onEdit, onDelete }) {
               <div className="space-y-1">
                 {orcamento.itens.slice(0, 3).map((item, index) => (
                   <div key={index} className="text-sm flex justify-between" style={{ color: '#8B8B8B' }}>
-                    <span>{item.quantidade}x {item.produto_nome}</span>
+                    <span>{item.quantidade}x {buildProductDisplayName(item.produto_nome, item.modelo_referencia)}</span>
                     <span>R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
                 ))}

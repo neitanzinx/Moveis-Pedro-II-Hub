@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { whatsappService } from "@/services/whatsappService";
 import RouteOptimizer from "./RouteOptimizer";
+import { buildProductDisplayName } from "@/utils/productReference";
 
 // Cores para cada caminhão
 const CORES_CAMINHOES = [
@@ -464,7 +465,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
     const matchCliente = e.cliente_nome?.toLowerCase().includes(termo);
     const matchPedido = e.numero_pedido?.toString().includes(termo);
     const venda = (vendas || []).find(v => v.id === e.venda_id);
-    const matchProduto = venda?.itens?.some(i => i.produto_nome?.toLowerCase().includes(termo));
+    const matchProduto = venda?.itens?.some(i => buildProductDisplayName(i.produto_nome, i.modelo_referencia).toLowerCase().includes(termo));
     return matchCliente || matchPedido || matchProduto;
   });
 
@@ -579,7 +580,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
       // Payload para entregas
       const payloadEntregas = entregasNaoNotificadas.map(entrega => {
         const venda = (vendas || []).find(v => v.id === entrega.venda_id);
-        const listaProdutos = venda?.itens?.map(item => `• ${item.quantidade}x ${item.produto_nome}`).join('\n') || "Itens não informados";
+        const listaProdutos = venda?.itens?.map(item => `• ${item.quantidade}x ${buildProductDisplayName(item.produto_nome, item.modelo_referencia)}`).join('\n') || "Itens não informados";
         return {
           id: entrega.id,
           tipo: 'entrega',
@@ -594,7 +595,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
       // Payload para assistências
       const payloadAssistencias = assistenciasNaoNotificadas.map(at => {
-        const itensTexto = at.itens_envolvidos?.map(i => `• ${i.produto_nome}`).join('\n') || at.tipo;
+        const itensTexto = at.itens_envolvidos?.map(i => `• ${buildProductDisplayName(i.produto_nome, i.modelo_referencia)}`).join('\n') || at.tipo;
         return {
           id: at.id,
           tipo: 'assistencia',
@@ -895,7 +896,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
         // DISPARAR NOTIFICAÇÃO DE REAGENDAMENTO PARA O CLIENTE
         try {
           const venda = (vendas || []).find(v => v.id === modalReagendamento.entrega.venda_id);
-          const listaProdutos = venda?.itens?.map(item => `• ${item.quantidade}x ${item.produto_nome}`).join('\n') || "Itens não informados";
+          const listaProdutos = venda?.itens?.map(item => `• ${item.quantidade}x ${buildProductDisplayName(item.produto_nome, item.modelo_referencia)}`).join('\n') || "Itens não informados";
 
           const payload = [{
             id: modalReagendamento.entrega.id,

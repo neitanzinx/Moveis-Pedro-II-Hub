@@ -41,15 +41,38 @@ export function useProdutoFilters() {
   const { data: fabricantes = [] } = useQuery({
     queryKey: ['fabricantes-produtos'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: produtos, error } = await supabase
         .from('produtos')
-        .select('fornecedor_nome, marca');
+        .select('fornecedor_id, fornecedor_nome');
 
       if (error) throw error;
 
+      const idsFornecedor = [...new Set(
+        (produtos || [])
+          .map((produto) => produto.fornecedor_id)
+          .filter(Boolean)
+      )];
+
+      let fornecedoresMap = new Map();
+      if (idsFornecedor.length > 0) {
+        const { data: fornecedores, error: fornecedoresError } = await supabase
+          .from('fornecedores')
+          .select('id, nome_empresa')
+          .in('id', idsFornecedor);
+
+        if (fornecedoresError) throw fornecedoresError;
+
+        fornecedoresMap = new Map(
+          (fornecedores || []).map((fornecedor) => [String(fornecedor.id), String(fornecedor.nome_empresa || '').trim()])
+        );
+      }
+
       const items = [...new Set(
-        (data || [])
-          .map((produto) => (produto.fornecedor_nome || produto.marca || '').trim())
+        (produtos || [])
+          .map((produto) => {
+            const nomeDoId = produto.fornecedor_id ? fornecedoresMap.get(String(produto.fornecedor_id)) : '';
+            return (nomeDoId || produto.fornecedor_nome || '').trim();
+          })
           .filter(Boolean)
       )].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
 
@@ -77,7 +100,7 @@ export function useProdutoFilters() {
 
     if (selectedFabricante !== 'todos') {
       sorted = sorted.filter((produto) => {
-        const fabricante = (produto.fornecedor_nome || produto.marca || '').trim();
+        const fabricante = (produto.fornecedor_nome || '').trim();
         return fabricante === selectedFabricante;
       });
     }

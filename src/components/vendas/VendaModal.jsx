@@ -23,6 +23,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useTenant } from "@/contexts/TenantContext";
 import { calcularComissaoVenda, registrarHistoricoComissao } from "@/services/comissaoService";
 import { useEstoqueValidacao } from "@/hooks/useEstoqueValidacao";
+import { buildProductDisplayName } from "@/utils/productReference";
 
 const formasPagamento = ["Dinheiro", "Crédito", "Débito", "Pix", "AFESP", "Multicrédito"];
 const statusVenda = ["Pagamento Pendente", "Pago", "Pago & Retirado"];
@@ -226,7 +227,8 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
     if (!produto) return;
 
     const subtotal = produto.preco_venda * quantidade;
-    const produtoNomeComCor = produto.cor ? `${produto.nome} - Cor: ${produto.cor}` : produto.nome;
+    const produtoNomeBase = buildProductDisplayName(produto.nome, produto.modelo_referencia);
+    const produtoNomeComCor = produto.cor ? `${produtoNomeBase} - Cor: ${produto.cor}` : produtoNomeBase;
 
     const novoItem = {
       produto_id: produto.id,
