@@ -47,6 +47,7 @@ import SolicitacoesReposicaoTab from '@/components/compras/SolicitacoesReposicao
 import RecebimentoModal from '@/components/compras/RecebimentoModal';
 import EnviarOcModal from '@/components/compras/EnviarOcModal';
 import PaymentApprovalModal from '@/components/compras/PaymentApprovalModal';
+import AjustePrecoModal from '@/components/configuracoes/AjustePrecoModal';
 import { VendaDetalhesModal } from '@/components/vendas/VendaDetalhesModal';
 import { base44 } from '@/api/base44Client';
 import { supabase } from '@/lib/supabase';
@@ -90,6 +91,7 @@ export default function Compras() {
   const temPermissaoEnvio = can('send_oc') || can('manage_compras');
   const temPermissaoRecebimento = can('receive_oc') || can('manage_compras');
   const temPermissaoAprovacaoPagamento = can('approve_payment_oc');
+  const temPermissaoReajusteGlobal = can('manage_bulk_price_adjustment');
   const formasAutoAprovadas = Array.isArray(settings?.compras_aprovacao_automatica)
     ? settings.compras_aprovacao_automatica
     : ['a_vista'];
@@ -121,6 +123,7 @@ export default function Compras() {
   const [ocParaAprovacaoPagamento, setOcParaAprovacaoPagamento] = useState(null);
   const [filtroAprovacaoPagamento, setFiltroAprovacaoPagamento] = useState('pendente_aprovacao');
   const [aprovacaoUltimaContagem, setAprovacaoUltimaContagem] = useState(0);
+  const [ajustePrecoModalOpen, setAjustePrecoModalOpen] = useState(false);
 
   // Estados para Análise de Preços
   const [searchProduto, setSearchProduto] = useState('');
@@ -1014,6 +1017,17 @@ export default function Compras() {
           <p className="text-gray-500 text-sm mt-1">Gestão integral: Ordens de Compra, Encomendas e Análises por Fornecedor</p>
         </div>
         <div className="flex gap-2">
+          {temPermissaoReajusteGlobal && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAjustePrecoModalOpen(true)}
+              className="gap-2"
+            >
+              <DollarSign className="w-4 h-4" />
+              Reajuste Global
+            </Button>
+          )}
           <Button 
             variant="outline" 
             size="sm"
@@ -1105,6 +1119,12 @@ export default function Compras() {
           </CardContent>
         </Card>
       )}
+
+      <AjustePrecoModal
+        isOpen={ajustePrecoModalOpen}
+        onClose={() => setAjustePrecoModalOpen(false)}
+        produtos={produtos}
+      />
 
       {/* Dashboard - Métricas */}
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3">

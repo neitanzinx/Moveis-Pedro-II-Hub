@@ -85,6 +85,24 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
         return [...new Set(produtos.map((produto) => produto.unidade).filter(Boolean))].sort();
     }, [produtos]);
 
+    const uniqueManufacturers = useMemo(() => {
+        return [...new Set(
+            produtos
+                .map((produto) => produto.fornecedor_nome || produto.marca)
+                .filter(Boolean)
+                .map((value) => String(value).trim())
+        )].sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+    }, [produtos]);
+
+    const uniqueCategories = useMemo(() => {
+        return [...new Set(
+            produtos
+                .map((produto) => produto.categoria)
+                .filter(Boolean)
+                .map((value) => String(value).trim())
+        )].sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+    }, [produtos]);
+
     const filteredProducts = useMemo(() => {
         return filterProductsByCriteria(produtos, criteria, targetField);
     }, [produtos, criteria, targetField]);
@@ -183,6 +201,11 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
 
         if (tipoAjuste === "porcentagem" && numericValue > BULK_PRICE_CONSTANTS.MAX_ADJUSTMENT_PERCENT) {
             toast.error(`Limite máximo por operação: ${BULK_PRICE_CONSTANTS.MAX_ADJUSTMENT_PERCENT}%`);
+            return;
+        }
+
+        if (tipoAjuste === "multiplicador" && numericValue === 1) {
+            toast.error("Informe um multiplicador diferente de 1");
             return;
         }
 
@@ -417,9 +440,11 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                 ? (operacao === "aumentar"
                     ? current * (1 + (parseFloat(percentual || 0) / 100))
                     : current * (1 - (parseFloat(percentual || 0) / 100)))
-                : (operacao === "aumentar"
-                    ? current + parseFloat(valorFixo || 0)
-                    : Math.max(0, current - parseFloat(valorFixo || 0))));
+                : tipoAjuste === "multiplicador"
+                    ? current * parseFloat(valorFixo || 0)
+                    : (operacao === "aumentar"
+                        ? current + parseFloat(valorFixo || 0)
+                        : Math.max(0, current - parseFloat(valorFixo || 0))));
         const deltaPercent = current > 0 ? ((adjusted - current) / current) * 100 : 0;
 
         return {
@@ -500,20 +525,34 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
 
                     <div className="grid md:grid-cols-4 gap-3 p-4 border rounded-xl">
                         <div>
-                            <Label className="text-xs text-gray-600">Fabricantes (vírgula)</Label>
-                            <Input
-                                value={criteria.fabricantes}
-                                onChange={(e) => setCriteria((prev) => ({ ...prev, fabricantes: e.target.value }))}
-                                placeholder="Altaro, Castor"
-                            />
+                            <Label className="text-xs text-gray-600">Fabricante</Label>
+                            <Select
+                                value={criteria.fabricantes || "todos"}
+                                onValueChange={(value) => setCriteria((prev) => ({ ...prev, fabricantes: value === "todos" ? "" : value }))}
+                            >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="todos">Todos os fabricantes</SelectItem>
+                                    {uniqueManufacturers.map((fabricante) => (
+                                        <SelectItem key={fabricante} value={fabricante}>{fabricante}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
                         <div>
-                            <Label className="text-xs text-gray-600">Categorias (vírgula)</Label>
-                            <Input
-                                value={criteria.categorias}
-                                onChange={(e) => setCriteria((prev) => ({ ...prev, categorias: e.target.value }))}
-                                placeholder="Sofá, Cama"
-                            />
+                            <Label className="text-xs text-gray-600">Categoria</Label>
+                            <Select
+                                value={criteria.categorias || "todas"}
+                                onValueChange={(value) => setCriteria((prev) => ({ ...prev, categorias: value === "todas" ? "" : value }))}
+                            >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="todas">Todas as categorias</SelectItem>
+                                    {uniqueCategories.map((categoria) => (
+                                        <SelectItem key={categoria} value={categoria}>{categoria}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
                         <div>
                             <Label className="text-xs text-gray-600">Produto específico</Label>
@@ -619,28 +658,38 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                                     <DollarSign className="w-4 h-4 mr-2" />
                                     Valor Fixo
                                 </Button>
+                                <Button
+                                    type="button"
+                                    variant={tipoAjuste === "multiplicador" ? "default" : "outline"}
+                                    onClick={() => setTipoAjuste("multiplicador")}
+                                    className={tipoAjuste === "multiplicador" ? "bg-violet-600 hover:bg-violet-700" : ""}
+                                >
+                                    Multiplicador
+                                </Button>
                             </div>
 
-                            <div className="flex gap-2">
-                                <Button
-                                    type="button"
-                                    variant={operacao === "aumentar" ? "default" : "outline"}
-                                    onClick={() => setOperacao("aumentar")}
-                                    className={operacao === "aumentar" ? "bg-green-600 hover:bg-green-700" : ""}
-                                >
-                                    <TrendingUp className="w-4 h-4 mr-2" />
-                                    Aumentar
-                                </Button>
-                                <Button
-                                    type="button"
-                                    variant={operacao === "diminuir" ? "default" : "outline"}
-                                    onClick={() => setOperacao("diminuir")}
-                                    className={operacao === "diminuir" ? "bg-red-600 hover:bg-red-700" : ""}
-                                >
-                                    <TrendingDown className="w-4 h-4 mr-2" />
-                                    Diminuir
-                                </Button>
-                            </div>
+                            {tipoAjuste !== "multiplicador" && (
+                                <div className="flex gap-2">
+                                    <Button
+                                        type="button"
+                                        variant={operacao === "aumentar" ? "default" : "outline"}
+                                        onClick={() => setOperacao("aumentar")}
+                                        className={operacao === "aumentar" ? "bg-green-600 hover:bg-green-700" : ""}
+                                    >
+                                        <TrendingUp className="w-4 h-4 mr-2" />
+                                        Aumentar
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant={operacao === "diminuir" ? "default" : "outline"}
+                                        onClick={() => setOperacao("diminuir")}
+                                        className={operacao === "diminuir" ? "bg-red-600 hover:bg-red-700" : ""}
+                                    >
+                                        <TrendingDown className="w-4 h-4 mr-2" />
+                                        Diminuir
+                                    </Button>
+                                </div>
+                            )}
                         </div>
 
                         <div>
@@ -649,12 +698,16 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                                 type="number"
                                 min="0"
                                 max={tipoAjuste === "porcentagem" ? "20" : "999999"}
-                                step={tipoAjuste === "porcentagem" ? "0.5" : "0.01"}
+                                step={tipoAjuste === "porcentagem" ? "0.5" : tipoAjuste === "multiplicador" ? "0.01" : "0.01"}
                                 value={adjustmentValue}
                                 onChange={(e) => tipoAjuste === "porcentagem" ? setPercentual(e.target.value) : setValorFixo(e.target.value)}
-                                placeholder={tipoAjuste === "porcentagem" ? "Ex: 5" : "Ex: 50"}
+                                placeholder={tipoAjuste === "porcentagem" ? "Ex: 5" : tipoAjuste === "multiplicador" ? "Ex: 1.08" : "Ex: 50"}
                             />
-                            <p className="text-xs text-gray-500 mt-1">Limite de segurança: 20% por item.</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                                {tipoAjuste === "multiplicador"
+                                    ? "Use fator direto. Ex.: 1.05 aumenta 5%, 0.95 reduz 5%."
+                                    : "Limite de segurança: 20% por item."}
+                            </p>
                         </div>
                     </div>
 

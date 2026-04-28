@@ -145,6 +145,10 @@ export const calculateAdjustedValue = ({ currentValue, adjustmentType, operation
     const current = toNumber(currentValue);
     const value = toNumber(adjustmentValue);
 
+    if (adjustmentType === "multiplicador") {
+        return current * value;
+    }
+
     if (adjustmentType === "porcentagem") {
         return operation === "aumentar"
             ? current * (1 + value / 100)
