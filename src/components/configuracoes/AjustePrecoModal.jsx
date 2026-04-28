@@ -6,6 +6,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import {
     Dialog,
     DialogContent,
+    DialogFooter,
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
@@ -24,6 +25,8 @@ import {
     RotateCcw,
     Percent,
     DollarSign,
+    ChevronLeft,
+    ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -42,8 +45,6 @@ const defaultCriteria = {
     searchTerm: "",
     precoMin: "",
     precoMax: "",
-    loja: "todas",
-    unidade: "todas",
     status: BULK_PRICE_CONSTANTS.STATUS_OPTIONS.TODOS,
     estoqueMin: "",
     estoqueMax: "",
@@ -52,6 +53,8 @@ const defaultCriteria = {
     updatedFrom: "",
     updatedTo: "",
 };
+
+const PREVIEW_PAGE_SIZE = 100;
 
 export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
     const [targetField, setTargetField] = useState("preco_venda");
@@ -66,24 +69,19 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
     const [simulation, setSimulation] = useState(null);
     const [lastBatch, setLastBatch] = useState(null);
     const [aplicando, setAplicando] = useState(false);
+    const [previewPage, setPreviewPage] = useState(1);
+    const [selectedExecutionIds, setSelectedExecutionIds] = useState([]);
+    const [editCadastroOpen, setEditCadastroOpen] = useState(false);
+    const [editCadastroItem, setEditCadastroItem] = useState(null);
+    const [editPrecoCusto, setEditPrecoCusto] = useState("");
+    const [editPrecoVenda, setEditPrecoVenda] = useState("");
+    const [salvandoEdicaoCadastro, setSalvandoEdicaoCadastro] = useState(false);
 
     const { user, can } = useAuth();
     const confirm = useConfirm();
     const queryClient = useQueryClient();
 
     const adjustmentValue = tipoAjuste === "porcentagem" ? percentual : valorFixo;
-
-    const uniqueStores = useMemo(() => {
-        return [...new Set(
-            produtos
-                .map((produto) => produto.loja || produto.loja_nome || produto.loja_venda || produto.store || produto.store_name)
-                .filter(Boolean)
-        )].sort();
-    }, [produtos]);
-
-    const uniqueUnits = useMemo(() => {
-        return [...new Set(produtos.map((produto) => produto.unidade).filter(Boolean))].sort();
-    }, [produtos]);
 
     const uniqueManufacturers = useMemo(() => {
         return [...new Set(
@@ -140,6 +138,11 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
 
     const executionRows = simulation?.executableRows || [];
     const blockedRows = simulation?.blockedRows || [];
+    const selectedExecutableRows = useMemo(() => {
+        if (!simulation) return [];
+        const selectedSet = new Set(selectedExecutionIds);
+        return executionRows.filter((row) => selectedSet.has(row.id));
+    }, [simulation, executionRows, selectedExecutionIds]);
 
     const formatMoney = (value) => {
         if (!value && value !== 0) return "R$ 0,00";
@@ -160,7 +163,12 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
 
     useEffect(() => {
         setSimulation(null);
+        setSelectedExecutionIds([]);
     }, [criteria, exceptionMode, exceptionIds, tipoAjuste, operacao, percentual, valorFixo, targetField]);
+
+    useEffect(() => {
+        setPreviewPage(1);
+    }, [simulation, criteria, exceptionMode, exceptionIds, tipoAjuste, operacao, percentual, valorFixo, targetField]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -218,7 +226,63 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
         });
 
         setSimulation(result);
+        setSelectedExecutionIds(result.executableRows.map((row) => row.id));
         toast.success(`Simulação gerada: ${result.summary.totalExecutaveis} item(ns) executáveis`);
+    };
+
+    const selecionarTodosElegiveis = () => {
+        if (!simulation) return;
+        setSelectedExecutionIds(executionRows.map((row) => row.id));
+    };
+
+    const limparSelecaoElegiveis = () => {
+        setSelectedExecutionIds([]);
+    };
+
+    const toggleExecucaoSelecionada = (produtoId) => {
+        setSelectedExecutionIds((prev) =>
+            prev.includes(produtoId)
+                ? prev.filter((id) => id !== produtoId)
+                : [...prev, produtoId]
+        );
+    };
+
+    const abrirEditarCadastro = (produto) => {
+        setEditCadastroItem(produto);
+        setEditPrecoCusto(String(produto?.preco_custo_tabela ?? produto?.preco_custo ?? 0));
+        setEditPrecoVenda(String(produto?.preco_venda ?? 0));
+        setEditCadastroOpen(true);
+    };
+
+    const salvarEdicaoCadastro = async () => {
+        if (!editCadastroItem?.id) return;
+
+        const custo = Number(editPrecoCusto);
+        const venda = Number(editPrecoVenda);
+
+        if (!(custo >= 0) || !(venda >= 0)) {
+            toast.error("Informe valores válidos de custo e venda");
+            return;
+        }
+
+        setSalvandoEdicaoCadastro(true);
+        try {
+            await base44.entities.Produto.update(editCadastroItem.id, {
+                preco_custo_tabela: custo,
+                preco_custo: custo,
+                preco_venda: venda,
+            });
+
+            queryClient.invalidateQueries({ queryKey: ["produtos"] });
+            setSimulation(null);
+            setSelectedExecutionIds([]);
+            setEditCadastroOpen(false);
+            toast.success("Cadastro do item atualizado. Gere nova simulação.");
+        } catch (error) {
+            toast.error("Erro ao atualizar cadastro: " + error.message);
+        } finally {
+            setSalvandoEdicaoCadastro(false);
+        }
     };
 
     const salvarSnapshotDesfazer = (snapshot) => {
@@ -324,20 +388,20 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
             return;
         }
 
-        if (!executionRows.length) {
+        if (!selectedExecutableRows.length) {
             toast.error("Nenhum item executável na simulação");
             return;
         }
 
         const firstConfirm = await confirm({
             title: "Confirmar reajuste",
-            message: `Executar reajuste em ${executionRows.length} item(ns) no campo ${targetField}?\nItens bloqueados: ${blockedRows.length}`,
+            message: `Executar reajuste em ${selectedExecutableRows.length} item(ns) no campo ${targetField}?\nItens bloqueados: ${blockedRows.length}`,
             confirmText: "Continuar",
             variant: "destructive",
         });
         if (!firstConfirm) return;
 
-        if (executionRows.length > 100) {
+        if (selectedExecutableRows.length > 100) {
             const secondConfirm = await confirm({
                 title: "Lote grande detectado",
                 message: "Esta operação afeta mais de 100 itens. Confirme novamente para executar.",
@@ -353,8 +417,8 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
 
         try {
             const batchSize = 25;
-            for (let i = 0; i < executionRows.length; i += batchSize) {
-                const batch = executionRows.slice(i, i + batchSize);
+            for (let i = 0; i < selectedExecutableRows.length; i += batchSize) {
+                const batch = selectedExecutableRows.slice(i, i + batchSize);
 
                 await Promise.all(batch.map(async (row) => {
                     try {
@@ -401,6 +465,7 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                     exceptionMode,
                     exceptionIds,
                     blockedCount: blockedRows.length,
+                    selectedCount: selectedExecutableRows.length,
                     successCount: snapshot.length,
                     errorCount: errors.length,
                 },
@@ -432,11 +497,22 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
 
     const nomeCampoAlvo = targetField === "preco_venda" ? "Preço de Venda" : "Preço de Custo Tabela";
 
-    const previewRows = simulation?.rows || eligibleProducts.map((produto) => {
-        const current = Number(produto[targetField] || 0);
-        const adjusted = simulation
-            ? current
-            : (tipoAjuste === "porcentagem"
+    const previewRowsSource = simulation?.rows || eligibleProducts;
+    const totalPreviewRows = previewRowsSource.length;
+    const totalPreviewPages = Math.max(1, Math.ceil(totalPreviewRows / PREVIEW_PAGE_SIZE));
+    const currentPreviewPage = Math.min(previewPage, totalPreviewPages);
+    const previewStartIndex = (currentPreviewPage - 1) * PREVIEW_PAGE_SIZE;
+
+    const previewRowsSlice = useMemo(() => {
+        return previewRowsSource.slice(previewStartIndex, previewStartIndex + PREVIEW_PAGE_SIZE);
+    }, [previewRowsSource, previewStartIndex]);
+
+    const previewRows = useMemo(() => {
+        if (simulation) return previewRowsSlice;
+
+        return previewRowsSlice.map((produto) => {
+            const current = Number(produto[targetField] || 0);
+            const adjusted = tipoAjuste === "porcentagem"
                 ? (operacao === "aumentar"
                     ? current * (1 + (parseFloat(percentual || 0) / 100))
                     : current * (1 - (parseFloat(percentual || 0) / 100)))
@@ -444,21 +520,23 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                     ? current * parseFloat(valorFixo || 0)
                     : (operacao === "aumentar"
                         ? current + parseFloat(valorFixo || 0)
-                        : Math.max(0, current - parseFloat(valorFixo || 0))));
-        const deltaPercent = current > 0 ? ((adjusted - current) / current) * 100 : 0;
+                        : Math.max(0, current - parseFloat(valorFixo || 0)));
+            const deltaPercent = current > 0 ? ((adjusted - current) / current) * 100 : 0;
 
-        return {
-            id: produto.id,
-            produto,
-            current,
-            adjusted: Math.round(adjusted * 100) / 100,
-            deltaPercent,
-            blocked: false,
-            reasons: [],
-        };
-    });
+            return {
+                id: produto.id,
+                produto,
+                current,
+                adjusted: Math.round(adjusted * 100) / 100,
+                deltaPercent,
+                blocked: false,
+                reasons: [],
+            };
+        });
+    }, [simulation, previewRowsSlice, targetField, tipoAjuste, operacao, percentual, valorFixo]);
 
     return (
+        <>
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
                 <DialogHeader className="pb-4 border-b">
@@ -491,9 +569,14 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                         </div>
                     )}
 
+                    <div className="space-y-2">
+                        <h3 className="text-sm font-semibold text-gray-900">1. Regra do reajuste</h3>
+                        <p className="text-xs text-gray-600">Escolha o campo de preço e o comportamento das exceções para a simulação.</p>
+                    </div>
+
                     <div className="grid md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-xl">
                         <div>
-                            <Label className="text-sm font-medium text-gray-700 mb-2 block">Campo alvo do reajuste</Label>
+                            <Label className="text-sm font-medium text-gray-700 mb-2 block">Campo de preço</Label>
                             <Select value={targetField} onValueChange={setTargetField}>
                                 <SelectTrigger>
                                     <SelectValue />
@@ -506,21 +589,26 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                         </div>
 
                         <div>
-                            <Label className="text-sm font-medium text-gray-700 mb-2 block">Modo de exceção</Label>
+                            <Label className="text-sm font-medium text-gray-700 mb-2 block">Modo das exceções</Label>
                             <Select value={exceptionMode} onValueChange={setExceptionMode}>
                                 <SelectTrigger>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value={BULK_PRICE_CONSTANTS.EXCEPTION_MODES.INCLUDE_FILTER_EXCLUDE_ITEMS}>
-                                        Incluir por filtro e excluir exceções
+                                        Excluir itens selecionados manualmente
                                     </SelectItem>
                                     <SelectItem value={BULK_PRICE_CONSTANTS.EXCEPTION_MODES.EXCLUDE_FILTER_INCLUDE_ITEMS}>
-                                        Excluir por filtro e incluir exceções
+                                        Incluir apenas itens selecionados manualmente
                                     </SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <h3 className="text-sm font-semibold text-gray-900">2. Itens alvo</h3>
+                        <p className="text-xs text-gray-600">Defina os candidatos usando filtros de fabricante, categoria, status e faixa de preço.</p>
                     </div>
 
                     <div className="grid md:grid-cols-4 gap-3 p-4 border rounded-xl">
@@ -571,7 +659,7 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value={BULK_PRICE_CONSTANTS.STATUS_OPTIONS.TODOS}>Todos</SelectItem>
-                                    <SelectItem value={BULK_PRICE_CONSTANTS.STATUS_OPTIONS.ATIVO}>Ativo</SelectItem>
+                                    <SelectItem value={BULK_PRICE_CONSTANTS.STATUS_OPTIONS.ATIVO}>Somente ativos</SelectItem>
                                     <SelectItem value={BULK_PRICE_CONSTANTS.STATUS_OPTIONS.INATIVO}>Inativo</SelectItem>
                                 </SelectContent>
                             </Select>
@@ -595,30 +683,6 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                         </div>
 
                         <div>
-                            <Label className="text-xs text-gray-600">Loja/Unidade</Label>
-                            <Select value={criteria.loja} onValueChange={(value) => setCriteria((prev) => ({ ...prev, loja: value }))}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="todas">Todas</SelectItem>
-                                    {uniqueStores.map((store) => (
-                                        <SelectItem key={store} value={store}>{store}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label className="text-xs text-gray-600">Unidade comercial</Label>
-                            <Select value={criteria.unidade} onValueChange={(value) => setCriteria((prev) => ({ ...prev, unidade: value }))}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="todas">Todas</SelectItem>
-                                    {uniqueUnits.map((unit) => (
-                                        <SelectItem key={unit} value={unit}>{unit}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
                             <Label className="text-xs text-gray-600">Cadastro (de)</Label>
                             <Input type="date" value={criteria.createdFrom} onChange={(e) => setCriteria((prev) => ({ ...prev, createdFrom: e.target.value }))} />
                         </div>
@@ -635,6 +699,16 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                             <Label className="text-xs text-gray-600">Atualização (até)</Label>
                             <Input type="date" value={criteria.updatedTo} onChange={(e) => setCriteria((prev) => ({ ...prev, updatedTo: e.target.value }))} />
                         </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <h3 className="text-sm font-semibold text-gray-900">3. Forma de cálculo</h3>
+                        <p className="text-xs text-gray-600">Defina tipo, direção e valor do reajuste.</p>
+                    </div>
+
+                    <div className="space-y-2">
+                        <h3 className="text-sm font-semibold text-gray-900">4. Ajustes manuais (exceções)</h3>
+                        <p className="text-xs text-gray-600">Inclua ou exclua itens pontuais sem alterar os filtros principais.</p>
                     </div>
 
                     <div className="grid md:grid-cols-2 gap-4 p-4 border rounded-xl">
@@ -755,26 +829,41 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                     <div className="p-3 rounded-lg border bg-gray-50 text-sm text-gray-700 grid md:grid-cols-3 gap-3">
                         <div>Base pelos filtros: <span className="font-semibold">{filteredProducts.length}</span></div>
                         <div>Elegíveis após exceções: <span className="font-semibold">{eligibleProducts.length}</span></div>
-                        <div>Campo alvo: <span className="font-semibold">{nomeCampoAlvo}</span></div>
+                        <div>Campo de preço: <span className="font-semibold">{nomeCampoAlvo}</span></div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <h3 className="text-sm font-semibold text-gray-900">5. Simulação e validação</h3>
+                        <p className="text-xs text-gray-600">Simule antes de executar e verifique os itens que requerem ajuste.</p>
                     </div>
 
                     <div className="flex items-center gap-3">
                         <Button onClick={gerarSimulacao} disabled={!can("manage_bulk_price_adjustment") || aplicando}>
-                            Gerar Simulação Obrigatória
+                            Simular reajuste
                         </Button>
                         {simulation && (
+                            <>
+                                <Button variant="outline" onClick={selecionarTodosElegiveis} disabled={aplicando || !executionRows.length}>
+                                    Selecionar todos elegíveis
+                                </Button>
+                                <Button variant="outline" onClick={limparSelecaoElegiveis} disabled={aplicando || !selectedExecutionIds.length}>
+                                    Limpar seleção
+                                </Button>
+                            </>
+                        )}
+                        {simulation && (
                             <div className="text-sm text-gray-600">
-                                Executáveis: <span className="font-semibold text-green-700">{simulation.summary.totalExecutaveis}</span> | Bloqueados: <span className="font-semibold text-red-700">{simulation.summary.totalBloqueados}</span>
+                                Prontos para aplicar: <span className="font-semibold text-green-700">{simulation.summary.totalExecutaveis}</span> | Selecionados: <span className="font-semibold text-blue-700">{selectedExecutableRows.length}</span> | Requer ajuste: <span className="font-semibold text-red-700">{simulation.summary.totalBloqueados}</span>
                             </div>
                         )}
                     </div>
 
                     {simulation && (
                         <div className="p-3 rounded-lg border border-blue-200 bg-blue-50 text-sm">
-                            <div className="font-medium text-blue-900 mb-2">Resumo da Simulação</div>
+                            <div className="font-medium text-blue-900 mb-2">Resumo da simulação</div>
                             <div className="grid md:grid-cols-4 gap-2 text-blue-900">
                                 <div>Total elegíveis: {simulation.summary.totalElegiveis}</div>
-                                <div>Total executáveis: {simulation.summary.totalExecutaveis}</div>
+                                <div>Prontos para aplicar: {simulation.summary.totalExecutaveis}</div>
                                 <div>Soma atual: {formatMoney(simulation.summary.somaAtual)}</div>
                                 <div>Soma nova: {formatMoney(simulation.summary.somaNova)}</div>
                             </div>
@@ -783,11 +872,37 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                     )}
 
                     <div className="border rounded-xl overflow-hidden">
+                        <div className="px-3 py-2 border-b bg-gray-50 flex items-center justify-between text-xs text-gray-600">
+                            <span>
+                                Mostrando {Math.min(totalPreviewRows, previewStartIndex + 1)}-{Math.min(totalPreviewRows, previewStartIndex + previewRows.length)} de {totalPreviewRows} item(ns)
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setPreviewPage((prev) => Math.max(1, prev - 1))}
+                                    disabled={currentPreviewPage <= 1}
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </Button>
+                                <span>Página {currentPreviewPage} de {totalPreviewPages}</span>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setPreviewPage((prev) => Math.min(totalPreviewPages, prev + 1))}
+                                    disabled={currentPreviewPage >= totalPreviewPages}
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </Button>
+                            </div>
+                        </div>
                         <div className="max-h-[280px] overflow-y-auto">
                             <Table>
                                 <TableHeader className="bg-gray-50 sticky top-0">
                                     <TableRow>
-                                        <TableHead className="w-12">Ex.</TableHead>
+                                        <TableHead className="w-16">Aplicar?</TableHead>
                                         <TableHead>Produto</TableHead>
                                         <TableHead className="text-right">Atual</TableHead>
                                         <TableHead className="text-right">Novo</TableHead>
@@ -797,11 +912,15 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                                 </TableHeader>
                                 <TableBody>
                                     {previewRows.map((row) => {
-                                        const selectedException = exceptionIds.includes(row.id);
+                                        const selectedExecution = selectedExecutionIds.includes(row.id);
                                         return (
                                             <TableRow key={row.id} className={row.blocked ? "bg-red-50" : ""}>
                                                 <TableCell>
-                                                    <Checkbox checked={selectedException} onCheckedChange={() => toggleException(row.id)} />
+                                                    <Checkbox
+                                                        checked={selectedExecution}
+                                                        disabled={row.blocked}
+                                                        onCheckedChange={() => toggleExecucaoSelecionada(row.id)}
+                                                    />
                                                 </TableCell>
                                                 <TableCell>
                                                     <p className="font-medium text-sm truncate max-w-[280px]">{row.produto.nome}</p>
@@ -816,10 +935,21 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                                                     {row.blocked ? (
                                                         <div className="text-red-700 flex items-center gap-1">
                                                             <ShieldAlert className="w-3 h-3" />
-                                                            {row.reasons.join("; ")}
+                                                            <span>{row.reasons.join("; ")}</span>
+                                                            {row.reasons.some((reason) => String(reason).toLowerCase().includes("menor ou igual a zero")) && (
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="link"
+                                                                    size="sm"
+                                                                    className="h-auto p-0 text-red-800 underline"
+                                                                    onClick={() => abrirEditarCadastro(row.produto)}
+                                                                >
+                                                                    corrigir cadastro
+                                                                </Button>
+                                                            )}
                                                         </div>
                                                     ) : (
-                                                        <span className="text-green-700">Executável</span>
+                                                        <span className="text-green-700">Pronto para aplicar</span>
                                                     )}
                                                 </TableCell>
                                             </TableRow>
@@ -831,11 +961,13 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                     </div>
                 </div>
 
-                <div className="pt-4 border-t flex items-center justify-between">
+                <div className="pt-4 border-t space-y-2">
+                    <h3 className="text-sm font-semibold text-gray-900">6. Execução</h3>
+                    <div className="flex items-center justify-between">
                     <div className="text-sm text-gray-600">
                         {simulation
-                            ? `${simulation.summary.totalExecutaveis} item(ns) prontos para execução em ${nomeCampoAlvo}`
-                            : "Gere a simulação para liberar a execução"}
+                            ? `${selectedExecutableRows.length} item(ns) selecionados para execução em ${nomeCampoAlvo}`
+                            : "Simule o reajuste para liberar a execução"}
                     </div>
 
                     <div className="flex gap-3">
@@ -847,7 +979,7 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                             disabled={
                                 aplicando ||
                                 !simulation ||
-                                !simulation.summary.totalExecutaveis ||
+                                !selectedExecutableRows.length ||
                                 !can("manage_bulk_price_adjustment")
                             }
                             className="min-w-[180px] bg-green-700 hover:bg-green-800"
@@ -860,8 +992,55 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
                             Executar Reajuste
                         </Button>
                     </div>
+                    </div>
                 </div>
             </DialogContent>
+
         </Dialog>
+
+        <Dialog open={editCadastroOpen} onOpenChange={setEditCadastroOpen}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Editar Cadastro do Item</DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-4 py-2">
+                    <div className="text-sm text-gray-700 font-medium">
+                        {editCadastroItem?.nome || "Produto"}
+                    </div>
+                    <div>
+                        <Label>Preço de Custo</Label>
+                        <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={editPrecoCusto}
+                            onChange={(e) => setEditPrecoCusto(e.target.value)}
+                        />
+                    </div>
+                    <div>
+                        <Label>Preço de Venda</Label>
+                        <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={editPrecoVenda}
+                            onChange={(e) => setEditPrecoVenda(e.target.value)}
+                        />
+                    </div>
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => setEditCadastroOpen(false)}>
+                        Cancelar
+                    </Button>
+                    <Button onClick={salvarEdicaoCadastro} disabled={salvandoEdicaoCadastro}>
+                        {salvandoEdicaoCadastro && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                        Salvar Cadastro
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+        </>
     );
 }
