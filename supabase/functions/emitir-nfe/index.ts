@@ -1,10 +1,10 @@
 // Supabase Edge Function: emitir-nfe
 // Deploy: supabase functions deploy emitir-nfe --no-verify-jwt
-// API: Nuvem Fiscal (multi-tenant — credenciais por organization_id)
+// API: ACBR API (multi-tenant — credenciais por organization_id)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getNuvemFiscalToken } from '../_shared/nuvemFiscalAuth.ts'
+import { getAcbrToken } from '../_shared/acbrAuth.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -84,7 +84,7 @@ serve(async (req) => {
         // Ping check
         if (body.ping) {
             return new Response(
-                JSON.stringify({ success: true, message: 'NF-e Emission Service Ready (Nuvem Fiscal)' }),
+                JSON.stringify({ success: true, message: 'NF-e Emission Service Ready (ACBR API)' }),
                 { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             )
         }
@@ -246,12 +246,12 @@ serve(async (req) => {
         }
 
         // ═══════════════════════════════════════════════════════════════════════
-        // STEP 3: FETCH NUVEM FISCAL TOKEN (via shared helper)
+        // STEP 3: FETCH ACBR TOKEN (via shared helper)
         // ═══════════════════════════════════════════════════════════════════════
 
         let auth: { accessToken: string; baseUrl: string };
         try {
-            auth = await getNuvemFiscalToken(supabase, organization_id, ambiente);
+            auth = await getAcbrToken(supabase, organization_id, ambiente);
         } catch (e) {
             return new Response(
                 JSON.stringify({ success: false, error: (e as Error).message, code: 'CONFIG_ERROR' }),
@@ -393,11 +393,11 @@ serve(async (req) => {
         }
 
         // ═══════════════════════════════════════════════════════════════════════
-        // STEP 5: BUILD NUVEM FISCAL PAYLOAD
+        // STEP 5: BUILD ACBR PAYLOAD
         // ═══════════════════════════════════════════════════════════════════════
 
         // ═══════════════════════════════════════════════════════════════════════
-        // STEP 5: BUILD NUVEM FISCAL PAYLOAD (TNfePedidoEmissao -> infNFe Sefaz)
+        // STEP 5: BUILD ACBR PAYLOAD (TNfePedidoEmissao -> infNFe Sefaz)
         // ═══════════════════════════════════════════════════════════════════════
 
         // Emitente data from body (injected by frontend) or config
@@ -682,12 +682,8 @@ serve(async (req) => {
         };
 
         // ═══════════════════════════════════════════════════════════════════════
-        // STEP 6: SEND TO NUVEM FISCAL
+        // STEP 6: SEND TO ACBR API
         // ═══════════════════════════════════════════════════════════════════════
-
-        // Note: Using the specialized /nfe/emitir endpoint might not exist, 
-        // usually it is POST /nfe implied emission or POST /nfe/autorizar depending on API version.
-        // nuvemFiscalAuth.ts uses standard generic endpoint.
 
         console.log('Sending NFe payload:', JSON.stringify(nfePayload));
 
@@ -705,10 +701,10 @@ serve(async (req) => {
         if (!nfeResponse.ok) {
             // Log full response for debugging
             const fullRespStr = JSON.stringify(respData);
-            console.error('[emitir-nfe] Nuvem Fiscal error (HTTP ' + nfeResponse.status + '):', fullRespStr);
+            console.error('[emitir-nfe] ACBR API error (HTTP ' + nfeResponse.status + '):', fullRespStr);
 
             // Return the RAW response so the user/developer can see exactly what failed
-            throw new Error(`Erro Nuvem Fiscal (HTTP ${nfeResponse.status}): ${fullRespStr.substring(0, 1500)}`);
+            throw new Error(`Erro ACBR API (HTTP ${nfeResponse.status}): ${fullRespStr.substring(0, 1500)}`);
         }
 
         // Response handling...
@@ -716,7 +712,7 @@ serve(async (req) => {
         // If synchronous, we get 'autorizado' or 'rejeitado'.
         // Nuvem Fiscal might return 'id' immediately.
 
-        const nuvemFiscalId = respData.id;
+        const acbrId = respData.id;
         const statusNfe = respData.status || 'processando';
         const codigoStatus = respData.codigo_status || respData.autorizacao?.codigo_status || null;
         const motivoStatus =
@@ -737,14 +733,14 @@ serve(async (req) => {
         await supabase.from('vendas').update({
             nfe_emitida: true,
             nfe_status: statusNfe,
-            nfe_ref: nuvemFiscalId,
+            nfe_ref: acbrId,
             nfe_mensagem: motivoStatus || 'Enviada para processamento'
         }).eq('id', venda_id);
 
         // Insert into notas_fiscais_emitidas
         await supabase.from('notas_fiscais_emitidas').insert({
             venda_id,
-            nuvem_fiscal_id: nuvemFiscalId,
+            acbr_id: acbrId,
             ambiente: ambiente,
             status: statusNfe,
             codigo_status: codigoStatus ? parseInt(String(codigoStatus), 10) : null,
@@ -752,9 +748,9 @@ serve(async (req) => {
             natureza_operacao,
             data_emissao,
             chave_acesso: respData.chave || null,
-            numero_nota: respData.numero ? String(respData.numero) : null,
+            numero_nota: (respData.numero_nf || respData.numero) ? String(respData.numero_nf || respData.numero) : null,
             serie: respData.serie ? String(respData.serie) : null,
-            protocolo_autorizacao: respData.protocolo || null,
+            protocolo_autorizacao: respData.numero_protocolo || respData.protocolo || null,
             emitente_cnpj: emitCnpj,
             emitente_razao_social: emitNome,
             destinatario_cpf_cnpj: clienteCpfCnpj,
@@ -777,7 +773,7 @@ serve(async (req) => {
         // ── Auditoria de evento fiscal ────────────────────────────────────────
         const { error: eventoErr } = await supabase.from('nfe_eventos').insert({
             venda_id,
-            nfe_ref: nuvemFiscalId,
+            nfe_ref: acbrId,
             tipo_evento: 'emissao_enviada',
             status_novo: statusNfe,
             dados_resposta: respData,
@@ -790,7 +786,7 @@ serve(async (req) => {
             JSON.stringify({
                 success: true,
                 message: 'NF-e enviada para processamento',
-                ref: nuvemFiscalId,
+                ref: acbrId,
                 status: statusNfe,
                 codigo_status: codigoStatus,
                 motivo_status: motivoStatus,

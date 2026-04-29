@@ -1,10 +1,10 @@
 // Supabase Edge Function: cancelar-nfe
 // Deploy: supabase functions deploy cancelar-nfe --no-verify-jwt
-// API: Nuvem Fiscal (multi-tenant)
+// API: ACBR API (multi-tenant)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getNuvemFiscalToken } from '../_shared/nuvemFiscalAuth.ts'
+import { getAcbrToken } from '../_shared/acbrAuth.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -24,7 +24,7 @@ serve(async (req) => {
 
         if (!nfe_ref) {
             return new Response(
-                JSON.stringify({ error: 'nfe_ref é obrigatório (ID da NF-e na Nuvem Fiscal)' }),
+                JSON.stringify({ error: 'nfe_ref é obrigatório (ID da NF-e na ACBR API)' }),
                 { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             )
         }
@@ -77,7 +77,7 @@ serve(async (req) => {
             const { data: nfeRecord } = await supabase
                 .from('notas_fiscais_emitidas')
                 .select('venda_id')
-                .eq('nuvem_fiscal_id', nfe_ref)
+                .eq('acbr_id', nfe_ref)
                 .single();
 
             if (nfeRecord?.venda_id) {
@@ -98,10 +98,10 @@ serve(async (req) => {
             )
         }
 
-        // ─── Get Nuvem Fiscal Token ──────────────────────────────────────────
+        // ─── Get ACBR Token ──────────────────────────────────────────────────
         let auth;
         try {
-            auth = await getNuvemFiscalToken(supabase, orgId, ambiente);
+            auth = await getAcbrToken(supabase, orgId, ambiente);
         } catch (e) {
             return new Response(
                 JSON.stringify({ error: (e as Error).message, configurado: false }),
@@ -109,7 +109,7 @@ serve(async (req) => {
             )
         }
 
-        // ─── Nuvem Fiscal API: Cancel ────────────────────────────────────────
+        // ─── ACBR API: Cancel ────────────────────────────────────────────────
         const cancelResponse = await fetch(`${auth.baseUrl}/nfe/${nfe_ref}/cancelamento`, {
             method: 'POST',
             headers: {
@@ -134,7 +134,7 @@ serve(async (req) => {
                 motivo_status: justificativa,
                 updated_at: new Date().toISOString(),
             })
-            .eq('nuvem_fiscal_id', nfe_ref);
+            .eq('acbr_id', nfe_ref);
 
         // Also update vendas table
         await supabase

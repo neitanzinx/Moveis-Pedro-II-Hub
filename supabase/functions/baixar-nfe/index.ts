@@ -2,6 +2,8 @@
 // Deploy: supabase functions deploy baixar-nfe --no-verify-jwt
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { getAcbrToken } from '../_shared/acbrAuth.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -14,7 +16,7 @@ serve(async (req) => {
     }
 
     try {
-        const { nfe_id, tipo = 'pdf', ambiente = 'homologacao' } = await req.json()
+        const { nfe_id, tipo = 'pdf', ambiente = 'homologacao', organization_id } = await req.json()
 
         if (!nfe_id) {
             return new Response(
@@ -23,42 +25,20 @@ serve(async (req) => {
             )
         }
 
-        const CLIENT_ID = ambiente === 'producao'
-            ? Deno.env.get('NUVEM_FISCAL_PROD_ID')
-            : Deno.env.get('NUVEM_FISCAL_HOMOLOG_ID');
-
-        const CLIENT_SECRET = ambiente === 'producao'
-            ? Deno.env.get('NUVEM_FISCAL_PROD_SECRET')
-            : Deno.env.get('NUVEM_FISCAL_HOMOLOG_SECRET');
-
-        if (!CLIENT_ID || !CLIENT_SECRET) {
+        if (!organization_id) {
             return new Response(
-                JSON.stringify({ error: 'Credenciais não configuradas', configurado: false }),
-                { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                JSON.stringify({ error: 'organization_id é obrigatório', configurado: false }),
+                { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             )
         }
 
-        const API_BASE = ambiente === 'producao'
-            ? 'https://api.nuvemfiscal.com.br'
-            : 'https://api.sandbox.nuvemfiscal.com.br';
+        const supabase = createClient(
+            Deno.env.get('SUPABASE_URL') ?? '',
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+        )
 
-        // Autenticar
-        const authResponse = await fetch('https://auth.nuvemfiscal.com.br/oauth/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-                grant_type: 'client_credentials',
-                client_id: CLIENT_ID,
-                client_secret: CLIENT_SECRET,
-                scope: 'nfe'
-            })
-        });
-
-        if (!authResponse.ok) {
-            throw new Error('Falha na autenticação');
-        }
-
-        const { access_token } = await authResponse.json();
+        const auth = await getAcbrToken(supabase, organization_id, ambiente);
+        const API_BASE = auth.baseUrl;
 
         // Baixar arquivo (PDF ou XML)
         const endpoint = tipo === 'pdf' ? 'pdf' : 'xml';
@@ -67,7 +47,7 @@ serve(async (req) => {
         const fileResponse = await fetch(`${API_BASE}/nfe/${nfe_id}/${endpoint}`, {
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${access_token}`,
+                'Authorization': `Bearer ${auth.accessToken}`,
                 'Accept': acceptHeader
             }
         });

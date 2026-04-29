@@ -1,10 +1,10 @@
 // Supabase Edge Function: consultar-nfe
 // Deploy: supabase functions deploy consultar-nfe --no-verify-jwt
-// API: Nuvem Fiscal (multi-tenant)
+// API: ACBR API (multi-tenant)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getNuvemFiscalToken } from '../_shared/nuvemFiscalAuth.ts'
+import { getAcbrToken } from '../_shared/acbrAuth.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -21,7 +21,7 @@ serve(async (req) => {
 
         if (!nfe_ref) {
             return new Response(
-                JSON.stringify({ error: 'nfe_ref é obrigatório (ID da NF-e na Nuvem Fiscal)' }),
+                JSON.stringify({ error: 'nfe_ref é obrigatório (ID da NF-e na ACBR API)' }),
                 { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             )
         }
@@ -39,7 +39,7 @@ serve(async (req) => {
             const { data: nfeRecord } = await supabase
                 .from('notas_fiscais_emitidas')
                 .select('venda_id')
-                .eq('nuvem_fiscal_id', nfe_ref)
+                .eq('acbr_id', nfe_ref)
                 .single();
 
             if (nfeRecord?.venda_id) {
@@ -60,10 +60,10 @@ serve(async (req) => {
             )
         }
 
-        // ─── Get Nuvem Fiscal Token ──────────────────────────────────────────
+        // ─── Get ACBR Token ──────────────────────────────────────────────────
         let auth;
         try {
-            auth = await getNuvemFiscalToken(supabase, orgId, ambiente);
+            auth = await getAcbrToken(supabase, orgId, ambiente);
         } catch (e) {
             return new Response(
                 JSON.stringify({ error: (e as Error).message, configurado: false }),
@@ -71,7 +71,7 @@ serve(async (req) => {
             )
         }
 
-        // ─── Nuvem Fiscal API: Consultar ─────────────────────────────────────
+        // ─── ACBR API: Consultar ─────────────────────────────────────────────
         const nfeResponse = await fetch(`${auth.baseUrl}/nfe/${nfe_ref}`, {
             method: 'GET',
             headers: {
@@ -81,7 +81,7 @@ serve(async (req) => {
 
         if (!nfeResponse.ok) {
             if (nfeResponse.status === 404) {
-                throw new Error('NF-e não encontrada na Nuvem Fiscal para este ID.');
+                throw new Error('NF-e não encontrada na ACBR API para este ID.');
             }
             const errBody = await nfeResponse.text();
             throw new Error(`Erro ao consultar NF-e: ${nfeResponse.status} - ${errBody}`);
@@ -100,9 +100,9 @@ serve(async (req) => {
             };
 
             if (nfeData.chave) updateData.chave_acesso = nfeData.chave;
-            if (nfeData.numero) updateData.numero_nota = String(nfeData.numero);
+            if (nfeData.numero_nf || nfeData.numero) updateData.numero_nota = String(nfeData.numero_nf || nfeData.numero);
             if (nfeData.serie) updateData.serie = String(nfeData.serie);
-            if (nfeData.protocolo) updateData.protocolo_autorizacao = nfeData.protocolo;
+            if (nfeData.numero_protocolo || nfeData.protocolo) updateData.protocolo_autorizacao = nfeData.numero_protocolo || nfeData.protocolo;
             if (codigoStatus) updateData.codigo_status = String(codigoStatus);
             if (motivoStatus) {
                 updateData.motivo_status = motivoStatus;
@@ -111,7 +111,7 @@ serve(async (req) => {
             const { data: nfeRow } = await supabase
                 .from('notas_fiscais_emitidas')
                 .update(updateData)
-                .eq('nuvem_fiscal_id', nfe_ref)
+                .eq('acbr_id', nfe_ref)
                 .select('venda_id')
                 .single();
 
@@ -123,13 +123,13 @@ serve(async (req) => {
                 .update({
                     nfe_status: nfeData.status,
                     nfe_chave: nfeData.chave || null,
-                    nfe_numero: nfeData.numero ? String(nfeData.numero) : null,
+                    nfe_numero: (nfeData.numero_nf || nfeData.numero) ? String(nfeData.numero_nf || nfeData.numero) : null,
                     nfe_mensagem: motivoStatus || nfeData.status,
                 })
                 .eq('nfe_ref', nfe_ref);
 
             // ─── Audit event for terminal status transitions ─────────────────
-            const terminalStatuses = ['autorizado', 'cancelado', 'rejeitado', 'denegado', 'erro_autorizacao'];
+            const terminalStatuses = ['autorizado', 'autorizada', 'cancelado', 'rejeitado', 'denegado', 'erro_autorizacao'];
             if (vendaId && terminalStatuses.includes(nfeData.status)) {
                 await supabase.from('nfe_eventos').insert({
                     venda_id: vendaId,
@@ -138,7 +138,7 @@ serve(async (req) => {
                     status_novo: nfeData.status,
                     codigo_sefaz: codigoStatus ? parseInt(String(codigoStatus)) : null,
                     motivo_sefaz: motivoStatus,
-                    protocolo: nfeData.protocolo ?? null,
+                    protocolo: nfeData.numero_protocolo || nfeData.protocolo || null,
                     dados_resposta: { codigo_status: codigoStatus },
                 });
             }
@@ -149,9 +149,9 @@ serve(async (req) => {
                 success: true,
                 status: nfeData.status,
                 chave: nfeData.chave,
-                numero: nfeData.numero,
+                numero: nfeData.numero_nf || nfeData.numero,
                 serie: nfeData.serie,
-                protocolo: nfeData.protocolo,
+                protocolo: nfeData.numero_protocolo || nfeData.protocolo,
                 codigo_status: codigoStatus,
                 motivo_status: motivoStatus,
             }),

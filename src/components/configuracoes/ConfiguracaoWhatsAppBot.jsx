@@ -111,6 +111,25 @@ Nossa equipe entrará em contato para reagendar uma data conveniente para você.
 Caso tenha alguma dúvida, responda esta mensagem!
 
 *Móveis Pedro II* 🧡💚`
+            },
+            {
+                key: "entrega_agradecimento",
+                label: "Agradecimento por Entrega Concluída",
+                description: "Enviada automaticamente após conclusão da entrega",
+                icon: MessageCircle,
+                variables: [
+                    { key: "{{nome}}", label: "Nome do Cliente", example: "João Silva" },
+                    { key: "{{pedido}}", label: "Número do Pedido", example: "#12345" }
+                ],
+                defaultTemplate: `Olá *{{nome}}*! 😊
+
+Confirmamos que a entrega do seu pedido *#{{pedido}}* foi concluída com sucesso.
+
+Muito obrigado por escolher a *Móveis Pedro II*! 💚
+
+Se precisar de qualquer suporte no pós-entrega, é só responder esta mensagem.
+
+Aproveite seus móveis! ✨`
             }
         ]
     },

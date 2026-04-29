@@ -512,7 +512,7 @@ export default function Entregador() {
     const rotaPossuiAndamento = (entregas = []) => {
         const statusAndamento = ['Entregue', 'Próxima parada', 'A caminho', 'Em rota'];
         return entregas.some((entrega) =>
-            statusAndamento.includes(entrega?.status) || entrega?.whatsapp_enviado === true
+            statusAndamento.includes(entrega?.status)
         );
     };
 
@@ -709,6 +709,10 @@ export default function Entregador() {
             // Notificar apenas em rota nova e somente o primeiro pedido pendente.
             if (primeiraPendente && !rotaJaPossuiAndamento) {
                 await whatsappService.notifyRouteStart([primeiraPendente]);
+                await whatsappService.sendDeliveryNextStop(
+                    primeiraPendente.cliente_telefone,
+                    primeiraPendente
+                );
             }
 
             setRotaIniciada(true);

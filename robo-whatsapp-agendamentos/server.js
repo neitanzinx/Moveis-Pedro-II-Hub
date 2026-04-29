@@ -108,6 +108,71 @@ const STATUS_ENTREGA_FINALIZADOS = new Set(['entregue', 'concluida', 'concluída
 const STATUS_ENTREGA_ATIVOS = new Set(['próxima parada', 'proxima parada', 'a caminho', 'em rota']);
 const STATUS_ENTREGA_FILA = new Set(['próxima parada', 'proxima parada', 'a caminho', 'em rota', 'pendente']);
 
+const WHATSAPP_SETTINGS_CACHE_TTL_MS = 30000;
+let whatsappSettingsCache = { data: null, expiresAt: 0 };
+
+function parseBooleanSetting(value, defaultValue = true) {
+    if (value === undefined || value === null) return defaultValue;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (['true', '1', 'sim', 'yes', 'on'].includes(normalized)) return true;
+        if (['false', '0', 'nao', 'não', 'no', 'off'].includes(normalized)) return false;
+    }
+    return defaultValue;
+}
+
+async function getWhatsAppSettings(forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && whatsappSettingsCache.data && now < whatsappSettingsCache.expiresAt) {
+        return whatsappSettingsCache.data;
+    }
+
+    const { data, error } = await supabase
+        .from('whatsapp_bot_settings')
+        .select('key, value');
+
+    if (error) throw error;
+
+    const settings = {};
+    (data || []).forEach((row) => {
+        settings[row.key] = row.value;
+    });
+
+    whatsappSettingsCache = {
+        data: settings,
+        expiresAt: now + WHATSAPP_SETTINGS_CACHE_TTL_MS
+    };
+
+    return settings;
+}
+
+function renderTemplate(template, variables = {}) {
+    return Object.entries(variables).reduce((text, [key, value]) => {
+        const placeholder = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+        return text.replace(placeholder, value ?? '');
+    }, template || '');
+}
+
+async function buildMessageFromSettings(messageKey, fallbackTemplate, variables = {}, defaultEnabled = true) {
+    try {
+        const settings = await getWhatsAppSettings();
+        const enabled = parseBooleanSetting(settings[`msg_${messageKey}_enabled`], defaultEnabled);
+        const template = settings[`msg_${messageKey}_template`] || fallbackTemplate;
+        return {
+            enabled,
+            message: renderTemplate(template, variables)
+        };
+    } catch (error) {
+        console.error(`Erro ao carregar template configurável (${messageKey}):`, error.message);
+        return {
+            enabled: defaultEnabled,
+            message: renderTemplate(fallbackTemplate, variables)
+        };
+    }
+}
+
 // 🔐 Rotas de Autenticação de Funcionários
 const { setupEmployeeAuthRoutes } = require('./routes/authEmployee');
 
@@ -1013,17 +1078,7 @@ app.get('/logs', (req, res) => {
 // --- ROTA PARA CARREGAR CONFIGURAÇÕES DO AGENTE IA ---
 app.get('/whatsapp/ai-settings', async (req, res) => {
     try {
-        const { data, error } = await supabase
-            .from('whatsapp_bot_settings')
-            .select('key, value');
-
-        if (error) throw error;
-
-        // Converter array para objeto chave-valor
-        const settings = {};
-        (data || []).forEach(row => {
-            settings[row.key] = row.value;
-        });
+        const settings = await getWhatsAppSettings(true);
 
         res.json(settings);
     } catch (e) {
@@ -1049,6 +1104,8 @@ app.post('/whatsapp/ai-settings', async (req, res) => {
 
             if (error) throw error;
         }
+
+        whatsappSettingsCache = { data: null, expiresAt: 0 };
 
         console.log('✅ Configurações do agente IA salvas');
         res.json({ success: true });
@@ -1172,33 +1229,17 @@ app.post('/disparar-confirmacoes', async (req, res) => {
 
             const isReagendamento = entrega.is_reagendamento === true;
 
-            // ✅ MENSAGENS: confirmação normal ou ajuste de data/horário
-            const mensagem = isReagendamento
-                ? `Olá *${entrega.cliente_nome}*! 👋
-Aqui é da *Móveis Pedro II*.
-
-🔄 *Sua entrega foi ajustada.*
-
-📦 Pedido: #${entrega.numero_pedido}
-📅 Nova data: *${dataTexto}*
-🕐 Novo horário: *${horarioTexto}*
-
-Nossa equipe reorganizou a carga e esse é o novo agendamento da sua entrega.
-
-⚠️ *Lembre-se:* É necessário que tenha alguém *maior de idade* no local para receber e conferir os itens.
-
-_O horário pode ter pequenas variações devido ao trânsito._`
-                : `Olá *${entrega.cliente_nome}*! 👋
+            const confirmacaoTemplate = `Olá *{{nome}}*! 👋
 Aqui é da *Móveis Pedro II*.
 
 🚚 *Sua entrega está confirmada!*
 
-📦 Pedido: #${entrega.numero_pedido}
-📅 Data: *${dataTexto}*
-🕐 Horário: *${horarioTexto}*
+📦 Pedido: #{{pedido}}
+📅 Data: *{{data}}*
+🕐 Horário: *{{horario}}*
 
 *O que você vai receber:*
-${entrega.produtos || "Móveis diversos"}
+{{produtos}}
 
 ✅ Tudo certo por aqui! Nossa equipe já está preparando seu pedido.
 
@@ -1206,7 +1247,40 @@ ${entrega.produtos || "Móveis diversos"}
 
 _O horário pode ter pequenas variações devido ao trânsito._`;
 
-            const msgEnviada = await client.sendMessage(chatId, mensagem);
+            const reagendamentoTemplate = `Olá *{{nome}}*! 😔
+
+Pedimos desculpas, mas *ocorreu um imprevisto* e precisaremos reagendar a sua entrega.
+
+📦 Pedido: *#{{pedido}}*
+
+Fique tranquilo(a)! O reagendamento será feito dentro do prazo original do seu pedido.
+
+Nossa equipe entrará em contato em breve para confirmar a nova data da entrega.
+
+Pedimos desculpas pelo inconveniente. 🙏
+*Móveis Pedro II*`;
+
+            const messageConfig = isReagendamento
+                ? await buildMessageFromSettings('reagendamento', reagendamentoTemplate, {
+                    nome: entrega.cliente_nome || 'Cliente',
+                    pedido: entrega.numero_pedido || '-',
+                    data: dataTexto,
+                    horario: horarioTexto,
+                    produtos: entrega.produtos || 'Móveis diversos'
+                })
+                : await buildMessageFromSettings('entrega_confirmacao', confirmacaoTemplate, {
+                    nome: entrega.cliente_nome || 'Cliente',
+                    pedido: entrega.numero_pedido || '-',
+                    data: dataTexto,
+                    horario: horarioTexto,
+                    produtos: entrega.produtos || 'Móveis diversos'
+                });
+
+            if (!messageConfig.enabled) {
+                continue;
+            }
+
+            const msgEnviada = await client.sendMessage(chatId, messageConfig.message);
             console.log(`📤 Enviado para ${entrega.cliente_nome} (${chatId})`);
 
             const chat = await msgEnviada.getChat();
@@ -1240,36 +1314,40 @@ app.post('/mensagem-pos-venda', async (req, res) => {
 
     console.log(`📤 Tentando enviar mensagem para ${nome} (${chatId})`);
 
-    const isRetirada = prazo && (prazo.toLowerCase().includes('retirada') || prazo.toLowerCase().includes('retirado'));
+    const posVendaTemplate = `Olá *{{nome}}!* 🎉
+Muito obrigado por comprar na *Móveis Pedro II*.
 
-    let mensagem;
+✅ *Seu Pedido #{{pedido}} foi confirmado!*
 
-    if (isRetirada) {
-        mensagem =
-            `Olá *${nome}!* 🎉\n` +
-            `Muito obrigado por comprar na *Móveis Pedro II*.\n\n` +
-            `✅ *Seu Pedido #${pedido} foi confirmado!* \n\n` +
-            `📦 *Itens do seu pedido:*\n` +
-            `${produtos || 'Consulte sua nota de pedido'}\n\n` +
-            `Esperamos que você aproveite muito sua compra! 😍\n\n` +
-            `Qualquer dúvida, estamos à disposição! 🧡💚`;
-    } else {
-        mensagem =
-            `Olá *${nome}!* 🎉\n` +
-            `Muito obrigado por comprar na *Móveis Pedro II*.\n\n` +
-            `✅ *Seu Pedido #${pedido} foi confirmado!* \n\n` +
-            `📦 *Itens do seu pedido:*\n` +
-            `${produtos || 'Consulte sua nota de pedido'}\n\n` +
-            `⚠️ *IMPORTANTE:*\n` +
-            `Por favor, **salve este número** na sua agenda. É por aqui que vamos te avisar sobre a entrega.\n\n` +
-            `📅 *Prazo:* ${prazo} úteis\n` +
-            `Não precisa se preocupar em ligar! Quando seu pedido já tiver uma rota pronta, entraremos em contato para te informar a data da entrega.\n\n` +
-            `Qualquer dúvida, estamos à disposição! 🧡💚`;
+📦 *Itens do seu pedido:*
+{{produtos}}
+
+⚠️ *IMPORTANTE:*
+Por favor, **salve este número** na sua agenda. É por aqui que vamos te avisar sobre a entrega.
+
+📅 *Prazo:* {{prazo}}
+Não precisa se preocupar em ligar! Quando seu pedido já tiver uma rota pronta, entraremos em contato para te informar a data da entrega.
+
+Qualquer dúvida, estamos à disposição! 🧡💚`;
+
+    const posVendaMessage = await buildMessageFromSettings(
+        'pos_venda',
+        posVendaTemplate,
+        {
+            nome: nome || 'Cliente',
+            pedido: pedido || '-',
+            produtos: produtos || 'Consulte sua nota de pedido',
+            prazo: prazo ? `${prazo} úteis` : 'A confirmar'
+        }
+    );
+
+    if (!posVendaMessage.enabled) {
+        return res.json({ success: true, skipped: true });
     }
 
     try {
         // Enviar mensagem de texto
-        const msgResult = await enviarMensagemSegura(chatId, mensagem);
+        const msgResult = await enviarMensagemSegura(chatId, posVendaMessage.message);
         console.log(`✅ Pós-venda enviado para ${nome}:`, msgResult.success ? 'OK' : msgResult.warning || 'Falha');
         res.json({ success: true, warning: msgResult.warning });
     } catch (e) {
@@ -1302,22 +1380,35 @@ app.post('/aviso-inicio-rota', async (req, res) => {
         });
         const linkRastreio = `${baseUrl}/rastreio?token=${encodeURIComponent(trackingToken)}`;
 
-        const msg =
-            `Bom dia, *${entrega.cliente_nome}*! 🚚
+        const inicioRotaTemplate = `Bom dia, *{{nome}}*! 🚚
 
 O caminhão da *Móveis Pedro II* acabou de sair do depósito e iniciou a rota de entregas de hoje.
 
-📦 Seu pedido *#${entrega.numero_pedido}* está a caminho!
+📦 Seu pedido *#{{pedido}}* está a caminho!
 
 👇 *Acompanhe a localização ao vivo:*
-${linkRastreio}
+{{localizacao}}
 
 Por favor, mantenha alguém no local para receber.
 
 Até breve!`;
 
+        const inicioRotaMessage = await buildMessageFromSettings(
+            'inicio_rota',
+            inicioRotaTemplate,
+            {
+                nome: entrega.cliente_nome || 'Cliente',
+                pedido: entrega.numero_pedido || '-',
+                localizacao: linkRastreio
+            }
+        );
+
+        if (!inicioRotaMessage.enabled) {
+            continue;
+        }
+
         try {
-            await client.sendMessage(chatId, msg);
+            await client.sendMessage(chatId, inicioRotaMessage.message);
             await new Promise(r => setTimeout(r, 3000)); // Delay de 3s entre msgs
         } catch (e) {
             console.error(`Erro ao enviar para ${entrega.cliente_nome}`);
@@ -1457,18 +1548,30 @@ app.post('/aviso-proxima-parada', async (req, res) => {
     });
     const linkRastreio = `${baseUrl}/rastreio?token=${encodeURIComponent(trackingToken)}`;
 
-    const msg =
-        `*Móveis Pedro II Informa:* 📍
+    const proximaParadaTemplate = `*Móveis Pedro II Informa:* 📍
 
-Olá *${nome}*! O motorista finalizou a entrega anterior e **você é a próxima parada!**
+Olá *{{nome}}*! O motorista finalizou a entrega anterior e **você é a próxima parada!**
 
 Prepare-se para receber seus móveis em breve.
 
 👇 *Acompanhe a localização do caminhão ao vivo:*
-${linkRastreio}`;
+{{localizacao}}`;
+
+    const proximaParadaMessage = await buildMessageFromSettings(
+        'proxima_parada',
+        proximaParadaTemplate,
+        {
+            nome: nome || 'Cliente',
+            localizacao: linkRastreio
+        }
+    );
 
     try {
-        const result = await enviarMensagemSegura(chatId, msg);
+        if (!proximaParadaMessage.enabled) {
+            return res.json({ success: true, link: linkRastreio, skipped: true });
+        }
+
+        await enviarMensagemSegura(chatId, proximaParadaMessage.message);
         res.json({ success: true, link: linkRastreio });
     } catch (e) {
         console.error("Erro ao enviar aviso de próxima parada:", e.message);
@@ -1490,12 +1593,11 @@ app.post('/reagendar-entregas', async (req, res) => {
         if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
         const chatId = `${tel}@c.us`;
 
-        const msg =
-            `Olá *${entrega.nome}*! 😔
+        const reagendamentoTemplate = `Olá *{{nome}}*! 😔
 
 Pedimos desculpas, mas *ocorreu um imprevisto* e precisaremos reagendar a sua entrega.
 
-📦 Pedido: *#${entrega.numero_pedido}*
+📦 Pedido: *#{{pedido}}*
 
 Fique tranquilo(a)! O reagendamento será feito dentro do prazo original do seu pedido.
 
@@ -1504,8 +1606,21 @@ Nossa equipe entrará em contato em breve para confirmar a nova data da entrega.
 Pedimos desculpas pelo inconveniente. 🙏
 *Móveis Pedro II*`;
 
+        const reagendamentoMessage = await buildMessageFromSettings(
+            'reagendamento',
+            reagendamentoTemplate,
+            {
+                nome: entrega.nome || 'Cliente',
+                pedido: entrega.numero_pedido || '-'
+            }
+        );
+
+        if (!reagendamentoMessage.enabled) {
+            continue;
+        }
+
         try {
-            await client.sendMessage(chatId, msg);
+            await client.sendMessage(chatId, reagendamentoMessage.message);
             console.log(`📅 Reagendamento enviado para ${entrega.nome}`);
             await new Promise(r => setTimeout(r, 3000));
         } catch (e) {
@@ -1526,12 +1641,11 @@ app.post('/entrega-nao-realizada', async (req, res) => {
     if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
     const chatId = `${tel}@c.us`;
 
-    const msg =
-        `Olá *${nome}*! 😔
+    const entregaFalhaTemplate = `Olá *{{nome}}*! 😔
 
-Nossos entregadores estiveram no endereço hoje, mas *não conseguimos realizar a entrega* do seu pedido *#${numero_pedido}*.
+Nossos entregadores estiveram no endereço hoje, mas *não conseguimos realizar a entrega* do seu pedido *#{{pedido}}*.
 
-${motivo ? `📝 Motivo: ${motivo}` : ''}
+📝 Motivo: {{motivo}}
 
 O pedido está retornando ao nosso depósito e faremos uma *nova tentativa de entrega em breve*.
 
@@ -1541,8 +1655,22 @@ Caso tenha alguma dúvida, responda esta mensagem!
 
 *Móveis Pedro II* 🧡💚`;
 
+    const entregaFalhaMessage = await buildMessageFromSettings(
+        'entrega_falha',
+        entregaFalhaTemplate,
+        {
+            nome: nome || 'Cliente',
+            pedido: numero_pedido || '-',
+            motivo: motivo || 'Não informado'
+        }
+    );
+
+    if (!entregaFalhaMessage.enabled) {
+        return res.json({ success: true, skipped: true });
+    }
+
     try {
-        await client.sendMessage(chatId, msg);
+        await client.sendMessage(chatId, entregaFalhaMessage.message);
         console.log(`❌ Aviso de falha enviado para ${nome}`);
         res.json({ success: true });
     } catch (e) {
@@ -2103,12 +2231,45 @@ app.post('/concluir-entrega', async (req, res) => {
             .from('entregas')
             .update(updatePayload)
             .eq('id', id_concluida)
-            .select('caminhao_id, ordem_rota')
+            .select('caminhao_id, ordem_rota, cliente_nome, cliente_telefone, numero_pedido')
             .single();
 
         if (err1) throw err1;
 
         res.json({ success: true, message: "Entrega concluída. Próximo cliente será avisado em 5 min." });
+
+        if (entregaAtual?.cliente_telefone) {
+            try {
+                const telConcluida = entregaAtual.cliente_telefone.replace(/\D/g, '');
+                const chatIdConcluida = (telConcluida.length <= 11 ? '55' : '') + telConcluida + '@c.us';
+
+                const agradecimentoTemplate = `Olá *{{nome}}*! 😊
+
+Confirmamos que a entrega do seu pedido *#{{pedido}}* foi concluída com sucesso.
+
+Muito obrigado por escolher a *Móveis Pedro II*! 💚
+
+Se precisar de qualquer suporte no pós-entrega, é só responder esta mensagem.
+
+Aproveite seus móveis! ✨`;
+
+                const agradecimentoMessage = await buildMessageFromSettings(
+                    'entrega_agradecimento',
+                    agradecimentoTemplate,
+                    {
+                        nome: entregaAtual.cliente_nome || 'Cliente',
+                        pedido: entregaAtual.numero_pedido || '-'
+                    }
+                );
+
+                if (agradecimentoMessage.enabled) {
+                    await enviarMensagemSegura(chatIdConcluida, agradecimentoMessage.message);
+                    console.log(`✅ Mensagem de agradecimento enviada: ${entregaAtual.cliente_nome}`);
+                }
+            } catch (thankErr) {
+                console.error('❌ Erro ao enviar mensagem de agradecimento:', thankErr.message);
+            }
+        }
 
         // 2. Aguardar 5 minutos (Temporizador solicitado)
         console.log(`⏳ Aguardando 5 minutos para avisar o próximo cliente após entrega ${id_concluida}...`);
@@ -2151,9 +2312,30 @@ app.post('/concluir-entrega', async (req, res) => {
                 const tel = proximaEntrega.cliente_telefone.replace(/\D/g, '');
                 const chatId = (tel.length <= 11 ? '55' : '') + tel + '@c.us';
 
-                const msg = `*Móveis Pedro II Informa:* 📍\n\nOlá *${proximaEntrega.cliente_nome}*! O motorista finalizou a entrega anterior e **você é a próxima parada!**\n\nPrepare-se para receber seus móveis em breve.\n\n👇 *Acompanhe a localização do caminhão ao vivo:*\n${linkRastreio}`;
+                const proximaParadaTemplate = `*Móveis Pedro II Informa:* 📍
 
-                await enviarMensagemSegura(chatId, msg);
+Olá *{{nome}}*! O motorista finalizou a entrega anterior e **você é a próxima parada!**
+
+Prepare-se para receber seus móveis em breve.
+
+👇 *Acompanhe a localização do caminhão ao vivo:*
+{{localizacao}}`;
+
+                const proximaParadaMessage = await buildMessageFromSettings(
+                    'proxima_parada',
+                    proximaParadaTemplate,
+                    {
+                        nome: proximaEntrega.cliente_nome || 'Cliente',
+                        localizacao: linkRastreio
+                    }
+                );
+
+                if (!proximaParadaMessage.enabled) {
+                    console.log('ℹ️ Mensagem de próxima parada desativada nas configurações.');
+                    return;
+                }
+
+                await enviarMensagemSegura(chatId, proximaParadaMessage.message);
                 console.log(`✅ Próximo cliente avisado automaticamente: ${proximaEntrega.cliente_nome}`);
 
             } catch (autoErr) {
