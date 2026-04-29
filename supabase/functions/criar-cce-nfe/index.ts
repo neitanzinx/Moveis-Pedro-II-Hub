@@ -4,7 +4,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getNuvemFiscalToken } from '../_shared/nuvemFiscalAuth.ts'
+import { getAcbrToken } from '../_shared/acbrAuth.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -27,7 +27,7 @@ serve(async (req) => {
             organization_id,
         } = await req.json()
 
-        if (!nfe_ref) throw new Error('nfe_ref (ID da NF-e na Nuvem Fiscal) é obrigatório')
+        if (!nfe_ref) throw new Error('nfe_ref (ID da NF-e na ACBR API) é obrigatório')
         if (!descricao_correcao || descricao_correcao.trim().length < 15) {
             throw new Error('A descrição da correção deve ter no mínimo 15 caracteres')
         }
@@ -61,7 +61,7 @@ serve(async (req) => {
         const { data: nfeRecord, error: nfeError } = await supabase
             .from('notas_fiscais_emitidas')
             .select('id, venda_id, status, chave_acesso')
-            .eq('nuvem_fiscal_id', nfe_ref)
+            .eq('acbr_id', nfe_ref)
             .single()
 
         if (nfeError || !nfeRecord) throw new Error('NF-e não encontrada no banco de dados')
@@ -95,8 +95,8 @@ serve(async (req) => {
             throw new Error('Limite máximo de 20 cartas de correção por NF-e atingido')
         }
 
-        // ─── Obter token Nuvem Fiscal ─────────────────────────────────────────
-        const auth = await getNuvemFiscalToken(supabase, orgId, ambiente)
+        // ─── Obter token ACBR ─────────────────────────────────────────────────
+        const auth = await getAcbrToken(supabase, orgId, ambiente)
 
         // ─── POST /nfe/{id}/carta-correcao ────────────────────────────────────
         const cceResponse = await fetch(`${auth.baseUrl}/nfe/${nfe_ref}/carta-correcao`, {

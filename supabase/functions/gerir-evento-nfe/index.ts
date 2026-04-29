@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getNuvemFiscalToken } from '../_shared/nuvemFiscalAuth.ts'
+import { getAcbrToken } from '../_shared/acbrAuth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -28,7 +28,7 @@ async function resolveOrganizationId(supabase: any, vendaId?: string, nfeRef?: s
     const { data: nfe } = await supabase
       .from('notas_fiscais_emitidas')
       .select('venda_id')
-      .eq('nuvem_fiscal_id', nfeRef)
+      .eq('acbr_id', nfeRef)
       .maybeSingle()
 
     if (nfe?.venda_id) {
@@ -264,10 +264,10 @@ serve(async (req) => {
 
     await supabase
       .from('nfe_eventos_solicitacoes')
-      .update({ status_solicitacao: 'executando', mensagem_status: 'Executando evento junto à Nuvem Fiscal...' })
+      .update({ status_solicitacao: 'executando', mensagem_status: 'Executando evento junto à ACBR API...' })
       .eq('id', solicitacao_id)
 
-    const auth = await getNuvemFiscalToken(supabase, solicitacao.organization_id, solicitacao.ambiente)
+    const auth = await getAcbrToken(supabase, solicitacao.organization_id, solicitacao.ambiente)
 
     let apiResponse: any = null
     let protocolo: string | null = null
@@ -283,7 +283,7 @@ serve(async (req) => {
       const { data: nfeRecord } = await supabase
         .from('notas_fiscais_emitidas')
         .select('status, venda_id')
-        .eq('nuvem_fiscal_id', solicitacao.nfe_ref)
+        .eq('acbr_id', solicitacao.nfe_ref)
         .single()
 
       if (!nfeRecord) throw new Error('NF-e não encontrada para cancelamento')
@@ -311,7 +311,7 @@ serve(async (req) => {
       await supabase
         .from('notas_fiscais_emitidas')
         .update({ status: 'cancelado', motivo_status: payloadJustificativa, updated_at: new Date().toISOString() })
-        .eq('nuvem_fiscal_id', solicitacao.nfe_ref)
+        .eq('acbr_id', solicitacao.nfe_ref)
 
       await supabase
         .from('vendas')
@@ -340,7 +340,7 @@ serve(async (req) => {
       const { data: nfeRecord, error: nfeError } = await supabase
         .from('notas_fiscais_emitidas')
         .select('id, venda_id, status')
-        .eq('nuvem_fiscal_id', solicitacao.nfe_ref)
+        .eq('acbr_id', solicitacao.nfe_ref)
         .single()
 
       if (nfeError || !nfeRecord) throw new Error('NF-e não encontrada para CC-e')

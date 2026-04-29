@@ -1,6 +1,6 @@
 // Supabase Edge Function: sincronizar-nfe
 // Deploy: supabase functions deploy sincronizar-nfe --no-verify-jwt
-// API: POST /nfe/{id}/sincronizar (Nuvem Fiscal)
+// API: ACBR API (consulta/reprocessamento)
 //
 // Purpose: Force re-sync of a NF-e against SEFAZ.
 // Use when a note is stuck in 'pendente' or 'processando' due to network failure
@@ -8,14 +8,14 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getNuvemFiscalToken } from '../_shared/nuvemFiscalAuth.ts'
+import { getAcbrToken } from '../_shared/acbrAuth.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// Statuses that warrant a sincronização call
+// Statuses that warrant a sync/check call
 const SYNCABLE_STATUSES = ['pendente', 'processando', 'em_processamento'];
 
 serve(async (req) => {
@@ -33,7 +33,7 @@ serve(async (req) => {
 
         if (!nfe_ref) {
             return new Response(
-                JSON.stringify({ error: 'nfe_ref é obrigatório (ID da NF-e na Nuvem Fiscal)' }),
+                JSON.stringify({ error: 'nfe_ref é obrigatório (ID da NF-e na ACBR API)' }),
                 { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             )
         }
@@ -51,7 +51,7 @@ serve(async (req) => {
         const { data: nfeRecord } = await supabase
             .from('notas_fiscais_emitidas')
             .select('venda_id, status')
-            .eq('nuvem_fiscal_id', nfe_ref)
+            .eq('acbr_id', nfe_ref)
             .single();
 
         if (nfeRecord) {
@@ -76,10 +76,10 @@ serve(async (req) => {
             )
         }
 
-        // ─── Get Nuvem Fiscal Token ───────────────────────────────────────────
+        // ─── Get ACBR Token ──────────────────────────────────────────────────
         let auth;
         try {
-            auth = await getNuvemFiscalToken(supabase, orgId, ambiente);
+            auth = await getAcbrToken(supabase, orgId, ambiente);
         } catch (e) {
             return new Response(
                 JSON.stringify({ error: (e as Error).message, configurado: false }),
@@ -87,19 +87,17 @@ serve(async (req) => {
             )
         }
 
-        // ─── Nuvem Fiscal API: Sincronizar ────────────────────────────────────
-        // This POST asks Nuvem Fiscal to re-query SEFAZ and update the note's status
-        const sincResponse = await fetch(`${auth.baseUrl}/nfe/${nfe_ref}/sincronizar`, {
-            method: 'POST',
+        // ─── ACBR API: Consultar situação atual ───────────────────────────────
+        const sincResponse = await fetch(`${auth.baseUrl}/nfe/${nfe_ref}`, {
+            method: 'GET',
             headers: {
                 'Authorization': `Bearer ${auth.accessToken}`,
-                'Content-Type': 'application/json',
             },
         });
 
         if (!sincResponse.ok) {
             const errBody = await sincResponse.text();
-            throw new Error(`Erro ao sincronizar NF-e: ${sincResponse.status} - ${errBody}`);
+            throw new Error(`Erro ao consultar/sincronizar NF-e: ${sincResponse.status} - ${errBody}`);
         }
 
         const sincData = await sincResponse.json();
@@ -125,7 +123,7 @@ serve(async (req) => {
         await supabase
             .from('notas_fiscais_emitidas')
             .update(updateData)
-            .eq('nuvem_fiscal_id', nfe_ref);
+            .eq('acbr_id', nfe_ref);
 
         await supabase
             .from('vendas')
