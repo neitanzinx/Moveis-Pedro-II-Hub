@@ -31,7 +31,7 @@ export const ROLE_RULES = {
       'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
       'view_montagem', 'view_marketing',
-      'view_compras', 'create_oc', 'manage_compras', 'approve_oc',
+      'view_compras', 'create_oc', 'manage_compras', 'approve_oc', 'view_fornecedores',
       'solicitar_nfe', 'aprovar_nfe', 'emitir_nfe', 'cancelar_nfe', 'corrigir_nfe', 'view_nfe',
       'solicitar_cancelamento_nfe', 'aprovar_cancelamento_nfe',
       'solicitar_cce_nfe', 'aprovar_cce_nfe',
@@ -47,7 +47,7 @@ export const ROLE_RULES = {
       'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
       'view_montagem', 'view_marketing',
-      'view_compras', 'create_oc', 'manage_compras', 'send_oc', 'receive_oc',
+      'view_compras', 'create_oc', 'manage_compras', 'send_oc', 'receive_oc', 'view_fornecedores',
       'manage_bulk_price_adjustment',
       'solicitar_nfe', 'aprovar_nfe', 'emitir_nfe', 'cancelar_nfe', 'corrigir_nfe', 'view_nfe',
       'solicitar_cancelamento_nfe', 'aprovar_cancelamento_nfe',
@@ -69,14 +69,14 @@ export const ROLE_RULES = {
   'Estoque': {
     can: [
       'view_estoque', 'manage_estoque', 'view_entregas', 'manage_entregas',
-      'view_montagem', 'view_produtos', 'view_compras', 'receive_oc'
+      'view_montagem', 'view_produtos', 'view_compras', 'receive_oc', 'view_fornecedores'
     ],
     scope: SCOPES.ALL
   },
   'Financeiro': {
     can: [
       'view_financeiro', 'manage_financeiro', 'view_vendas',
-      'view_clientes', 'view_compras', 'approve_oc',
+      'view_clientes', 'view_compras', 'approve_oc', 'view_fornecedores',
       'solicitar_nfe', 'aprovar_nfe', 'view_nfe',
       'solicitar_cancelamento_nfe', 'aprovar_cancelamento_nfe',
       'solicitar_cce_nfe', 'aprovar_cce_nfe',
@@ -182,7 +182,8 @@ export const MENU_ITEMS = [
 
   { title: "Produtos", url: "/admin/Produtos", icon: Tag, permission: 'view_produtos', section: "Operacional" },
   { title: "Estoque", url: "/admin/Estoque", icon: Warehouse, permission: 'view_estoque', section: "Operacional" },
-  { title: "Compras", url: "/admin/Compras", icon: ShoppingCart, permission: 'view_compras', section: "Operacional" },
+  { title: "Setor de Compras", url: "/admin/Compras", icon: ShoppingCart, permission: 'view_compras', section: "Operacional" },
+  { title: "Fornecedores", url: "/admin/Fornecedores", icon: Building2, permission: 'view_fornecedores', section: "Operacional" },
   { title: "Logística", url: "/admin/LogisticaSemanal", icon: CalendarDays, permission: 'view_entregas', section: "Operacional" },
   { title: "Montagem", url: "/admin/Montagem", icon: Building2, permission: 'view_montagem', section: "Operacional", module: 'montagem' },
   { title: "Assistência Técnica", url: "/admin/AssistenciaTecnica", icon: Wrench, permission: 'view_assistencia', section: "Operacional", module: 'assistencia_tecnica' },
