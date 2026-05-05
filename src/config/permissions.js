@@ -59,7 +59,7 @@ export const ROLE_RULES = {
   'Vendedor': {
     can: [
       'view_dashboard', 'view_vendas', 'create_vendas',
-      'view_produtos', 'view_clientes', 'create_clientes',
+      'view_produtos', 'manage_produtos', 'view_clientes', 'create_clientes',
       'view_orcamentos', 'create_orcamentos', 'view_catalogo',
       'solicitar_nfe', 'view_nfe',
       'solicitar_cancelamento_nfe', 'solicitar_cce_nfe'

@@ -23,6 +23,61 @@ export function getAcbrBaseUrl(ambiente: string): string {
 }
 
 /**
+ * Obtém um Bearer token OAuth2 usando credenciais master da integração ACBr.
+ * Secrets esperados: ACBR_MASTER_CLIENT_ID e ACBR_MASTER_CLIENT_SECRET.
+ */
+export async function getAcbrMasterToken(ambiente: string): Promise<AuthResult> {
+    const denoRuntime = (globalThis as unknown as {
+        Deno?: { env: { get: (key: string) => string | undefined } };
+    }).Deno;
+    const clientId = denoRuntime?.env.get('ACBR_MASTER_CLIENT_ID')?.trim();
+    const clientSecret = denoRuntime?.env.get('ACBR_MASTER_CLIENT_SECRET')?.trim();
+
+    if (!clientId || !clientSecret) {
+        throw new Error(
+            'Credenciais master da ACBR API não configuradas. Defina ACBR_MASTER_CLIENT_ID e ACBR_MASTER_CLIENT_SECRET nos secrets da Edge Function.'
+        );
+    }
+
+    const baseUrl = getAcbrBaseUrl(ambiente);
+
+    const tokenResponse = await fetch(AUTH_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+            grant_type: 'client_credentials',
+            client_id: clientId,
+            client_secret: clientSecret,
+            scope: 'nfe',
+        }).toString(),
+    });
+
+    if (!tokenResponse.ok) {
+        const errBody = await tokenResponse.text();
+        console.error('[ACBR] Erro ao obter token master:', tokenResponse.status, errBody);
+
+        if (tokenResponse.status === 401 || tokenResponse.status === 400) {
+            throw new Error(
+                'Credenciais master da ACBR API inválidas. Verifique ACBR_MASTER_CLIENT_ID e ACBR_MASTER_CLIENT_SECRET.'
+            );
+        }
+
+        throw new Error(`Erro ao obter token master ACBR: ${tokenResponse.status}`);
+    }
+
+    const tokenData = await tokenResponse.json();
+    const accessToken = tokenData.access_token;
+
+    if (!accessToken) {
+        throw new Error('Resposta de autenticação da ACBR sem access_token.');
+    }
+
+    return { accessToken, baseUrl };
+}
+
+/**
  * Obtém um Bearer token válido para a ACBR API.
  * 1. Busca credenciais da organização na tabela organization_nfe_configs
  * 2. Se já existe token cacheado e não expirou, retorna direto

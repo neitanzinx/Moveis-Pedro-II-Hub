@@ -207,17 +207,22 @@ export default function Vendas() {
                     }
                 }
             } catch (err) {
-                console.error('Erro ao cancelar assistências:', err);
+                console.error('Erro ao cancelar assistências:');
             }
 
-            // 6. Retornar itens ao estoque
+            // 6. Retornar itens ao estoque (apenas se não for encomenda)
             if (venda.itens && venda.itens.length > 0) {
                 for (const item of venda.itens) {
+                    // Se for encomenda, não decrementou estoque na venda, logo não incrementa no cancelamento
+                    if (item.is_encomenda) continue;
+                    
                     if (item.produto_id) {
                         try {
-                            // Buscar produto atual
-                            const produtos = await base44.entities.Produto.list();
-                            const produto = produtos.find(p => p.id === item.produto_id);
+                            const { data: produto } = await supabase
+                                .from('produtos')
+                                .select('quantidade_estoque')
+                                .eq('id', item.produto_id)
+                                .single();
 
                             if (produto) {
                                 const novaQuantidade = (produto.quantidade_estoque || 0) + (item.quantidade || 1);
@@ -238,19 +243,26 @@ export default function Vendas() {
                 const { data: solicitacoes } = await supabase
                     .from('solicitacoes_encomenda')
                     .select('*')
-                    .eq('venda_id', venda.id);
+                    .or(`venda_id.eq.${venda.id},numero_pedido.eq.${venda.numero_pedido}`);
 
                 if (solicitacoes && solicitacoes.length > 0) {
                     for (const sol of solicitacoes) {
-                        if (sol.status === 'pendente') {
+                        const statusNormalizado = (sol.status || '').toLowerCase();
+                        if (statusNormalizado === 'pendente' || statusNormalizado === 'aguardando_compra') {
                             await supabase
                                 .from('solicitacoes_encomenda')
-                                .update({ status: 'cancelada', observacoes: (sol.observacoes || '') + ' [VENDA CANCELADA]' })
+                                .update({ 
+                                    status: 'cancelada', 
+                                    observacoes: (sol.observacoes || '') + ' [VENDA CANCELADA]' 
+                                })
                                 .eq('id', sol.id);
                         } else {
                             await supabase
                                 .from('solicitacoes_encomenda')
-                                .update({ status: 'cancelada_retida_cd', observacoes: (sol.observacoes || '') + ' [VENDA CANCELADA - ENVIAR PARA CD]' })
+                                .update({ 
+                                    status: 'cancelada_retida_cd', 
+                                    observacoes: (sol.observacoes || '') + ' [VENDA CANCELADA - ENVIAR PARA CD]' 
+                                })
                                 .eq('id', sol.id);
                         }
                     }
@@ -260,7 +272,7 @@ export default function Vendas() {
                 const { data: itensCompra } = await supabase
                     .from('compras_oc_itens')
                     .select('id, ordem_compra_id, observacao_item')
-                    .eq('venda_id', venda.id);
+                    .or(`pedido_origem_numero.eq.${venda.numero_pedido},descricao_personalizada.ilike.%${venda.numero_pedido}%`);
 
                 if (itensCompra && itensCompra.length > 0) {
                     const ordensNotificadas = new Set();
@@ -274,7 +286,6 @@ export default function Vendas() {
                             
                         if (!ordensNotificadas.has(item.ordem_compra_id)) {
                             ordensNotificadas.add(item.ordem_compra_id);
-                            // Criar notificação no histórico da ordem alertando a logística / compras
                             await supabase
                                 .from('compras_comunicacoes')
                                 .insert([{
@@ -301,13 +312,14 @@ export default function Vendas() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['vendas'] });
-            queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
-            queryClient.invalidateQueries({ queryKey: ['produtos'] });
-            queryClient.invalidateQueries({ queryKey: ['entregas'] });
-            queryClient.invalidateQueries({ queryKey: ['montagens'] });
-            queryClient.invalidateQueries({ queryKey: ['assistencias'] });
+            queryClient.invalidateQueries({ queryKey: ['lancamentos-venda'] });
+            queryClient.invalidateQueries({ queryKey: ['entregas-venda'] });
+            queryClient.invalidateQueries({ queryKey: ['montagens-venda'] });
+            queryClient.invalidateQueries({ queryKey: ['assistencias-venda'] });
             queryClient.invalidateQueries({ queryKey: ['solicitacoes-pdv'] });
+            queryClient.invalidateQueries({ queryKey: ['solicitacoes_encomenda'] });
             queryClient.invalidateQueries({ queryKey: ['pedidos-compra-dashboard'] });
+            queryClient.invalidateQueries({ queryKey: ['compras'] });
             toast.success("Venda cancelada! Entregas, montagens, assistências, lançamentos e encomendas vinculadas também foram sinalizados.");
         }
     });

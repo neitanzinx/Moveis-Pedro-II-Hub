@@ -1,13 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getAcbrMasterToken } from "../_shared/acbrAuth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-
-const ACBR_BASE_URL = "https://prod.acbr.api.br";
 
 function sanitizeDigits(value: string) {
   return (value || "").replace(/\D/g, "");
@@ -54,11 +53,6 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-    const tokenIntegrador = Deno.env.get("TOKEN_INTEGRADOR");
-
-    if (!tokenIntegrador) {
-      throw new Error("TOKEN_INTEGRADOR não configurado nos secrets do Supabase.");
-    }
 
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: { persistSession: false },
@@ -108,12 +102,15 @@ serve(async (req) => {
     assertRequired(enderecoPayload.uf, "endereco.uf");
     assertRequired(enderecoPayload.cep, "endereco.cep");
 
+    const ambienteAcbr = ambiente === "homologacao" ? "homologacao" : "producao";
+    const authAcbr = await getAcbrMasterToken(ambienteAcbr);
+
     const acbrHeaders = {
-      Authorization: `Bearer ${tokenIntegrador}`,
+      Authorization: `Bearer ${authAcbr.accessToken}`,
       "Content-Type": "application/json",
     };
 
-    const consultarResp = await fetch(`${ACBR_BASE_URL}/empresas/${cnpjLimpo}`, {
+    const consultarResp = await fetch(`${authAcbr.baseUrl}/empresas/${cnpjLimpo}`, {
       method: "GET",
       headers: acbrHeaders,
     });
@@ -124,7 +121,7 @@ serve(async (req) => {
     }
 
     if (consultarResp.status === 404) {
-      const criarResp = await fetch(`${ACBR_BASE_URL}/empresas`, {
+      const criarResp = await fetch(`${authAcbr.baseUrl}/empresas`, {
         method: "POST",
         headers: acbrHeaders,
         body: JSON.stringify({
@@ -141,7 +138,7 @@ serve(async (req) => {
       }
     }
 
-    const certResp = await fetch(`${ACBR_BASE_URL}/empresas/${cnpjLimpo}/certificado`, {
+    const certResp = await fetch(`${authAcbr.baseUrl}/empresas/${cnpjLimpo}/certificado`, {
       method: "PUT",
       headers: acbrHeaders,
       body: JSON.stringify({
