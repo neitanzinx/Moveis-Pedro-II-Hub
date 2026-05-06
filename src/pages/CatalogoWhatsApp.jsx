@@ -393,7 +393,7 @@ export default function CatalogoWhatsApp() {
                             )}
                           </div>
                           <h3 className="font-bold text-sm leading-tight mb-1" style={{ color: '#07593f' }}>
-                            {produto.nome}
+                            {produto.nome}{produto.modelo_referencia ? ` - ${produto.modelo_referencia}` : ''}
                           </h3>
                           <div className="flex flex-wrap gap-1 mb-2">
                             <Badge variant="secondary" className="text-[10px] h-4 py-0">{produto.categoria}</Badge>
@@ -496,8 +496,9 @@ export default function CatalogoWhatsApp() {
                     <div key={p.id} className="p-4 rounded-xl border-2 border-gray-100 bg-white shadow-sm space-y-4">
                       <div className="flex justify-between items-start gap-3">
                         <div className="flex-1 min-w-0">
-                          <h4 className="font-bold text-[#07593f] truncate">{p.nome}</h4>
-                          <p className="text-[10px] text-gray-500 uppercase tracking-wider">{p.modelo_referencia || 'Sem referência'}</p>
+                          <h4 className="font-bold text-[#07593f] truncate">
+                            {p.nome}{p.modelo_referencia ? ` (${p.modelo_referencia})` : ''}
+                          </h4>
                         </div>
                         <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 h-5 px-1.5 shrink-0">
                           {idx + 1}/{produtosSelecionados.length}

@@ -252,10 +252,10 @@ export default function RecebimentoModal({
                       </TableCell>
                       <TableCell className="text-sm">
                         <div className="flex flex-col gap-1">
-                          <span className="font-medium">{item.produto_nome}</span>
-                          {item.produtos?.modelo_referencia && (
-                            <span className="text-xs text-blue-600 font-semibold">Ref: {item.produtos.modelo_referencia}</span>
-                          )}
+                          <span className="font-medium">
+                            {item.produto_nome}
+                            {item.produtos?.modelo_referencia && <span className="text-blue-600 font-semibold ml-1">({item.produtos.modelo_referencia})</span>}
+                          </span>
                           <div className="text-xs text-gray-700 space-y-0.5">
                             {item.produtos?.cor && (
                               <div><span className="font-medium">Cor:</span> {item.produtos.cor}</div>

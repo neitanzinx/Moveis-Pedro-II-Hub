@@ -347,13 +347,13 @@ export default function RecebimentoPedido({ open, onClose, pedido }) {
                                                 <div className="flex flex-col">
                                                     <div className="flex items-center gap-2">
                                                         <Package className="w-4 h-4 text-gray-400" />
-                                                        <span className="font-medium">{item.produto_nome}</span>
+                                                        <span className="font-medium">
+                                                            {item.produto_nome}
+                                                            {item.detalhes?.modelo && <span className="text-gray-400 font-normal ml-1">({item.detalhes.modelo})</span>}
+                                                        </span>
                                                     </div>
                                                     {item.detalhes && (
                                                         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-xs text-gray-500 ml-6">
-                                                            {item.detalhes.modelo && (
-                                                                <span title="Modelo/Referência">Ref: {item.detalhes.modelo}</span>
-                                                            )}
                                                             {item.detalhes.cor && (
                                                                 <span title="Cor">Cor: {item.detalhes.cor}</span>
                                                             )}

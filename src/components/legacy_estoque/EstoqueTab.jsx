@@ -79,6 +79,7 @@ export default function EstoqueTab({ user }) {
           queryClient.invalidateQueries({ queryKey: ['produtos-atencao-count'] });
           queryClient.invalidateQueries({ queryKey: ['categorias-produtos'] });
           queryClient.invalidateQueries({ queryKey: ['fabricantes-produtos'] });
+          queryClient.invalidateQueries({ queryKey: ['fabricantes-e-map'] });
           queryClient.invalidateQueries({ queryKey: ['produtos'] });
         }
       )
@@ -101,36 +102,59 @@ export default function EstoqueTab({ user }) {
     staleTime: 1000 * 60 * 5 // Cache for 5 mins
   });
 
-  const { data: fabricantes = [] } = useQuery({
-    queryKey: ['fabricantes-produtos'],
+  const { data: fabricantesInfo = { items: [], fornecedoresById: {} } } = useQuery({
+    queryKey: ['fabricantes-e-map'],
     queryFn: async () => {
-      // Em alguns ambientes o campo `marca` nao existe. Faz fallback para evitar erro 400.
-      let data = null;
-      const withMarca = await supabase
+      const { data: produtos, error } = await supabase
         .from('produtos')
-        .select('fornecedor_nome, marca');
+        .select('fornecedor_id, fornecedor_nome');
 
-      if (withMarca.error) {
-        const fallback = await supabase
-          .from('produtos')
-          .select('fornecedor_nome');
+      if (error) throw error;
 
-        if (fallback.error) throw fallback.error;
-        data = fallback.data;
-      } else {
-        data = withMarca.data;
+      const idsFornecedor = [...new Set(
+        (produtos || [])
+          .map((produto) => produto.fornecedor_id)
+          .filter(Boolean)
+      )];
+
+      let fornecedoresById = {};
+      if (idsFornecedor.length > 0) {
+        try {
+          const { data: fornecedores, error: fornecedoresError } = await supabase
+            .from('fornecedores')
+            .select('id, nome_empresa')
+            .in('id', idsFornecedor);
+
+          if (!fornecedoresError && fornecedores) {
+            fornecedoresById = fornecedores.reduce((acc, fornecedor) => {
+              const id = String(fornecedor.id || '');
+              const nome = String(fornecedor.nome_empresa || '').trim();
+              if (id && nome) acc[id] = nome;
+              return acc;
+            }, {});
+          }
+        } catch (_) {
+          // Falha silenciosa: usa apenas fornecedor_nome texto como fallback
+        }
       }
 
       const items = [...new Set(
-        (data || [])
-          .map((produto) => (produto.fornecedor_nome || produto.marca || '').trim())
+        (produtos || [])
+          .map((produto) => {
+            const id = String(produto.fornecedor_id || '');
+            const nomeDoId = id ? fornecedoresById[id] : '';
+            return (nomeDoId || produto.fornecedor_nome || '').trim();
+          })
           .filter(Boolean)
       )].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
 
-      return items;
+      return { items, fornecedoresById };
     },
     staleTime: 1000 * 60 * 5
   });
+
+  const fabricantes = fabricantesInfo.items || [];
+  const fornecedoresById = fabricantesInfo.fornecedoresById || {};
 
   // 2. Attention Count Query
   // Note: This matches the filter logic used in the main query
@@ -156,12 +180,15 @@ export default function EstoqueTab({ user }) {
     isError,
     error
   } = useInfiniteQuery({
-    queryKey: ['produtos-paginated', debouncedSearch, selectedCategoria, filtroAtencao],
+    queryKey: ['produtos-paginated', debouncedSearch, selectedCategoria, filtroAtencao, selectedFabricante],
     queryFn: async ({ pageParam = 1 }) => {
       const filters = {};
 
       if (selectedCategoria !== 'todas') filters.categoria = selectedCategoria;
       if (filtroAtencao) filters.requer_atencao = 'true'; // converted to string due to object entry
+      // Filtro de fabricante no servidor — evita o problema de paginação client-side
+      // que deixava produtos de fornecedores alfabeticamente tardios (TOZZETO etc.) fora da tela
+      if (selectedFabricante !== 'todos') filters.fornecedor_nome = selectedFabricante;
 
       return await base44.entities.Produto.search({
         page: pageParam,
@@ -206,7 +233,9 @@ export default function EstoqueTab({ user }) {
 
     if (selectedFabricante !== 'todos') {
       produtos = produtos.filter((produto) => {
-        const fabricante = (produto.fornecedor_nome || produto.marca || '').trim();
+        const idFornecedor = String(produto.fornecedor_id || '');
+        const fabricantePorId = idFornecedor ? fornecedoresById[idFornecedor] : '';
+        const fabricante = (fabricantePorId || produto.fornecedor_nome || produto.marca || '').trim();
         return fabricante === selectedFabricante;
       });
     }
@@ -236,7 +265,7 @@ export default function EstoqueTab({ user }) {
     }
 
     return produtos;
-  }, [flatProdutos, selectedFabricante, selectedOrdenacao, selectedDirecao]);
+  }, [flatProdutos, fornecedoresById, selectedFabricante, selectedOrdenacao, selectedDirecao]);
   const totalCount = data?.pages[0]?.count || 0;
 
   const handleDelete = async (id) => {
@@ -646,6 +675,8 @@ export default function EstoqueTab({ user }) {
             queryClient.invalidateQueries({ queryKey: ['produtos-atencao-count'] });
             queryClient.invalidateQueries({ queryKey: ['categorias-produtos'] }); // Update categories too
             queryClient.invalidateQueries({ queryKey: ['fabricantes-produtos'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricantes-produtos-v2'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricantes-e-map'] });
             queryClient.invalidateQueries({ queryKey: ['produtos'] });
             setIsCadastroModalOpen(false);
             setCadastroProduto(null);

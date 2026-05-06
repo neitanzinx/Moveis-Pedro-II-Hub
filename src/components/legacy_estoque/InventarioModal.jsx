@@ -280,7 +280,7 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
                         className="w-full justify-between bg-white"
                       >
                         {produtoSelecionado
-                          ? produtos.find((p) => p.id === produtoSelecionado)?.nome
+                          ? (() => { const p = produtos.find((p) => p.id === produtoSelecionado); return p ? `${p.nome}${p.modelo_referencia ? ` (${p.modelo_referencia})` : ''}` : 'Selecione um produto...'; })()
                           : "Selecione um produto..."}
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
@@ -306,7 +306,7 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
                                     produtoSelecionado === produto.id ? "opacity-100" : "opacity-0"
                                   )}
                                 />
-                                {produto.nome}
+                                {produto.nome}{produto.modelo_referencia ? ` (${produto.modelo_referencia})` : ''}
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -316,8 +316,7 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
                   </Popover>
                   {selectedProductDetails && (
                     <p className="text-xs text-muted-foreground mt-1">
-                      Estoque Atual: <strong>{selectedProductDetails.quantidade_estoque || 0}</strong> •
-                      Ref: {selectedProductDetails.modelo_referencia || 'N/A'}
+                      Estoque Atual: <strong>{selectedProductDetails.quantidade_estoque || 0}</strong>
                     </p>
                   )}
                 </div>

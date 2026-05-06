@@ -37,50 +37,6 @@ export function useProdutoFilters() {
     staleTime: 1000 * 60 * 5
   });
 
-  // Fetch fabricantes únicos
-  const { data: fabricantes = [] } = useQuery({
-    queryKey: ['fabricantes-produtos'],
-    queryFn: async () => {
-      const { data: produtos, error } = await supabase
-        .from('produtos')
-        .select('fornecedor_id, fornecedor_nome');
-
-      if (error) throw error;
-
-      const idsFornecedor = [...new Set(
-        (produtos || [])
-          .map((produto) => produto.fornecedor_id)
-          .filter(Boolean)
-      )];
-
-      let fornecedoresMap = new Map();
-      if (idsFornecedor.length > 0) {
-        const { data: fornecedores, error: fornecedoresError } = await supabase
-          .from('fornecedores')
-          .select('id, nome_empresa')
-          .in('id', idsFornecedor);
-
-        if (fornecedoresError) throw fornecedoresError;
-
-        fornecedoresMap = new Map(
-          (fornecedores || []).map((fornecedor) => [String(fornecedor.id), String(fornecedor.nome_empresa || '').trim()])
-        );
-      }
-
-      const items = [...new Set(
-        (produtos || [])
-          .map((produto) => {
-            const nomeDoId = produto.fornecedor_id ? fornecedoresMap.get(String(produto.fornecedor_id)) : '';
-            return (nomeDoId || produto.fornecedor_nome || '').trim();
-          })
-          .filter(Boolean)
-      )].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
-
-      return items;
-    },
-    staleTime: 1000 * 60 * 5
-  });
-
   // Fetch count de produtos com atenção
   const { data: produtosComAtencao = 0 } = useQuery({
     queryKey: ['produtos-atencao-count'],
@@ -94,16 +50,10 @@ export function useProdutoFilters() {
     }
   });
 
-  // Função para aplicar sorting (client-side) em um array de produtos
+  // Função para aplicar sorting (client-side) em um array de produtos.
+  // O filtro de fabricante NÃO é aplicado aqui — já foi aplicado no queryFn de quem chamou.
   const aplicarOrdenacao = (produtos) => {
     let sorted = [...produtos];
-
-    if (selectedFabricante !== 'todos') {
-      sorted = sorted.filter((produto) => {
-        const fabricante = (produto.fornecedor_nome || '').trim();
-        return fabricante === selectedFabricante;
-      });
-    }
 
     switch (selectedOrdenacao) {
       case 'quantidade':
@@ -161,7 +111,6 @@ export function useProdutoFilters() {
 
     // Dados carregados
     categorias,
-    fabricantes,
     produtosComAtencao,
 
     // Utilities

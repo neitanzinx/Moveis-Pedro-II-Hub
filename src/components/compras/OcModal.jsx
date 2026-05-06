@@ -55,7 +55,6 @@ function buildProductSummary(produto) {
   if (!produto) return '';
 
   const detalhes = [
-    produto.modelo_referencia ? `Ref: ${produto.modelo_referencia}` : null,
     produto.cor ? `Cor: ${produto.cor}` : null,
     produto.material ? `Material: ${produto.material}` : null,
     produto.largura || produto.altura || produto.profundidade
@@ -69,16 +68,19 @@ function buildProductSummary(produto) {
 function buildNomeConsolidadoProduto(produto) {
   if (!produto || !produto.nome) return '';
 
+  const nomePrincipal = produto.modelo_referencia
+    ? `${produto.nome} - ${produto.modelo_referencia}`
+    : produto.nome;
+
   const detalhes = [
-    produto.modelo_referencia ? `Ref: ${produto.modelo_referencia}` : null,
     (produto.largura || produto.altura || produto.profundidade)
       ? `Medidas: ${produto.largura || '-'}x${produto.altura || '-'}x${produto.profundidade || '-'} cm`
       : null,
     produto.material ? `Material: ${produto.material}` : null,
   ].filter(Boolean);
 
-  if (detalhes.length === 0) return produto.nome;
-  return `${produto.nome} - ${detalhes.join(' | ')}`;
+  if (detalhes.length === 0) return nomePrincipal;
+  return `${nomePrincipal} - ${detalhes.join(' | ')}`;
 }
 
 function extractItemFieldsFromProduct(produto) {
@@ -94,7 +96,6 @@ function extractItemFieldsFromProduct(produto) {
 
 function buildStructuredItemDetails(item) {
   const detalhes = [
-    item?.modelo_referencia ? `Ref: ${item.modelo_referencia}` : null,
     item?.cor ? `Cor: ${item.cor}` : null,
     item?.material ? `Material: ${item.material}` : null,
     item?.largura || item?.altura || item?.profundidade
@@ -256,25 +257,42 @@ export default function OcModal({
   const { data: produtosDoFornecedor = [], isLoading: carregandoProdutos } = useQuery({
     queryKey: ['produtos-fornecedor', formData.fornecedor_id, formData.fornecedor_nome],
     queryFn: async () => {
-      const selectColumns = 'id, nome, preco_custo, preco_venda, markup_multiplicador, markup_percentual, modelo_referencia, cor, material, categoria, largura, altura, profundidade, fornecedor_id, fornecedor_nome, parent_id, is_parent';
+      const selectColumns = 'id, nome, preco_custo, preco_venda, markup_aplicado, modelo_referencia, cor, material, categoria, largura, altura, profundidade, fornecedor_id, fornecedor_nome, parent_id, is_parent';
 
-      const { data: dataPorId, error: errorPorId } = await supabase
-        .from('produtos')
-        .select(selectColumns)
-        .eq('fornecedor_id', formData.fornecedor_id)
-        .order('nome', { ascending: true });
+      const idFornecedor = formData.fornecedor_id;
+      let dataPorId = [];
 
-      if (errorPorId) throw errorPorId;
+      if (idFornecedor !== null && idFornecedor !== undefined && String(idFornecedor).trim() !== '') {
+        const { data, error } = await supabase
+          .from('produtos')
+          .select(selectColumns)
+          .eq('fornecedor_id', idFornecedor)
+          .order('nome', { ascending: true });
+
+        if (error) {
+          const erroFiltroInvalidoUuid =
+            error.code === '22P02' ||
+            /invalid input syntax for type uuid/i.test(String(error.message || ''));
+
+          if (!erroFiltroInvalidoUuid) {
+            throw error;
+          }
+        } else {
+          dataPorId = data || [];
+        }
+      }
 
       const nomeFornecedor = String(formData.fornecedor_nome || '').trim();
       if (!nomeFornecedor) {
         return dataPorId || [];
       }
 
+      const nomeFornecedorEscapado = nomeFornecedor.replace(/[%,]/g, '').trim();
+
       const { data: dataPorNome, error: errorPorNome } = await supabase
         .from('produtos')
         .select(selectColumns)
-        .ilike('fornecedor_nome', nomeFornecedor)
+        .ilike('fornecedor_nome', `%${nomeFornecedorEscapado}%`)
         .order('nome', { ascending: true });
 
       if (errorPorNome) throw errorPorNome;
@@ -287,7 +305,7 @@ export default function OcModal({
 
       return Array.from(mapaPorId.values());
     },
-    enabled: !!formData.fornecedor_id,
+    enabled: !!(formData.fornecedor_id || String(formData.fornecedor_nome || '').trim()),
     staleTime: 30000,
   });
 
@@ -384,7 +402,7 @@ export default function OcModal({
       };
       const novoProduto = await base44.entities.Produto.create(produtoData);
       toast.success(`Produto "${novoProduto.nome}" cadastrado com sucesso`);
-      queryClient.invalidateQueries({ queryKey: ['produtos-fornecedor', formData.fornecedor_id] });
+      queryClient.invalidateQueries({ queryKey: ['produtos-fornecedor'] });
       // Auto-selecionar o produto recem cadastrado
       handleProdutoSelect(novoProduto);
       setNovoProdutoModalOpen(false);
@@ -403,13 +421,13 @@ export default function OcModal({
   }, [itens]);
 
   const produtosFiltradosNovoItem = useMemo(() => {
-    if (!formData.fornecedor_id || !produtosDoFornecedor.length) return [];
+    if (!produtosDoFornecedor.length) return [];
     let lista = produtosDoFornecedor;
     if (buscaProduto.trim()) {
       lista = lista.filter(p => matchProductByAnyOrder(p, buscaProduto));
     }
     return lista.slice(0, limiteProdutos);
-  }, [produtosDoFornecedor, buscaProduto, formData.fornecedor_id, limiteProdutos]);
+  }, [produtosDoFornecedor, buscaProduto, limiteProdutos]);
 
   const descricaoEstruturadaNovoItem = useMemo(() => {
     return buildStructuredItemDetails(novoItem);
@@ -615,7 +633,7 @@ export default function OcModal({
         });
       }
 
-      queryClient.invalidateQueries({ queryKey: ['produtos-fornecedor', formData.fornecedor_id] });
+      queryClient.invalidateQueries({ queryKey: ['produtos-fornecedor'] });
       toast.success('Markup aplicado na OC e persistido no cadastro dos produtos filtrados');
       return;
     }
@@ -1453,7 +1471,9 @@ export default function OcModal({
                                   onMouseDown={() => handleProdutoSelect(produto)}
                                   className="w-full px-3 py-2 text-left text-sm hover:bg-blue-50 border-b last:border-b-0 transition-colors"
                                 >
-                                  <div className="font-semibold text-gray-800">{produto.nome}</div>
+                                  <div className="font-semibold text-gray-800">
+                                    {produto.nome}{produto.modelo_referencia ? ` - ${produto.modelo_referencia}` : ''}
+                                  </div>
                                   <div className="text-[10px] text-gray-500 uppercase">
                                     {buildProductSummary(produto) || 'Sem detalhes técnicos'}
                                   </div>

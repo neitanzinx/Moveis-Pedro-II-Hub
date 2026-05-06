@@ -65,10 +65,10 @@ export default function Produtos() {
     filtroAtencao,
     setFiltroAtencao,
     categorias,
-    fabricantes,
     produtosComAtencao,
     aplicarOrdenacao
   } = useProdutoFilters();
+  // fabricantes é derivado localmente dos produtos resolvidos (ver useMemo abaixo)
   const [viewMode, setViewMode] = useState("grid"); // grid ou list
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 100;
@@ -87,60 +87,56 @@ export default function Produtos() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
 
-  const { data: produtos, isLoading } = useQuery({
-    queryKey: ['produtos', debouncedSearch, selectedCategoria, selectedFabricante, filtroAtencao],
+  // Query 1: todos os produtos (sem filtro de fabricante — feito via useMemo abaixo)
+  const { data: rawProdutos = [], isLoading } = useQuery({
+    queryKey: ['produtos', debouncedSearch, selectedCategoria, filtroAtencao],
     queryFn: async () => {
-      let allProdutos = await base44.entities.Produto.list('nome');
-
-      // Resolve manufacturer name for legacy rows that only have fornecedor_id.
-      const fornecedorIds = [...new Set((allProdutos || []).map((p) => p.fornecedor_id).filter(Boolean))];
-      let fornecedorMap = new Map();
-
-      if (fornecedorIds.length > 0) {
-        const fornecedores = await base44.entities.Fornecedor.list('nome_empresa');
-        fornecedorMap = new Map(
-          (fornecedores || []).map((fornecedor) => [String(fornecedor.id), String(fornecedor.nome_empresa || '').trim()])
-        );
-      }
-
-      allProdutos = (allProdutos || []).map((produto) => ({
-        ...produto,
-        fornecedor_nome: String(produto.fornecedor_nome || fornecedorMap.get(String(produto.fornecedor_id)) || '').trim(),
-      }));
-      
-      // Apply filters
-      return allProdutos.filter(p => {
-        // Search filter
-        if (debouncedSearch) {
-          const searchTerms = debouncedSearch.toLowerCase().split(/\s+/).filter(t => t.length > 0);
-          const searchableText = [
-            p.nome,
-            p.modelo_referencia,
-            p.categoria,
-            p.ambiente,
-            p.codigo_barras,
-            p.sku,
-            p.fornecedor_nome,
-            p.cor
-          ].filter(Boolean).join(' ').toLowerCase();
-          
-          const matchesSearch = searchTerms.every(term => searchableText.includes(term));
-          if (!matchesSearch) return false;
-        }
-        
-        // Category filter
-        if (selectedCategoria !== 'todas' && p.categoria !== selectedCategoria) return false;
-        
-        // Manufacturer filter
-        if (selectedFabricante !== 'todos' && p.fornecedor_nome !== selectedFabricante) return false;
-        
-        // Attention filter
-        if (filtroAtencao && !p.requer_atencao) return false;
-        
-        return true;
-      });
-    }
+      const allProdutos = await base44.entities.Produto.list('nome');
+      return allProdutos || [];
+    },
   });
+
+  // Query 2: fornecedores — mesma chave usada pelo OcModal, beneficia do cache compartilhado
+  const { data: fornecedoresList = [] } = useQuery({
+    queryKey: ['fornecedores'],
+    queryFn: () => base44.entities.Fornecedor.list('nome_empresa'),
+    staleTime: 1000 * 60 * 5,
+  });
+
+  // Mapa UUID → nome_empresa (fonte única de verdade)
+  const fornecedoresById = useMemo(() => {
+    return (fornecedoresList || []).reduce((acc, f) => {
+      const id = String(f.id || '');
+      const nome = String(f.nome_empresa || '').trim();
+      if (id && nome) acc[id] = nome;
+      return acc;
+    }, {});
+  }, [fornecedoresList]);
+
+  // Produtos com nome do fornecedor resolvido (ID-first) e filtros de busca/categoria/atenção
+  const produtos = useMemo(() => {
+    return (rawProdutos || []).map((p) => ({
+      ...p,
+      fornecedor_nome: String(fornecedoresById[String(p.fornecedor_id)] || p.fornecedor_nome || '').trim(),
+    })).filter((p) => {
+      // Busca textual
+      if (debouncedSearch) {
+        const termos = debouncedSearch.toLowerCase().split(/\s+/).filter(Boolean);
+        const texto = [p.nome, p.modelo_referencia, p.categoria, p.ambiente, p.codigo_barras, p.sku, p.fornecedor_nome, p.cor]
+          .filter(Boolean).join(' ').toLowerCase();
+        if (!termos.every(t => texto.includes(t))) return false;
+      }
+      if (selectedCategoria !== 'todas' && p.categoria !== selectedCategoria) return false;
+      if (filtroAtencao && !p.requer_atencao) return false;
+      return true;
+    });
+  }, [rawProdutos, fornecedoresById, debouncedSearch, selectedCategoria, filtroAtencao]);
+
+  // Lista de fabricantes para o dropdown — derivada dos mesmos produtos resolvidos
+  const fabricantes = useMemo(() => {
+    return [...new Set((produtos || []).map(p => p.fornecedor_nome).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+  }, [produtos]);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -192,8 +188,12 @@ export default function Produtos() {
 
   // Apply ordering to products
   const produtosOrdenados = useMemo(() => {
-    return aplicarOrdenacao(produtos || []);
-  }, [produtos, selectedOrdenacao, selectedDirecao, selectedFabricante, aplicarOrdenacao]);
+    // Aplica filtro de fabricante client-side (mesma resolu\u00e7\u00e3o que o dropdown)
+    const filtrados = selectedFabricante === 'todos'
+      ? (produtos || [])
+      : (produtos || []).filter(p => p.fornecedor_nome === selectedFabricante);
+    return aplicarOrdenacao(filtrados);
+  }, [produtos, selectedFabricante, selectedOrdenacao, selectedDirecao, aplicarOrdenacao]);
 
   // Estatísticas
   const stats = useMemo(() => {

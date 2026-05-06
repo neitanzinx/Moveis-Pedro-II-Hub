@@ -19,7 +19,7 @@ export function buildProductDisplayName(name, reference) {
   if (!cleanedReference) return cleanedName;
   if (extractReferenceFromName(cleanedName)) return cleanedName;
 
-  return `${cleanedName} - Ref: ${cleanedReference}`;
+  return `${cleanedName} - ${cleanedReference}`;
 }
 
 export function formatProductItemName(item = {}) {

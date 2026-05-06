@@ -878,9 +878,11 @@ export default function Marketing() {
                                                             onCheckedChange={(checked) => handleSelectProduct(produto, checked)}
                                                         />
                                                         <div className="flex-1 min-w-0 text-left">
-                                                            <p className="font-bold text-[#07593f] truncate">{produto.nome}</p>
+                                                            <p className="font-bold text-[#07593f] truncate">
+                                                                {produto.nome}
+                                                                {produto.modelo_referencia && <span className="text-gray-400 font-normal ml-2">({produto.modelo_referencia})</span>}
+                                                            </p>
                                                             <div className="flex flex-wrap gap-x-2 text-[10px] text-gray-500 uppercase font-medium">
-                                                                {produto.modelo_referencia && <span>Ref: {produto.modelo_referencia}</span>}
                                                                 {(produto.largura || produto.altura || produto.profundidade) && (
                                                                     <span className="text-amber-700">{produto.largura || '0'}x{produto.altura || '0'}x{produto.profundidade || '0'}cm</span>
                                                                 )}
@@ -1038,11 +1040,11 @@ export default function Marketing() {
                                                 <TableRow key={produto.id}>
                                                     <TableCell>
                                                         <div className="space-y-1">
-                                                            <p className="font-bold text-[#07593f] leading-none">{produto.nome}</p>
+                                                            <p className="font-bold text-[#07593f] leading-none">
+                                                                {produto.nome}
+                                                                {produto.modelo_referencia && <span className="text-gray-400 font-normal ml-1">({produto.modelo_referencia})</span>}
+                                                            </p>
                                                             <div className="flex items-center gap-2 text-[10px] text-gray-500 uppercase font-medium flex-wrap">
-                                                                {produto.modelo_referencia && (
-                                                                    <span className="bg-gray-100 px-1 rounded">Ref: {produto.modelo_referencia}</span>
-                                                                )}
                                                                 {produto.codigo_barras && (
                                                                     <span className="bg-gray-100 px-1 rounded">EAN: {produto.codigo_barras}</span>
                                                                 )}
@@ -1166,6 +1168,7 @@ export default function Marketing() {
                                             }}
                                         >
                                             {produto.nome}
+                                            {produto.modelo_referencia && <span className="text-gray-500 font-normal"> - {produto.modelo_referencia}</span>}
                                         </p>
 
                                         {/* Divider */}
@@ -1198,13 +1201,8 @@ export default function Marketing() {
                                             {formatarValor(produto.preco_venda)}
                                         </p>
 
-                                        {/* Sub-info (SKU, Dimensões, Cor) */}
+                                        {/* Sub-info (Dimensões, Cor) */}
                                         <div className="mt-4 flex flex-col gap-1 items-center">
-                                            {produto.modelo_referencia && (
-                                                <p className="text-gray-500 font-medium uppercase tracking-widest" style={{ fontSize: `calc(${layoutConfig.nameSize} * 0.4)` }}>
-                                                    REF: {produto.modelo_referencia}
-                                                </p>
-                                            )}
                                             {(produto.largura || produto.altura || produto.profundidade) && (
                                                 <p className="text-amber-700 font-bold" style={{ fontSize: `calc(${layoutConfig.nameSize} * 0.45)` }}>
                                                     {produto.largura || '0'} x {produto.altura || '0'} x {produto.profundidade || '0'} CM
@@ -1395,7 +1393,7 @@ export default function Marketing() {
                                         wordBreak: 'break-word'
                                     }}
                                 >
-                                    {produto.nome}
+                                    {produto.nome} {produto.modelo_referencia ? `- ${produto.modelo_referencia}` : ''}
                                 </p>
 
                                 {/* Divider */}
@@ -1412,7 +1410,7 @@ export default function Marketing() {
                                         </p>
                                         <p className="text-red-600 font-bold text-sm uppercase tracking-widest mb-2">
                                             POR APENAS
-                                        </p>
+                                         </p>
                                     </>
                                 )}
 
@@ -1428,16 +1426,11 @@ export default function Marketing() {
                                     {formatarValor(produto.preco_venda)}
                                 </p>
 
-                                {/* Sub-info (SKU, Dimensões, Cor) */}
+                                {/* Sub-info (Dimensões, Cor) */}
                                 <div className="mt-4 flex flex-col gap-1 items-center">
-                                    {produto.modelo_referencia && (
-                                        <p className="text-gray-500 font-medium uppercase tracking-widest" style={{ fontSize: `calc(${config.nameSize} * 0.4)` }}>
-                                            REF: {produto.modelo_referencia}
-                                        </p>
-                                    )}
                                     {(produto.largura || produto.altura || produto.profundidade) && (
                                         <p className="text-amber-700 font-bold" style={{ fontSize: `calc(${config.nameSize} * 0.45)` }}>
-                                            {produto.largura || '0'} x {produto.altura || '0'} x {produto.profundidade || '0'} CM
+                                            MEDIDAS: {produto.largura || '0'} x {produto.altura || '0'} x {produto.profundidade || '0'} CM
                                         </p>
                                     )}
                                     {(produto.cor || produto.tamanho) && (

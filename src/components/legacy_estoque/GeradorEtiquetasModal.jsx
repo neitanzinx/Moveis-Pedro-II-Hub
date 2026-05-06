@@ -197,10 +197,7 @@ export default function GeradorEtiquetasModal({
                                             <div key={item.produto.id} className="bg-gray-50 border p-3 rounded-lg flex items-center justify-between gap-2">
                                                 <div className="flex-1 min-w-0">
                                                     <p className="font-medium text-sm text-gray-900 truncate" title={item.produto.nome}>
-                                                        {item.produto.nome}
-                                                    </p>
-                                                    <p className="text-xs text-gray-500">
-                                                        {item.produto.modelo_referencia ? `Ref: ${item.produto.modelo_referencia}` : 'S/ Ref'}
+                                                        {item.produto.nome} {item.produto.modelo_referencia ? `(${item.produto.modelo_referencia})` : ''}
                                                     </p>
                                                 </div>
 

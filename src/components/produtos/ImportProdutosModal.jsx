@@ -1200,14 +1200,11 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                                     <div className="flex-1">
                                                         <h4 className="font-bold text-base flex items-center gap-2">
                                                             <Package className="w-4 h-4 text-green-600" />
-                                                            {product.nome}
+                                                            {product.nome}{product.modelo_referencia ? ` - ${product.modelo_referencia}` : ''}
                                                         </h4>
                                                         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-gray-500">
                                                             {product.fornecedor_nome && (
                                                                 <span>Fornecedor: <span className="font-medium text-gray-700">{product.fornecedor_nome}</span></span>
-                                                            )}
-                                                            {product.modelo_referencia && (
-                                                                <span>Ref: <span className="font-medium text-gray-700">{product.modelo_referencia}</span></span>
                                                             )}
                                                             {product.categoria && (
                                                                 <span>Categoria: <span className="font-medium text-gray-700">{product.categoria}</span></span>

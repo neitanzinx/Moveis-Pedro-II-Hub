@@ -85,21 +85,17 @@ export const EtiquetaImpressao = forwardRef(({ empresa, produtos }, ref) => {
                                         COD: {produto.codigo_barras}
                                     </p>
                                 )}
-                                {produto.modelo_referencia && (
-                                    <p className="text-lg font-medium text-gray-700 uppercase leading-snug">
-                                        REF. {produto.modelo_referencia}
-                                    </p>
-                                )}
+
 
                                 <p className="text-lg font-medium text-gray-700 uppercase leading-snug">
                                     COR: {produto.cor || 'A CONSULTAR'}
                                 </p>
 
-                                {(produto.largura || produto.altura || produto.profundidade) && (
-                                    <p className="text-base font-medium text-gray-600 uppercase mt-1 leading-snug">
-                                        DIMENSÕES: {produto.largura || '?'}x{produto.altura || '?'}x{produto.profundidade || '?'}
-                                    </p>
-                                )}
+                                    {(produto.largura || produto.altura || produto.profundidade) && (
+                                        <p className="text-base font-medium text-gray-600 uppercase mt-1 leading-snug">
+                                            MEDIDAS: {produto.largura || '?'}x{produto.altura || '?'}x{produto.profundidade || '?'} CM
+                                        </p>
+                                    )}
 
                                 <p className="text-lg font-medium text-gray-700 uppercase pt-1 text-right w-full leading-snug mt-auto">
                                     {produto.origem_nfe ? 'NFE / ' : ''}
