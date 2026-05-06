@@ -29,7 +29,7 @@ export const ROLE_RULES = {
       'view_estoque', 'view_clientes', 'manage_clientes',
       'view_entregas', 'manage_entregas', 'view_assistencia', 'manage_assistencia',
       'view_financeiro', 'view_relatorios', 'view_rh',
-      'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
+      'view_orcamentos', 'create_vendas', 'view_produtos', 'manage_produtos', 'view_catalogo',
       'view_montagem', 'view_marketing',
       'view_compras', 'create_oc', 'manage_compras', 'approve_oc', 'view_fornecedores',
       'solicitar_nfe', 'aprovar_nfe', 'emitir_nfe', 'cancelar_nfe', 'corrigir_nfe', 'view_nfe',
@@ -45,7 +45,7 @@ export const ROLE_RULES = {
       'view_estoque', 'view_clientes', 'manage_clientes',
       'view_entregas', 'manage_entregas', 'view_assistencia', 'manage_assistencia',
       'view_financeiro', 'view_relatorios', 'view_rh',
-      'view_orcamentos', 'create_vendas', 'view_produtos', 'view_catalogo',
+      'view_orcamentos', 'create_vendas', 'view_produtos', 'manage_produtos', 'view_catalogo',
       'view_montagem', 'view_marketing',
       'view_compras', 'create_oc', 'manage_compras', 'send_oc', 'receive_oc', 'view_fornecedores',
       'manage_bulk_price_adjustment',
@@ -59,7 +59,7 @@ export const ROLE_RULES = {
   'Vendedor': {
     can: [
       'view_dashboard', 'view_vendas', 'create_vendas',
-      'view_produtos', 'manage_produtos', 'view_clientes', 'create_clientes',
+      'view_produtos', 'view_clientes', 'create_clientes',
       'view_orcamentos', 'create_orcamentos', 'view_catalogo',
       'solicitar_nfe', 'view_nfe',
       'solicitar_cancelamento_nfe', 'solicitar_cce_nfe'
@@ -110,7 +110,7 @@ export const ROLE_RULES = {
   'Comprador': {
     can: [
       'view_compras', 'create_oc', 'manage_compras', 'send_oc',
-      'view_produtos', 'view_fornecedores'
+      'view_produtos', 'manage_produtos', 'view_fornecedores'
     ],
     scope: SCOPES.ALL
   }

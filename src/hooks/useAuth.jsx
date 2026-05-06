@@ -35,6 +35,11 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const getMergedRolePermissions = (roles = [], dbPermissions = []) => {
+    const hardcodedPermissions = roles.flatMap((role) => ROLE_RULES[role]?.can || []);
+    return Array.from(new Set([...(dbPermissions || []), ...hardcodedPermissions]));
+  };
+
   useEffect(() => {
     let mounted = true;
 
@@ -144,11 +149,12 @@ export function AuthProvider({ children }) {
           try {
             const rolePermissions = await base44.entities.RolePermission.list();
             const roles = getUserRoles(employeeUser);
-            const permissions = Array.from(new Set(
+            const permissionsFromDb = Array.from(new Set(
               rolePermissions
                 .filter(c => roles.includes(c.cargo))
                 .flatMap(c => Array.isArray(c.permissions) ? c.permissions : [])
             ));
+            const permissions = getMergedRolePermissions(roles, permissionsFromDb);
 
             if (permissions.length > 0) {
               const roleScopes = roles.map(role => ROLE_RULES[role]?.scope).filter(Boolean);
@@ -185,11 +191,12 @@ export function AuthProvider({ children }) {
             try {
               const rolePermissions = await base44.entities.RolePermission.list();
               const roles = getUserRoles(fullProfile);
-              const permissions = Array.from(new Set(
+              const permissionsFromDb = Array.from(new Set(
                 rolePermissions
                   .filter(c => roles.includes(c.cargo))
                   .flatMap(c => Array.isArray(c.permissions) ? c.permissions : [])
               ));
+              const permissions = getMergedRolePermissions(roles, permissionsFromDb);
 
               if (permissions.length > 0) {
                 const roleScopes = roles.map(role => ROLE_RULES[role]?.scope).filter(Boolean);

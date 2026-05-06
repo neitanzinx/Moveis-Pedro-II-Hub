@@ -81,7 +81,7 @@ export default function Produtos() {
   const [focusField, setFocusField] = useState(null);
   const [isGeradorEtiquetasOpen, setIsGeradorEtiquetasOpen] = useState(false);
   const [produtosParaEtiqueta, setProdutosParaEtiqueta] = useState([]);
-  const { user, loading } = useAuth();
+  const { user, loading, can } = useAuth();
   const { organization } = useTenant();
 
   const queryClient = useQueryClient();
@@ -182,10 +182,8 @@ export default function Produtos() {
 
   // Verificações de permissão
   const isAdmin = user?.cargo === 'Administrador';
-  const isManager = user?.cargo === 'Gerente';
-  const isWarehouse = user?.cargo === 'Estoque';
-  const canEdit = isAdmin || isManager || isWarehouse;
-  const canDelete = isAdmin || isManager;
+  const canEdit = can('manage_produtos');
+  const canDelete = isAdmin || can('manage_produtos');
 
   // Helper para calcular estoque total consolidado
   const getEstoqueTotal = (p) => {
