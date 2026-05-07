@@ -534,7 +534,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
 
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="telefone">Telefone *</Label>
+                  <Label htmlFor="telefone">WhatsApp *</Label>
                   <Input
                     id="telefone"
                     value={formData.telefone}
@@ -542,6 +542,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
                     placeholder="(00) 00000-0000"
                     required
                   />
+                  <p className="text-xs text-gray-500 mt-1">Este numero e usado pelo bot para envio de mensagens no WhatsApp.</p>
                 </div>
                 <div>
                   <Label htmlFor="email">E-mail</Label>

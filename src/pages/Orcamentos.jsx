@@ -17,6 +17,7 @@ import { formatarTelefone, formatarNome } from "@/utils/formatters";
 export default function Orcamentos() {
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
+    const [fornecedorFilter, setFornecedorFilter] = useState("all");
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingOrcamento, setEditingOrcamento] = useState(null);
     const queryClient = useQueryClient();
@@ -75,6 +76,12 @@ export default function Orcamentos() {
 
     const { data: clientes = [] } = useQuery({ queryKey: ['clientes'], queryFn: () => base44.entities.Cliente.list() });
     const { data: produtos = [] } = useQuery({ queryKey: ['produtos'], queryFn: () => base44.entities.Produto.list() });
+    const { data: fornecedores = [] } = useQuery({ queryKey: ['fornecedores'], queryFn: () => base44.entities.Fornecedor.list('nome_empresa') });
+
+    const produtosById = produtos.reduce((acc, produto) => {
+        acc[String(produto.id)] = produto;
+        return acc;
+    }, {});
 
     useEffect(() => {
         const channel = supabase
@@ -111,7 +118,11 @@ export default function Orcamentos() {
     const filtered = orcamentos.filter(orc => {
         const matchesSearch = orc.numero_orcamento?.toLowerCase().includes(searchTerm.toLowerCase()) || orc.cliente_nome?.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesStatus = statusFilter === "all" || orc.status === statusFilter;
-        return matchesSearch && matchesStatus;
+        const matchesFornecedor = fornecedorFilter === "all" || (orc.itens || []).some((item) => {
+            const produto = produtosById[String(item.produto_id)];
+            return String(produto?.fornecedor_id || "") === fornecedorFilter;
+        });
+        return matchesSearch && matchesStatus && matchesFornecedor;
     });
 
     return (
@@ -139,6 +150,20 @@ export default function Orcamentos() {
                         onChange={e => setSearchTerm(e.target.value)}
                     />
                 </div>
+                <Select value={fornecedorFilter} onValueChange={(value) => setFornecedorFilter(String(value))}>
+                    <SelectTrigger className="w-[220px] border-gray-200 dark:border-neutral-700">
+                        <div className="flex items-center gap-2 text-gray-500">
+                            <Filter className="w-4 h-4" />
+                            <SelectValue placeholder="Fornecedor" />
+                        </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">Todos os Fornecedores</SelectItem>
+                        {fornecedores.map(f => (
+                            <SelectItem key={f.id} value={String(f.id)}>{f.nome_empresa}</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                     <SelectTrigger className="w-[200px] border-gray-200 dark:border-neutral-700">
                         <div className="flex items-center gap-2 text-gray-500">
@@ -231,6 +256,8 @@ export default function Orcamentos() {
                 orcamento={editingOrcamento}
                 clientes={clientes}
                 produtos={produtos}
+                fornecedores={fornecedores}
+                fornecedorSelecionado={fornecedorFilter}
                 isLoading={createMutation.isPending || updateMutation.isPending}
             />
         </div>

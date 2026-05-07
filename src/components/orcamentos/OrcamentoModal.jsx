@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useDeferredValue, useMemo, useRef } from "react";
 // Similar structure to VendaModal but for Orcamento
 import {
   Dialog,
@@ -13,15 +13,21 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Plus, Trash2, Search } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { Loader2, Plus, Trash2, Search, Pencil } from "lucide-react";
+import ClienteModal from "@/components/clientes/ClienteModal";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { formatarTelefone, formatarNome } from "@/utils/formatters";
 import { buildProductDisplayName } from "@/utils/productReference";
+import { formatDimensions } from "@/utils/productFormatters";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
 
 
 
-export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, clientes, produtos, isLoading }) {
+export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, clientes, produtos, fornecedores, fornecedorSelecionado, isLoading }) {
+  const queryClient = useQueryClient();
+  const { getUserLoja } = useAuth();
   const [formData, setFormData] = useState({
     numero_orcamento: "",
     data_orcamento: new Date().toISOString().split('T')[0],
@@ -41,15 +47,71 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
   const [searchProduto, setSearchProduto] = useState("");
   const [selectedProduto, setSelectedProduto] = useState(null);
   const [quantidade, setQuantidade] = useState(1);
+  const [fornecedorFilter, setFornecedorFilter] = useState(String(fornecedorSelecionado || "all"));
+  const [showResultadosProduto, setShowResultadosProduto] = useState(false);
+  const [selectedIndexProduto, setSelectedIndexProduto] = useState(0);
 
   const [searchCliente, setSearchCliente] = useState("");
   const [isClienteDropdownOpen, setIsClienteDropdownOpen] = useState(false);
+  const [showNovoClienteForm, setShowNovoClienteForm] = useState(false);
+  const [novoClienteData, setNovoClienteData] = useState({ nome_completo: "", telefone: "", sem_whatsapp: false });
+  const [editandoCliente, setEditandoCliente] = useState(null);
+  const [isEditClienteLoading, setIsEditClienteLoading] = useState(false);
+  const productSearchRef = useRef(null);
+  const deferredSearchProduto = useDeferredValue(searchProduto);
 
   const { data: lojas = [] } = useQuery({
     queryKey: ['lojas'],
     queryFn: () => base44.entities.Loja.list('nome'),
     select: (data) => data.filter(l => l.ativa),
   });
+
+  const criarClienteMutation = useMutation({
+    mutationFn: async (dados) => {
+      const lojaOperacao = getUserLoja() || formData.loja || 'Centro';
+      return base44.entities.Cliente.create({
+        nome_completo: formatarNome(dados.nome_completo),
+        telefone: dados.sem_whatsapp ? (dados.telefone || "") : dados.telefone,
+        loja: lojaOperacao
+      });
+    },
+    onSuccess: (novoCliente) => {
+      queryClient.invalidateQueries({ queryKey: ['clientes'] });
+      setFormData((prev) => ({
+        ...prev,
+        cliente_id: novoCliente.id,
+        cliente_nome: novoCliente.nome_completo || "",
+        cliente_telefone: novoCliente.telefone || ""
+      }));
+      setSearchCliente(formatarNome(novoCliente.nome_completo || ""));
+      setIsClienteDropdownOpen(false);
+      setShowNovoClienteForm(false);
+      setNovoClienteData({ nome_completo: "", telefone: "", sem_whatsapp: false });
+      toast.success("Cliente criado com sucesso!");
+    },
+    onError: (error) => {
+      toast.error(error?.message || "Erro ao criar cliente");
+    }
+  });
+
+  function handleAbrirNovoClienteForm() {
+    setNovoClienteData({ nome_completo: formatarNome(searchCliente.trim()), telefone: "", sem_whatsapp: false });
+    setShowNovoClienteForm(true);
+  }
+
+  function handleSubmitNovoCliente(e) {
+    e.preventDefault();
+    if (!novoClienteData.sem_whatsapp && !novoClienteData.telefone.trim()) {
+      toast.error("Informe o telefone/WhatsApp ou marque \"cliente não possui WhatsApp\"");
+      return;
+    }
+    criarClienteMutation.mutate(novoClienteData);
+  }
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setFornecedorFilter(String(fornecedorSelecionado || "all"));
+  }, [fornecedorSelecionado, isOpen]);
 
   useEffect(() => {
     if (orcamento) {
@@ -89,6 +151,17 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     calcularTotal();
   }, [formData.itens, formData.desconto]);
 
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (productSearchRef.current && !productSearchRef.current.contains(event.target)) {
+        setShowResultadosProduto(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const handleClienteChange = (clienteId) => {
     const cliente = clientes.find(c => c.id === clienteId);
     setFormData({
@@ -107,6 +180,59 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     c.telefone?.includes(searchCliente)
   );
 
+  const podeCriarCliente = searchCliente.trim().length >= 3 && clientesFiltrados.length === 0;
+
+  const getItemCaracteristicas = (item) => {
+    if (item.caracteristicas) return item.caracteristicas;
+
+    const caracteristicas = [];
+    const tamanho = String(item.tamanho || '').trim();
+    const material = String(item.material || '').trim();
+    const cor = String(item.cor || '').trim();
+    const tamanhoValido = tamanho && !['n/a', 'na', '-', 'null', 'undefined'].includes(tamanho.toLowerCase());
+
+    const dimensoesFormatadas = formatDimensions(item.largura, item.altura, item.profundidade);
+    const dimensoesValidas = dimensoesFormatadas !== '-';
+    const dimensoesCompactas = [item.largura, item.altura, item.profundidade].filter(Boolean).join('x');
+    const tamanhoDuplicaDimensoes = tamanhoValido && dimensoesCompactas && tamanho.replace(/\s+/g, '').toLowerCase() === dimensoesCompactas.toLowerCase();
+
+    if (tamanhoValido && !tamanhoDuplicaDimensoes) caracteristicas.push(`Tamanho: ${tamanho}`);
+    if (material && !['n/a', 'na', '-', 'null', 'undefined'].includes(material.toLowerCase())) caracteristicas.push(`Material: ${material}`);
+    if (cor && !['n/a', 'na', '-', 'null', 'undefined'].includes(cor.toLowerCase())) caracteristicas.push(`Cor: ${cor}`);
+    if (dimensoesValidas) caracteristicas.push(`Medidas: ${dimensoesFormatadas}`);
+
+    return caracteristicas.join(" | ");
+  };
+
+  const getItemFabricante = (item) => {
+    return String(item.fornecedor_nome || fornecedoresById[String(item.fornecedor_id)] || '').trim();
+  };
+
+  const handleKeyDownProduto = (event, resultados) => {
+    if (!showResultadosProduto || resultados.length === 0) return;
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setSelectedIndexProduto((prev) => Math.min(prev + 1, resultados.length - 1));
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setSelectedIndexProduto((prev) => Math.max(prev - 1, 0));
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const produtoSelecionado = resultados[selectedIndexProduto];
+      if (!produtoSelecionado) return;
+      setSelectedProduto(produtoSelecionado.id);
+      setSearchProduto(produtoSelecionado.nome);
+      setShowResultadosProduto(false);
+    }
+  };
+
   const adicionarProduto = () => {
     if (!selectedProduto || quantidade <= 0) return;
 
@@ -114,12 +240,22 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     if (!produto) return;
 
     const subtotal = produto.preco_venda * quantidade;
+    
     const novoItem = {
       produto_id: produto.id,
       produto_nome: buildProductDisplayName(produto.nome, produto.modelo_referencia),
+      fornecedor_id: produto.fornecedor_id || null,
+      fornecedor_nome: fornecedoresById[String(produto.fornecedor_id)] || produto.fornecedor_nome || '',
       quantidade: quantidade,
       preco_unitario: produto.preco_venda,
-      subtotal: subtotal
+      subtotal: subtotal,
+      caracteristicas: getItemCaracteristicas(produto),
+      cor: produto.cor,
+      material: produto.material,
+      tamanho: produto.tamanho,
+      largura: produto.largura,
+      altura: produto.altura,
+      profundidade: produto.profundidade
     };
 
     setFormData({
@@ -154,11 +290,57 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     onSave(formData);
   };
 
-  const produtosFiltrados = produtos.filter(p =>
-    p.nome?.toLowerCase().includes(searchProduto.toLowerCase()) && p.ativo
-  );
+  // Mapear fornecedores por ID para resolver o nome
+  const fornecedoresById = (fornecedores || []).reduce((acc, f) => {
+    acc[String(f.id)] = f.nome_empresa;
+    return acc;
+  }, {});
+
+  const produtosPesquisa = useMemo(() => {
+    return (produtos || []).map((produto) => {
+      const fornecedorNome = fornecedoresById[String(produto.fornecedor_id)] || produto.fornecedor_nome || '';
+      const textoBusca = [
+        produto.nome,
+        produto.codigo_barras,
+        produto.categoria,
+        produto.material,
+        produto.cor,
+        fornecedorNome,
+        produto.modelo_referencia
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return {
+        ...produto,
+        fornecedor_nome: fornecedorNome,
+        texto_busca: textoBusca
+      };
+    });
+  }, [produtos, fornecedoresById]);
+
+  const produtosFiltrados = useMemo(() => {
+    const termo = deferredSearchProduto.trim().toLowerCase();
+    if (!termo) return [];
+
+    const tokens = termo.split(/\s+/).filter(Boolean);
+
+    return produtosPesquisa
+      .filter((produto) => {
+        if (!produto.ativo) return false;
+        if (fornecedorFilter !== "all" && String(produto.fornecedor_id || "") !== fornecedorFilter) return false;
+        return tokens.every((token) => produto.texto_busca.includes(token));
+      })
+      .slice(0, 10);
+  }, [produtosPesquisa, deferredSearchProduto, fornecedorFilter]);
+
+  useEffect(() => {
+    setSelectedIndexProduto(0);
+  }, [deferredSearchProduto, fornecedorFilter]);
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -193,7 +375,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                   onChange={(e) => setFormData({ ...formData, validade: e.target.value })}
                   required
                 />
-                <div className="flex gap-1 mt-1">
+                <div className="flex gap-1 mt-1 items-center flex-wrap">
                   {[7, 15, 30, 60].map(dias => (
                     <button
                       key={dias}
@@ -207,6 +389,42 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                       {dias}d
                     </button>
                   ))}
+                  <div className="flex items-center gap-0.5 ml-1">
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="0"
+                      className="w-12 h-5 text-[10px] text-center border border-gray-200 rounded-l-full px-1 focus:outline-none focus:border-green-500"
+                      id="validade_custom_num"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const num = parseInt(e.target.value);
+                          const unidade = document.getElementById('validade_custom_unidade')?.value || 'd';
+                          if (!num || num < 1) return;
+                          const mult = unidade === 's' ? 7 : unidade === 'm' ? 30 : 1;
+                          const novaValidade = new Date(Date.now() + num * mult * 86400000);
+                          setFormData({ ...formData, validade: novaValidade.toISOString().split('T')[0] });
+                        }
+                      }}
+                      onBlur={(e) => {
+                        const num = parseInt(e.target.value);
+                        const unidade = document.getElementById('validade_custom_unidade')?.value || 'd';
+                        if (!num || num < 1) return;
+                        const mult = unidade === 's' ? 7 : unidade === 'm' ? 30 : 1;
+                        const novaValidade = new Date(Date.now() + num * mult * 86400000);
+                        setFormData({ ...formData, validade: novaValidade.toISOString().split('T')[0] });
+                      }}
+                    />
+                    <select
+                      id="validade_custom_unidade"
+                      className="h-5 text-[10px] border border-l-0 border-gray-200 rounded-r-full px-1 focus:outline-none focus:border-green-500 bg-white text-gray-600"
+                    >
+                      <option value="d">dias</option>
+                      <option value="s">sem</option>
+                      <option value="m">mês</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
@@ -235,18 +453,85 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                   <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto">
                     {clientesFiltrados.length > 0 ? (
                       clientesFiltrados.map(cliente => (
-                        <button
-                          key={cliente.id}
-                          type="button"
-                          onClick={() => handleClienteChange(cliente.id)}
-                          className="w-full text-left px-4 py-3 hover:bg-gray-50 flex flex-col"
-                        >
-                          <span className="font-medium text-green-900">{formatarNome(cliente.nome_completo)}</span>
-                          <span className="text-xs text-gray-500">{cliente.cpf || 'CPF n/d'} • {formatarTelefone(cliente.telefone)}</span>
-                        </button>
+                        <div key={cliente.id} className="flex items-center hover:bg-gray-50 group">
+                          <button
+                            type="button"
+                            onClick={() => handleClienteChange(cliente.id)}
+                            className="flex-1 text-left px-4 py-3 flex flex-col"
+                          >
+                            <span className="font-medium text-green-900">{formatarNome(cliente.nome_completo)}</span>
+                            <span className="text-xs text-gray-500">{cliente.cpf || 'CPF n/d'} • {formatarTelefone(cliente.telefone)}</span>
+                          </button>
+                          <button
+                            type="button"
+                            title="Editar cadastro"
+                            onClick={(e) => { e.stopPropagation(); setEditandoCliente(cliente); setIsClienteDropdownOpen(false); }}
+                            className="pr-3 pl-1 py-3 text-gray-400 hover:text-green-700 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       ))
                     ) : (
-                      <div className="px-4 py-3 text-sm text-gray-500">Nenhum cliente encontrado</div>
+                      <div className="px-4 py-3 text-sm text-gray-500 space-y-2">
+                        {!showNovoClienteForm ? (
+                          <>
+                            <div>Nenhum cliente encontrado</div>
+                            {podeCriarCliente && (
+                              <Button
+                                type="button"
+                                variant="link"
+                                className="h-auto p-0 text-green-700"
+                                onClick={handleAbrirNovoClienteForm}
+                              >
+                                {`Criar novo cliente com o nome "${formatarNome(searchCliente)}"`}
+                              </Button>
+                            )}
+                          </>
+                        ) : (
+                          <form onSubmit={handleSubmitNovoCliente} className="space-y-3 pt-1">
+                            <div className="font-medium text-gray-700 text-sm">Novo cliente</div>
+                            <div>
+                              <Label className="text-xs">Nome *</Label>
+                              <Input
+                                value={novoClienteData.nome_completo}
+                                onChange={e => setNovoClienteData(prev => ({ ...prev, nome_completo: e.target.value }))}
+                                placeholder="Nome completo"
+                                className="h-8 text-sm mt-1"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">Telefone / WhatsApp {!novoClienteData.sem_whatsapp && <span className="text-red-500">*</span>}</Label>
+                              <Input
+                                value={novoClienteData.telefone}
+                                onChange={e => setNovoClienteData(prev => ({ ...prev, telefone: formatarTelefone(e.target.value) }))}
+                                placeholder="(00) 00000-0000"
+                                className="h-8 text-sm mt-1"
+                                disabled={novoClienteData.sem_whatsapp}
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                id="sem_whatsapp_check"
+                                checked={novoClienteData.sem_whatsapp}
+                                onChange={e => setNovoClienteData(prev => ({ ...prev, sem_whatsapp: e.target.checked, telefone: e.target.checked ? "" : prev.telefone }))}
+                                className="h-4 w-4 accent-green-700"
+                              />
+                              <label htmlFor="sem_whatsapp_check" className="text-xs text-gray-600 cursor-pointer">Cliente não possui WhatsApp</label>
+                            </div>
+                            <div className="flex gap-2 pt-1">
+                              <Button type="submit" size="sm" className="bg-green-700 hover:bg-green-800 text-white" disabled={criarClienteMutation.isPending}>
+                                {criarClienteMutation.isPending ? "Salvando..." : "Salvar"}
+                              </Button>
+                              <Button type="button" size="sm" variant="outline" onClick={() => setShowNovoClienteForm(false)}>
+                                Cancelar
+                              </Button>
+                            </div>
+                          </form>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -276,8 +561,23 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
             <div className="border rounded-xl p-4" style={{ borderColor: '#E5E0D8' }}>
               <h4 className="font-semibold mb-4" style={{ color: '#07593f' }}>Produtos</h4>
 
+              <div className="mb-4">
+                <Label>Filtrar por Fornecedor</Label>
+                <Select value={fornecedorFilter} onValueChange={(value) => setFornecedorFilter(String(value))}>
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder="Selecione um fornecedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os Fornecedores</SelectItem>
+                    {(fornecedores || []).map(f => (
+                      <SelectItem key={f.id} value={String(f.id)}>{f.nome_empresa}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
               <div className="grid md:grid-cols-12 gap-3 mb-4">
-                <div className="md:col-span-7">
+                <div className="md:col-span-7" ref={productSearchRef}>
                   <Label>Produto</Label>
                   <div className="relative mt-2">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4" style={{ color: '#8B8B8B' }} />
@@ -287,23 +587,40 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                       onChange={(e) => {
                         setSearchProduto(e.target.value);
                         setSelectedProduto(null);
+                        setShowResultadosProduto(true);
+                        setSelectedIndexProduto(0);
                       }}
+                      onFocus={() => setShowResultadosProduto(true)}
+                      onKeyDown={(event) => handleKeyDownProduto(event, produtosFiltrados)}
                       className="pl-9"
                     />
                   </div>
-                  {searchProduto && (
+                  {showResultadosProduto && searchProduto && (
                     <div className="absolute z-10 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                      {produtosFiltrados.map(produto => (
+                      {produtosFiltrados.length === 0 ? (
+                        <div className="px-4 py-3 text-sm text-gray-500">Nenhum produto encontrado</div>
+                      ) : produtosFiltrados.map((produto, index) => (
                         <button
                           key={produto.id}
                           type="button"
                           onClick={() => {
                             setSelectedProduto(produto.id);
                             setSearchProduto(produto.nome);
+                            setShowResultadosProduto(false);
                           }}
-                          className="w-full text-left px-4 py-3 hover:bg-gray-50"
+                          className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 ${index === selectedIndexProduto ? 'bg-green-50' : 'hover:bg-gray-50'}`}
                         >
                           <p className="font-medium" style={{ color: '#07593f' }}>{produto.nome}</p>
+                          {getItemFabricante(produto) && (
+                            <p className="text-xs mt-1 font-medium" style={{ color: '#8B8B8B' }}>
+                              Fabricante: {getItemFabricante(produto)}
+                            </p>
+                          )}
+                          {getItemCaracteristicas(produto) && (
+                            <p className="text-xs mt-1" style={{ color: '#666' }}>
+                              {getItemCaracteristicas(produto)}
+                            </p>
+                          )}
                           <p className="text-sm" style={{ color: '#8B8B8B' }}>
                             R$ {produto.preco_venda?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                           </p>
@@ -338,26 +655,38 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
               {formData.itens.length > 0 && (
                 <div className="space-y-2">
                   {formData.itens.map((item, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 rounded-lg border">
-                      <div>
-                        <p className="font-medium" style={{ color: '#07593f' }}>{item.produto_nome}</p>
-                        <p className="text-sm" style={{ color: '#8B8B8B' }}>
-                          {item.quantidade} x R$ {item.preco_unitario?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <p className="font-bold" style={{ color: '#07593f' }}>
-                          R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </p>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removerProduto(index)}
-                          className="text-red-600"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
+                    <div key={index} className="p-3 rounded-lg border">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <p className="font-medium" style={{ color: '#07593f' }}>{item.produto_nome}</p>
+                          {getItemFabricante(item) && (
+                            <p className="text-xs mt-1 font-medium" style={{ color: '#8B8B8B' }}>
+                              Fabricante: {getItemFabricante(item)}
+                            </p>
+                          )}
+                          <p className="text-sm" style={{ color: '#8B8B8B' }}>
+                            {item.quantidade} x R$ {item.preco_unitario?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </p>
+                          {getItemCaracteristicas(item) && (
+                            <p className="text-xs mt-2 p-2 bg-gray-50 rounded" style={{ color: '#666' }}>
+                              {getItemCaracteristicas(item)}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 ml-4">
+                          <p className="font-bold" style={{ color: '#07593f' }}>
+                            R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </p>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removerProduto(index)}
+                            className="text-red-600"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -459,5 +788,38 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
         </form>
       </DialogContent>
     </Dialog>
+
+    {editandoCliente && (
+      <ClienteModal
+        isOpen={!!editandoCliente}
+        onClose={() => setEditandoCliente(null)}
+        cliente={editandoCliente}
+        isLoading={isEditClienteLoading}
+        clientes={clientes}
+        onSave={async (dadosAtualizados) => {
+          setIsEditClienteLoading(true);
+          try {
+            await base44.entities.Cliente.update(editandoCliente.id, dadosAtualizados);
+            queryClient.invalidateQueries({ queryKey: ['clientes'] });
+            if (formData.cliente_id === editandoCliente.id) {
+              const telefoneWhatsApp = dadosAtualizados.telefone || "";
+              setFormData(prev => ({
+                ...prev,
+                cliente_nome: dadosAtualizados.nome_completo || prev.cliente_nome,
+                cliente_telefone: telefoneWhatsApp,
+              }));
+              setSearchCliente(formatarNome(dadosAtualizados.nome_completo || ""));
+            }
+            toast.success("Cliente atualizado com sucesso!");
+            setEditandoCliente(null);
+          } catch (err) {
+            toast.error(err?.message || "Erro ao atualizar cliente");
+          } finally {
+            setIsEditClienteLoading(false);
+          }
+        }}
+      />
+    )}
+    </>
   );
 }

@@ -41,7 +41,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
 import ImportProdutosModal from "@/components/produtos/ImportProdutosModal";
-import { formatPrice } from "@/utils/productFormatters";
+import { formatDimensions, formatPrice } from "@/utils/productFormatters";
 import { getColorHex } from "@/components/produtos/FurnitureColorPicker";
 import { CATEGORIAS } from "@/constants/productConstants";
 import ProductIncompleteIndicator from "@/components/produtos/ProductIncompleteIndicator";
@@ -86,6 +86,23 @@ export default function Produtos() {
 
   const queryClient = useQueryClient();
   const confirm = useConfirm();
+
+  const hasMeaningfulValue = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized && !['n/a', 'na', '-', 'null', 'undefined', '?'].includes(normalized);
+  };
+
+  const getDisplayDimensions = (produto) => {
+    const dimensions = formatDimensions(produto.largura, produto.altura, produto.profundidade);
+    return dimensions === '-' ? null : dimensions;
+  };
+
+  const shouldShowSize = (produto) => {
+    if (!hasMeaningfulValue(produto.tamanho)) return false;
+    const dimensoesCompactas = [produto.largura, produto.altura, produto.profundidade].filter(Boolean).join('x').toLowerCase();
+    const tamanhoCompacto = String(produto.tamanho).replace(/\s+/g, '').toLowerCase();
+    return !dimensoesCompactas || tamanhoCompacto !== dimensoesCompactas;
+  };
 
   // Query 1: todos os produtos (sem filtro de fabricante — feito via useMemo abaixo)
   const { data: rawProdutos = [], isLoading } = useQuery({
@@ -645,21 +662,23 @@ export default function Produtos() {
 
                     {/* Dimensoes e Material */}
                     <div className="flex flex-wrap gap-1 mt-1">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 flex items-center" title="Dimensões (LxAxP)">
-                        <Ruler className="w-3 h-3 mr-1 opacity-50" />
-                        {(produto.largura || produto.altura || produto.profundidade)
-                          ? `${produto.largura || '?'}x${produto.altura || '?'}x${produto.profundidade || '?'}`
-                          : 'Dim: N/A'}
-                      </span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100 flex items-center" title="Material">
-                        <Layers className="w-3 h-3 mr-1 opacity-50" /> {produto.material || 'Mat: N/A'}
-                      </span>
+                      {getDisplayDimensions(produto) && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100 flex items-center" title="Dimensões (LxAxP)">
+                          <Ruler className="w-3 h-3 mr-1 opacity-50" />
+                          {getDisplayDimensions(produto)}
+                        </span>
+                      )}
+                      {hasMeaningfulValue(produto.material) && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100 flex items-center" title="Material">
+                          <Layers className="w-3 h-3 mr-1 opacity-50" /> {produto.material}
+                        </span>
+                      )}
                     </div>
 
                     {/* Atributos da Variação (Cor/Tamanho) */}
                     <div className="flex flex-wrap gap-1 mt-1">
-                      <Badge variant="secondary" className="text-[10px] px-1.5 h-5 flex items-center gap-1 bg-gray-50 border border-gray-100" title="Cor">
-                        {produto.cor ? (
+                      {hasMeaningfulValue(produto.cor) && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 h-5 flex items-center gap-1 bg-gray-50 border border-gray-100" title="Cor">
                           <>
                             <div
                               className="w-2 h-2 rounded-full border border-gray-300"
@@ -667,14 +686,14 @@ export default function Produtos() {
                             />
                             {produto.cor}
                           </>
-                        ) : (
-                          <span className="text-gray-400">Cor: N/A</span>
-                        )}
-                      </Badge>
-                      <Badge variant="secondary" className="text-[10px] px-1.5 h-5 bg-gray-50 border border-gray-100" title="Tamanho">
-                        <Ruler className="w-3 h-3 mr-1 text-gray-400" />
-                        {produto.tamanho || 'Tam: N/A'}
-                      </Badge>
+                        </Badge>
+                      )}
+                      {shouldShowSize(produto) && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 h-5 bg-gray-50 border border-gray-100" title="Tamanho">
+                          <Ruler className="w-3 h-3 mr-1 text-gray-400" />
+                          {produto.tamanho}
+                        </Badge>
+                      )}
                     </div>
                   </div>
 

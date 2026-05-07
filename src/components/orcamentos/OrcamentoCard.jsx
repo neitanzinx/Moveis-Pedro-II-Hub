@@ -10,6 +10,7 @@ import { base44 } from "@/api/base44Client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { buildProductDisplayName } from "@/utils/productReference";
+import { formatDimensions } from "@/utils/productFormatters";
 
 const statusColors = {
   "Pendente": { bg: "#FEF3C7", text: "#92400E", border: "#FCD34D" },
@@ -18,6 +19,30 @@ const statusColors = {
   "Convertido": { bg: "#D1FAE5", text: "#065F46", border: "#6EE7B7" },
   "Expirado": { bg: "#F3F4F6", text: "#6B7280", border: "#D1D5DB" }
 };
+
+const getItemCaracteristicas = (item) => {
+  if (item.caracteristicas) return item.caracteristicas;
+
+  const caracteristicas = [];
+  const tamanho = String(item.tamanho || '').trim();
+  const material = String(item.material || '').trim();
+  const cor = String(item.cor || '').trim();
+  const tamanhoValido = tamanho && !['n/a', 'na', '-', 'null', 'undefined'].includes(tamanho.toLowerCase());
+
+  const dimensoesFormatadas = formatDimensions(item.largura, item.altura, item.profundidade);
+  const dimensoesValidas = dimensoesFormatadas !== '-';
+  const dimensoesCompactas = [item.largura, item.altura, item.profundidade].filter(Boolean).join('x');
+  const tamanhoDuplicaDimensoes = tamanhoValido && dimensoesCompactas && tamanho.replace(/\s+/g, '').toLowerCase() === dimensoesCompactas.toLowerCase();
+
+  if (tamanhoValido && !tamanhoDuplicaDimensoes) caracteristicas.push(`Tamanho: ${tamanho}`);
+  if (material && !['n/a', 'na', '-', 'null', 'undefined'].includes(material.toLowerCase())) caracteristicas.push(`Material: ${material}`);
+  if (cor && !['n/a', 'na', '-', 'null', 'undefined'].includes(cor.toLowerCase())) caracteristicas.push(`Cor: ${cor}`);
+  if (dimensoesValidas) caracteristicas.push(`Medidas: ${dimensoesFormatadas}`);
+
+  return caracteristicas.join(" | ");
+};
+
+const getItemFabricante = (item) => String(item.fornecedor_nome || '').trim();
 
 export default function OrcamentoCard({ orcamento, onEdit, onDelete }) {
   const navigate = useNavigate();
@@ -130,9 +155,21 @@ export default function OrcamentoCard({ orcamento, onEdit, onDelete }) {
               </p>
               <div className="space-y-1">
                 {orcamento.itens.slice(0, 3).map((item, index) => (
-                  <div key={index} className="text-sm flex justify-between" style={{ color: '#8B8B8B' }}>
-                    <span>{item.quantidade}x {buildProductDisplayName(item.produto_nome, item.modelo_referencia)}</span>
-                    <span>R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  <div key={index} className="text-sm" style={{ color: '#8B8B8B' }}>
+                    <div className="flex justify-between">
+                      <span>{item.quantidade}x {buildProductDisplayName(item.produto_nome, item.modelo_referencia)}</span>
+                      <span>R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    {getItemFabricante(item) && (
+                      <div className="text-xs mt-1 font-medium" style={{ color: '#8B8B8B' }}>
+                        Fabricante: {getItemFabricante(item)}
+                      </div>
+                    )}
+                    {getItemCaracteristicas(item) && (
+                      <div className="text-xs mt-1 px-2 py-1 bg-gray-50 rounded" style={{ color: '#666' }}>
+                        {getItemCaracteristicas(item)}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {orcamento.itens.length > 3 && (
