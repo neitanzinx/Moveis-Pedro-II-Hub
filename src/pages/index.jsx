@@ -122,7 +122,20 @@ function PagesContent() {
     // Mover lógica de loading para o final do "processamento de hooks"
     // ou garantir que as rotas públicas que não usam hooks extras venham depois do loading se necessário.
 
-    if (loading && !location.pathname.startsWith('/avaliacao/') && location.pathname !== '/' && location.pathname !== '/home' && location.pathname !== '/vip' && !location.pathname.startsWith('/operador')) {
+    const isPublicRoute =
+        location.pathname === '/' ||
+        location.pathname === '/home' ||
+        location.pathname === '/vip' ||
+        location.pathname === '/login' ||
+        location.pathname === '/cliente-login' ||
+        location.pathname === '/area-cliente' ||
+        location.pathname === '/assistencia/auto' ||
+        location.pathname === '/CadastroMobile' ||
+        location.pathname.startsWith('/rastreio') ||
+        location.pathname.startsWith('/avaliacao/') ||
+        location.pathname.startsWith('/operador');
+
+    if (loading && !isPublicRoute) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-800"></div>

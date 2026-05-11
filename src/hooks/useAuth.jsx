@@ -44,6 +44,15 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let mounted = true;
 
+    const startLoadingFailsafe = () => {
+      return setTimeout(() => {
+        if (mounted) {
+          console.warn('[Auth] Failsafe acionado: finalizando loading para evitar tela travada.');
+          setLoading(false);
+        }
+      }, 10000);
+    };
+
     // Função auxiliar para carregar o perfil completo (Supabase)
     const loadSupabaseProfile = async (sessionUser) => {
       try {
@@ -128,70 +137,29 @@ export function AuthProvider({ children }) {
     const initAuth = async () => {
       console.log('[Auth] Iniciando verificação de autenticação...');
 
-      // Limpar token legado do backend (não mais utilizado)
-      if (localStorage.getItem('employee_token')) {
-        console.log('[Auth] Removendo token legado do backend...');
-        localStorage.removeItem('employee_token');
-      }
-
-      // 1. Primeiro verifica se há cache de funcionário
-      const hasCachedUser = localStorage.getItem('employee_user');
-
-      if (hasCachedUser) {
-        console.log('[Auth] Cache de funcionário encontrado, verificando...');
-        const employeeUser = await checkEmployeeAuth();
-
-        if (employeeUser && mounted) {
-          console.log('[Auth] ✅ Funcionário autenticado:', employeeUser.full_name, '- Cargos:', employeeUser.cargos?.join(', ') || employeeUser.cargo);
-          setAuthType('employee');
-          setUser(employeeUser);
-
-          // Buscar permissões dos cargos
-          try {
-            const rolePermissions = await base44.entities.RolePermission.list();
-            const roles = getUserRoles(employeeUser);
-            const permissionsFromDb = Array.from(new Set(
-              rolePermissions
-                .filter(c => roles.includes(c.cargo))
-                .flatMap(c => Array.isArray(c.permissions) ? c.permissions : [])
-            ));
-            const permissions = getMergedRolePermissions(roles, permissionsFromDb);
-
-            if (permissions.length > 0) {
-              const roleScopes = roles.map(role => ROLE_RULES[role]?.scope).filter(Boolean);
-              setCargoPermissoes({
-                can: permissions,
-                scope: getHighestScope(roleScopes)
-              });
-            }
-          } catch (e) {
-            console.log("[Auth] Usando permissões hardcoded (fallback)", e);
-          }
-
-          setLoading(false);
-          return;
-        } else {
-          console.log('[Auth] ⚠️ Cache inválido ou sessão expirada');
+      try {
+        // Limpar token legado do backend (não mais utilizado)
+        if (localStorage.getItem('employee_token')) {
+          console.log('[Auth] Removendo token legado do backend...');
+          localStorage.removeItem('employee_token');
         }
-      }
 
-      // 2. Se não tem funcionário logado, verifica Supabase Auth (para clientes)
-      console.log('[Auth] Verificando autenticação Supabase...');
-      const supabaseUser = await base44.auth.me();
+        // 1. Primeiro verifica se há cache de funcionário
+        const hasCachedUser = localStorage.getItem('employee_user');
 
-      if (supabaseUser && mounted) {
-        const fullProfile = await loadSupabaseProfile(supabaseUser);
+        if (hasCachedUser) {
+          console.log('[Auth] Cache de funcionário encontrado, verificando...');
+          const employeeUser = await checkEmployeeAuth();
 
-        if (fullProfile) {
-          console.log('[Auth] Supabase user encontrado:', fullProfile.email, '- Cargos:', fullProfile.cargos?.join(', ') || fullProfile.cargo || 'Nenhum');
-          setAuthType('supabase');
-          setUser(fullProfile);
+          if (employeeUser && mounted) {
+            console.log('[Auth] ✅ Funcionário autenticado:', employeeUser.full_name, '- Cargos:', employeeUser.cargos?.join(', ') || employeeUser.cargo);
+            setAuthType('employee');
+            setUser(employeeUser);
 
-          // Buscar permissões dos cargos se existir
-          if (fullProfile.cargos?.length || fullProfile.cargo) {
+            // Buscar permissões dos cargos
             try {
               const rolePermissions = await base44.entities.RolePermission.list();
-              const roles = getUserRoles(fullProfile);
+              const roles = getUserRoles(employeeUser);
               const permissionsFromDb = Array.from(new Set(
                 rolePermissions
                   .filter(c => roles.includes(c.cargo))
@@ -207,18 +175,64 @@ export function AuthProvider({ children }) {
                 });
               }
             } catch (e) {
-              console.log("Usando permissões hardcoded (fallback)", e);
+              console.log("[Auth] Usando permissões hardcoded (fallback)", e);
+            }
+
+            setLoading(false);
+            return;
+          } else {
+            console.log('[Auth] ⚠️ Cache inválido ou sessão expirada');
+          }
+        }
+
+        // 2. Se não tem funcionário logado, verifica Supabase Auth (para clientes)
+        console.log('[Auth] Verificando autenticação Supabase...');
+        const supabaseUser = await base44.auth.me();
+
+        if (supabaseUser && mounted) {
+          const fullProfile = await loadSupabaseProfile(supabaseUser);
+
+          if (fullProfile) {
+            console.log('[Auth] Supabase user encontrado:', fullProfile.email, '- Cargos:', fullProfile.cargos?.join(', ') || fullProfile.cargo || 'Nenhum');
+            setAuthType('supabase');
+            setUser(fullProfile);
+
+            // Buscar permissões dos cargos se existir
+            if (fullProfile.cargos?.length || fullProfile.cargo) {
+              try {
+                const rolePermissions = await base44.entities.RolePermission.list();
+                const roles = getUserRoles(fullProfile);
+                const permissionsFromDb = Array.from(new Set(
+                  rolePermissions
+                    .filter(c => roles.includes(c.cargo))
+                    .flatMap(c => Array.isArray(c.permissions) ? c.permissions : [])
+                ));
+                const permissions = getMergedRolePermissions(roles, permissionsFromDb);
+
+                if (permissions.length > 0) {
+                  const roleScopes = roles.map(role => ROLE_RULES[role]?.scope).filter(Boolean);
+                  setCargoPermissoes({
+                    can: permissions,
+                    scope: getHighestScope(roleScopes)
+                  });
+                }
+              } catch (e) {
+                console.log("Usando permissões hardcoded (fallback)", e);
+              }
             }
           }
         }
-      }
-
-      if (mounted) {
-        setLoading(false);
+      } catch (error) {
+        console.error('[Auth] Erro durante initAuth:', error);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
 
-    initAuth();
+    const failsafeId = startLoadingFailsafe();
+    initAuth().finally(() => clearTimeout(failsafeId));
 
     // Inscreve para mudanças no Supabase Auth
     const { data: { subscription } } = base44.auth.onAuthStateChange?.((event, session) => {
