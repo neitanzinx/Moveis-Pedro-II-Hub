@@ -7,10 +7,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Eye, EyeOff, Lock, IdCard, Loader2 } from "lucide-react";
 import { supabase } from "@/api/base44Client";
+import { useNavigate } from "react-router-dom";
 
 
 
 export default function LoginFuncionario() {
+    const navigate = useNavigate();
     const { brandName, brandLogo } = useTenant();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
@@ -33,7 +35,7 @@ export default function LoginFuncionario() {
         const params = new URLSearchParams(window.location.search);
         const redirect = params.get('redirect');
         if (redirect) {
-            window.location.href = redirect;
+            navigate(redirect, { replace: true });
             return;
         }
 
@@ -48,13 +50,13 @@ export default function LoginFuncionario() {
         }
 
         if (cargo === 'Montador Externo') {
-            window.location.href = '/admin/MontadorExterno';
+            navigate('/admin/MontadorExterno', { replace: true });
         } else if (cargo === 'Entregador') {
-            window.location.href = '/admin/Entregador';
+            navigate('/admin/Entregador', { replace: true });
         } else if (cargo === 'Montador') {
-            window.location.href = '/admin/Montagem';
+            navigate('/admin/Montagem', { replace: true });
         } else {
-            window.location.href = '/admin';
+            navigate('/admin', { replace: true });
         }
     };
 

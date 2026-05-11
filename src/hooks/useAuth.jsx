@@ -21,6 +21,8 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [cargoPermissoes, setCargoPermissoes] = useState(null);
   const [authType, setAuthType] = useState(null); // 'employee' | 'supabase' | null
+  const [authError, setAuthError] = useState(null);
+  const [authAttempt, setAuthAttempt] = useState(0);
 
   // Admin Store Selection State
   const [selectedStore, setSelectedStoreState] = useState(() => {
@@ -43,6 +45,10 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let mounted = true;
+
+    const isTimeoutError = (error) => {
+      return error?.message?.includes('Timeout em');
+    };
 
     const startLoadingFailsafe = () => {
       return setTimeout(() => {
@@ -89,6 +95,13 @@ export function AuthProvider({ children }) {
           });
         }
       } catch (e) {
+        if (isTimeoutError(e) && mounted) {
+          setAuthError({
+            code: 'permissions-timeout',
+            source: 'RolePermission.list',
+            message: 'A consulta de permissões excedeu o tempo limite. Verifique a conexão com o Supabase e tente novamente.'
+          });
+        }
         console.log('[Auth] Usando permissões hardcoded (fallback)', e);
       }
     };
@@ -194,6 +207,9 @@ export function AuthProvider({ children }) {
         });
       } catch (e) {
         console.error("Erro ao verificar auth de funcionário:", e);
+        if (isTimeoutError(e)) {
+          throw e;
+        }
         try {
           const parsedCachedUser = JSON.parse(cachedUser);
           console.warn('[Auth] Falha na validação remota, mantendo cache local temporariamente.');
@@ -210,6 +226,10 @@ export function AuthProvider({ children }) {
       console.log('[Auth] Iniciando verificação de autenticação...');
 
       try {
+        if (mounted) {
+          setAuthError(null);
+        }
+
         // Limpar token legado do backend (não mais utilizado)
         if (localStorage.getItem('employee_token')) {
           console.log('[Auth] Removendo token legado do backend...');
@@ -240,7 +260,11 @@ export function AuthProvider({ children }) {
 
         // 2. Se não tem funcionário logado, verifica Supabase Auth (para clientes)
         console.log('[Auth] Verificando autenticação Supabase...');
-        const supabaseUser = await base44.auth.me();
+        const supabaseUser = await withTimeout(
+          base44.auth.me(),
+          5000,
+          'base44.auth.me'
+        );
 
         if (supabaseUser && mounted) {
           const fullProfile = await loadSupabaseProfile(supabaseUser);
@@ -258,6 +282,16 @@ export function AuthProvider({ children }) {
         }
       } catch (error) {
         console.error('[Auth] Erro durante initAuth:', error);
+        if (isTimeoutError(error) && mounted) {
+          setUser(null);
+          setCargoPermissoes(null);
+          setAuthType(null);
+          setAuthError({
+            code: 'auth-timeout',
+            source: error?.message?.replace('Timeout em ', '') || 'auth',
+            message: 'Nao foi possivel validar sua sessao dentro do tempo esperado. Tente novamente em instantes.'
+          });
+        }
       } finally {
         if (mounted) {
           setLoading(false);
@@ -291,7 +325,7 @@ export function AuthProvider({ children }) {
       mounted = false;
       subscription?.unsubscribe();
     };
-  }, []); // Esvaziado para rodar apenas no mount do Provider
+  }, [authAttempt]);
 
   // Sync effect: If user has fixed store, force selectedStore to match
   useEffect(() => {
@@ -312,8 +346,15 @@ export function AuthProvider({ children }) {
     setUser(null);
     setAuthType(null);
     setCargoPermissoes(null);
+    setAuthError(null);
     setSelectedStore(null); // Limpa seleção
     window.location.href = '/login';
+  };
+
+  const retryAuth = () => {
+    setLoading(true);
+    setAuthError(null);
+    setAuthAttempt(prev => prev + 1);
   };
 
   // Verifica permissão - primeiro tenta banco, depois fallback hardcoded
@@ -423,7 +464,9 @@ export function AuthProvider({ children }) {
   const value = {
     user,
     loading,
+    authError,
     logout,
+    retryAuth,
     authType,
     can,
     getScope,
