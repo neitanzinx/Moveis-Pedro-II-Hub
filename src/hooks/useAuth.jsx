@@ -1,6 +1,7 @@
 import { useState, useEffect, createContext, useContext } from "react";
 import { base44, supabase } from "@/api/base44Client";
 import { ROLE_RULES, SCOPES, userCan, getUserRoles, getHighestScope, hasRole, getUserEffectivePermissions } from "@/config/permissions";
+import { canAccessLojaId, filterDataByLoja } from "@/lib/utils";
 
 const AuthContext = createContext(null);
 
@@ -310,10 +311,18 @@ export function AuthProvider({ children }) {
     return user?.loja || selectedStore || null;
   };
 
+  const getUserLojas = () => {
+    const lojas = [user?.loja, selectedStore].filter(Boolean);
+    return Array.from(new Set(lojas));
+  };
+
+  const canAccessLoja = (lojaId) => {
+    return canAccessLojaId(lojaId, getUserLojas());
+  };
+
   // Verifica se deve filtrar por loja (Gerente)
   const shouldFilterByStore = () => {
-    const scope = getScope();
-    return scope === SCOPES.STORE || scope === 'store';
+    return getUserLojas().length > 0;
   };
 
   // Filtra dados automaticamente por escopo
@@ -321,40 +330,36 @@ export function AuthProvider({ children }) {
     if (!data || !user) return [];
     if (!Array.isArray(data)) return [];
 
-    const scope = getScope();
+    const normalizedOptions = typeof options === 'string'
+      ? { scopeOverride: options }
+      : (options || {});
 
-    // Admin ve tudo
-    if (scope === SCOPES.ALL || scope === 'all') return data;
+    const userLojas = getUserLojas();
+    const dataWithinUserStores = userLojas.length > 0
+      ? filterDataByLoja(data, userLojas, { lojaField: normalizedOptions.lojaField })
+      : data;
+
+    const scope = normalizedOptions.scopeOverride || getScope();
+
+    // Mesmo admins do tenant continuam limitados a suas lojas atribuídas.
+    if (scope === SCOPES.ALL || scope === 'all') return dataWithinUserStores;
 
     // Gerente ve apenas da sua loja
     if (scope === SCOPES.STORE || scope === 'store') {
-      const userLoja = getUserLoja();
-      if (!userLoja) {
+      if (!userLojas.length) {
         console.warn('[useAuth] Gerente sem loja definida, filtrando tudo');
         return [];
       }
 
-      // Tenta varios campos possiveis para loja
-      const lojaFields = options.lojaField
-        ? [options.lojaField]
-        : ['loja', 'loja_id', 'loja_nome', 'loja_venda', 'store'];
-
-      return data.filter(item => {
-        for (const field of lojaFields) {
-          if (item[field] && item[field] === userLoja) {
-            return true;
-          }
-        }
-        return false;
-      });
+      return dataWithinUserStores;
     }
 
     // Vendedor ve apenas o proprio
     if (scope === SCOPES.OWN || scope === 'own') {
-      const userIdField = options.userField || 'responsavel_id';
+      const userIdField = normalizedOptions.userField || 'responsavel_id';
       const userIdFields = [userIdField, 'vendedor_id', 'created_by', 'user_id'];
 
-      return data.filter(item => {
+      return dataWithinUserStores.filter(item => {
         for (const field of userIdFields) {
           if (item[field] === user.id || item[field] === user.email) {
             return true;
@@ -377,6 +382,8 @@ export function AuthProvider({ children }) {
     filterData,
     isGerente,
     getUserLoja,
+    getUserLojas,
+    canAccessLoja,
     shouldFilterByStore,
     SCOPES,
     selectedStore,

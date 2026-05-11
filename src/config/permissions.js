@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Warehouse, Users, ShoppingCart, Truck, Building2,
   FileText, DollarSign, UserCog, MessageCircle, CreditCard,
-  Settings, CalendarDays, Tag, Wrench, Target, TrendingUp
+  Settings, CalendarDays, Tag, Wrench, Target, TrendingUp, Activity
 } from "lucide-react";
 
 // Níveis de Acesso aos Dados
@@ -52,7 +52,8 @@ export const ROLE_RULES = {
       'solicitar_nfe', 'aprovar_nfe', 'emitir_nfe', 'cancelar_nfe', 'corrigir_nfe', 'view_nfe',
       'solicitar_cancelamento_nfe', 'aprovar_cancelamento_nfe',
       'solicitar_cce_nfe', 'aprovar_cce_nfe',
-      'solicitar_inutilizacao_nfe', 'aprovar_inutilizacao_nfe'
+      'solicitar_inutilizacao_nfe', 'aprovar_inutilizacao_nfe',
+      'view_cliente_access_analytics'
     ],
     scope: SCOPES.ALL
   },
@@ -190,6 +191,7 @@ export const MENU_ITEMS = [
 
   { title: "Financeiro", url: "/admin/Financeiro", icon: DollarSign, permission: 'view_financeiro', section: "Gestão" },
   { title: "Central Analítica", url: "/admin/CentralAnalitica", icon: TrendingUp, permission: ['view_relatorios', 'view_financeiro'], section: "Gestão" },
+  { title: "Acessos do Portal", url: "/admin/RelatorioAcessosClientes", icon: Activity, permission: 'view_cliente_access_analytics', section: "Gestão" },
   { title: "Marketing", url: "/admin/Marketing", icon: Tag, permission: 'view_marketing', section: "Gestão", module: 'marketing' },
   { title: "RH", url: "/admin/RecursosHumanos", icon: UserCog, permission: 'view_rh', section: "Gestão", module: 'rh' },
 

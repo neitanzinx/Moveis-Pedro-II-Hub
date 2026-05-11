@@ -420,8 +420,11 @@ export default function Vendas() {
         setNfeModalOpen(true);
     };
 
-    // 1. Filtra pelo Escopo do Usuário (Dono / Loja / Tudo)
-    const vendasPermitidas = filterData(vendas, { userField: 'responsavel_id' });
+    // 1. Filtra pelo escopo do usuário, sempre respeitando a loja atribuída.
+    const vendasPermitidas = filterData(vendas, {
+        userField: 'responsavel_id',
+        lojaField: 'loja'
+    });
     const vendasComResumo = vendasPermitidas.map((venda) => ({
         ...venda,
         financeiro: getVendaFinanceiro(venda, { entregas, lancamentos }),

@@ -38,6 +38,10 @@ const AvaliacaoNPS = lazy(() => import("./AvaliacaoNPS.jsx"));
 const EntradaEstoque = lazy(() => import("./EntradaEstoque.jsx"));
 const PoliticasEstoque = lazy(() => import("./PoliticasEstoque.jsx"));
 const AprovacaoSemEstoque = lazy(() => import("./AprovacaoSemEstoque.jsx"));
+const RelatorioAcessosClientes = lazy(() => import("./RelatorioAcessosClientes.jsx"));
+const PainelSaaSOperador = lazy(() => import("./PainelSaaSOperador.jsx"));
+const OperadorLogin = lazy(() => import("./OperadorLogin.jsx"));
+const OperatorLayout = lazy(() => import("./OperatorLayout.jsx"));
 
 // ============================================================================
 // CARREGAMENTO SÍNCRONO - Páginas Públicas (críticas para SEO e primeira impressão)
@@ -68,6 +72,7 @@ function PageLoadingFallback() {
     );
 }
 import { useAuth } from "@/hooks/useAuth";
+import { useOperatorAuth } from "@/hooks/useOperatorAuth";
 
 
 const PAGES = {
@@ -77,7 +82,8 @@ const PAGES = {
     Inventario, Estoque, ModoReuniao, PDV, CatalogoWhatsApp,
     LogisticaSemanal, Entregador, Marketing, MontadorExterno,
     CentralAnalitica, DashboardGerente,
-    EntradaEstoque, PoliticasEstoque, AprovacaoSemEstoque
+    EntradaEstoque, PoliticasEstoque, AprovacaoSemEstoque,
+    PainelSaaSOperador
 };
 
 function _getCurrentPage(url) {
@@ -101,6 +107,7 @@ function _getCurrentPage(url) {
 function PagesContent() {
     const location = useLocation();
     const { user, loading, can } = useAuth();
+    const { loading: operatorLoading, hasSession: operatorHasSession, isOperator } = useOperatorAuth();
     const { isModuleActive } = useTenant();
     const currentPage = _getCurrentPage(location.pathname);
 
@@ -115,7 +122,7 @@ function PagesContent() {
     // Mover lógica de loading para o final do "processamento de hooks"
     // ou garantir que as rotas públicas que não usam hooks extras venham depois do loading se necessário.
 
-    if (loading && !location.pathname.startsWith('/avaliacao/') && location.pathname !== '/' && location.pathname !== '/home' && location.pathname !== '/vip') {
+    if (loading && !location.pathname.startsWith('/avaliacao/') && location.pathname !== '/' && location.pathname !== '/home' && location.pathname !== '/vip' && !location.pathname.startsWith('/operador')) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-800"></div>
@@ -183,6 +190,41 @@ function PagesContent() {
         }
 
         return <LoginFuncionario />;
+    }
+
+    // ===== LOGIN DE OPERADOR (PAINEL SaaS SEPARADO) =====
+    if (location.pathname === '/operador/login') {
+        return (
+            <Suspense fallback={<PageLoadingFallback />}>
+                <OperadorLogin />
+            </Suspense>
+        );
+    }
+
+    // ===== ROTAS OPERADOR (SEPARADAS DO /admin) =====
+    if (location.pathname.startsWith('/operador')) {
+        if (operatorLoading) {
+            return (
+                <div className="min-h-screen flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-800"></div>
+                </div>
+            );
+        }
+
+        if (!isOperator) {
+            return <Navigate to={operatorHasSession ? "/login" : "/operador/login"} replace />;
+        }
+
+        return (
+            <Suspense fallback={<PageLoadingFallback />}>
+                <OperatorLayout>
+                    <Routes>
+                        <Route path="/operador" element={<PainelSaaSOperador />} />
+                        <Route path="/operador/*" element={<Navigate to="/operador" replace />} />
+                    </Routes>
+                </OperatorLayout>
+            </Suspense>
+        );
     }
 
     // ===== ROTAS ADMIN (Requerem autenticação do sistema interno) =====
@@ -310,6 +352,7 @@ function PagesContent() {
                         {/* Gestão e Financeiro */}
                         <Route path="/admin/Financeiro" element={<Financeiro />} />
                         <Route path="/admin/CentralAnalitica" element={<CentralAnalitica />} />
+                        <Route path="/admin/RelatorioAcessosClientes" element={<RelatorioAcessosClientes />} />
                         <Route path="/admin/RelatorioComissoes" element={<Navigate to="/admin/CentralAnalitica?aba=comissoes" replace />} />
                         <Route path="/admin/RelatoriosAvancados" element={<Navigate to="/admin/CentralAnalitica?aba=relatorios" replace />} />
                         <Route path="/admin/RecursosHumanos" element={<RecursosHumanos />} />

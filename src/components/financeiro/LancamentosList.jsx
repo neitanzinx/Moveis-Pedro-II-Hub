@@ -178,6 +178,7 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
               <TableHeader>
                 <TableRow className="bg-gray-50 dark:bg-neutral-800">
                   <TableHead className="w-[100px] text-xs">Data</TableHead>
+                  <TableHead className="w-[120px] text-xs">Vencimento</TableHead>
                   <TableHead className="text-xs">Descrição</TableHead>
                   <TableHead className="text-xs">Categoria</TableHead>
                   <TableHead className="text-xs text-right">Valor</TableHead>
@@ -192,6 +193,11 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
                     <TableRow key={lanc.id} className="hover:bg-gray-50 dark:hover:bg-neutral-800/50">
                       <TableCell className="text-xs text-gray-600 dark:text-gray-400">
                         {formatDate(lanc.data_lancamento)}
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-600 dark:text-gray-400">
+                        {lanc.data_vencimento
+                          ? new Date(`${lanc.data_vencimento}T00:00:00`).toLocaleDateString('pt-BR')
+                          : '-'}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">

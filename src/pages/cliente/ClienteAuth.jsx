@@ -2,6 +2,8 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { EMPRESA } from "@/config/empresa";
 import { supabase } from "@/api/base44Client";
+import { processarFidelidadeCadastro } from "@/utils/fidelidadeEngine";
+import { ensureClientPortalSession, trackClientAccessEvent } from "@/lib/clienteAccessTracking";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -147,6 +149,25 @@ export default function ClienteAuth() {
                 console.error("Erro ao buscar cliente:", clienteError);
             }
 
+            const accessSession = await ensureClientPortalSession({
+                authUserId: data.user.id,
+                clienteId: cliente?.id,
+                pagePath: "/cliente-login",
+            });
+
+            if (accessSession?.sessionId) {
+                await trackClientAccessEvent({
+                    sessionId: accessSession.sessionId,
+                    authUserId: data.user.id,
+                    clienteId: cliente?.id,
+                    eventName: "login_success",
+                    eventCategory: "auth",
+                    pagePath: "/cliente-login",
+                    metadata: { source: "password" },
+                    dedupeKey: `login_success_${data.user.id}`,
+                });
+            }
+
             toast.success("Login realizado com sucesso!");
             navigate("/area-cliente");
         } catch (err) {
@@ -199,14 +220,8 @@ export default function ClienteAuth() {
 
             if (authError) throw authError;
 
-            // 2. Get loyalty config for bonus steps
-            const { data: fidelidadeConfig } = await supabase
-                .from("fidelidade_config")
-                .select("signup_bonus")
-                .eq("is_active", true)
-                .single();
-
-            const bonusSteps = fidelidadeConfig?.signup_bonus || 2;
+            // 2. Bonus steps will be applied via fidelidadeEngine after client record is created
+            const bonusSteps = 0; // legacy variable kept for toast message — actual bonus applied below
 
             // 3. Check if there's an existing client with the same CPF/CNPJ (from PDV purchases)
             const docToMatch = registerData.tipo_pessoa === "Física"
@@ -231,8 +246,6 @@ export default function ClienteAuth() {
                 const updateData = {
                     user_id: authData.user.id,
                     email: registerData.email,
-                    fidelidade_steps: (existingClient.fidelidade_steps || 0) + bonusSteps, // Add bonus to existing
-                    coroas: (existingClient.coroas || 0) + bonusSteps,
                 };
 
                 // Update fields only if they were empty
@@ -257,7 +270,9 @@ export default function ClienteAuth() {
 
                 if (updateError) throw updateError;
 
-                toast.success(`Bem-vindo de volta! Suas ${existingClient.fidelidade_steps || 0} Coroas anteriores + ${bonusSteps} bônus foram vinculadas!`);
+                // Apply signup bonus via engine (reads config from DB)
+                const bonusResult = await processarFidelidadeCadastro({ id: existingClient.id, coroas: existingClient.coroas || 0, nome_completo: existingClient.nome_completo });
+                toast.success(`Bem-vindo de volta! ${bonusResult.coroasGanhas > 0 ? `+${bonusResult.coroasGanhas} Coroas de bonus vinculadas!` : `Suas ${existingClient.coroas || 0} Coroas foram vinculadas!`}`);
             } else {
                 // 4b. Create new cliente record
                 const clienteData = {
@@ -279,17 +294,19 @@ export default function ClienteAuth() {
                     bairro: registerData.bairro || null,
                     cidade: registerData.cidade || null,
                     estado: registerData.estado || null,
-                    fidelidade_steps: bonusSteps,
-                    coroas: bonusSteps,
                 };
 
-                const { error: clienteError } = await supabase
+                const { data: novoCliente, error: clienteError } = await supabase
                     .from("clientes")
-                    .insert(clienteData);
+                    .insert(clienteData)
+                    .select("id, coroas, nome_completo")
+                    .single();
 
                 if (clienteError) throw clienteError;
 
-                toast.success(`Cadastro realizado! Você ganhou ${bonusSteps} Coroas de boas-vindas!`);
+                // Apply signup bonus via engine
+                const bonusResult = await processarFidelidadeCadastro(novoCliente || { id: novoCliente?.id, coroas: 0, nome_completo: registerData.nome_completo });
+                toast.success(`Cadastro realizado! ${bonusResult.coroasGanhas > 0 ? `Voce ganhou ${bonusResult.coroasGanhas} Coroas de boas-vindas!` : 'Bem-vindo!'}`);
             }
 
             // Verifica se sessão foi criada (auto-confirm ativo) ou se e-mail precisa ser confirmado

@@ -1659,10 +1659,16 @@ export default function PDV() {
       });
 
       executarEmSegundoPlano('processar fidelidade', async () => {
+        const formaPagamentoPrincipal = vendaData.pagamentos?.[0]?.forma_pagamento || '';
+        const itensFidelidade = (itens || []).map(i => ({ categoria: i.categoria || '' }));
+
         const resultadoFidelidade = await processarFidelidadeCompra(
           clienteSelecionado,
           total,
-          vendaData.numero_pedido
+          vendaData.numero_pedido,
+          vendaCriada.id,
+          formaPagamentoPrincipal,
+          itensFidelidade
         );
 
         if (resultadoFidelidade?.coroasGanhas > 0) {

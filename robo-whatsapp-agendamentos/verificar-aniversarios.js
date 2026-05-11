@@ -179,6 +179,35 @@ async function executarVerificacaoAniversarios() {
             // 3.2 Enviar mensagem
             await enviarMensagemAniversario(cliente, cupomCodigo, lojas);
 
+            // 3.3 Bonus de aniversario no sistema de fidelidade
+            try {
+                const anoAtual = new Date().getFullYear();
+                if (cliente.aniversario_fidelidade_ano !== anoAtual) {
+                    const { data: cfg } = await supabase
+                        .from('fidelidade_config')
+                        .select('aniversario_ativo, aniversario_coroas')
+                        .eq('is_active', true)
+                        .maybeSingle();
+                    if (cfg && cfg.aniversario_ativo) {
+                        const coroas = cfg.aniversario_coroas || 50;
+                        const novoSaldo = (cliente.coroas || 0) + coroas;
+                        await supabase.from('clientes')
+                            .update({ coroas: novoSaldo, aniversario_fidelidade_ano: anoAtual })
+                            .eq('id', cliente.id);
+                        await supabase.from('fidelidade_historico').insert({
+                            cliente_id: cliente.id,
+                            tipo_evento: 'aniversario',
+                            coroas,
+                            descricao: `Bonus de aniversario ${anoAtual}`,
+                            saldo_apos: novoSaldo
+                        });
+                        console.log(`+${coroas} Coroas de aniversario para ${cliente.nome_completo}`);
+                    }
+                }
+            } catch (e) {
+                console.error('Erro bonus aniversario fidelidade:', e.message);
+            }
+
             // Delay entre mensagens para não sobrecarregar
             await new Promise(resolve => setTimeout(resolve, 5000));
         }

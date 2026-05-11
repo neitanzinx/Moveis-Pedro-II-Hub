@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import { supabase } from "@/api/base44Client";
+import { resgatarCoroasDesconto, buscarHistoricoCliente, formatarTipoEvento } from "@/utils/fidelidadeEngine";
+import { ensureClientPortalSession, markClientSessionAlive, trackClientAccessEvent } from "@/lib/clienteAccessTracking";
 import { EMPRESA } from "@/config/empresa";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -22,11 +24,18 @@ const HERO_IMAGE = "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6
 
 export default function ClienteDashboard() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [loading, setLoading] = useState(true);
     const [user, setUser] = useState(null);
     const [cliente, setCliente] = useState(null);
     const [vendas, setVendas] = useState([]);
     const [fidelidadeConfig, setFidelidadeConfig] = useState(null);
+    const [accessSessionId, setAccessSessionId] = useState(null);
+
+    // Redeem State
+    const [coroasParaResgatar, setCoroasParaResgatar] = useState("");
+    const [resgatando, setResgatando] = useState(false);
+    const [historicoCoroas, setHistoricoCoroas] = useState([]);
 
     // Edit Profile State
     const [isEditing, setIsEditing] = useState(false);
@@ -96,6 +105,26 @@ export default function ClienteDashboard() {
             setCliente(resolvedCliente);
             initEditData(resolvedCliente, authUser);
 
+            const accessSession = await ensureClientPortalSession({
+                authUserId: authUser.id,
+                clienteId: resolvedCliente?.id,
+                pagePath: location.pathname,
+            });
+
+            if (accessSession?.sessionId) {
+                setAccessSessionId(accessSession.sessionId);
+                await trackClientAccessEvent({
+                    sessionId: accessSession.sessionId,
+                    authUserId: authUser.id,
+                    clienteId: resolvedCliente?.id,
+                    eventName: "dashboard_view",
+                    eventCategory: "navigation",
+                    pagePath: location.pathname,
+                    dedupeKey: `dashboard_view_${authUser.id}`,
+                    metadata: { source: "portal_cliente" },
+                });
+            }
+
             // Fetch loyalty config
             const { data: configData } = await supabase
                 .from("fidelidade_config")
@@ -115,6 +144,12 @@ export default function ClienteDashboard() {
                     .limit(10);
 
                 setVendas(vendasData || []);
+
+                // Fetch coroas history
+                try {
+                    const hist = await buscarHistoricoCliente(resolvedCliente.id, 10);
+                    setHistoricoCoroas(hist || []);
+                } catch (e) { /* silently fail */ }
             }
         } catch (error) {
             console.error("Erro ao verificar autenticação:", error);
@@ -122,6 +157,27 @@ export default function ClienteDashboard() {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        if (!accessSessionId || !user?.id) return;
+
+        const heartbeat = () => markClientSessionAlive(accessSessionId, user.id, cliente?.id);
+
+        const intervalId = window.setInterval(heartbeat, 60 * 1000);
+
+        const onVisibilityChange = () => {
+            if (!document.hidden) {
+                heartbeat();
+            }
+        };
+
+        document.addEventListener("visibilitychange", onVisibilityChange);
+
+        return () => {
+            window.clearInterval(intervalId);
+            document.removeEventListener("visibilitychange", onVisibilityChange);
+        };
+    }, [accessSessionId, user?.id, cliente?.id]);
 
     const initEditData = (data, authUser) => {
         if (!data) {
@@ -202,6 +258,18 @@ export default function ClienteDashboard() {
 
             toast.success("Perfil atualizado com sucesso!");
             setCliente(data);
+            if (accessSessionId && user?.id) {
+                await trackClientAccessEvent({
+                    sessionId: accessSessionId,
+                    authUserId: user.id,
+                    clienteId: data?.id || cliente?.id,
+                    eventName: "profile_saved",
+                    eventCategory: "profile",
+                    pagePath: location.pathname,
+                    metadata: { updated_fields: Object.keys(editData).filter((key) => !!editData[key]) },
+                    dedupeKey: `profile_saved_${user.id}`,
+                });
+            }
             setIsEditing(false);
         } catch (error) {
             console.error("Erro ao atualizar perfil:", error);
@@ -209,6 +277,28 @@ export default function ClienteDashboard() {
         } finally {
             setSavingProfile(false);
         }
+    };
+
+    const handleResgatarDesconto = async () => {
+        const qty = parseInt(coroasParaResgatar);
+        if (!qty || qty < 1) { toast.error("Informe a quantidade de Coroas"); return; }
+        if (!cliente) return;
+        setResgatando(true);
+        try {
+            const resultado = await resgatarCoroasDesconto(cliente, qty);
+            if (resultado.sucesso) {
+                toast.success(`Cupom gerado: ${resultado.cupom} — R$ ${resultado.valorDesconto.toFixed(2)} de desconto!`);
+                // Refresh cliente data
+                const { data: updatedCliente } = await supabase.from("clientes").select("*").eq("id", cliente.id).single();
+                if (updatedCliente) setCliente(updatedCliente);
+                const hist = await buscarHistoricoCliente(cliente.id, 10);
+                setHistoricoCoroas(hist || []);
+                setCoroasParaResgatar("");
+            } else {
+                toast.error(resultado.mensagem || "Erro ao resgatar");
+            }
+        } catch (e) { toast.error("Erro ao resgatar: " + e.message); }
+        finally { setResgatando(false); }
     };
 
     const buscarCEP = async (cep) => {
@@ -234,9 +324,50 @@ export default function ClienteDashboard() {
     };
 
     const handleLogout = async () => {
+        if (accessSessionId && user?.id) {
+            await trackClientAccessEvent({
+                sessionId: accessSessionId,
+                authUserId: user.id,
+                clienteId: cliente?.id,
+                eventName: "logout",
+                eventCategory: "auth",
+                pagePath: location.pathname,
+                metadata: { trigger: "manual" },
+            });
+        }
         await supabase.auth.signOut();
         toast.success("Você saiu da sua conta");
         navigate("/");
+    };
+
+    const openProfileEditor = async () => {
+        setIsEditing(true);
+        if (accessSessionId && user?.id) {
+            await trackClientAccessEvent({
+                sessionId: accessSessionId,
+                authUserId: user.id,
+                clienteId: cliente?.id,
+                eventName: "profile_edit_opened",
+                eventCategory: "profile",
+                pagePath: location.pathname,
+                dedupeKey: `profile_edit_opened_${user.id}`,
+            });
+        }
+    };
+
+    const openAutoAtendimento = async () => {
+        if (accessSessionId && user?.id) {
+            await trackClientAccessEvent({
+                sessionId: accessSessionId,
+                authUserId: user.id,
+                clienteId: cliente?.id,
+                eventName: "support_auto_atendimento_opened",
+                eventCategory: "support",
+                pagePath: location.pathname,
+                dedupeKey: `support_auto_atendimento_opened_${user.id}`,
+            });
+        }
+        navigate("/assistencia/auto");
     };
 
     const formatCurrency = (value) => {
@@ -252,14 +383,26 @@ export default function ClienteDashboard() {
     };
 
     // Keep loyalty calculations
-    const currentSteps = cliente?.fidelidade_steps || 0;
+    const currentSteps = cliente?.coroas || 0;
     const maxSteps = fidelidadeConfig?.reward_threshold || 20;
     const progressPercent = Math.min((currentSteps / maxSteps) * 100, 100);
 
+    const statusMembro = currentSteps >= maxSteps
+        ? "Membro Coroa Master"
+        : currentSteps >= Math.ceil(maxSteps * 0.75)
+            ? "Membro Coroa Ouro"
+            : currentSteps >= Math.ceil(maxSteps * 0.4)
+                ? "Membro Coroa Prata"
+                : "Membro Coroa Inicial";
+
+    const firstMilestone = Math.max(1, Math.ceil(maxSteps * 0.25));
+    const secondMilestone = Math.max(firstMilestone + 1, Math.ceil(maxSteps * 0.5));
+    const thirdMilestone = Math.max(secondMilestone + 1, Math.ceil(maxSteps * 0.75));
+
     const milestones = [
-        { steps: 5, reward: "5% de desconto" },
-        { steps: 10, reward: "10% de desconto" },
-        { steps: 15, reward: "Brinde surpresa" },
+        { steps: firstMilestone, reward: `${firstMilestone} coroas acumuladas` },
+        { steps: secondMilestone, reward: `${secondMilestone} coroas acumuladas` },
+        { steps: thirdMilestone, reward: `${thirdMilestone} coroas acumuladas` },
         { steps: maxSteps, reward: fidelidadeConfig?.reward_description || "Recompensa especial!" },
     ];
 
@@ -339,7 +482,7 @@ export default function ClienteDashboard() {
                             </div>
                             <div>
                                 <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">Status</p>
-                                <p className="text-sm font-bold text-stone-800">Membro Prime</p>
+                                <p className="text-sm font-bold text-stone-800">{statusMembro}</p>
                             </div>
                         </div>
                     </div>
@@ -362,7 +505,7 @@ export default function ClienteDashboard() {
                                             <Sparkles size={12} />
                                             Programa de Fidelidade
                                         </div>
-                                        <h3 className="text-3xl font-['Playfair_Display'] font-bold">Cartão Coroas Gold</h3>
+                                        <h3 className="text-3xl font-['Playfair_Display'] font-bold">Programa Coroas</h3>
                                     </div>
                                     <div className="w-16 h-10 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-lg shadow-amber-900/50">
                                         <div className="w-8 h-6 border-[1.5px] border-white/30 rounded flex items-center justify-center">
@@ -376,7 +519,7 @@ export default function ClienteDashboard() {
                                         <div>
                                             <p className="text-stone-400 text-xs font-bold uppercase tracking-[.2em] mb-1">Saldo Atual</p>
                                             <div className="flex items-center gap-3">
-                                                <span className="text-5xl font-black font-['Playfair_Display'] text-amber-400">{cliente?.fidelidade_steps || 0}</span>
+                                                <span className="text-5xl font-black font-['Playfair_Display'] text-amber-400">{cliente?.coroas || 0}</span>
                                                 <span className="text-amber-500/50 font-bold uppercase tracking-widest text-sm">Coroas</span>
                                             </div>
                                         </div>
@@ -393,14 +536,14 @@ export default function ClienteDashboard() {
                                         <div className="h-4 w-full bg-white/5 rounded-full overflow-hidden border border-white/10 p-[2px]">
                                             <div
                                                 className="h-full bg-gradient-to-r from-amber-600 via-amber-400 to-amber-600 rounded-full transition-all duration-1000 relative group"
-                                                style={{ width: `${Math.min((cliente?.fidelidade_steps || 0) / (fidelidadeConfig?.reward_threshold || 10) * 100, 100)}%` }}
+                                                style={{ width: `${Math.min((cliente?.coroas || 0) / (fidelidadeConfig?.reward_threshold || 10) * 100, 100)}%` }}
                                             >
                                                 <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.2)_50%,transparent_75%)] bg-[length:50px_50px] animate-[shimmer_2s_infinite]" />
                                             </div>
                                         </div>
                                         <div className="flex justify-between text-[10px] font-bold text-stone-500 uppercase tracking-widest">
                                             <span>Início</span>
-                                            <span className="text-amber-500">{Math.max(0, (fidelidadeConfig?.reward_threshold || 10) - (cliente?.fidelidade_steps || 0))} Coroas para o Próximo Nível</span>
+                                            <span className="text-amber-500">{Math.max(0, (fidelidadeConfig?.reward_threshold || 10) - (cliente?.coroas || 0))} Coroas para o Próximo Nível</span>
                                             <span>Master</span>
                                         </div>
                                     </div>
@@ -408,12 +551,69 @@ export default function ClienteDashboard() {
                             </div>
                         </div>
 
+                        {/* Redemption Card */}
+                        {(cliente?.coroas || 0) >= (fidelidadeConfig?.reward_threshold || 100) && (
+                            <div className="relative p-6 rounded-[2rem] bg-gradient-to-br from-amber-50 to-white border border-amber-200/60 shadow-sm">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600"><Gift size={20} /></div>
+                                    <div>
+                                        <h3 className="font-bold text-stone-900">Resgatar Coroas</h3>
+                                        <p className="text-xs text-stone-500">Converta Coroas em desconto na sua proxima compra</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-end gap-3">
+                                    <div className="flex-1">
+                                        <label className="text-xs text-stone-500 font-bold uppercase tracking-wide block mb-1">Quantidade de Coroas</label>
+                                        <input type="number" min={fidelidadeConfig?.reward_threshold || 100} max={cliente?.coroas || 0}
+                                            value={coroasParaResgatar} onChange={(e) => setCoroasParaResgatar(e.target.value)}
+                                            placeholder={`Min: ${fidelidadeConfig?.reward_threshold || 100}`}
+                                            className="w-full px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                                    </div>
+                                    {coroasParaResgatar && parseInt(coroasParaResgatar) > 0 && (
+                                        <div className="text-right">
+                                            <p className="text-xs text-stone-400">Valor</p>
+                                            <p className="font-bold text-green-600">R$ {((parseInt(coroasParaResgatar) || 0) * (fidelidadeConfig?.desconto_por_coroa || 0.10)).toFixed(2)}</p>
+                                        </div>
+                                    )}
+                                    <button onClick={handleResgatarDesconto} disabled={resgatando || !coroasParaResgatar}
+                                        className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-40 flex items-center gap-2"
+                                        style={{ backgroundColor: "#07593f" }}>
+                                        {resgatando ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                                        Gerar Cupom
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Coroas History */}
+                        {historicoCoroas.length > 0 && (
+                            <div className="p-6 rounded-[2rem] bg-white border border-stone-200/60 shadow-sm">
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="w-10 h-10 rounded-xl bg-stone-50 flex items-center justify-center text-stone-500"><Crown size={20} /></div>
+                                    <h3 className="font-bold text-stone-900">Historico de Coroas</h3>
+                                </div>
+                                <div className="divide-y divide-stone-50">
+                                    {historicoCoroas.map((h) => (
+                                        <div key={h.id} className="flex items-center justify-between py-3">
+                                            <div>
+                                                <p className="text-sm font-medium text-stone-800">{formatarTipoEvento(h.tipo_evento)}</p>
+                                                <p className="text-xs text-stone-400">{new Date(h.created_at).toLocaleDateString("pt-BR")}</p>
+                                            </div>
+                                            <span className={`font-bold text-sm ${h.coroas > 0 ? "text-green-600" : "text-red-500"}`}>
+                                                {h.coroas > 0 ? "+" : ""}{h.coroas}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
                         {/* Stats Grid */}
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                             {[
                                 { label: 'Total Gasto', value: formatCurrency(vendas.reduce((acc, p) => acc + (p.valor_total || 0), 0)), icon: ShoppingBag },
                                 { label: 'Pedidos', value: String(vendas.length), icon: Package },
-                                { label: 'Coroas', value: String(cliente?.fidelidade_steps || 0), icon: Crown }
+                                { label: 'Coroas', value: String(cliente?.coroas || 0), icon: Crown }
                             ].map((stat, i) => (
                                 <div key={i} className="group p-6 rounded-[2rem] bg-white border border-stone-200/60 shadow-sm transition-all duration-500 hover:shadow-xl hover:shadow-stone-200/50">
                                     <div className="flex items-center gap-4">
@@ -533,7 +733,7 @@ export default function ClienteDashboard() {
                                         {cliente?.nome_completo?.charAt(0) || user?.email?.charAt(0).toUpperCase()}
                                     </div>
                                     <button
-                                        onClick={() => setIsEditing(true)}
+                                        onClick={openProfileEditor}
                                         className="absolute -bottom-2 -right-2 w-10 h-10 rounded-xl bg-amber-500 text-white shadow-xl shadow-amber-500/20 flex items-center justify-center hover:scale-110 active:scale-95 transition-all"
                                     >
                                         <Edit2 size={18} />
@@ -563,23 +763,6 @@ export default function ClienteDashboard() {
                             </div>
                         </div>
 
-                        {/* Marketing Card */}
-                        <div className="p-8 rounded-[2.5rem] bg-gradient-to-br from-stone-800 to-stone-950 text-white shadow-xl relative overflow-hidden group">
-                            <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-110 transition-transform">
-                                <Gift size={100} />
-                            </div>
-                            <div className="relative z-10 space-y-6">
-                                <div className="space-y-2">
-                                    <h4 className="text-xl font-bold font-['Playfair_Display']">Acesso Exclusivo</h4>
-                                    <p className="text-xs text-stone-400 leading-relaxed">Como membro Premium, você tem acesso antecipado ao nosso novo catálogo de Outono/Inverno.</p>
-                                </div>
-                                <button className="w-full py-3 bg-white text-stone-900 rounded-2xl text-sm font-black uppercase tracking-widest hover:scale-[1.02] transition-all flex items-center justify-center gap-2 group">
-                                    Ver Catálogo
-                                    <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
-                                </button>
-                            </div>
-                        </div>
-
                         {/* Support Card */}
                         <div className="p-8 rounded-[2.5rem] bg-white border border-stone-200/60 shadow-sm flex flex-col items-center text-center space-y-4">
                             <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
@@ -589,7 +772,12 @@ export default function ClienteDashboard() {
                                 <h4 className="text-lg font-bold text-stone-900">Precisa de Ajuda?</h4>
                                 <p className="text-xs text-stone-500">Nossa equipe está disponível para te atender.</p>
                             </div>
-                            <button className="text-emerald-600 font-bold text-sm hover:underline">Falar com Consultor</button>
+                            <button
+                                className="text-emerald-600 font-bold text-sm hover:underline"
+                                onClick={openAutoAtendimento}
+                            >
+                                Abrir Autoatendimento
+                            </button>
                         </div>
                     </div>
                 </div>

@@ -25,12 +25,14 @@ export default function LancamentoForm({ categorias }) {
     descricao: "",
     valor: "",
     data_lancamento: new Date().toISOString().split('T')[0],
+    data_vencimento: "",
     forma_pagamento: "Dinheiro",
     status: "Pago",
     observacao: "",
     recorrente: false,
     recorrencia_tipo: "Mensal"
   });
+  const [validationError, setValidationError] = useState("");
 
   const [uploading, setUploading] = useState(false);
   const [categoriaModo, setCategoriaModo] = useState("select");
@@ -49,12 +51,14 @@ export default function LancamentoForm({ categorias }) {
         descricao: "",
         valor: "",
         data_lancamento: new Date().toISOString().split('T')[0],
+        data_vencimento: "",
         forma_pagamento: "Dinheiro",
         status: "Pago",
         observacao: "",
         recorrente: false,
         recorrencia_tipo: "Mensal"
       });
+      setValidationError("");
       setCategoriaModo("select");
       setOutrosNome("");
     }
@@ -77,6 +81,12 @@ export default function LancamentoForm({ categorias }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setValidationError("");
+
+    if (formData.tipo === "Saída" && !formData.data_vencimento) {
+      setValidationError("Informe a data de vencimento para lançamentos de saída.");
+      return;
+    }
 
     let finalCategoriaId = formData.categoria_id;
     let finalCategoriaNome = categorias.find(c => c.id === finalCategoriaId)?.nome || "";
@@ -89,8 +99,7 @@ export default function LancamentoForm({ categorias }) {
         const newCat = await base44.entities.CategoriaFinanceira.create({
           nome,
           tipo: formData.tipo,
-          cor: "#6B7280",
-          icone: "tag"
+          cor: "#6B7280"
         });
         queryClient.invalidateQueries({ queryKey: ['categorias-financeiras'] });
         finalCategoriaId = newCat.id;
@@ -138,7 +147,13 @@ export default function LancamentoForm({ categorias }) {
               <Select
                 value={formData.tipo}
                 onValueChange={(value) => {
-                  setFormData({ ...formData, tipo: value, categoria_id: "" });
+                  setFormData({
+                    ...formData,
+                    tipo: value,
+                    categoria_id: "",
+                    data_vencimento: value === "Saída" ? formData.data_vencimento : ""
+                  });
+                  setValidationError("");
                   setCategoriaModo("select");
                   setOutrosNome("");
                 }}
@@ -290,6 +305,24 @@ export default function LancamentoForm({ categorias }) {
             </div>
           </div>
 
+          {formData.tipo === "Saída" && (
+            <div className="grid md:grid-cols-3 gap-4">
+              <div>
+                <Label htmlFor="data_vencimento">Data de vencimento *</Label>
+                <Input
+                  id="data_vencimento"
+                  type="date"
+                  value={formData.data_vencimento}
+                  onChange={(e) => {
+                    setFormData({ ...formData, data_vencimento: e.target.value });
+                    if (validationError) setValidationError("");
+                  }}
+                  required={formData.tipo === "Saída"}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <Label htmlFor="status">Status *</Label>
@@ -374,6 +407,14 @@ export default function LancamentoForm({ categorias }) {
             </Alert>
           )}
 
+          {validationError && (
+            <Alert className="bg-red-50 border-red-200">
+              <AlertDescription className="text-red-700">
+                {validationError}
+              </AlertDescription>
+            </Alert>
+          )}
+
           <div className="flex justify-end gap-3">
             <Button
               type="button"
@@ -385,12 +426,14 @@ export default function LancamentoForm({ categorias }) {
                   descricao: "",
                   valor: "",
                   data_lancamento: new Date().toISOString().split('T')[0],
+                  data_vencimento: "",
                   forma_pagamento: "Dinheiro",
                   status: "Pago",
                   observacao: "",
                   recorrente: false,
                   recorrencia_tipo: "Mensal"
                 });
+                setValidationError("");
                 setCategoriaModo("select");
                 setOutrosNome("");
               }}
