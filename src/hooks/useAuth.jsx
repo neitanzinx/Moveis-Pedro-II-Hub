@@ -53,6 +53,46 @@ export function AuthProvider({ children }) {
       }, 10000);
     };
 
+    const withTimeout = async (promise, ms, label) => {
+      let timeoutId;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`Timeout em ${label}`)), ms);
+      });
+
+      try {
+        return await Promise.race([promise, timeoutPromise]);
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    };
+
+    const loadPermissionsForUser = async (targetUser) => {
+      try {
+        const rolePermissions = await withTimeout(
+          base44.entities.RolePermission.list(),
+          5000,
+          'RolePermission.list'
+        );
+        const roles = getUserRoles(targetUser);
+        const permissionsFromDb = Array.from(new Set(
+          rolePermissions
+            .filter(c => roles.includes(c.cargo))
+            .flatMap(c => Array.isArray(c.permissions) ? c.permissions : [])
+        ));
+        const permissions = getMergedRolePermissions(roles, permissionsFromDb);
+
+        if (permissions.length > 0 && mounted) {
+          const roleScopes = roles.map(role => ROLE_RULES[role]?.scope).filter(Boolean);
+          setCargoPermissoes({
+            can: permissions,
+            scope: getHighestScope(roleScopes)
+          });
+        }
+      } catch (e) {
+        console.log('[Auth] Usando permissões hardcoded (fallback)', e);
+      }
+    };
+
     // Função auxiliar para carregar o perfil completo (Supabase)
     const loadSupabaseProfile = async (sessionUser) => {
       try {
@@ -89,8 +129,14 @@ export function AuthProvider({ children }) {
         // Valida que o cache é JSON v\u00e1lido antes de prosseguir (cache corrompido = limpar e sair)
         JSON.parse(cachedUser);
 
-        // Verificar se ainda tem sessão Supabase ativa
-        const { data: { session } } = await supabase.auth.getSession();
+        const parsedCachedUser = normalizeUserRoles(JSON.parse(cachedUser));
+
+        // Verificar se ainda tem sessão Supabase ativa (com timeout)
+        const { data: { session } } = await withTimeout(
+          supabase.auth.getSession(),
+          4000,
+          'supabase.auth.getSession'
+        );
 
         if (!session) {
           // Sessão expirada, limpar cache
@@ -99,16 +145,36 @@ export function AuthProvider({ children }) {
         }
 
         // Buscar perfil atualizado do banco para garantir dados recentes
-        const { data: userProfile, error } = await supabase
-          .from('public_users')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
+        let userProfile = null;
+        let error = null;
+        try {
+          const profileResponse = await withTimeout(
+            supabase
+              .from('public_users')
+              .select('*')
+              .eq('id', session.user.id)
+              .single(),
+            5000,
+            'public_users.profile'
+          );
+          userProfile = profileResponse?.data || null;
+          error = profileResponse?.error || null;
+        } catch (profileTimeoutError) {
+          console.warn('[Auth] Timeout ao buscar perfil, usando cache local.', profileTimeoutError);
+          return normalizeUserRoles({
+            ...session.user,
+            ...parsedCachedUser,
+            full_name: parsedCachedUser.full_name || parsedCachedUser.matricula || session.user.email
+          });
+        }
 
         if (error || !userProfile) {
           console.warn('[Auth] Perfil não encontrado no banco');
-          localStorage.removeItem('employee_user');
-          return null;
+          return normalizeUserRoles({
+            ...session.user,
+            ...parsedCachedUser,
+            full_name: parsedCachedUser.full_name || parsedCachedUser.matricula || session.user.email
+          });
         }
 
         if (!userProfile.ativo) {
@@ -128,8 +194,14 @@ export function AuthProvider({ children }) {
         });
       } catch (e) {
         console.error("Erro ao verificar auth de funcionário:", e);
-        localStorage.removeItem('employee_user');
-        return null;
+        try {
+          const parsedCachedUser = JSON.parse(cachedUser);
+          console.warn('[Auth] Falha na validação remota, mantendo cache local temporariamente.');
+          return normalizeUserRoles(parsedCachedUser);
+        } catch {
+          localStorage.removeItem('employee_user');
+          return null;
+        }
       }
     };
 
@@ -155,30 +227,11 @@ export function AuthProvider({ children }) {
             console.log('[Auth] ✅ Funcionário autenticado:', employeeUser.full_name, '- Cargos:', employeeUser.cargos?.join(', ') || employeeUser.cargo);
             setAuthType('employee');
             setUser(employeeUser);
-
-            // Buscar permissões dos cargos
-            try {
-              const rolePermissions = await base44.entities.RolePermission.list();
-              const roles = getUserRoles(employeeUser);
-              const permissionsFromDb = Array.from(new Set(
-                rolePermissions
-                  .filter(c => roles.includes(c.cargo))
-                  .flatMap(c => Array.isArray(c.permissions) ? c.permissions : [])
-              ));
-              const permissions = getMergedRolePermissions(roles, permissionsFromDb);
-
-              if (permissions.length > 0) {
-                const roleScopes = roles.map(role => ROLE_RULES[role]?.scope).filter(Boolean);
-                setCargoPermissoes({
-                  can: permissions,
-                  scope: getHighestScope(roleScopes)
-                });
-              }
-            } catch (e) {
-              console.log("[Auth] Usando permissões hardcoded (fallback)", e);
-            }
-
             setLoading(false);
+
+            // Carrega permissões sem bloquear navegação inicial
+            void loadPermissionsForUser(employeeUser);
+
             return;
           } else {
             console.log('[Auth] ⚠️ Cache inválido ou sessão expirada');
@@ -199,26 +252,7 @@ export function AuthProvider({ children }) {
 
             // Buscar permissões dos cargos se existir
             if (fullProfile.cargos?.length || fullProfile.cargo) {
-              try {
-                const rolePermissions = await base44.entities.RolePermission.list();
-                const roles = getUserRoles(fullProfile);
-                const permissionsFromDb = Array.from(new Set(
-                  rolePermissions
-                    .filter(c => roles.includes(c.cargo))
-                    .flatMap(c => Array.isArray(c.permissions) ? c.permissions : [])
-                ));
-                const permissions = getMergedRolePermissions(roles, permissionsFromDb);
-
-                if (permissions.length > 0) {
-                  const roleScopes = roles.map(role => ROLE_RULES[role]?.scope).filter(Boolean);
-                  setCargoPermissoes({
-                    can: permissions,
-                    scope: getHighestScope(roleScopes)
-                  });
-                }
-              } catch (e) {
-                console.log("Usando permissões hardcoded (fallback)", e);
-              }
+              void loadPermissionsForUser(fullProfile);
             }
           }
         }
