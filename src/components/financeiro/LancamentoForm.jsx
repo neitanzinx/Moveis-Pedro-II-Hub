@@ -41,8 +41,27 @@ export default function LancamentoForm({ categorias }) {
 
   const queryClient = useQueryClient();
 
+  const withTimeout = async (promise, ms, label) => {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`Tempo limite excedido ao ${label}. Tente novamente.`)), ms);
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
   const createMutation = useMutation({
-    mutationFn: (data) => base44.entities.LancamentoFinanceiro.create(data),
+    mutationFn: async (data) => {
+      return await withTimeout(
+        base44.entities.LancamentoFinanceiro.create(data),
+        15000,
+        'salvar o lançamento'
+      );
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
       setFormData({
@@ -61,6 +80,11 @@ export default function LancamentoForm({ categorias }) {
       setValidationError("");
       setCategoriaModo("select");
       setOutrosNome("");
+    },
+    onError: (err) => {
+      const message = err?.message || "Erro ao salvar lançamento. Verifique sua conexão e tente novamente.";
+      setValidationError(message);
+      console.error("Erro ao criar lançamento:", err);
     }
   });
 
@@ -93,24 +117,43 @@ export default function LancamentoForm({ categorias }) {
 
     if (categoriaModo === "outros") {
       const nome = outrosNome.trim();
-      if (!nome) return;
+      if (!nome) {
+        setValidationError("Informe o nome da nova categoria.");
+        return;
+      }
+
       setIsCreatingCategoria(true);
       try {
-        const newCat = await base44.entities.CategoriaFinanceira.create({
-          nome,
-          tipo: formData.tipo,
-          cor: "#6B7280"
-        });
+        const newCat = await withTimeout(
+          base44.entities.CategoriaFinanceira.create({
+            nome,
+            tipo: formData.tipo,
+            cor: "#6B7280"
+          }),
+          10000,
+          'criar a categoria'
+        );
+
         queryClient.invalidateQueries({ queryKey: ['categorias-financeiras'] });
         finalCategoriaId = newCat.id;
         finalCategoriaNome = nome;
       } catch (err) {
         console.error("Erro ao criar categoria:", err);
-        setIsCreatingCategoria(false);
+        setValidationError(err?.message || "Erro ao criar categoria. Tente novamente.");
         return;
+      } finally {
+        setIsCreatingCategoria(false);
       }
-      setIsCreatingCategoria(false);
-    } else if (!finalCategoriaId) {
+    }
+
+    if (!finalCategoriaId) {
+      setValidationError("Selecione uma categoria para continuar.");
+      return;
+    }
+
+    const valorNumerico = parseFloat(formData.valor);
+    if (Number.isNaN(valorNumerico) || valorNumerico <= 0) {
+      setValidationError("Informe um valor válido maior que zero.");
       return;
     }
 
@@ -118,7 +161,8 @@ export default function LancamentoForm({ categorias }) {
       ...formData,
       categoria_id: finalCategoriaId,
       categoria_nome: finalCategoriaNome,
-      valor: parseFloat(formData.valor)
+      valor: valorNumerico,
+      data_vencimento: formData.data_vencimento || null
     });
   };
 
