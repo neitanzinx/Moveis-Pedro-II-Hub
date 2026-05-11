@@ -14,6 +14,7 @@ import LancamentoForm from "../components/financeiro/LancamentoForm";
 import LancamentosList from "../components/financeiro/LancamentosList";
 import FinanceiroCharts from "../components/financeiro/FinanceiroCharts";
 import RecorrentesManager from "../components/financeiro/RecorrentesManager";
+import VencimentosProximos from "../components/financeiro/VencimentosProximos";
 
 
 export default function Financeiro() {
@@ -74,6 +75,12 @@ export default function Financeiro() {
     ...queryOpts,
   });
 
+  const { data: entregas = [] } = useQuery({
+    queryKey: ['entregas-financeiro'],
+    queryFn: async () => await base44.entities.Entrega.list('-created_at') || [],
+    ...queryOpts,
+  });
+
   if (loading || !user) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -103,8 +110,8 @@ export default function Financeiro() {
 
   const TABS = [
     { id: "visao-geral",    label: "Visão Geral",       icon: LayoutDashboard },
-    { id: "contas-receber", label: "A Receber",          icon: TrendingDown },
-    { id: "contas-pagar",   label: "A Pagar",            icon: TrendingUp },
+    { id: "contas-receber", label: "Entradas",           icon: TrendingDown },
+    { id: "contas-pagar",   label: "Saídas",             icon: TrendingUp },
     { id: "lancamentos",    label: "Lançamentos",        icon: DollarSign },
     { id: "graficos",       label: "Gráficos",           icon: BarChart3 },
     ...(canManage ? [{ id: "novo", label: "Novo", icon: Plus }] : []),
@@ -157,7 +164,7 @@ export default function Financeiro() {
           </TabsContent>
 
           <TabsContent value="contas-receber">
-            <ContasReceber vendas={vendas} isLoading={loadingVendas} />
+            <ContasReceber vendas={vendas} lancamentos={listaLancamentos} entregas={entregas} mesAno={mesAno} isLoading={loadingVendas} />
           </TabsContent>
 
           <TabsContent value="contas-pagar">
@@ -176,6 +183,7 @@ export default function Financeiro() {
 
           <TabsContent value="lancamentos">
             <div className="space-y-4">
+              <VencimentosProximos lancamentos={listaLancamentos} />
               <LancamentosList
                 lancamentos={lancamentosDoMes}
                 categorias={categorias}

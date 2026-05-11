@@ -18,6 +18,26 @@ const CATEGORIAS_PADRAO = {
   Saída: ["Aluguel", "Energia Elétrica", "Água e Saneamento", "Telefone / Internet", "Compra de Fornecedor", "Salário / Folha", "Comissão Paga", "Marketing / Publicidade", "Manutenção", "Transporte / Frete", "Material de Escritório", "Imposto / Taxa", "Software / Assinatura"],
 };
 
+const isoToDisplay = (iso) => {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+};
+
+const maskDateInput = (raw) => {
+  let v = raw.replace(/\D/g, "").slice(0, 8);
+  if (v.length >= 5) v = v.slice(0, 2) + "/" + v.slice(2, 4) + "/" + v.slice(4);
+  else if (v.length >= 3) v = v.slice(0, 2) + "/" + v.slice(2);
+  return v;
+};
+
+const displayToIso = (display) => {
+  if (display.length !== 10) return "";
+  const [d, m, y] = display.split("/");
+  if (!d || !m || !y || y.length !== 4) return "";
+  return `${y}-${m}-${d}`;
+};
+
 export default function LancamentoForm({ categorias }) {
   const [formData, setFormData] = useState({
     tipo: "Entrada",
@@ -38,6 +58,17 @@ export default function LancamentoForm({ categorias }) {
   const [categoriaModo, setCategoriaModo] = useState("select");
   const [outrosNome, setOutrosNome] = useState("");
   const [isCreatingCategoria, setIsCreatingCategoria] = useState(false);
+  const [displayDates, setDisplayDates] = useState({
+    data_lancamento: isoToDisplay(new Date().toISOString().split('T')[0]),
+    data_vencimento: "",
+  });
+
+  const handleDateChange = (field, raw) => {
+    const masked = maskDateInput(raw);
+    setDisplayDates(prev => ({ ...prev, [field]: masked }));
+    const iso = displayToIso(masked);
+    if (iso || masked === "") setFormData(prev => ({ ...prev, [field]: iso }));
+  };
 
   const queryClient = useQueryClient();
 
@@ -85,6 +116,8 @@ export default function LancamentoForm({ categorias }) {
       const message = err?.message || "Erro ao salvar lançamento. Verifique sua conexão e tente novamente.";
       setValidationError(message);
       console.error("Erro ao criar lançamento:", err);
+
+      setDisplayDates({ data_lancamento: isoToDisplay(new Date().toISOString().split('T')[0]), data_vencimento: "" });
     }
   });
 
@@ -320,9 +353,11 @@ export default function LancamentoForm({ categorias }) {
               <Label htmlFor="data">Data *</Label>
               <Input
                 id="data"
-                type="date"
-                value={formData.data_lancamento}
-                onChange={(e) => setFormData({ ...formData, data_lancamento: e.target.value })}
+                type="text"
+                value={displayDates.data_lancamento}
+                onChange={(e) => handleDateChange("data_lancamento", e.target.value)}
+                placeholder="dd/mm/aaaa"
+                maxLength={10}
                 required
               />
             </div>
@@ -352,15 +387,17 @@ export default function LancamentoForm({ categorias }) {
           {formData.tipo === "Saída" && (
             <div className="grid md:grid-cols-3 gap-4">
               <div>
-                <Label htmlFor="data_vencimento">Data de vencimento *</Label>
+                <Label htmlFor="data_vencimento">Data de Vencimento *</Label>
                 <Input
                   id="data_vencimento"
-                  type="date"
-                  value={formData.data_vencimento}
+                  type="text"
+                  value={displayDates.data_vencimento}
                   onChange={(e) => {
-                    setFormData({ ...formData, data_vencimento: e.target.value });
+                    handleDateChange("data_vencimento", e.target.value);
                     if (validationError) setValidationError("");
                   }}
+                  placeholder="dd/mm/aaaa"
+                  maxLength={10}
                   required={formData.tipo === "Saída"}
                 />
               </div>
@@ -480,6 +517,7 @@ export default function LancamentoForm({ categorias }) {
                 setValidationError("");
                 setCategoriaModo("select");
                 setOutrosNome("");
+                setDisplayDates({ data_lancamento: isoToDisplay(new Date().toISOString().split('T')[0]), data_vencimento: "" });
               }}
             >
               Limpar
