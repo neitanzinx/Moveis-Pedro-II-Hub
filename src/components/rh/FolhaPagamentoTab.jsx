@@ -176,9 +176,9 @@ export default function FolhaPagamentoTab() {
                     descricao: `Pagamento Folha - ${MESES[folhaParaPagar.mes_referencia - 1]}/${folhaParaPagar.ano_referencia} - ${folhaParaPagar.colaborador_nome}`,
                     valor: -Number(folhaParaPagar.salario_liquido),
                     tipo: 'despesa',
-                    categoria: 'Salários', // Assuming this category exists or is free-text
+                    categoria_nome: 'Salário / Folha',
                     data_lancamento: new Date().toISOString().slice(0, 10),
-                    forma_pagamento: 'Transferência', // Defaulting to Transfer
+                    forma_pagamento: 'Transferência',
                     status: 'Pago'
                 });
             }

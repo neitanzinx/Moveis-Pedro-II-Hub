@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import EntregaCard from "./EntregaCard";
 import { whatsappService } from "@/services/whatsappService";
+import { isStatusCancelado } from "@/utils/vendaStatus";
 
 export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEntrega, onCalcularRota, calculandoRota }) {
   const queryClient = useQueryClient();
@@ -32,7 +33,7 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
   const entregasManha = entregas.filter(e => e.turno === 'Manhã');
   const entregasTarde = entregas.filter(e => e.turno === 'Tarde');
 
-  const entregasParaDisparo = entregas.filter(e => e.status !== 'Entregue' && e.status !== 'Cancelada');
+  const entregasParaDisparo = entregas.filter(e => e.status !== 'Entregue' && !isStatusCancelado(e.status));
 
   // Verificar quais já foram notificadas para ESTA data/turno
   const jaNotificadas = entregasParaDisparo.filter(e => {

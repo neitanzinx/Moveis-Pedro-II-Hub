@@ -15,6 +15,7 @@ import LancamentosList from "../components/financeiro/LancamentosList";
 import FinanceiroCharts from "../components/financeiro/FinanceiroCharts";
 import RecorrentesManager from "../components/financeiro/RecorrentesManager";
 import VencimentosProximos from "../components/financeiro/VencimentosProximos";
+import { isVendaCancelada } from "@/utils/vendaStatus";
 
 
 export default function Financeiro() {
@@ -105,7 +106,7 @@ export default function Financeiro() {
     (l) => l.data_lancamento?.slice(0, 7) === mesAno
   );
   const vendasDoMes = vendas.filter(
-    (v) => v.data_venda?.slice(0, 7) === mesAno && v.status !== "Cancelada"
+    (v) => v.data_venda?.slice(0, 7) === mesAno && !isVendaCancelada(v)
   );
 
   const TABS = [

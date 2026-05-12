@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { whatsappService } from "@/services/whatsappService";
 import RouteOptimizer from "./RouteOptimizer";
 import { buildProductDisplayName } from "@/utils/productReference";
+import { isStatusCancelado } from "@/utils/vendaStatus";
 
 // Cores para cada caminhão
 const CORES_CAMINHOES = [
@@ -265,7 +266,7 @@ function ColunaCaminhao({ caminhao, cor, dataAtual, entregas, vendas, onClickEnt
   );
 
   // Verificar quais entregas já foram notificadas
-  const entregasParaDisparo = entregasDoCaminhao.filter(e => e.status !== 'Entregue' && e.status !== 'Cancelada');
+  const entregasParaDisparo = entregasDoCaminhao.filter(e => e.status !== 'Entregue' && !isStatusCancelado(e.status));
   const entregasJaNotificadas = entregasParaDisparo.filter(e => {
     const dataAgendada = e.data_agendada?.split('T')[0];
     return dataAgendada === e.data_notificacao && e.turno === e.turno_notificacao;
@@ -273,7 +274,7 @@ function ColunaCaminhao({ caminhao, cor, dataAtual, entregas, vendas, onClickEnt
   const entregasNaoNotificadas = entregasParaDisparo.filter(e => !entregasJaNotificadas.includes(e));
 
   // Verificar quais assistências já foram notificadas (usando mesma lógica)
-  const assistenciasParaDisparo = assistenciasDoCaminhao.filter(a => a.status !== 'Concluída' && a.status !== 'Cancelada');
+  const assistenciasParaDisparo = assistenciasDoCaminhao.filter(a => a.status !== 'Concluída' && !isStatusCancelado(a.status));
   const assistenciasJaNotificadas = assistenciasParaDisparo.filter(a => {
     const dataVisita = a.data_visita?.split('T')[0];
     return dataVisita === a.data_notificacao && a.turno === a.turno_notificacao;
@@ -475,7 +476,7 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
         e.status_confirmacao === 'Confirmada' &&
         e.data_agendada &&
         e.status !== 'Entregue' &&
-        e.status !== 'Cancelada'
+        !isStatusCancelado(e.status)
       )
       .sort((a, b) => (a.data_agendada || '').localeCompare(b.data_agendada || ''));
   }, [entregas]);

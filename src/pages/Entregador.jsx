@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { whatsappService } from "@/services/whatsappService";
 import { toast } from "sonner";
 import { applyDeliveryPayment, formatMoney, needsDeliveryPaymentConfirmation, toMoneyNumber, MONEY_EPSILON } from "@/utils/deliveryPayment";
+import { isStatusCancelado } from "@/utils/vendaStatus";
 
 const ENTREGADOR_SESSION_KEY = 'entregador_rota_state';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 horas
@@ -38,14 +39,7 @@ function lerSessaoSalva() {
 }
 
 function statusVendaCancelada(status) {
-    const normalizado = (status || '')
-        .toString()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .trim();
-
-    return normalizado === 'cancelada' || normalizado === 'cancelado';
+    return isStatusCancelado(status);
 }
 
 // Custom Hook para persistência agressiva do checklist
@@ -189,7 +183,7 @@ export default function Entregador() {
             const todas = await base44.entities.Entrega.list('-ordem_rota');
             const entregasDia = todas.filter(e =>
                 e.data_agendada?.startsWith(dataSelecionada) &&
-                e.status !== 'Cancelada'
+                !isStatusCancelado(e.status)
             );
 
             const vendaIds = [...new Set(entregasDia.map(e => e.venda_id).filter(Boolean))];
@@ -225,7 +219,7 @@ export default function Entregador() {
             const todas = await base44.entities.AssistenciaTecnica.list('-created_at');
             return todas.filter(a =>
                 a.status !== 'Concluída' &&
-                a.status !== 'Cancelada' &&
+                !isStatusCancelado(a.status) &&
                 (a.tipo === 'Devolução' || a.tipo === 'Troca' || a.tipo === 'Peça Faltante' || a.tipo === 'Visita Técnica' || a.tipo === 'Conserto')
             );
         },

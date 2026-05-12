@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, TrendingDown, DollarSign, CheckCircle2, Clock } from "lucide-react";
 import { normalizeTipo } from "@/services/financeiroAggregation";
+import { isVendaCancelada } from "@/utils/vendaStatus";
 
 const fmt = (v) =>
   Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -26,7 +27,7 @@ function SecaoJaEntrou({ vendas, lancamentos, mesAno }) {
   const vendasPagas = useMemo(() =>
     vendas.filter(
       (v) =>
-        v.status !== "Cancelada" &&
+        !isVendaCancelada(v) &&
         (v.valor_pago || 0) > EPSILON &&
         (v.valor_restante || 0) <= EPSILON &&
         v.data_venda?.slice(0, 7) === mesAno
@@ -164,7 +165,7 @@ function SecaoParaEntrar({ vendas, lancamentos, entregas }) {
   const hoje = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d; }, []);
 
   const vendasPendentes = useMemo(() =>
-    vendas.filter((v) => v.status !== "Cancelada" && (v.valor_restante || 0) > EPSILON),
+    vendas.filter((v) => !isVendaCancelada(v) && (v.valor_restante || 0) > EPSILON),
     [vendas]);
 
   const lancsEntradaPendentes = useMemo(() =>

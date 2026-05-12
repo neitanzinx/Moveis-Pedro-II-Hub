@@ -4,6 +4,18 @@ function normalizeText(value) {
     return String(value || '').trim().toLowerCase();
 }
 
+export function isStatusCancelado(status) {
+    return normalizeText(status).startsWith('cancelad');
+}
+
+export function isVendaCancelada(vendaOuStatus) {
+    const status = typeof vendaOuStatus === 'string'
+        ? vendaOuStatus
+        : vendaOuStatus?.status;
+
+    return isStatusCancelado(status);
+}
+
 function toNumber(value) {
     if (typeof value === 'number') {
         return Number.isFinite(value) ? value : 0;
@@ -65,7 +77,7 @@ export function getVendaFinanceiro(venda, { entregas = [], lancamentos = [] } = 
     const legacyStatus = String(venda?.status || '').trim();
     const normalizedLegacyStatus = normalizeText(legacyStatus);
 
-    if (normalizedLegacyStatus === 'cancelado' || normalizedLegacyStatus === 'cancelada') {
+    if (isVendaCancelada(venda)) {
         return {
             total: toNumber(venda?.valor_total),
             valorPago: 0,

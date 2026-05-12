@@ -401,7 +401,6 @@ function DocumentoUploadModal({ colaboradores, onClose }) {
             await base44.entities.DocumentoRH.create({
                 ...formData,
                 arquivo_url: arquivoUrl,
-                data_upload: new Date().toISOString(),
             });
 
             queryClient.invalidateQueries(['documentos_rh']);

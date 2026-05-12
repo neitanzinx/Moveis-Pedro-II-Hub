@@ -34,6 +34,9 @@ const limparTexto = (texto, tamanho = 60) => {
         .toUpperCase();
 };
 
+const isLancamentoCancelado = (status) =>
+    String(status || '').trim().toLowerCase().startsWith('cancelad');
+
 /**
  * Gera arquivo SPED EFD Contribuições simplificado
  * @param {Object} dados - Dados para exportação
@@ -249,8 +252,8 @@ export function gerarSPEDContribuicoes(dados, empresa, periodo) {
 export function gerarResumoContador(dados, periodo) {
     const { vendas = [], lancamentos = [] } = dados;
 
-    const receitas = lancamentos.filter(l => l.tipo === 'receita' && l.status !== 'Cancelado');
-    const despesas = lancamentos.filter(l => l.tipo === 'despesa' && l.status !== 'Cancelado');
+    const receitas = lancamentos.filter(l => l.tipo === 'receita' && !isLancamentoCancelado(l.status));
+    const despesas = lancamentos.filter(l => l.tipo === 'despesa' && !isLancamentoCancelado(l.status));
 
     const totalReceitas = receitas.reduce((sum, l) => sum + Math.abs(l.valor || 0), 0);
     const totalDespesas = despesas.reduce((sum, l) => sum + Math.abs(l.valor || 0), 0);

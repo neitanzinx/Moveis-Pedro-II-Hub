@@ -373,11 +373,11 @@ export default function RelatorioComissoes() {
         descricao: `Comissão - ${pagamentoSelecionado.vendedor.nome} - Ref: ${mesInicio === mesFim ? mesInicio : `${mesInicio} a ${mesFim}`}`,
         valor: -Number(pagamentoSelecionado.totalFinal.toFixed(2)),
         tipo: 'despesa',
-        categoria: 'Comissões',
+        categoria_nome: 'Comissões',
         data_lancamento: dataPagamento,
         forma_pagamento: 'Transferência',
         status: 'Pago',
-        observacoes: `Pgto ref. ${pagamentoSelecionado.quantidadeVendas} vendas. ${observacaoPagamento}`,
+        observacao: `Pgto ref. ${pagamentoSelecionado.quantidadeVendas} vendas. ${observacaoPagamento}`,
       });
 
       if (pagamentoSelecionado.fechamento_id) {

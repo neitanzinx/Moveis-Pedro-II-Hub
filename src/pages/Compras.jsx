@@ -42,6 +42,20 @@ import { useConfirm } from '@/hooks/useConfirm';
 import { useTenant } from '@/contexts/TenantContext';
 import { comprasService } from '@/services/comprasService';
 import OcTable from '@/components/compras/OcTable';
+import CriarLancamentoFromOcModal from '@/components/compras/CriarLancamentoFromOcModal';
+  // Categorias financeiras para o modal de lançamento
+  const { data: categorias = [] } = useQuery({
+    queryKey: ['categorias-financeiras'],
+    queryFn: async () => await base44.entities.CategoriaFinanceira.list('nome') || [],
+  });
+  // Estado do modal de lançamento financeiro
+  const [modalLancamentoOpen, setModalLancamentoOpen] = useState(false);
+  const [ocParaLancamento, setOcParaLancamento] = useState(null);
+  // Handler para abrir modal de lançamento financeiro
+  const handleCriarLancamentoFinanceiro = (oc) => {
+    setOcParaLancamento(oc);
+    setModalLancamentoOpen(true);
+  };
 import OcModal from '@/components/compras/OcModal';
 import SolicitacoesReposicaoTab from '@/components/compras/SolicitacoesReposicaoTab';
 import RecebimentoModal from '@/components/compras/RecebimentoModal';
@@ -1509,17 +1523,24 @@ export default function Compras() {
             </CardHeader>
             <CardContent>
               <div className="rounded-lg border overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-gray-50">
-                      <TableHead>Produto</TableHead>
-                      <TableHead>Fornecedor</TableHead>
-                      <TableHead className="text-right">Preço Anterior</TableHead>
-                      <TableHead className="text-right">Preço Atual</TableHead>
-                      <TableHead className="text-right w-20">Delta %</TableHead>
-                      <TableHead>Data</TableHead>
-                    </TableRow>
-                  </TableHeader>
+                <OcTable
+                  ocs={ocs}
+                  onEdit={setOcParaEditar}
+                  onDelete={handleDeleteOc}
+                  onReceive={handleReceberOc}
+                  onSend={handleEnviarOc}
+                  onCancel={handleCancelarOc}
+                  onSubmitPaymentApproval={handleAprovarPagamento}
+                  formasAutoAprovadas={formasAutoAprovadas}
+                  isLoading={ocIsLoading}
+                  onCriarLancamentoFinanceiro={handleCriarLancamentoFinanceiro}
+                />
+                <CriarLancamentoFromOcModal
+                  oc={ocParaLancamento}
+                  open={modalLancamentoOpen && !!ocParaLancamento}
+                  onClose={() => { setModalLancamentoOpen(false); setOcParaLancamento(null); }}
+                  categorias={categorias}
+                />
                   <TableBody>
                     {analisePrecos.length === 0 ? (
                       <TableRow>

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Pencil, Trash2, User, Calendar, CreditCard, Package, FileDown, MapPin, XCircle } from "lucide-react";
 import { format } from "date-fns";
 import { stripInternalProductPrefixes } from "@/utils/productReference";
+import { isStatusCancelado } from "@/utils/vendaStatus";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -67,7 +68,7 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
           e.venda_id === venda.id || e.numero_pedido === venda.numero_pedido
         );
         for (const entrega of entregasVenda) {
-          if (entrega.status !== 'Cancelado') {
+          if (!isStatusCancelado(entrega.status)) {
             await base44.entities.Entrega.update(entrega.id, {
               status: 'Cancelado',
               observacoes: (entrega.observacoes || '') + ' [VENDA CANCELADA]'
@@ -83,7 +84,7 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
         const montagens = await base44.entities.MontagemItem.list();
         const montagensVenda = montagens.filter(m => m.venda_id === venda.id);
         for (const montagem of montagensVenda) {
-          if (montagem.status !== 'cancelada') {
+          if (!isStatusCancelado(montagem.status)) {
             await base44.entities.MontagemItem.update(montagem.id, {
               status: 'cancelada',
               observacoes: (montagem.observacoes || '') + ' [VENDA CANCELADA]'
@@ -99,7 +100,7 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
         const assistencias = await base44.entities.AssistenciaTecnica.list();
         const assistenciasVenda = assistencias.filter(a => a.venda_id === venda.id);
         for (const assistencia of assistenciasVenda) {
-          if (assistencia.status !== 'Cancelada') {
+          if (!isStatusCancelado(assistencia.status)) {
             await base44.entities.AssistenciaTecnica.update(assistencia.id, {
               status: 'Cancelada',
               observacoes: (assistencia.observacoes || '') + ' [VENDA CANCELADA]'

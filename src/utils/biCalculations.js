@@ -5,6 +5,10 @@ import { formatarMoeda as formatMoedaOriginal } from './formatters';
 
 export const formatarMoeda = formatMoedaOriginal;
 
+function isStatusCancelado(status) {
+    return String(status || '').trim().toLowerCase().startsWith('cancelad');
+}
+
 /**
  * Formata um valor decimal em porcentagem (ex: 0.15 -> 15.0%)
  */
@@ -169,7 +173,7 @@ export function calcularKPIsEstoque(produtos, vendas) {
 export function calcularKPIsLogistica(entregas, vendas) {
     const totalEntregas = entregas.length;
     const entregasConcluidas = entregas.filter(e => e.status === 'Entregue').length;
-    const entregasPendentes = entregas.filter(e => e.status !== 'Entregue' && e.status !== 'Cancelada').length;
+    const entregasPendentes = entregas.filter(e => e.status !== 'Entregue' && !isStatusCancelado(e.status)).length;
 
     // Taxa de pontualidade
     const entregasComData = entregas.filter(e => e.data_agendada && e.data_realizada);

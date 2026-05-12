@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import useRouteOptimization from "@/hooks/useRouteOptimization";
 import { base44 } from "@/api/base44Client";
+import { isStatusCancelado } from "@/utils/vendaStatus";
 
 /**
  * Componente para otimização de rotas de entrega
@@ -47,7 +48,7 @@ export default function RouteOptimizer({
     const entregasValidas = entregas?.filter(e =>
         e.endereco_entrega &&
         e.status !== 'Entregue' &&
-        e.status !== 'Cancelada'
+        !isStatusCancelado(e.status)
     ) || [];
 
     const modalControlado = typeof open === 'boolean';

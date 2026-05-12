@@ -9,6 +9,7 @@ import MontagemInterna from "@/components/logistica/MontagemInterna";
 import AguardandoLiberacao from "@/components/logistica/AguardandoLiberacao";
 import MapaFrota from "@/components/logistica/MapaFrota";
 import ChatEquipe from "@/components/logistica/ChatEquipe";
+import { isStatusCancelado } from "@/utils/vendaStatus";
 
 export default function LogisticaSemanal() {
   const [tabAtiva, setTabAtiva] = useState("planejamento");
@@ -45,7 +46,7 @@ export default function LogisticaSemanal() {
   // Filtrar assistências que precisam de entrega/visita (não concluídas/canceladas)
   const assistenciasPendentes = assistencias.filter(a =>
     a.status !== 'Concluída' &&
-    a.status !== 'Cancelada' &&
+    !isStatusCancelado(a.status) &&
     (a.tipo === 'Devolução' || a.tipo === 'Troca' || a.tipo === 'Peça Faltante' || a.tipo === 'Visita Técnica' || a.tipo === 'Conserto')
   );
 
@@ -85,7 +86,7 @@ export default function LogisticaSemanal() {
       titulo: i === 0 ? 'Hoje' : i === 1 ? 'Amanhã' : `${diaSemana} (${data.getDate()}/${data.getMonth() + 1})`,
       data: dataStr,
       // Usa startsWith para comparar datas (ignora timezone)
-      entregas: (entregas || []).filter(e => e.data_agendada?.startsWith(dataStr) && e.status !== 'Entregue' && e.status !== 'Cancelada' && e.status !== 'Aguardando Liberação'),
+      entregas: (entregas || []).filter(e => e.data_agendada?.startsWith(dataStr) && e.status !== 'Entregue' && !isStatusCancelado(e.status) && e.status !== 'Aguardando Liberação'),
       isHoje: i === 0,
       dataFormatada: data.toLocaleDateString('pt-BR')
     });

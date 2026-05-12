@@ -44,6 +44,7 @@ export default function OcTable({
   onSubmitPaymentApproval,
   formasAutoAprovadas = ['a_vista'],
   isLoading = false,
+  onCriarLancamentoFinanceiro,
 }) {
   // Mapeamento status -> Badge color
   const statusBadgeConfig = {
@@ -240,6 +241,16 @@ export default function OcTable({
                           </DropdownMenuItem>
                         )}
 
+                        {/* Criar Lançamento Financeiro (exceto rascunho/cancelada) */}
+                        {oc.status !== 'Rascunho' && oc.status !== 'Cancelada' && (
+                          <DropdownMenuItem
+                            onClick={() => onCriarLancamentoFinanceiro?.(oc)}
+                            className="text-green-700 font-medium"
+                          >
+                            <DollarSign className="w-4 h-4 mr-2" />
+                            Criar Lançamento Financeiro
+                          </DropdownMenuItem>
+                        )}
                         {/* Cancelar (não permitido para OCs recebidas) */}
                         {oc.status !== 'Cancelada' &&
                           oc.status !== 'Recebido' &&

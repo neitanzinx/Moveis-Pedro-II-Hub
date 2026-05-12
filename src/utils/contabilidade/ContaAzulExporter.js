@@ -17,6 +17,9 @@ const formatarValor = (valor) => {
     return Number(valor).toFixed(2).replace('.', ',');
 };
 
+const isLancamentoCancelado = (status) =>
+    String(status || '').trim().toLowerCase().startsWith('cancelad');
+
 /**
  * Exporta lançamentos financeiros para formato Conta Azul
  * @param {Array} lancamentos - Lista de lançamentos financeiros
@@ -28,7 +31,7 @@ export function exportarLancamentosContaAzul(lancamentos, options = {}) {
 
     // Filtrar lançamentos
     const lancamentosFiltrados = lancamentos.filter(l =>
-        incluirCancelados || l.status !== 'Cancelado'
+        incluirCancelados || !isLancamentoCancelado(l.status)
     );
 
     // Cabeçalho CSV

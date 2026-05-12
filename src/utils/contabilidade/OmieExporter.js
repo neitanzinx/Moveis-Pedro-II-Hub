@@ -15,6 +15,9 @@ const formatarValor = (valor) => {
     return Number(valor).toFixed(2).replace('.', ',');
 };
 
+const isLancamentoCancelado = (status) =>
+    String(status || '').trim().toLowerCase().startsWith('cancelad');
+
 /**
  * Exporta lançamentos financeiros para formato Omie
  */
@@ -22,7 +25,7 @@ export function exportarLancamentosOmie(lancamentos, options = {}) {
     const { incluirCancelados = false } = options;
 
     const lancamentosFiltrados = lancamentos.filter(l =>
-        incluirCancelados || l.status !== 'Cancelado'
+        incluirCancelados || !isLancamentoCancelado(l.status)
     );
 
     // Cabeçalho padrão Omie para contas a pagar/receber

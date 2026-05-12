@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +12,9 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import { Upload, Plus, Tag, ChevronDown } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import CategoriasManager from "./CategoriasManager";
+import { getBrazilTodayISO } from "@/lib/dateBrazil";
+import { verificarConciliacao } from "@/lib/conciliacaoInteligente";
+import ConciliacaoAlertModal from "./ConciliacaoAlertModal";
 
 const CATEGORIAS_PADRAO = {
   Entrada: ["Venda de Produtos", "Recebimento de Parcela", "Comissão Recebida", "Serviço de Montagem", "Devolução Recebida"],
@@ -38,13 +41,37 @@ const displayToIso = (display) => {
   return `${y}-${m}-${d}`;
 };
 
+const formatCurrencyFromDigits = (raw) => {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+
+  const padded = digits.padStart(3, "0");
+  const cents = padded.slice(-2);
+  const integerPart = padded.slice(0, -2).replace(/^0+(?=\d)/, "") || "0";
+  const integerFormatted = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+
+  return `${integerFormatted},${cents}`;
+};
+
+const parseCurrencyToNumber = (formattedValue) => {
+  if (!formattedValue) return NaN;
+  const normalized = String(formattedValue)
+    .replace(/\./g, "")
+    .replace(/,/g, ".")
+    .replace(/[^\d.-]/g, "");
+
+  return parseFloat(normalized);
+};
+
 export default function LancamentoForm({ categorias }) {
+  const todayBrazilISO = getBrazilTodayISO();
+
   const [formData, setFormData] = useState({
     tipo: "Entrada",
     categoria_id: "",
     descricao: "",
     valor: "",
-    data_lancamento: new Date().toISOString().split('T')[0],
+    data_lancamento: todayBrazilISO,
     data_vencimento: "",
     forma_pagamento: "Dinheiro",
     status: "Pago",
@@ -53,13 +80,14 @@ export default function LancamentoForm({ categorias }) {
     recorrencia_tipo: "Mensal"
   });
   const [validationError, setValidationError] = useState("");
+  const [conciliacaoState, setConciliacaoState] = useState(null); // { duplicatas, payload }
 
   const [uploading, setUploading] = useState(false);
   const [categoriaModo, setCategoriaModo] = useState("select");
   const [outrosNome, setOutrosNome] = useState("");
   const [isCreatingCategoria, setIsCreatingCategoria] = useState(false);
   const [displayDates, setDisplayDates] = useState({
-    data_lancamento: isoToDisplay(new Date().toISOString().split('T')[0]),
+    data_lancamento: isoToDisplay(todayBrazilISO),
     data_vencimento: "",
   });
 
@@ -71,6 +99,12 @@ export default function LancamentoForm({ categorias }) {
   };
 
   const queryClient = useQueryClient();
+
+  const { data: todosLancamentos = [] } = useQuery({
+    queryKey: ['lancamentos-financeiros'],
+    queryFn: async () => await base44.entities.LancamentoFinanceiro.list('-data_lancamento') || [],
+    staleTime: 60000,
+  });
 
   const withTimeout = async (promise, ms, label) => {
     let timeoutId;
@@ -100,7 +134,7 @@ export default function LancamentoForm({ categorias }) {
         categoria_id: "",
         descricao: "",
         valor: "",
-        data_lancamento: new Date().toISOString().split('T')[0],
+        data_lancamento: todayBrazilISO,
         data_vencimento: "",
         forma_pagamento: "Dinheiro",
         status: "Pago",
@@ -117,7 +151,7 @@ export default function LancamentoForm({ categorias }) {
       setValidationError(message);
       console.error("Erro ao criar lançamento:", err);
 
-      setDisplayDates({ data_lancamento: isoToDisplay(new Date().toISOString().split('T')[0]), data_vencimento: "" });
+      setDisplayDates({ data_lancamento: isoToDisplay(todayBrazilISO), data_vencimento: "" });
     }
   });
 
@@ -184,19 +218,28 @@ export default function LancamentoForm({ categorias }) {
       return;
     }
 
-    const valorNumerico = parseFloat(formData.valor);
+    const valorNumerico = parseCurrencyToNumber(formData.valor);
     if (Number.isNaN(valorNumerico) || valorNumerico <= 0) {
       setValidationError("Informe um valor válido maior que zero.");
       return;
     }
 
-    createMutation.mutate({
+    const payload = {
       ...formData,
       categoria_id: finalCategoriaId,
       categoria_nome: finalCategoriaNome,
       valor: valorNumerico,
       data_vencimento: formData.data_vencimento || null
-    });
+    };
+
+    // Conciliação inteligente: verificar duplicatas antes de salvar
+    const { duplicatas } = verificarConciliacao(payload, todosLancamentos);
+    if (duplicatas.length > 0) {
+      setConciliacaoState({ duplicatas, payload });
+      return;
+    }
+
+    createMutation.mutate(payload);
   };
 
   const categoriasFiltered = categorias.filter(c => 
@@ -209,6 +252,20 @@ export default function LancamentoForm({ categorias }) {
 
   return (
   <div className="space-y-4">
+    {conciliacaoState && (
+      <ConciliacaoAlertModal
+        open
+        duplicatas={conciliacaoState.duplicatas}
+        novoValor={conciliacaoState.payload.valor}
+        novoDescricao={conciliacaoState.payload.descricao}
+        onConfirm={() => {
+          const p = conciliacaoState.payload;
+          setConciliacaoState(null);
+          createMutation.mutate(p);
+        }}
+        onCancel={() => setConciliacaoState(null)}
+      />
+    )}
     <Card className="border-0 shadow-lg">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
@@ -339,11 +396,10 @@ export default function LancamentoForm({ categorias }) {
               <Label htmlFor="valor">Valor (R$) *</Label>
               <Input
                 id="valor"
-                type="number"
-                step="0.01"
-                min="0"
+                type="text"
+                inputMode="numeric"
                 value={formData.valor}
-                onChange={(e) => setFormData({ ...formData, valor: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, valor: formatCurrencyFromDigits(e.target.value) })}
                 placeholder="0,00"
                 required
               />
@@ -506,7 +562,7 @@ export default function LancamentoForm({ categorias }) {
                   categoria_id: "",
                   descricao: "",
                   valor: "",
-                  data_lancamento: new Date().toISOString().split('T')[0],
+                  data_lancamento: todayBrazilISO,
                   data_vencimento: "",
                   forma_pagamento: "Dinheiro",
                   status: "Pago",
@@ -517,7 +573,7 @@ export default function LancamentoForm({ categorias }) {
                 setValidationError("");
                 setCategoriaModo("select");
                 setOutrosNome("");
-                setDisplayDates({ data_lancamento: isoToDisplay(new Date().toISOString().split('T')[0]), data_vencimento: "" });
+                setDisplayDates({ data_lancamento: isoToDisplay(todayBrazilISO), data_vencimento: "" });
               }}
             >
               Limpar

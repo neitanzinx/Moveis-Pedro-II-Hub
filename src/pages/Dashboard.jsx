@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../hooks/useAuth";
+import { isVendaCancelada } from "@/utils/vendaStatus";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ShoppingCart, DollarSign, Package, Users, TrendingUp, ArrowUpRight, ArrowDownRight, Activity, Calendar, Loader2 } from "lucide-react";
@@ -70,6 +71,8 @@ export default function Dashboard() {
       const listaClientes = Array.isArray(clientes) ? clientes : [];
 
       const vendasFiltradas = listaVendas.filter(v => {
+        if (isVendaCancelada(v)) return false;
+
         // Filtro de Dono (SEMPRE APLICADO)
         // Considera venda do usuário se ele é o responsavel_id OU se ele criou o registro
         if (v?.responsavel_id !== user.id && v?.created_by !== user.email) return false;
@@ -99,6 +102,7 @@ export default function Dashboard() {
       limiteAnt.setDate(limiteAnt.getDate() - dias);
 
       const vendasAnt = listaVendas.filter(v => {
+        if (isVendaCancelada(v)) return false;
         if (v?.responsavel_id !== user.id && v?.created_by !== user.email) return false;
         if (!v?.data_venda) return false;
         const d = new Date(v.data_venda);

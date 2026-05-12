@@ -74,7 +74,7 @@ async function syncReceitaLancamentos(vendaId, paymentDateIso, pagamentoQuitado)
         await base44.entities.LancamentoFinanceiro.update(lancamento.id, {
             status: "Pago",
             pago: true,
-            data_pagamento: paymentDateIso.split("T")[0],
+            data_lancamento_real: paymentDateIso.split("T")[0],
         });
     }
 }

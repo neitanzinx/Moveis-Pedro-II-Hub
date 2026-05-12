@@ -14,6 +14,7 @@ import {
   filtrarPorMes,
   normalizeTipo,
 } from "@/services/financeiroAggregation";
+import { isVendaCancelada } from "@/utils/vendaStatus";
 
 const fmt = (v) =>
   Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -150,7 +151,7 @@ export default function VisaoGeral({
         <KPICard
           titulo="Receita Bruta"
           valor={dre.receitaBruta}
-          subtitulo={`${vendas.filter((v) => v.data_venda?.slice(0, 7) === mesAno && v.status !== "Cancelada").length} pedido(s)`}
+          subtitulo={`${vendas.filter((v) => v.data_venda?.slice(0, 7) === mesAno && !isVendaCancelada(v)).length} pedido(s)`}
           icon={ShoppingCart}
           cor="green"
         />

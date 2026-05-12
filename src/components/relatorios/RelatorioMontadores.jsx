@@ -210,13 +210,11 @@ export default function RelatorioMontadores() {
         descricao: `Montagem Externa - ${grupo.montadorNome} (${dataInicio} a ${dataFim})`,
         valor: Number(grupo.totalBruto.toFixed(2)),
         tipo: "despesa",
-        categoria: "Montagens Externas",
         categoria_nome: "Montagens Externas",
         data_lancamento: dataFim,
         forma_pagamento: "Transferência",
         status: "Pendente",
         observacao: `${grupo.chaveLancamento} Pagamento bruto de montagens terceirizadas no período.`,
-        observacoes: `${grupo.chaveLancamento} Pagamento bruto de montagens terceirizadas no período.`,
       });
       toast.success(`Lançamento financeiro criado para ${grupo.montadorNome}`);
     } catch (error) {

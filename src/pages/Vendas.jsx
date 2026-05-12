@@ -24,7 +24,7 @@ import ArquivoTab from "../components/vendas/ArquivoTab";
 import EmitirNFeModal from "../components/vendas/EmitirNFeModal";
 import TransferirMontagemModal from "../components/vendas/TransferirMontagemModal";
 import { VendaDetalhesModal } from "@/components/vendas/VendaDetalhesModal";
-import { getVendaFinanceiro, getVendaResumoLogistico } from "@/utils/vendaStatus";
+import { getVendaFinanceiro, getVendaResumoLogistico, isStatusCancelado, isVendaCancelada } from "@/utils/vendaStatus";
 import { buildProductDisplayName } from "@/utils/productReference";
 
 export default function Vendas() {
@@ -175,7 +175,7 @@ export default function Vendas() {
                 e.venda_id === venda.id || e.numero_pedido === venda.numero_pedido
             );
             for (const entrega of entregasVenda) {
-                if (entrega.status !== 'Cancelado') {
+                if (!isStatusCancelado(entrega.status)) {
                     await base44.entities.Entrega.update(entrega.id, {
                         status: 'Cancelado',
                         observacoes: (entrega.observacoes || '') + ' [VENDA CANCELADA]'
@@ -186,7 +186,7 @@ export default function Vendas() {
             // 4. Cancelar montagens vinculadas (internas e externas)
             const montagensVenda = montagens.filter(m => m.venda_id === venda.id);
             for (const montagem of montagensVenda) {
-                if (montagem.status !== 'cancelada') {
+                if (!isStatusCancelado(montagem.status)) {
                     await base44.entities.MontagemItem.update(montagem.id, {
                         status: 'cancelada',
                         observacoes: (montagem.observacoes || '') + ' [VENDA CANCELADA]'
@@ -199,7 +199,7 @@ export default function Vendas() {
                 const todasAssistencias = await base44.entities.AssistenciaTecnica.list();
                 const assistenciasVenda = todasAssistencias.filter(a => a.venda_id === venda.id);
                 for (const assistencia of assistenciasVenda) {
-                    if (assistencia.status !== 'Cancelada') {
+                    if (!isStatusCancelado(assistencia.status)) {
                         await base44.entities.AssistenciaTecnica.update(assistencia.id, {
                             status: 'Cancelada',
                             observacoes: (assistencia.observacoes || '') + ' [VENDA CANCELADA]'
@@ -433,7 +433,7 @@ export default function Vendas() {
 
     // 2. Filtros de Busca e Status da Tela (exclui cancelados da aba principal)
     const filtered = vendasComResumo.filter(v => {
-        if (v.status === 'Cancelado') return false;
+        if (isVendaCancelada(v)) return false;
         if (statusFilter !== 'all' && v.financeiro.displayStatus !== statusFilter) return false;
         if (search && !v.cliente_nome?.toLowerCase().includes(search.toLowerCase()) && !v.numero_pedido?.includes(search)) return false;
         return true;
@@ -441,7 +441,7 @@ export default function Vendas() {
 
     // 3. Filtro para aba de cancelados
     const filteredCancelados = vendasComResumo.filter(v => {
-        if (v.status !== 'Cancelado') return false;
+        if (!isVendaCancelada(v)) return false;
         if (search && !v.cliente_nome?.toLowerCase().includes(search.toLowerCase()) && !v.numero_pedido?.includes(search)) return false;
         return true;
     });
@@ -722,7 +722,7 @@ export default function Vendas() {
                                                     </Button>
 
                                                     {/* Botão de Cancelar */}
-                                                    {canCancelVendas && venda.status !== 'Cancelado' && (
+                                                    {canCancelVendas && !isVendaCancelada(venda) && (
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"
@@ -1247,7 +1247,7 @@ function PaymentStatusBadge({ status, linkPagamento, cliente, numeroPedido, valo
 // Componente para status operacional do pedido
 function OrderStatusBadge({ venda, entregas, montagens, financeiro }) {
     // Se a venda foi cancelada, mostrar isso
-    if (venda.status === 'Cancelado') {
+    if (isVendaCancelada(venda)) {
         return (
             <Badge className="bg-red-100 text-red-700 border border-red-200 gap-1 w-fit">
                 <XCircle className="w-3 h-3" />

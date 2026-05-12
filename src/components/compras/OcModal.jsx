@@ -133,17 +133,51 @@ function matchProductByAnyOrder(produto, termoBusca) {
   return termos.every(termo => conteudoProduto.includes(termo));
 }
 
-function buildItemPricingFromCostAndMarkup(custo, markupMultiplicador, markupPercentual) {
+function buildItemPricingFromCostAndMarkup(custo, markupMultiplicador, markupPercentual, additionalCosts = {}) {
   const custoNumerico = Number(custo) || 0;
-  const precoSugerido = calculateFinalPriceFromMarkup(custoNumerico, markupMultiplicador, markupPercentual);
-  const precoFinal = precoSugerido > 0 ? precoSugerido : custoNumerico;
+  
+  // Calcula o custo total considerando IPI, Frete e Montagem
+  const custoTotal = calculateTotalCost(custoNumerico, additionalCosts);
+  
+  const precoSugerido = calculateFinalPriceFromMarkup(custoTotal, markupMultiplicador, markupPercentual);
+  const precoFinal = precoSugerido > 0 ? precoSugerido : custoTotal;
 
   return {
     preco_custo_item: custoNumerico,
+    custo_total: custoTotal,
     preco_final_sugerido: precoSugerido > 0 ? precoSugerido : null,
     preco_final_manual: precoFinal > 0 ? precoFinal : null,
     preco_unitario: precoFinal,
   };
+}
+
+function calculateTotalCost(precoCusto, additionalCosts = {}) {
+  let total = precoCusto;
+  ipi_tipo: 'fixo',
+    ipi_valor: 0,
+    frete_tipo: 'fixo',
+    frete_valor: 0,
+    montagem_valor: 0,
+    custo_total: 0,
+    
+  // IPI
+  if (additionalCosts.ipi_tipo === 'fixo') {
+    total += Number(additionalCosts.ipi_valor) || 0;
+  } else if (additionalCosts.ipi_tipo === 'porcentagem') {
+    total += precoCusto * ((Number(additionalCosts.ipi_valor) || 0) / 100);
+  }
+  
+  // Frete
+  if (additionalCosts.frete_tipo === 'fixo') {
+    total += Number(additionalCosts.frete_valor) || 0;
+  } else if (additionalCosts.frete_tipo === 'porcentagem') {
+    total += precoCusto * ((Number(additionalCosts.frete_valor) || 0) / 100);
+  }
+  
+  // Montagem (sempre fixo)
+  total += Number(additionalCosts.montagem_valor) || 0;
+  
+  return total;
 }
 
 function createOcItemDefault() {
@@ -197,7 +231,7 @@ export default function OcModal({
   modo = 'novo', // 'novo' | 'editar' | 'duplicar' | 'ver'
 }) {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const { lojas } = useTenant();
   const isNovoOuDuplicar = !oc || oc.duplicar;
   const isVer = modo === 'ver';
@@ -216,6 +250,7 @@ export default function OcModal({
     observacoes_aprovacao: '',
     anexos_aprovacao: [],
     anexo_fornecedor: [],
+    anexos_financeiro: [],
     canal_solicitacao: '',
     data_hora_criado: '',
     data_hora_enviado: '',
@@ -226,6 +261,7 @@ export default function OcModal({
 
   const [uploadingAnexosAprovacao, setUploadingAnexosAprovacao] = useState(false);
   const [uploadingAnexoFornecedor, setUploadingAnexoFornecedor] = useState(false);
+  const [uploadingAnexosFinanceiro, setUploadingAnexosFinanceiro] = useState(false);
   const [novoProdutoModalOpen, setNovoProdutoModalOpen] = useState(false);
   const [salvandoNovoProduto, setSalvandoNovoProduto] = useState(false);
 
@@ -350,6 +386,7 @@ export default function OcModal({
             observacoes_aprovacao: ocDetalhada.observacoes_aprovacao || '',
             anexos_aprovacao: ocDetalhada.anexos_aprovacao || [],
             anexo_fornecedor: ocDetalhada.anexo_fornecedor || [],
+            anexos_financeiro: ocDetalhada.anexos_financeiro || [],
             canal_solicitacao: metadata.canal_solicitacao || '',
             data_hora_criado: metadata.data_hora_criado || '',
             data_hora_enviado: metadata.data_hora_enviado || '',
@@ -381,6 +418,7 @@ export default function OcModal({
       observacoes_aprovacao: '',
       anexos_aprovacao: [],
       anexo_fornecedor: [],
+      anexos_financeiro: [],
       canal_solicitacao: metadata.canal_solicitacao || '',
       data_hora_criado: metadata.data_hora_criado || agora,
       data_hora_enviado: metadata.data_hora_enviado || '',
@@ -499,7 +537,7 @@ export default function OcModal({
     const usarMarkupFornecedor = Boolean(fornecedorSelecionado?.usar_markup_padrao);
     const markupMultiplicador = produto.markup_multiplicador || (usarMarkupFornecedor ? fornecedorSelecionado?.markup_padrao_multiplicador : null);
     const markupPercentual = produto.markup_percentual || (usarMarkupFornecedor ? fornecedorSelecionado?.markup_padrao_percentual : null);
-    const pricing = buildItemPricingFromCostAndMarkup(precoCusto, markupMultiplicador, markupPercentual);
+    const pricing = buildItemPricingFromCostAndMarkup(precoCusto, markupMultiplicador, markupPercentual, {});
 
     setNovoItem(prev => ({
       ...prev,
@@ -535,24 +573,27 @@ export default function OcModal({
         [field]: value,
       };
 
-      if (field === 'markup_multiplicador') {
-        const percent = value ? toPercentFromMultiplier(value) : '';
-        const pricing = buildItemPricingFromCostAndMarkup(item.preco_custo_item, value, percent);
-        return {
-          ...itemAtualizado,
-          markup_percentual: percent ? String(percent) : '',
-          preco_final_sugerido: pricing.preco_final_sugerido,
-          preco_final_manual: pricing.preco_final_manual,
-          preco_unitario: pricing.preco_unitario,
+      // Recalculate pricing for any cost-related field
+      const costRelatedFields = ['preco_custo_item', 'ipi_tipo', 'ipi_valor', 'frete_tipo', 'frete_valor', 'montagem_valor', 'markup_multiplicador', 'markup_percentual'];
+      
+      if (costRelatedFields.includes(field)) {
+        const precoCusto = itemAtualizado.preco_custo_item || item.preco_custo_item || 0;
+        const additionalCosts = {
+          ipi_tipo: itemAtualizado.ipi_tipo || item.ipi_tipo || 'fixo',
+          ipi_valor: itemAtualizado.ipi_valor !== undefined ? itemAtualizado.ipi_valor : (item.ipi_valor || 0),
+          frete_tipo: itemAtualizado.frete_tipo || item.frete_tipo || 'fixo',
+          frete_valor: itemAtualizado.frete_valor !== undefined ? itemAtualizado.frete_valor : (item.frete_valor || 0),
+          montagem_valor: itemAtualizado.montagem_valor !== undefined ? itemAtualizado.montagem_valor : (item.montagem_valor || 0),
         };
-      }
-
-      if (field === 'markup_percentual') {
-        const multiplier = value ? toMultiplierFromPercent(value) : '';
-        const pricing = buildItemPricingFromCostAndMarkup(item.preco_custo_item, multiplier, value);
+        
+        const multiplicador = itemAtualizado.markup_multiplicador !== undefined ? itemAtualizado.markup_multiplicador : (item.markup_multiplicador || '');
+        const percentual = itemAtualizado.markup_percentual !== undefined ? itemAtualizado.markup_percentual : (item.markup_percentual || '');
+        
+        const pricing = buildItemPricingFromCostAndMarkup(precoCusto, multiplicador, percentual, additionalCosts);
+        
         return {
           ...itemAtualizado,
-          markup_multiplicador: multiplier ? String(multiplier) : '',
+          custo_total: pricing.custo_total,
           preco_final_sugerido: pricing.preco_final_sugerido,
           preco_final_manual: pricing.preco_final_manual,
           preco_unitario: pricing.preco_unitario,
@@ -607,9 +648,17 @@ export default function OcModal({
         return item;
       }
 
-      const pricing = buildItemPricingFromCostAndMarkup(item.preco_custo_item || item.preco_unitario, multiplicador, percentual);
+      const additionalCosts = {
+        ipi_tipo: item.ipi_tipo || 'fixo',
+        ipi_valor: item.ipi_valor || 0,
+        frete_tipo: item.frete_tipo || 'fixo',
+        frete_valor: item.frete_valor || 0,
+        montagem_valor: item.montagem_valor || 0,
+      };
+      const pricing = buildItemPricingFromCostAndMarkup(item.preco_custo_item || item.preco_unitario, multiplicador, percentual, additionalCosts);
       return {
         ...item,
+        custo_total: pricing.custo_total,
         markup_percentual: percentual.toString(),
         markup_multiplicador: multiplicador.toString(),
         preco_final_sugerido: pricing.preco_final_sugerido,
@@ -678,6 +727,7 @@ export default function OcModal({
             observacoes_aprovacao: formData.observacoes_aprovacao || null,
             anexos_aprovacao: formData.anexos_aprovacao || [],
             anexo_fornecedor: formData.anexo_fornecedor || [],
+            anexos_financeiro: formData.anexos_financeiro || [],
             metadata: {
               pedido_faturado: formData.pedido_faturado,
               data_faturamento: formData.data_faturamento || null,
@@ -698,6 +748,7 @@ export default function OcModal({
             observacoes_aprovacao: formData.observacoes_aprovacao || null,
             anexos_aprovacao: formData.anexos_aprovacao || [],
             anexo_fornecedor: formData.anexo_fornecedor || [],
+            anexos_financeiro: formData.anexos_financeiro || [],
             metadata: {
               ...(oc.metadata || {}),
               pedido_faturado: formData.pedido_faturado,
@@ -757,6 +808,7 @@ export default function OcModal({
             observacoes_aprovacao: formData.observacoes_aprovacao || null,
             anexos_aprovacao: formData.anexos_aprovacao || [],
             anexo_fornecedor: formData.anexo_fornecedor || [],
+            anexos_financeiro: formData.anexos_financeiro || [],
           });
 
           toast.success(`Acompanhamento da OC ${oc.numero_pedido} atualizado`);
@@ -1068,6 +1120,107 @@ export default function OcModal({
                       </div>
                     </div>
                   )}
+
+                  {/* Anexos para Financeiro (editável mesmo após enviado) */}
+                  {!isVer && oc && (
+                    <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                      <Label className="text-blue-900 font-semibold">Anexos para Financeiro</Label>
+                      <p className="text-xs text-blue-700">Documentos para visualização e análise do financeiro</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(formData.anexos_financeiro || []).map((anexo, idx) => (
+                          <div key={idx} className="relative group">
+                            {anexo.tipo?.startsWith('image/') ? (
+                              <div className="relative w-20 h-20 border rounded overflow-hidden bg-gray-100">
+                                <img
+                                  src={anexo.url}
+                                  alt={anexo.nome}
+                                  className="w-full h-full object-cover hover:opacity-80 transition-opacity cursor-pointer"
+                                  title={anexo.nome}
+                                  onClick={() => window.open(anexo.url, '_blank')}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setFormData(prev => ({
+                                    ...prev,
+                                    anexos_financeiro: prev.anexos_financeiro.filter((_, i) => i !== idx),
+                                  }))}
+                                  className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1 bg-white border rounded px-2 py-1 text-xs">
+                                <Paperclip className="w-3 h-3 text-gray-500" />
+                                <a href={anexo.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-[120px] truncate">
+                                  {anexo.nome || 'Anexo'}
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => setFormData(prev => ({
+                                    ...prev,
+                                    anexos_financeiro: prev.anexos_financeiro.filter((_, i) => i !== idx),
+                                  }))}
+                                  className="text-gray-400 hover:text-red-500"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        <label className={`flex items-center gap-1 cursor-pointer bg-white border border-dashed rounded px-2 py-1 text-xs text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors ${uploadingAnexosFinanceiro ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                          {uploadingAnexosFinanceiro ? <Loader2 className="w-3 h-3 animate-spin" /> : <Paperclip className="w-3 h-3" />}
+                          {uploadingAnexosFinanceiro ? 'Enviando...' : 'Anexar'}
+                          <input
+                            type="file"
+                            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                            multiple
+                            disabled={uploadingAnexosFinanceiro}
+                            className="hidden"
+                            onChange={async (e) => {
+                              const files = Array.from(e.target.files || []);
+                              if (!files.length) return;
+                              setUploadingAnexosFinanceiro(true);
+                              const uploads = [];
+                              for (const file of files) {
+                                try {
+                                  const { file_url } = await base44.integrations.Core.UploadFile({ file });
+                                  uploads.push({ nome: file.name, url: file_url, tipo: file.type, uploaded_at: new Date().toISOString() });
+                                } catch (err) {
+                                  console.error('Upload error:', err);
+                                  toast.error(`Falha ao enviar ${file.name}`);
+                                }
+                              }
+                              setUploadingAnexosFinanceiro(false);
+                              if (uploads.length > 0) {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  anexos_financeiro: [...(prev.anexos_financeiro || []), ...uploads],
+                                }));
+                              }
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                  {/* Modo visualização: mostrar anexos do financeiro */}
+                  {isVer && (formData.anexos_financeiro || []).length > 0 && (
+                    <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                      <Label className="text-blue-900 font-semibold">Anexos para Financeiro</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {formData.anexos_financeiro.map((anexo, idx) => (
+                          <a key={idx} href={anexo.url} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 bg-white border rounded px-2 py-1 text-xs text-blue-600 hover:underline">
+                            <Paperclip className="w-3 h-3" />
+                            {anexo.nome || 'Anexo'}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1194,11 +1347,15 @@ export default function OcModal({
                     <TableRow className="bg-gray-50">
                       <TableHead>Produto</TableHead>
                       <TableHead>Detalhes</TableHead>
-                      <TableHead className="text-right w-24">Qtd</TableHead>
-                      <TableHead className="text-right w-28">Custo</TableHead>
-                      <TableHead className="text-right w-24">Markup %</TableHead>
-                      <TableHead className="text-right w-32">Preço Final</TableHead>
-                      <TableHead className="text-right w-32">Subtotal</TableHead>
+                      <TableHead className="text-right w-20">Qtd</TableHead>
+                      <TableHead className="text-right w-20">Preço</TableHead>
+                      <TableHead className="text-right w-20">IPI</TableHead>
+                      <TableHead className="text-right w-20">Frete</TableHead>
+                      <TableHead className="text-right w-20">Montagem</TableHead>
+                      <TableHead className="text-right w-24">Custo Total</TableHead>
+                      <TableHead className="text-right w-20">Markup %</TableHead>
+                      <TableHead className="text-right w-28">Preço Final</TableHead>
+                      <TableHead className="text-right w-28">Subtotal</TableHead>
                       {podeEditarItens && <TableHead className="w-12">Ações</TableHead>}
                     </TableRow>
                   </TableHeader>
@@ -1243,7 +1400,85 @@ export default function OcModal({
                           )}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm">
-                          R$ {(Number(item.preco_custo_item || 0)).toFixed(2)}
+                          {podeEditarItens && can('manage_cost_prices') ? (
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              className="text-right"
+                              value={item.preco_custo_item || 0}
+                              onChange={(e) => handleItemChange(index, 'preco_custo_item', parseFloat(e.target.value) || 0)}
+                            />
+                          ) : (
+                            `R$ ${(Number(item.preco_custo_item || 0)).toFixed(2)}`
+                          )}
+                        </TableCell>
+
+                        <TableCell className="text-right font-mono text-sm">
+                          {podeEditarItens && can('manage_cost_prices') ? (
+                            <div className="flex gap-1">
+                              <Select value={item.ipi_tipo || 'fixo'} onValueChange={(tipo) => handleItemChange(index, 'ipi_tipo', tipo)}>
+                                <SelectTrigger className="w-16 h-8"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="fixo">R$</SelectItem>
+                                  <SelectItem value="porcentagem">%</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="text-right h-8 text-xs"
+                                value={item.ipi_valor || 0}
+                                onChange={(e) => handleItemChange(index, 'ipi_valor', parseFloat(e.target.value) || 0)}
+                              />
+                            </div>
+                          ) : (
+                            `${item.ipi_tipo === 'porcentagem' ? item.ipi_valor + '%' : 'R$ ' + Number(item.ipi_valor || 0).toFixed(2)}`
+                          )}
+                        </TableCell>
+
+                        <TableCell className="text-right font-mono text-sm">
+                          {podeEditarItens && can('manage_cost_prices') ? (
+                            <div className="flex gap-1">
+                              <Select value={item.frete_tipo || 'fixo'} onValueChange={(tipo) => handleItemChange(index, 'frete_tipo', tipo)}>
+                                <SelectTrigger className="w-16 h-8"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="fixo">R$</SelectItem>
+                                  <SelectItem value="porcentagem">%</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="text-right h-8 text-xs"
+                                value={item.frete_valor || 0}
+                                onChange={(e) => handleItemChange(index, 'frete_valor', parseFloat(e.target.value) || 0)}
+                              />
+                            </div>
+                          ) : (
+                            `${item.frete_tipo === 'porcentagem' ? item.frete_valor + '%' : 'R$ ' + Number(item.frete_valor || 0).toFixed(2)}`
+                          )}
+                        </TableCell>
+
+                        <TableCell className="text-right font-mono text-sm">
+                          {podeEditarItens && can('manage_cost_prices') ? (
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              className="text-right text-xs"
+                              value={item.montagem_valor || 0}
+                              onChange={(e) => handleItemChange(index, 'montagem_valor', parseFloat(e.target.value) || 0)}
+                            />
+                          ) : (
+                            `R$ ${(Number(item.montagem_valor || 0)).toFixed(2)}`
+                          )}
+                        </TableCell>
+
+                        <TableCell className="text-right font-mono text-sm font-semibold">
+                          R$ {(Number(item.custo_total || 0)).toFixed(2)}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm">
                           {podeEditarItens ? (
@@ -1251,7 +1486,7 @@ export default function OcModal({
                               type="number"
                               step="0.01"
                               min="0"
-                              className="text-right"
+                              className="text-right text-xs"
                               value={item.markup_percentual || ''}
                               onChange={(e) => handleItemChange(index, 'markup_percentual', e.target.value)}
                             />
@@ -1505,9 +1740,28 @@ export default function OcModal({
                         type="number"
                         step="0.01"
                         min="0"
-                        className="bg-gray-100"
+                        className={can('manage_cost_prices') ? "bg-white" : "bg-gray-100"}
                         value={novoItem.preco_custo_item || 0}
-                        disabled
+                        disabled={!can('manage_cost_prices')}
+                        onChange={(e) => {
+                          if (!can('manage_cost_prices')) return;
+                          const precoCusto = parseFloat(e.target.value) || 0;
+                          const multiplicador = novoItem.markup_multiplicador || '';
+                          const percentual = novoItem.markup_percentual || '';
+                          const additionalCosts = {
+                            ipi_tipo: novoItem.ipi_tipo || 'fixo',
+                            ipi_valor: novoItem.ipi_valor || 0,
+                            frete_tipo: novoItem.frete_tipo || 'fixo',
+                            frete_valor: novoItem.frete_valor || 0,
+                            montagem_valor: novoItem.montagem_valor || 0,
+                          };
+                          const pricing = buildItemPricingFromCostAndMarkup(precoCusto, multiplicador, percentual, additionalCosts);
+                          setNovoItem(prev => ({
+                            ...prev,
+                            preco_custo_item: precoCusto,
+                            ...pricing,
+                          }));
+                        }}
                       />
                     </div>
 
@@ -1544,11 +1798,147 @@ export default function OcModal({
                         onChange={(e) => {
                           const multiplicador = e.target.value;
                           const percentual = multiplicador === '' ? '' : toPercentFromMultiplier(multiplicador).toString();
-                          const pricing = buildItemPricingFromCostAndMarkup(novoItem.preco_custo_item, multiplicador, percentual);
+                          const additionalCosts = {
+                            ipi_tipo: novoItem.ipi_tipo || 'fixo',
+                            ipi_valor: novoItem.ipi_valor || 0,
+                            frete_tipo: novoItem.frete_tipo || 'fixo',
+                            frete_valor: novoItem.frete_valor || 0,
+                            montagem_valor: novoItem.montagem_valor || 0,
+                          };
+                          const pricing = buildItemPricingFromCostAndMarkup(novoItem.preco_custo_item, multiplicador, percentual, additionalCosts);
                           setNovoItem(prev => ({
                             ...prev,
                             markup_percentual: percentual,
                             markup_multiplicador: multiplicador,
+                            ...pricing,
+                          }));
+                        }}
+                      />
+                    </div>
+
+                    <div className="md:col-span-1 space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">IPI</Label>
+                      <div className="flex gap-2">
+                        <Select value={novoItem.ipi_tipo || 'fixo'} onValueChange={(tipo) => {
+                          const additionalCosts = {
+                            ipi_tipo: tipo,
+                            ipi_valor: novoItem.ipi_valor || 0,
+                            frete_tipo: novoItem.frete_tipo || 'fixo',
+                            frete_valor: novoItem.frete_valor || 0,
+                            montagem_valor: novoItem.montagem_valor || 0,
+                          };
+                          const pricing = buildItemPricingFromCostAndMarkup(novoItem.preco_custo_item, novoItem.markup_multiplicador, novoItem.markup_percentual, additionalCosts);
+                          setNovoItem(prev => ({
+                            ...prev,
+                            ipi_tipo: tipo,
+                            ...pricing,
+                          }));
+                        }}>
+                          <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="fixo">Fixo</SelectItem>
+                            <SelectItem value="porcentagem">%</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="bg-white flex-1"
+                          placeholder={novoItem.ipi_tipo === 'porcentagem' ? '%' : 'R$'}
+                          value={novoItem.ipi_valor || 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            const additionalCosts = {
+                              ipi_tipo: novoItem.ipi_tipo || 'fixo',
+                              ipi_valor: val,
+                              frete_tipo: novoItem.frete_tipo || 'fixo',
+                              frete_valor: novoItem.frete_valor || 0,
+                              montagem_valor: novoItem.montagem_valor || 0,
+                            };
+                            const pricing = buildItemPricingFromCostAndMarkup(novoItem.preco_custo_item, novoItem.markup_multiplicador, novoItem.markup_percentual, additionalCosts);
+                            setNovoItem(prev => ({
+                              ...prev,
+                              ipi_valor: val,
+                              ...pricing,
+                            }));
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="md:col-span-1 space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Frete</Label>
+                      <div className="flex gap-2">
+                        <Select value={novoItem.frete_tipo || 'fixo'} onValueChange={(tipo) => {
+                          const additionalCosts = {
+                            ipi_tipo: novoItem.ipi_tipo || 'fixo',
+                            ipi_valor: novoItem.ipi_valor || 0,
+                            frete_tipo: tipo,
+                            frete_valor: novoItem.frete_valor || 0,
+                            montagem_valor: novoItem.montagem_valor || 0,
+                          };
+                          const pricing = buildItemPricingFromCostAndMarkup(novoItem.preco_custo_item, novoItem.markup_multiplicador, novoItem.markup_percentual, additionalCosts);
+                          setNovoItem(prev => ({
+                            ...prev,
+                            frete_tipo: tipo,
+                            ...pricing,
+                          }));
+                        }}>
+                          <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="fixo">Fixo</SelectItem>
+                            <SelectItem value="porcentagem">%</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="bg-white flex-1"
+                          placeholder={novoItem.frete_tipo === 'porcentagem' ? '%' : 'R$'}
+                          value={novoItem.frete_valor || 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            const additionalCosts = {
+                              ipi_tipo: novoItem.ipi_tipo || 'fixo',
+                              ipi_valor: novoItem.ipi_valor || 0,
+                              frete_tipo: novoItem.frete_tipo || 'fixo',
+                              frete_valor: val,
+                              montagem_valor: novoItem.montagem_valor || 0,
+                            };
+                            const pricing = buildItemPricingFromCostAndMarkup(novoItem.preco_custo_item, novoItem.markup_multiplicador, novoItem.markup_percentual, additionalCosts);
+                            setNovoItem(prev => ({
+                              ...prev,
+                              frete_valor: val,
+                              ...pricing,
+                            }));
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="md:col-span-1 space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Montagem (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="bg-white"
+                        value={novoItem.montagem_valor || 0}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          const additionalCosts = {
+                            ipi_tipo: novoItem.ipi_tipo || 'fixo',
+                            ipi_valor: novoItem.ipi_valor || 0,
+                            frete_tipo: novoItem.frete_tipo || 'fixo',
+                            frete_valor: novoItem.frete_valor || 0,
+                            montagem_valor: val,
+                          };
+                          const pricing = buildItemPricingFromCostAndMarkup(novoItem.preco_custo_item, novoItem.markup_multiplicador, novoItem.markup_percentual, additionalCosts);
+                          setNovoItem(prev => ({
+                            ...prev,
+                            montagem_valor: val,
                             ...pricing,
                           }));
                         }}

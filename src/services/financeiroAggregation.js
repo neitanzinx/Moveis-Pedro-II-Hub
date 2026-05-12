@@ -18,6 +18,10 @@ export function normalizeTipo(tipo) {
   return null;
 }
 
+function isStatusCancelado(status) {
+  return String(status || "").trim().toLowerCase().startsWith("cancelad");
+}
+
 // ─── Filtros de Período ────────────────────────────────────────────────────────
 /** Filtra lista por campo de data no formato "YYYY-MM-DD" para o mês/ano dado. */
 export function filtrarPorMes(lista, campoData, mesAno) {
@@ -38,21 +42,21 @@ export function filtrarFolhasPorMes(folhas, mesAno) {
 /** Receita bruta: soma valor_total de vendas não canceladas no mês. */
 export function calcularReceitaBruta(vendas, mesAno) {
   return filtrarPorMes(vendas, "data_venda", mesAno)
-    .filter((v) => v.status !== "Cancelada")
+    .filter((v) => !isStatusCancelado(v.status))
     .reduce((s, v) => s + (v.valor_total || 0), 0);
 }
 
 /** Total de descontos das vendas do mês. */
 export function calcularTotalDescontos(vendas, mesAno) {
   return filtrarPorMes(vendas, "data_venda", mesAno)
-    .filter((v) => v.status !== "Cancelada")
+    .filter((v) => !isStatusCancelado(v.status))
     .reduce((s, v) => s + (v.desconto || 0), 0);
 }
 
 /** Total efetivamente recebido das vendas do mês (valor_pago). */
 export function calcularReceitaRecebida(vendas, mesAno) {
   return filtrarPorMes(vendas, "data_venda", mesAno)
-    .filter((v) => v.status !== "Cancelada")
+    .filter((v) => !isStatusCancelado(v.status))
     .reduce((s, v) => s + (v.valor_pago || 0), 0);
 }
 
@@ -64,7 +68,7 @@ export function calcularReceitaRecebida(vendas, mesAno) {
 export function calcularContasReceber(vendas) {
   if (!Array.isArray(vendas)) return { total: 0, itens: [] };
   const itens = vendas.filter(
-    (v) => v.status !== "Cancelada" && (v.valor_restante || 0) > 0
+    (v) => !isStatusCancelado(v.status) && (v.valor_restante || 0) > 0
   );
   const total = itens.reduce((s, v) => s + (v.valor_restante || 0), 0);
   return { total, itens };

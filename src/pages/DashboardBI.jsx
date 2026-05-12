@@ -77,6 +77,7 @@ import {
     agruparVendasPorDia,
     agruparPorFormaPagamento
 } from "@/utils/biCalculations";
+import { isVendaCancelada } from "@/utils/vendaStatus";
 
 // ── Paleta de Cores ──────────────────────────────────────────────
 const CORES = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
@@ -244,7 +245,7 @@ export default function DashboardBI() {
         vendas.filter(v => {
             const matchPeriodo = filtroFn(v.data_venda);
             const matchLoja = lojaFiltro === 'todas' || v.loja === lojaFiltro;
-            return matchPeriodo && matchLoja && v.status !== 'Cancelada';
+            return matchPeriodo && matchLoja && !isVendaCancelada(v);
         }),
         [vendas, periodo, lojaFiltro, filtroFn]
     );

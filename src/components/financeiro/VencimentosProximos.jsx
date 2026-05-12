@@ -1,7 +1,14 @@
+
 import React, { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { TrendingDown, Calendar, AlertTriangle, Clock } from "lucide-react";
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
+import { TrendingDown, Calendar, AlertTriangle, Clock, Siren } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useConfirm } from "@/hooks/useConfirm";
+import { useAuth } from "@/hooks/useAuth";
+import { base44 } from "@/lib/supabase";
+import { isStatusCancelado } from "@/utils/vendaStatus";
 
 const fmt = (v) =>
   `R$ ${Math.abs(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
@@ -37,7 +44,7 @@ function weekKey(isoDate) {
   return monday.toISOString().slice(0, 10);
 }
 
-function ItemRow({ lanc }) {
+function ItemRow({ lanc, onStatusChange, updating }) {
   const venc = lanc.data_vencimento
     ? new Date(lanc.data_vencimento + "T00:00:00").toLocaleDateString("pt-BR")
     : "—";
@@ -59,23 +66,48 @@ function ItemRow({ lanc }) {
       </div>
       <div className="flex items-center gap-2 ml-3 flex-shrink-0">
         <span className="text-sm font-bold text-red-600">{fmt(lanc.valor)}</span>
-        <Badge
-          className={
-            lanc.status === "Pago"
-              ? "bg-green-100 text-green-800 text-[10px]"
-              : lanc.status === "Cancelado"
-              ? "bg-gray-100 text-gray-600 text-[10px]"
-              : "bg-yellow-100 text-yellow-800 text-[10px]"
-          }
-        >
-          {lanc.status || "Pendente"}
-        </Badge>
+        {lanc.status === "Pendente" ? (
+          <Select
+            value={lanc.status}
+            onValueChange={(value) => onStatusChange(lanc, value)}
+            disabled={updating}
+          >
+            <SelectTrigger className="h-6 w-[90px] text-[10px] border-0 bg-transparent hover:bg-gray-100 dark:hover:bg-neutral-800">
+              <SelectValue>
+                <Badge className="bg-yellow-100 text-yellow-800 text-[10px]">Pendente</Badge>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Pago">
+                <Badge className="bg-green-100 text-green-800 text-[10px]">Pago</Badge>
+              </SelectItem>
+              <SelectItem value="Pendente">
+                <Badge className="bg-yellow-100 text-yellow-800 text-[10px]">Pendente</Badge>
+              </SelectItem>
+              <SelectItem value="Cancelado">
+                <Badge className="bg-gray-100 text-gray-600 text-[10px]">Cancelado</Badge>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        ) : (
+          <Badge
+            className={
+              lanc.status === "Pago"
+                ? "bg-green-100 text-green-800 text-[10px]"
+                : isStatusCancelado(lanc.status)
+                ? "bg-gray-100 text-gray-600 text-[10px]"
+                : "bg-yellow-100 text-yellow-800 text-[10px]"
+            }
+          >
+            {lanc.status || "Pendente"}
+          </Badge>
+        )}
       </div>
     </div>
   );
 }
 
-function Grupo({ titulo, icon: Icon, cor, items, total }) {
+function Grupo({ titulo, icon: Icon, cor, items, total, onStatusChange, updatingId }) {
   const [aberto, setAberto] = useState(true);
   if (items.length === 0) return null;
   return (
@@ -98,7 +130,7 @@ function Grupo({ titulo, icon: Icon, cor, items, total }) {
       {aberto && (
         <div className="border rounded-xl overflow-hidden divide-y dark:divide-neutral-700">
           {items.map((l) => (
-            <ItemRow key={l.id} lanc={l} />
+            <ItemRow key={l.id} lanc={l} onStatusChange={onStatusChange} updating={updatingId === l.id} />
           ))}
         </div>
       )}
@@ -108,6 +140,10 @@ function Grupo({ titulo, icon: Icon, cor, items, total }) {
 
 export default function VencimentosProximos({ lancamentos = [] }) {
   const hoje = startOfDay(new Date());
+  const queryClient = useQueryClient();
+  const confirm = useConfirm();
+  const { user } = useAuth();
+  const [updatingId, setUpdatingId] = useState(null);
 
   const grupos = useMemo(() => {
     const pendentes = lancamentos.filter(
@@ -115,9 +151,11 @@ export default function VencimentosProximos({ lancamentos = [] }) {
         l.data_vencimento &&
         (l.tipo === "Saída" || l.tipo === "saida") &&
         l.status !== "Pago" &&
-        l.status !== "Cancelado"
+        !isStatusCancelado(l.status)
     );
 
+    const atrasados = [];
+    const hojeItems = [];
     const amanha = [];
     const ate3 = [];
     const de3a5 = [];
@@ -125,8 +163,11 @@ export default function VencimentosProximos({ lancamentos = [] }) {
 
     pendentes.forEach((l) => {
       const dias = diffDays(hoje, new Date(l.data_vencimento + "T00:00:00"));
-      if (dias < 0) return; // vencidos não entram aqui
-      if (dias === 1) {
+      if (dias < 0) {
+        atrasados.push(l);
+      } else if (dias === 0) {
+        hojeItems.push(l);
+      } else if (dias === 1) {
         amanha.push(l);
       } else if (dias <= 3) {
         ate3.push(l);
@@ -148,14 +189,74 @@ export default function VencimentosProximos({ lancamentos = [] }) {
         total: items.reduce((s, i) => s + Math.abs(i.valor || 0), 0),
       }));
 
-    return { amanha, ate3, de3a5, semanasOrdenadas };
+    return { atrasados, hojeItems, amanha, ate3, de3a5, semanasOrdenadas };
   }, [lancamentos, hoje]);
 
+  const totalAtrasados = grupos.atrasados.reduce((s, l) => s + Math.abs(l.valor || 0), 0);
+  const totalHoje = grupos.hojeItems.reduce((s, l) => s + Math.abs(l.valor || 0), 0);
   const totalAmanha = grupos.amanha.reduce((s, l) => s + Math.abs(l.valor || 0), 0);
   const totalAte3 = grupos.ate3.reduce((s, l) => s + Math.abs(l.valor || 0), 0);
   const totalDe3a5 = grupos.de3a5.reduce((s, l) => s + Math.abs(l.valor || 0), 0);
 
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }) => base44.entities.LancamentoFinanceiro.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lancamentos-financeiros"] });
+      setUpdatingId(null);
+    },
+    onError: () => setUpdatingId(null)
+  });
+
+  const handleStatusChange = async (lanc, newStatus) => {
+    if (lanc.status === newStatus) return;
+    const previousStatus = lanc.status || "Pendente";
+    const isMarkingAsPaid = newStatus === "Pago" && previousStatus !== "Pago";
+    let confirmed = true;
+    if (isMarkingAsPaid) {
+      confirmed = await confirm({
+        title: "Confirmar pagamento",
+        message: `Confirmar ${lanc.descricao || "conta"} (${lanc.categoria_nome || "Sem categoria"} · R$ ${Math.abs(lanc.valor || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })} · vence ${lanc.data_vencimento}) como pago?`,
+        confirmText: "Confirmar pagamento",
+        cancelText: "Cancelar",
+        variant: "default",
+      });
+    }
+    if (!confirmed) return;
+    setUpdatingId(lanc.id);
+    updateMutation.mutate(
+      { id: lanc.id, data: { status: newStatus } },
+      {
+        onSuccess: async () => {
+          if (!isMarkingAsPaid) return;
+          try {
+            await base44.entities.AuditLog.create({
+              acao: "MARK_PAID",
+              usuario: user?.full_name || user?.nome || user?.email || "Usuário desconhecido",
+              user_id: user?.id || null,
+              tabela: "lancamentos_financeiros",
+              detalhes: {
+                record_id: lanc.id,
+                descricao: lanc.descricao || null,
+                categoria: lanc.categoria_nome || null,
+                valor: lanc.valor ?? null,
+                data_vencimento: lanc.data_vencimento || null,
+                from_status: previousStatus,
+                to_status: newStatus,
+              },
+            });
+            queryClient.invalidateQueries({ queryKey: ["audit-mark-paid"] });
+          } catch (error) {
+            // erro de log não bloqueia
+          }
+        },
+        onError: () => setUpdatingId(null)
+      }
+    );
+  };
+
   const temAlgum =
+    grupos.atrasados.length > 0 ||
+    grupos.hojeItems.length > 0 ||
     grupos.amanha.length > 0 ||
     grupos.ate3.length > 0 ||
     grupos.de3a5.length > 0 ||
@@ -174,11 +275,31 @@ export default function VencimentosProximos({ lancamentos = [] }) {
       </CardHeader>
       <CardContent className="pt-4 space-y-4">
         <Grupo
+          titulo="Atrasados"
+          icon={Siren}
+          cor="text-red-700"
+          items={grupos.atrasados}
+          total={totalAtrasados}
+          onStatusChange={handleStatusChange}
+          updatingId={updatingId}
+        />
+        <Grupo
+          titulo="Vencendo hoje"
+          icon={AlertTriangle}
+          cor="text-red-600"
+          items={grupos.hojeItems}
+          total={totalHoje}
+          onStatusChange={handleStatusChange}
+          updatingId={updatingId}
+        />
+        <Grupo
           titulo="Vencendo amanhã"
           icon={AlertTriangle}
           cor="text-red-600"
           items={grupos.amanha}
           total={totalAmanha}
+          onStatusChange={handleStatusChange}
+          updatingId={updatingId}
         />
         <Grupo
           titulo="Próximos 3 dias"
@@ -186,6 +307,8 @@ export default function VencimentosProximos({ lancamentos = [] }) {
           cor="text-orange-500"
           items={grupos.ate3}
           total={totalAte3}
+          onStatusChange={handleStatusChange}
+          updatingId={updatingId}
         />
         <Grupo
           titulo="De 3 a 5 dias"
@@ -193,6 +316,8 @@ export default function VencimentosProximos({ lancamentos = [] }) {
           cor="text-yellow-600"
           items={grupos.de3a5}
           total={totalDe3a5}
+          onStatusChange={handleStatusChange}
+          updatingId={updatingId}
         />
         {grupos.semanasOrdenadas.map((sem) => (
           <Grupo
@@ -202,6 +327,8 @@ export default function VencimentosProximos({ lancamentos = [] }) {
             cor="text-gray-500"
             items={sem.items}
             total={sem.total}
+            onStatusChange={handleStatusChange}
+            updatingId={updatingId}
           />
         ))}
       </CardContent>

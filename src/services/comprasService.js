@@ -119,6 +119,7 @@ export const comprasService = {
         observacoes_aprovacao = null,
         anexos_aprovacao = [],
         anexo_fornecedor = [],
+        anexos_financeiro = [],
       } = data;
 
       if (!fornecedor_id || itens.length === 0) {
@@ -151,6 +152,7 @@ export const comprasService = {
         observacoes_aprovacao: observacoes_aprovacao || null,
         anexos_aprovacao: anexos_aprovacao || [],
         anexo_fornecedor: anexo_fornecedor || [],
+        anexos_financeiro: anexos_financeiro || [],
         metadata: mergeOcMetadata({}, metadata, loja_id),
         data_pedido: new Date().toISOString().split('T')[0]
       });
@@ -627,15 +629,16 @@ export const comprasService = {
             await supabase
               .from('historico_precos')
               .insert({
-                tenant_id: tenantId,
+                organization_id: tenantId,
                 produto_id: itemOc.produto_id,
                 produto_nome: buildProductDisplayName(produto.nome || 'Sem nome', produto.modelo_referencia),
                 fornecedor_id: oc.fornecedor_id,
                 fornecedor_nome: oc.fornecedor_nome,
                 ordem_compra_id: ocId,
                 numero_oc: oc.numero_pedido,
+                tipo: 'compra',
                 motivo: 'recebimento_oc',
-                preco_anterior: precoAnterior,
+                preco_antigo: precoAnterior,
                 preco_novo: precoCusto,
                 delta_percentual: Math.round(deltaPercentual * 100) / 100,
                 created_at: new Date().toISOString()
@@ -655,22 +658,53 @@ export const comprasService = {
           .eq('nome', 'Compras de Estoque')
           .single();
 
-        const lancamentoPayload = {
-          tipo: 'DESPESA',
-          descricao: `Compra OC #${oc.numero_pedido}`,
-          valor: oc.valor_total,
-          data_vencimento: dataVencimento.toISOString().split('T')[0],
-          data_lancamento: new Date().toISOString().split('T')[0],
-          status: 'Pendente',
-          observacao: `Lançamento gerado automaticamente pelo recebimento da OC ${oc.numero_pedido}.`
-        };
+        // Conciliação inteligente: evitar duplicata se já existe lançamento para esta OC
+        // (pode ter sido criado manualmente pelo financeiro antes do recebimento)
+        const { data: lancamentosExistentes } = await supabase
+          .from('lancamentos_financeiros')
+          .select('id, valor, status, descricao')
+          .ilike('descricao', `%OC #${oc.numero_pedido}%`)
+          .is('deleted_at', null)
+          .limit(5);
 
-        if (categoriasCompra?.id) {
-          lancamentoPayload.categoria_id = categoriasCompra.id;
-          lancamentoPayload.categoria_nome = categoriasCompra.nome;
+        // Também checar por origem (campo preenchido pelo CriarLancamentoFromOcModal)
+        const { data: lancamentosOrigem } = await supabase
+          .from('lancamentos_financeiros')
+          .select('id, valor, status, descricao')
+          .ilike('origem', `%OC#${oc.numero_pedido}%`)
+          .is('deleted_at', null)
+          .limit(5);
+
+        const jaExiste = [
+          ...(lancamentosExistentes || []),
+          ...(lancamentosOrigem || []),
+        ].some((l) => Math.floor(l.valor) === Math.floor(oc.valor_total));
+
+        if (jaExiste) {
+          console.info(
+            `[Conciliação] Lançamento para OC #${oc.numero_pedido} já existe com valor similar. Criação automática ignorada para evitar duplicidade.`
+          );
+        } else {
+          const lancamentoPayload = {
+            tipo: 'DESPESA',
+            descricao: `Compra OC #${oc.numero_pedido}`,
+            valor: oc.valor_total,
+            data_vencimento: dataVencimento.toISOString().split('T')[0],
+            data_lancamento: new Date().toISOString().split('T')[0],
+            status: 'Pendente',
+            origem: `OC#${oc.numero_pedido}`,
+            numero_pedido: String(oc.numero_pedido),
+            fornecedor_nome: oc.fornecedor_nome || null,
+            observacao: `Lançamento gerado automaticamente pelo recebimento da OC ${oc.numero_pedido}.`
+          };
+
+          if (categoriasCompra?.id) {
+            lancamentoPayload.categoria_id = categoriasCompra.id;
+            lancamentoPayload.categoria_nome = categoriasCompra.nome;
+          }
+
+          await base44.entities.LancamentoFinanceiro.create(lancamentoPayload);
         }
-
-        await base44.entities.LancamentoFinanceiro.create(lancamentoPayload);
       }
 
       return {
@@ -871,22 +905,37 @@ export const comprasService = {
 
       // Atualizar ou criar lançamento financeiro correspondente
       try {
-        const { data: lancamentos } = await supabase
+        // Buscar por número de OC na descrição OU no campo origem
+        const { data: lancamentosDesc } = await supabase
           .from('lancamentos_financeiros')
-          .select('id')
+          .select('id, valor, status')
           .ilike('descricao', `%OC #${oc.numero_pedido}%`)
           .is('deleted_at', null)
-          .limit(1);
+          .limit(5);
+
+        const { data: lancamentosOrigem } = await supabase
+          .from('lancamentos_financeiros')
+          .select('id, valor, status')
+          .ilike('origem', `%OC#${oc.numero_pedido}%`)
+          .is('deleted_at', null)
+          .limit(5);
+
+        const todosEncontrados = [...(lancamentosDesc || []), ...(lancamentosOrigem || [])];
+        // Deduplica por id
+        const unicos = Object.values(
+          Object.fromEntries(todosEncontrados.map((l) => [l.id, l]))
+        );
 
         const dataFormaDesc = data.pagamento_forma_final
           ? ` — ${data.pagamento_forma_final}`
           : '';
         const dataPagamento = data.pagamento_data_pagamento || new Date().toISOString().split('T')[0];
 
-        if (lancamentos && lancamentos.length > 0) {
-          await base44.entities.LancamentoFinanceiro.update(lancamentos[0].id, {
+        if (unicos.length > 0) {
+          // Atualiza o primeiro encontrado como Pago
+          await base44.entities.LancamentoFinanceiro.update(unicos[0].id, {
             status: 'Pago',
-            data_pagamento: dataPagamento,
+            data_lancamento_real: dataPagamento,
             forma_pagamento: data.pagamento_forma_final || null,
             observacao: `Aprovado pelo master.${dataFormaDesc}${data.pagamento_observacoes ? ' ' + data.pagamento_observacoes : ''}`,
           });
@@ -904,8 +953,11 @@ export const comprasService = {
             valor: data.pagamento_valor_pago || oc.valor_total,
             data_vencimento: dataPagamento,
             data_lancamento: new Date().toISOString().split('T')[0],
-            data_pagamento: dataPagamento,
+            data_lancamento_real: dataPagamento,
             status: 'Pago',
+            origem: `OC#${oc.numero_pedido}`,
+            numero_pedido: String(oc.numero_pedido),
+            fornecedor_nome: oc.fornecedor_nome || null,
             forma_pagamento: data.pagamento_forma_final || null,
             observacao: `Lançamento gerado na aprovação de pagamento da OC ${oc.numero_pedido}.${data.pagamento_observacoes ? ' ' + data.pagamento_observacoes : ''}`,
           };
@@ -930,7 +982,7 @@ export const comprasService = {
   /**
    * Atualiza apenas campos de anexo e pagamento de uma OC (qualquer status)
    * @param {string} ocId
-   * @param {Object} dados - { forma_pagamento_oc?, anexo_fornecedor?, observacoes_aprovacao?, anexos_aprovacao? }
+   * @param {Object} dados - { forma_pagamento_oc?, anexo_fornecedor?, observacoes_aprovacao?, anexos_aprovacao?, anexos_financeiro? }
    * @returns {Promise<Object>}
    */
   async updateOcPaymentFields(ocId, dados) {
@@ -947,6 +999,7 @@ export const comprasService = {
       if (dados.anexo_fornecedor !== undefined) updatePayload.anexo_fornecedor = dados.anexo_fornecedor;
       if (dados.observacoes_aprovacao !== undefined) updatePayload.observacoes_aprovacao = dados.observacoes_aprovacao;
       if (dados.anexos_aprovacao !== undefined) updatePayload.anexos_aprovacao = dados.anexos_aprovacao;
+      if (dados.anexos_financeiro !== undefined) updatePayload.anexos_financeiro = dados.anexos_financeiro;
 
       return await base44.entities.ComprasOrden.update(ocId, updatePayload);
     } catch (error) {

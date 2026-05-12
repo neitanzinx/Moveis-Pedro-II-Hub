@@ -568,7 +568,7 @@ export default function Clientes() {
                     .select('id')
                     .in('venda_id', vendaIds)
                     .neq('status', 'Entregue')
-                    .neq('status', 'Cancelada')
+                    .not('status', 'ilike', 'cancelad%')
                     .neq('status', 'Retirado');
 
                   if (entregasPorVenda) entregasParaAtualizar.push(...entregasPorVenda.map(e => e.id));
@@ -581,7 +581,7 @@ export default function Clientes() {
                     .select('id')
                     .eq('cliente_nome', cleanData.nome_completo)
                     .neq('status', 'Entregue')
-                    .neq('status', 'Cancelada')
+                    .not('status', 'ilike', 'cancelad%')
                     .neq('status', 'Retirado');
 
                   if (entregasPorNome) entregasParaAtualizar.push(...entregasPorNome.map(e => e.id));

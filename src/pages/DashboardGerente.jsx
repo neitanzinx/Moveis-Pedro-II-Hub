@@ -20,6 +20,7 @@ import ProdutoModal from "@/components/produtos/ProdutoModal";
 import AcoesVendedoresWidget from "@/components/dashboard/AcoesVendedoresWidget";
 import { toast } from "sonner";
 import { formatarMoeda } from "@/utils/formatters";
+import { isVendaCancelada } from "@/utils/vendaStatus";
 import {
     DollarSign,
     ShoppingCart,
@@ -414,7 +415,7 @@ export default function DashboardGerente() {
 
         return vendas.filter(v => {
             // Filtro de status
-            if (v.status === 'Cancelada') return false;
+            if (isVendaCancelada(v)) return false;
 
             // Filtro de loja
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
@@ -446,7 +447,7 @@ export default function DashboardGerente() {
         const hojeIso = new Date().toLocaleDateString('en-CA');
 
         return vendas.filter(v => {
-            if (v.status === 'Cancelada') return false;
+            if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
             const dataVendaStr = v.data_venda.split('T')[0];
@@ -458,7 +459,7 @@ export default function DashboardGerente() {
     const vendasMes = useMemo(() => {
         const hoje = new Date();
         return vendas.filter(v => {
-            if (v.status === 'Cancelada') return false;
+            if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
             const d = new Date(v.data_venda);
@@ -509,7 +510,7 @@ export default function DashboardGerente() {
         semanaPassada.setHours(0, 0, 0, 0);
 
         const vendasSemanaPassada = vendas.filter(v => {
-            if (v.status === 'Cancelada') return false;
+            if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
             const d = new Date(v.data_venda);
@@ -541,7 +542,7 @@ export default function DashboardGerente() {
         const fimMesAnoPassado = new Date(hoje.getFullYear() - 1, hoje.getMonth() + 1, 0);
 
         const vendasAnoPassado = vendas.filter(v => {
-            if (v.status === 'Cancelada') return false;
+            if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
             const d = new Date(v.data_venda);
@@ -578,7 +579,7 @@ export default function DashboardGerente() {
         const fimMesAnterior = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
 
         const vendasMesAnterior = vendas.filter(v => {
-            if (v.status === 'Cancelada') return false;
+            if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
             const d = new Date(v.data_venda);
@@ -731,7 +732,7 @@ export default function DashboardGerente() {
 
         // Mapear última venda e total de vendas de cada produto
         vendas.forEach(v => {
-            if (v.status === 'Cancelada') return;
+            if (isVendaCancelada(v)) return;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return;
             if (v.itens && Array.isArray(v.itens)) {
                 v.itens.forEach(item => {
@@ -806,7 +807,7 @@ export default function DashboardGerente() {
         const pendentes = entregasFiltradas.filter(e => e.status === 'Pendente' || e.status === 'Agendada');
         const emRota = entregasFiltradas.filter(e => e.status === 'Em Rota' || e.status === 'Em Transito');
         const atrasadas = entregasFiltradas.filter(e => {
-            if (e.status === 'Entregue' || e.status === 'Cancelada') return false;
+            if (e.status === 'Entregue' || isVendaCancelada(e?.status)) return false;
             if (!e.data_agendada) return false;
 
             // Comparação segura de strings YYYY-MM-DD
@@ -826,7 +827,7 @@ export default function DashboardGerente() {
                 const vendaAssociada = vendas.find(v => v.id === e.venda_id);
                 if (vendaAssociada?.loja !== lojaAtiva) return false;
             }
-            return !['Entregue', 'Cancelada'].includes(e.status);
+            return e.status !== 'Entregue' && !isVendaCancelada(e?.status);
         });
 
         // Montagens pendentes
@@ -835,19 +836,19 @@ export default function DashboardGerente() {
                 const vendaAssociada = vendas.find(v => v.id === m.venda_id);
                 if (vendaAssociada?.loja !== lojaAtiva) return false;
             }
-            return m.status !== 'Concluída' && m.status !== 'Cancelada';
+            return m.status !== 'Concluída' && !isVendaCancelada(m?.status);
         });
 
         // Pagamentos em aberto
         const pagamentosAbertos = vendas.filter(v => {
-            if (v.status === 'Cancelada') return false;
+            if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             return (v.valor_restante || 0) > 0;
         });
 
         // Triagem pendente
         const triagemPendente = vendas.filter(v => {
-            if (v.status === 'Cancelada') return false;
+            if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             return v.triagem_realizada === false;
         });
@@ -867,7 +868,7 @@ export default function DashboardGerente() {
         const termo = buscaPedido.toLowerCase().trim();
 
         return vendas.filter(v => {
-            if (v.status === 'Cancelada') return false;
+            if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
 
             // Buscar por número do pedido, cliente ou vendedor
@@ -912,7 +913,7 @@ export default function DashboardGerente() {
         const fimMesAnterior = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
 
         const vendasMesAnterior = vendas.filter(v => {
-            if (v.status === 'Cancelada') return false;
+            if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
             const d = new Date(v.data_venda);
@@ -1113,7 +1114,7 @@ export default function DashboardGerente() {
 
         // Preencher com vendas (filtrando por loja e status)
         vendas.forEach(v => {
-            if (v.status === 'Cancelada') return;
+            if (isVendaCancelada(v)) return;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return;
             if (!v.data_venda) return;
 
@@ -1169,14 +1170,14 @@ export default function DashboardGerente() {
 
             // Vendas do dia específico este mês
             const vendasDiaAtual = vendas.filter(v =>
-                v.status !== 'Cancelada' &&
+                !isVendaCancelada(v) &&
                 (lojaAtiva === 'todas' || v.loja === lojaAtiva) &&
                 v.data_venda?.startsWith(`${mesAtualStr}-${diaStr}`)
             );
 
             // Vendas do mesmo dia no mês anterior
             const vendasDiaAnterior = vendas.filter(v =>
-                v.status !== 'Cancelada' &&
+                !isVendaCancelada(v) &&
                 (lojaAtiva === 'todas' || v.loja === lojaAtiva) &&
                 v.data_venda?.startsWith(`${mesAnteriorStr}-${diaStr}`)
             );
@@ -1214,13 +1215,13 @@ export default function DashboardGerente() {
             const mesStr = String(index + 1).padStart(2, '0');
 
             const vendasEsteAno = vendas.filter(v =>
-                v.status !== 'Cancelada' &&
+                !isVendaCancelada(v) &&
                 (lojaAtiva === 'todas' || v.loja === lojaAtiva) &&
                 v.data_venda?.startsWith(`${anoAtual}-${mesStr}`)
             );
 
             const vendasAnoPassado = vendas.filter(v =>
-                v.status !== 'Cancelada' &&
+                !isVendaCancelada(v) &&
                 (lojaAtiva === 'todas' || v.loja === lojaAtiva) &&
                 v.data_venda?.startsWith(`${anoPassado}-${mesStr}`)
             );

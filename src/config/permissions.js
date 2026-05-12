@@ -31,7 +31,7 @@ export const ROLE_RULES = {
       'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'manage_produtos', 'view_catalogo',
       'view_montagem', 'view_marketing',
-      'view_compras', 'create_oc', 'manage_compras', 'approve_oc', 'view_fornecedores',
+      'view_compras', 'create_oc', 'manage_compras', 'manage_cost_prices', 'approve_oc', 'view_fornecedores',
       'solicitar_nfe', 'aprovar_nfe', 'emitir_nfe', 'cancelar_nfe', 'corrigir_nfe', 'view_nfe',
       'solicitar_cancelamento_nfe', 'aprovar_cancelamento_nfe',
       'solicitar_cce_nfe', 'aprovar_cce_nfe',
@@ -47,7 +47,7 @@ export const ROLE_RULES = {
       'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'manage_produtos', 'view_catalogo',
       'view_montagem', 'view_marketing',
-      'view_compras', 'create_oc', 'manage_compras', 'send_oc', 'receive_oc', 'view_fornecedores',
+      'view_compras', 'create_oc', 'manage_compras', 'manage_cost_prices', 'send_oc', 'receive_oc', 'view_fornecedores',
       'manage_bulk_price_adjustment',
       'solicitar_nfe', 'aprovar_nfe', 'emitir_nfe', 'cancelar_nfe', 'corrigir_nfe', 'view_nfe',
       'solicitar_cancelamento_nfe', 'aprovar_cancelamento_nfe',
@@ -110,7 +110,7 @@ export const ROLE_RULES = {
   },
   'Comprador': {
     can: [
-      'view_compras', 'create_oc', 'manage_compras', 'send_oc',
+      'view_compras', 'create_oc', 'manage_compras', 'manage_cost_prices', 'send_oc',
       'view_produtos', 'manage_produtos', 'view_fornecedores'
     ],
     scope: SCOPES.ALL

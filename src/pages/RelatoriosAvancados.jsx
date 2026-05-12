@@ -28,6 +28,7 @@ import ProdutoModal from "@/components/produtos/ProdutoModal";
 import RelatorioMontadores from "@/components/relatorios/RelatorioMontadores";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { isVendaCancelada } from "@/utils/vendaStatus";
 
 const COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#f97316'];
 const GRADIENT_COLORS = {
@@ -435,7 +436,7 @@ export default function RelatoriosAvancados() {
     // Deduções (discounts + cancelled sales)
     const descontos = vendasFiltradas.reduce((sum, v) => sum + (v.desconto || 0) + (v.cupom_desconto || 0), 0);
     const vendasCanceladas = vendasFiltradas
-      .filter(v => v.status === 'Cancelada' || v.status === 'Cancelado')
+      .filter(v => isVendaCancelada(v))
       .reduce((sum, v) => sum + (v.valor_total || 0), 0);
     const deducoes = descontos + vendasCanceladas;
 
@@ -445,7 +446,7 @@ export default function RelatoriosAvancados() {
     // CMV (Cost of Goods Sold) - calculate from product costs in items
     let cmv = 0;
     vendasFiltradas.forEach(v => {
-      if (v.status !== 'Cancelada' && v.status !== 'Cancelado') {
+      if (!isVendaCancelada(v)) {
         v.itens?.forEach(item => {
           const produto = produtosMap[item.produto_id];
           const custoProduto = produto?.preco_custo || (item.preco_unitario * 0.6); // Fallback: 60% do preço venda
@@ -508,7 +509,7 @@ export default function RelatoriosAvancados() {
     // Aggregate all products from sales
     const produtosVendidos = {};
     vendasFiltradas.forEach(v => {
-      if (v.status !== 'Cancelada' && v.status !== 'Cancelado') {
+      if (!isVendaCancelada(v)) {
         v.itens?.forEach(item => {
           const id = item.produto_id || item.id;
           const produtoInfo = produtos.find(p => p.id === id);
@@ -589,7 +590,7 @@ export default function RelatoriosAvancados() {
 
     // Receivables (valor_restante from sales with prazo_entrega or delivery pending)
     const recebiveisTotal = vendas
-      .filter(v => v.status !== 'Cancelada' && v.status !== 'Cancelado')
+      .filter(v => !isVendaCancelada(v))
       .reduce((sum, v) => sum + (v.valor_restante || 0), 0);
 
     // Group receivables by expected date

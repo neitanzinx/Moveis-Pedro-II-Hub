@@ -207,12 +207,13 @@ export function AuthProvider({ children }) {
         });
       } catch (e) {
         console.error("Erro ao verificar auth de funcionário:", e);
-        if (isTimeoutError(e)) {
-          throw e;
-        }
         try {
           const parsedCachedUser = JSON.parse(cachedUser);
-          console.warn('[Auth] Falha na validação remota, mantendo cache local temporariamente.');
+          if (isTimeoutError(e)) {
+            console.warn('[Auth] Timeout ao validar sessão remota, mantendo cache local temporariamente.');
+          } else {
+            console.warn('[Auth] Falha na validação remota, mantendo cache local temporariamente.');
+          }
           return normalizeUserRoles(parsedCachedUser);
         } catch {
           localStorage.removeItem('employee_user');
