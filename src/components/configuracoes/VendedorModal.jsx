@@ -145,7 +145,7 @@ export default function VendedorModal({ isOpen, onClose, onSave, vendedor, isLoa
                 <Label htmlFor="data_admissao">Data de Admissão</Label>
                 <Input
                   id="data_admissao"
-                  type="date"
+                  type="date" lang="pt-BR"
                   value={formData.data_admissao}
                   onChange={(e) => setFormData({ ...formData, data_admissao: e.target.value })}
                 />

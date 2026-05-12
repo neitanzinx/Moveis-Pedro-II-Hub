@@ -726,7 +726,7 @@ export default function RelatorioComissoes() {
                 <Label htmlFor="dataPagamento">Data do Pagamento</Label>
                 <Input
                   id="dataPagamento"
-                  type="date"
+                  type="date" lang="pt-BR"
                   value={dataPagamento}
                   onChange={(e) => setDataPagamento(e.target.value)}
                 />

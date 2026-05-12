@@ -1329,7 +1329,7 @@ export default function Entregador() {
                     <div className="mb-4">
                         <label className="text-xs font-semibold text-gray-500 uppercase mb-2 block">Data</label>
                         <input
-                            type="date"
+                            type="date" lang="pt-BR"
                             value={dataSelecionada}
                             onChange={(e) => setDataSelecionada(e.target.value)}
                             className="w-full border rounded-lg px-3 py-2 text-sm"

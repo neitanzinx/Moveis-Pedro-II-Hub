@@ -407,7 +407,7 @@ function AvaliacaoFormModal({ avaliacao, colaboradores, onClose }) {
                         <div>
                             <Label>Data da Avaliação</Label>
                             <Input
-                                type="date"
+                                type="date" lang="pt-BR"
                                 value={formData.data_avaliacao}
                                 onChange={(e) => setFormData(prev => ({ ...prev, data_avaliacao: e.target.value }))}
                             />

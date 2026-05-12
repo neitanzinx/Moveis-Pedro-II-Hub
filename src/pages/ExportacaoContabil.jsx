@@ -288,7 +288,7 @@ export default function ExportacaoContabil() {
                                 <div>
                                     <Label>Data Início</Label>
                                     <Input
-                                        type="date"
+                                        type="date" lang="pt-BR"
                                         value={periodoInicio}
                                         onChange={(e) => setPeriodoInicio(e.target.value)}
                                     />
@@ -296,7 +296,7 @@ export default function ExportacaoContabil() {
                                 <div>
                                     <Label>Data Fim</Label>
                                     <Input
-                                        type="date"
+                                        type="date" lang="pt-BR"
                                         value={periodoFim}
                                         onChange={(e) => setPeriodoFim(e.target.value)}
                                     />

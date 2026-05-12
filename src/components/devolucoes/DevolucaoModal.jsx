@@ -337,7 +337,7 @@ export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, ven
                 <Label htmlFor="data_devolucao">Data *</Label>
                 <Input
                   id="data_devolucao"
-                  type="date"
+                  type="date" lang="pt-BR"
                   value={formData.data_devolucao}
                   onChange={(e) => setFormData({ ...formData, data_devolucao: e.target.value })}
                   required

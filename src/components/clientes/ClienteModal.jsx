@@ -563,7 +563,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
                   </Label>
                   <Input
                     id="data_nascimento"
-                    type="date"
+                    type="date" lang="pt-BR"
                     value={formData.data_nascimento || ""}
                     onChange={(e) => setFormData({ ...formData, data_nascimento: e.target.value })}
                     className="mt-1"

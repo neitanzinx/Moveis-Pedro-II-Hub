@@ -505,7 +505,7 @@ export default function EntregasPendentes({ entregas, vendas, clientes }) {
             <div className="space-y-2">
               <Label>Data Limite Sugerida/Final</Label>
               <Input
-                type="date"
+                type="date" lang="pt-BR"
                 value={novaDataLimite}
                 onChange={(e) => setNovaDataLimite(e.target.value)}
               />

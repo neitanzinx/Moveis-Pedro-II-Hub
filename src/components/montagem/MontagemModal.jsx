@@ -246,7 +246,7 @@ export default function MontagemModal({ isOpen, onClose, montagem, vendas, valor
                 <Label htmlFor="data">Data *</Label>
                 <Input
                   id="data"
-                  type="date"
+                  type="date" lang="pt-BR"
                   min={new Date().toISOString().split('T')[0]}
                   value={formData.data_montagem}
                   onChange={(e) => setFormData({ ...formData, data_montagem: e.target.value })}

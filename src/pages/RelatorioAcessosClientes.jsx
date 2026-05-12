@@ -219,7 +219,7 @@ export default function RelatorioAcessosClientes() {
                     <div className="flex items-center gap-1 text-sm">
                         <span className="text-muted-foreground">De</span>
                         <Input
-                            type="date" value={dateFrom}
+                            type="date" lang="pt-BR" value={dateFrom}
                             onChange={e => setDateFrom(e.target.value)}
                             className="h-8 w-36 text-sm"
                         />
@@ -227,7 +227,7 @@ export default function RelatorioAcessosClientes() {
                     <div className="flex items-center gap-1 text-sm">
                         <span className="text-muted-foreground">até</span>
                         <Input
-                            type="date" value={dateTo}
+                            type="date" lang="pt-BR" value={dateTo}
                             onChange={e => setDateTo(e.target.value)}
                             className="h-8 w-36 text-sm"
                         />

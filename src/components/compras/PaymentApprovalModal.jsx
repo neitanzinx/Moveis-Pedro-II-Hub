@@ -332,7 +332,7 @@ export default function PaymentApprovalModal({ isOpen, onClose, oc }) {
             <div>
               <Label>Data do Pagamento</Label>
               <Input
-                type="date"
+                type="date" lang="pt-BR"
                 value={formData.pagamento_data_pagamento}
                 onChange={(e) => setFormData(prev => ({ ...prev, pagamento_data_pagamento: e.target.value }))}
               />

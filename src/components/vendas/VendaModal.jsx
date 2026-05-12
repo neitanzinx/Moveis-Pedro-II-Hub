@@ -727,7 +727,7 @@ _Móveis Pedro II - ${vendaData.loja}_`;
                 <Label htmlFor="data_venda">Data da Venda *</Label>
                 <Input
                   id="data_venda"
-                  type="date"
+                  type="date" lang="pt-BR"
                   value={formData.data_venda}
                   onChange={(e) => setFormData({ ...formData, data_venda: e.target.value })}
                   required

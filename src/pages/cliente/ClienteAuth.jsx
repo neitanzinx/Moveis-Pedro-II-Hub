@@ -579,7 +579,7 @@ export default function ClienteAuth() {
                                                     <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
                                                     <Input
                                                         id="data_nascimento"
-                                                        type="date"
+                                                        type="date" lang="pt-BR"
                                                         className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
                                                         value={registerData.data_nascimento}
                                                         onChange={(e) => setRegisterData({ ...registerData, data_nascimento: e.target.value })}

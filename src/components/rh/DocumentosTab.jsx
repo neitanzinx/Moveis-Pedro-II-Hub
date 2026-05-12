@@ -456,7 +456,7 @@ function DocumentoUploadModal({ colaboradores, onClose }) {
                         <div>
                             <Label>Data do Documento</Label>
                             <Input
-                                type="date"
+                                type="date" lang="pt-BR"
                                 value={formData.data_documento}
                                 onChange={(e) => setFormData(prev => ({ ...prev, data_documento: e.target.value }))}
                             />

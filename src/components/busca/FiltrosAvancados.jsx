@@ -65,7 +65,7 @@ export default function FiltrosAvancados({ filtros, onChange }) {
             <div>
               <Label className="text-xs">Data Início</Label>
               <Input
-                type="date"
+                type="date" lang="pt-BR"
                 value={filtros.dataInicio}
                 onChange={(e) => onChange({ ...filtros, dataInicio: e.target.value })}
               />
@@ -74,7 +74,7 @@ export default function FiltrosAvancados({ filtros, onChange }) {
             <div>
               <Label className="text-xs">Data Fim</Label>
               <Input
-                type="date"
+                type="date" lang="pt-BR"
                 value={filtros.dataFim}
                 onChange={(e) => onChange({ ...filtros, dataFim: e.target.value })}
               />

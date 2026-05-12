@@ -224,7 +224,7 @@ export default function InventarioModal({ isOpen, onClose, onSave, produtos, isL
                 <Label htmlFor="data">Data *</Label>
                 <Input
                   id="data"
-                  type="date"
+                  type="date" lang="pt-BR"
                   value={formData.data_inventario}
                   onChange={(e) => setFormData({ ...formData, data_inventario: e.target.value })}
                   required

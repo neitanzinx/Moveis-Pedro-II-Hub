@@ -1310,7 +1310,7 @@ export default function Marketing() {
                                     </Label>
                                     <Input
                                         id="validade"
-                                        type="date"
+                                        type="date" lang="pt-BR"
                                         value={formData.validade}
                                         onChange={(e) => setFormData(prev => ({ ...prev, validade: e.target.value }))}
                                         className="mt-1"

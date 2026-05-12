@@ -1040,7 +1040,7 @@ export default function RelatoriosAvancados() {
               <div>
                 <Label className="text-xs text-gray-500">Data Início</Label>
                 <Input
-                  type="date"
+                  type="date" lang="pt-BR"
                   value={filtros.dataInicio}
                   onChange={(e) => setFiltros({ ...filtros, dataInicio: e.target.value })}
                   className="mt-1"
@@ -1049,7 +1049,7 @@ export default function RelatoriosAvancados() {
               <div>
                 <Label className="text-xs text-gray-500">Data Fim</Label>
                 <Input
-                  type="date"
+                  type="date" lang="pt-BR"
                   value={filtros.dataFim}
                   onChange={(e) => setFiltros({ ...filtros, dataFim: e.target.value })}
                   className="mt-1"

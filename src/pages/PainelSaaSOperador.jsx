@@ -135,13 +135,13 @@ export default function PainelSaaSOperador() {
 
         <div className="flex flex-wrap items-center gap-2">
           <Input
-            type="date"
+            type="date" lang="pt-BR"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
             className="h-9 w-36"
           />
           <Input
-            type="date"
+            type="date" lang="pt-BR"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
             className="h-9 w-36"

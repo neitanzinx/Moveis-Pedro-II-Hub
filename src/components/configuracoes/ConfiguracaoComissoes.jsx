@@ -255,7 +255,7 @@ export default function ConfiguracaoComissoes() {
                       <Label htmlFor="dataRecalculoRetroativo" className="text-xs text-amber-700">Data de início do recálculo</Label>
                       <Input
                         id="dataRecalculoRetroativo"
-                        type="date"
+                        type="date" lang="pt-BR"
                         className="mt-1"
                         value={dataRecalculoRetroativo}
                         onChange={(e) => setDataRecalculoRetroativo(e.target.value)}

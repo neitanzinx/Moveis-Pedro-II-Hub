@@ -684,20 +684,20 @@ export default function AjustePrecoModal({ isOpen, onClose, produtos = [] }) {
 
                         <div>
                             <Label className="text-xs text-gray-600">Cadastro (de)</Label>
-                            <Input type="date" value={criteria.createdFrom} onChange={(e) => setCriteria((prev) => ({ ...prev, createdFrom: e.target.value }))} />
+                            <Input type="date" lang="pt-BR" value={criteria.createdFrom} onChange={(e) => setCriteria((prev) => ({ ...prev, createdFrom: e.target.value }))} />
                         </div>
                         <div>
                             <Label className="text-xs text-gray-600">Cadastro (até)</Label>
-                            <Input type="date" value={criteria.createdTo} onChange={(e) => setCriteria((prev) => ({ ...prev, createdTo: e.target.value }))} />
+                            <Input type="date" lang="pt-BR" value={criteria.createdTo} onChange={(e) => setCriteria((prev) => ({ ...prev, createdTo: e.target.value }))} />
                         </div>
 
                         <div>
                             <Label className="text-xs text-gray-600">Atualização (de)</Label>
-                            <Input type="date" value={criteria.updatedFrom} onChange={(e) => setCriteria((prev) => ({ ...prev, updatedFrom: e.target.value }))} />
+                            <Input type="date" lang="pt-BR" value={criteria.updatedFrom} onChange={(e) => setCriteria((prev) => ({ ...prev, updatedFrom: e.target.value }))} />
                         </div>
                         <div>
                             <Label className="text-xs text-gray-600">Atualização (até)</Label>
-                            <Input type="date" value={criteria.updatedTo} onChange={(e) => setCriteria((prev) => ({ ...prev, updatedTo: e.target.value }))} />
+                            <Input type="date" lang="pt-BR" value={criteria.updatedTo} onChange={(e) => setCriteria((prev) => ({ ...prev, updatedTo: e.target.value }))} />
                         </div>
                     </div>
 

@@ -1947,7 +1947,7 @@ export default function PDV() {
                   <div>
                     <Label className="text-xs mb-1.5 block font-medium">Data da Venda</Label>
                     <input
-                      type="date"
+                      type="date" lang="pt-BR"
                       className="w-full h-10 text-sm border rounded-lg px-3 bg-white dark:bg-neutral-800 border-gray-200 dark:border-neutral-700"
                       value={configVenda.data}
                       onChange={e => setConfigVenda({ ...configVenda, data: e.target.value })}

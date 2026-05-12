@@ -887,7 +887,7 @@ export default function OcModal({
                   <Label htmlFor="data_previsao">Data Previsão Entrega</Label>
                   <Input
                     id="data_previsao"
-                    type="date"
+                    type="date" lang="pt-BR"
                     value={formData.data_previsao_entrega}
                     onChange={(e) => setFormData(prev => ({
                       ...prev,
@@ -923,7 +923,7 @@ export default function OcModal({
                   <Label htmlFor="data_faturamento">Data do Faturamento</Label>
                   <Input
                     id="data_faturamento"
-                    type="date"
+                    type="date" lang="pt-BR"
                     value={formData.data_faturamento}
                     onChange={(e) => setFormData(prev => ({
                       ...prev,

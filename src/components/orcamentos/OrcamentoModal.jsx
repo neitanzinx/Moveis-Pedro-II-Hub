@@ -360,7 +360,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                 <Label htmlFor="data_orcamento">Data *</Label>
                 <Input
                   id="data_orcamento"
-                  type="date"
+                  type="date" lang="pt-BR"
                   value={formData.data_orcamento}
                   onChange={(e) => setFormData({ ...formData, data_orcamento: e.target.value })}
                   required
@@ -370,7 +370,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                 <Label htmlFor="validade">Válido até *</Label>
                 <Input
                   id="validade"
-                  type="date"
+                  type="date" lang="pt-BR"
                   value={formData.validade}
                   onChange={(e) => setFormData({ ...formData, validade: e.target.value })}
                   required

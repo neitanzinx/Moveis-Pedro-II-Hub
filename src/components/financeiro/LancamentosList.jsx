@@ -89,6 +89,8 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
   const paidDeclarationByLancamento = useMemo(() => {
     const map = {};
 
+    const toKey = (value) => String(value ?? "").trim();
+
     (paidAuditLogs || []).forEach((log) => {
       const action = log.acao || log.action;
       const tabela = log.tabela || log.table_name;
@@ -96,14 +98,15 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
       if (tabela && tabela !== 'lancamentos_financeiros') return;
 
       const recordId = log?.detalhes?.record_id || log.record_id || log.entity_id;
-      if (!recordId) return;
+      const recordKey = toKey(recordId);
+      if (!recordKey) return;
 
       const timestamp = log.created_at || log.timestamp;
       const ts = timestamp ? new Date(timestamp).getTime() : 0;
-      const current = map[recordId];
+      const current = map[recordKey];
 
       if (!current || ts > current._ts) {
-        map[recordId] = {
+        map[recordKey] = {
           nome: log.usuario || log.user_name || 'Usuário desconhecido',
           em: timestamp,
           _ts: ts,
@@ -113,6 +116,12 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
 
     return map;
   }, [paidAuditLogs]);
+
+  const selectedPaidDeclaration = useMemo(() => {
+    const key = String(selectedLancamento?.id ?? "").trim();
+    if (!key) return null;
+    return paidDeclarationByLancamento[key] || null;
+  }, [selectedLancamento, paidDeclarationByLancamento]);
 
   const handleStatusChange = async (id, newStatus) => {
     const lanc = lancamentos.find((item) => item.id === id);
@@ -434,9 +443,9 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{lanc.descricao}</p>
                             {lanc.observacao && <p className="text-[10px] text-gray-400 truncate">{lanc.observacao}</p>}
-                            {lanc.status === 'Pago' && paidDeclarationByLancamento[lanc.id] && (
+                            {lanc.status === 'Pago' && paidDeclarationByLancamento[String(lanc.id)] && (
                               <p className="text-[10px] text-emerald-700 dark:text-emerald-400 truncate">
-                                Declarado como pago por {paidDeclarationByLancamento[lanc.id].nome} as {formatDateTime(paidDeclarationByLancamento[lanc.id].em)}
+                                Declarado como pago por {paidDeclarationByLancamento[String(lanc.id)].nome} as {formatDateTime(paidDeclarationByLancamento[String(lanc.id)].em)}
                               </p>
                             )}
                           </div>
@@ -686,7 +695,7 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
                   <Label>Data do lançamento</Label>
                   {isEditing ? (
                     <Input
-                      type="date"
+                      type="date" lang="pt-BR"
                       value={detalhesForm.data_lancamento || ""}
                       onChange={(e) => setDetalhesForm((prev) => ({ ...prev, data_lancamento: e.target.value }))}
                     />
@@ -699,7 +708,7 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
                   <Label>Data de vencimento</Label>
                   {isEditing ? (
                     <Input
-                      type="date"
+                      type="date" lang="pt-BR"
                       value={detalhesForm.data_vencimento || ""}
                       onChange={(e) => setDetalhesForm((prev) => ({ ...prev, data_vencimento: e.target.value }))}
                     />
@@ -713,7 +722,7 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
                 <Label>Data de pagamento real</Label>
                 {isEditing ? (
                   <Input
-                    type="date"
+                    type="date" lang="pt-BR"
                     value={detalhesForm.data_lancamento_real || ""}
                     onChange={(e) => setDetalhesForm((prev) => ({ ...prev, data_lancamento_real: e.target.value }))}
                   />
@@ -879,6 +888,8 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
               <div className="grid md:grid-cols-2 gap-4 text-xs text-gray-500">
                 <p><strong>ID:</strong> {selectedLancamento.id}</p>
                 <p><strong>Criado em:</strong> {formatDate(selectedLancamento.created_at)}</p>
+                <p><strong>Pago por:</strong> {selectedPaidDeclaration?.nome || '-'}</p>
+                <p><strong>Pago em:</strong> {selectedPaidDeclaration?.em ? formatDateTime(selectedPaidDeclaration.em) : '-'}</p>
                 <p><strong>Pedido:</strong> {selectedLancamento.numero_pedido || '-'}</p>
                 <p><strong>Venda vinculada:</strong> {selectedLancamento.venda_id || '-'}</p>
               </div>

@@ -147,7 +147,7 @@ export default function CriarLancamentoFromOcModal({ oc, open, onClose, categori
           </div>
           <div>
             <label className="block text-xs font-medium">Data de Vencimento</label>
-            <Input type="date" value={form.data_vencimento} onChange={e => setForm(f => ({ ...f, data_vencimento: e.target.value }))} />
+            <Input type="date" lang="pt-BR" value={form.data_vencimento} onChange={e => setForm(f => ({ ...f, data_vencimento: e.target.value }))} />
           </div>
           <div>
             <label className="block text-xs font-medium">Forma de Pagamento</label>

@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Users, ShoppingCart, TrendingUp } from "lucide-react";
+import { Search, Users, ShoppingCart, TrendingUp, CheckCircle2 } from "lucide-react";
 import { filtrarFolhasPorMes, normalizeTipo } from "@/services/financeiroAggregation";
 
 const fmt = (v) =>
@@ -448,6 +448,180 @@ function DespesasTab({ lancamentos = [], isLoading }) {
   );
 }
 
+function PagasTab({
+  folhas = [],
+  comissoes = [],
+  contasPagarCompras = [],
+  lancamentos = [],
+  isLoading = false,
+}) {
+  const [busca, setBusca] = useState("");
+
+  const toStatus = (v) => String(v || "").trim().toLowerCase();
+  const isPago = (status) => ["pago", "paga", "quitado", "liquidado"].includes(toStatus(status));
+
+  const contasPagas = useMemo(() => {
+    const contas = [];
+
+    folhas
+      .filter((f) => isPago(f.status))
+      .forEach((f) => {
+        contas.push({
+          id: `folha-${f.id}`,
+          origem: "Folha",
+          descricao: f.colaborador_nome || "Folha de pagamento",
+          categoria: "Folha de Pagamento",
+          forma: "—",
+          valor: Number(f.salario_liquido || 0),
+          data: f.data_pagamento || f.updated_at || f.created_at || null,
+          status: f.status || "Pago",
+        });
+      });
+
+    comissoes
+      .filter((c) => isPago(c.status))
+      .forEach((c) => {
+        contas.push({
+          id: `comissao-${c.id}`,
+          origem: "Comissão",
+          descricao: c.colaborador_nome || "Comissão de vendas",
+          categoria: "Comissões",
+          forma: c.forma_pagamento || "—",
+          valor: Number(c.valor_comissao || 0),
+          data: c.data_pagamento || c.data_calculo || c.updated_at || c.created_at || null,
+          status: c.status || "Paga",
+        });
+      });
+
+    contasPagarCompras
+      .filter((c) => isPago(c.status))
+      .forEach((c) => {
+        contas.push({
+          id: `compra-${c.id}`,
+          origem: "Compras",
+          descricao: c.descricao || c.numero_pedido || "Conta de compra",
+          categoria: "Contas de Compras",
+          forma: c.forma_pagamento || "—",
+          valor: Number(c.valor_total || c.valor || 0),
+          data: c.data_pagamento || c.updated_at || c.created_at || null,
+          status: c.status || "Pago",
+        });
+      });
+
+    lancamentos
+      .filter((l) => normalizeTipo(l.tipo) === "saida" && (l.pago === true || isPago(l.status)))
+      .forEach((l) => {
+        contas.push({
+          id: `lancamento-${l.id}`,
+          origem: "Despesas",
+          descricao: l.descricao || "Lançamento financeiro",
+          categoria: l.categoria_nome || "Sem categoria",
+          forma: l.forma_pagamento || "—",
+          valor: Math.abs(Number(l.valor || 0)),
+          data: l.data_lancamento_real || l.data_lancamento || l.updated_at || l.created_at || null,
+          status: l.status || "Pago",
+        });
+      });
+
+    return contas.sort((a, b) => {
+      const da = a.data ? new Date(a.data).getTime() : 0;
+      const db = b.data ? new Date(b.data).getTime() : 0;
+      return db - da;
+    });
+  }, [folhas, comissoes, contasPagarCompras, lancamentos]);
+
+  const filtradas = useMemo(() => {
+    if (!busca) return contasPagas;
+    const termo = busca.toLowerCase();
+    return contasPagas.filter((conta) =>
+      conta.descricao?.toLowerCase().includes(termo) ||
+      conta.categoria?.toLowerCase().includes(termo) ||
+      conta.forma?.toLowerCase().includes(termo) ||
+      conta.origem?.toLowerCase().includes(termo)
+    );
+  }, [contasPagas, busca]);
+
+  const totalPago = contasPagas.reduce((sum, conta) => sum + Number(conta.valor || 0), 0);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-32">
+        <div className="animate-spin rounded-full h-7 w-7 border-b-2 border-green-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-0 shadow-md">
+        <CardContent className="pt-4 pb-3">
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Total Pago</p>
+          <p className="text-xl font-bold text-green-600">R$ {fmt(totalPago)}</p>
+          <p className="text-xs text-gray-400">{contasPagas.length} conta(s) paga(s)</p>
+        </CardContent>
+      </Card>
+
+      <div className="relative">
+        <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+        <Input
+          placeholder="Pesquisar conta paga por descrição, categoria, origem ou forma..."
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          className="pl-9 text-sm"
+        />
+      </div>
+
+      {filtradas.length === 0 ? (
+        <div className="text-center py-12 text-gray-400">
+          <CheckCircle2 className="w-10 h-10 mx-auto mb-2 opacity-30" />
+          <p>{contasPagas.length === 0 ? "Nenhuma conta paga encontrada." : "Nenhuma conta paga corresponde à busca."}</p>
+        </div>
+      ) : (
+        <Card className="border-0 shadow-md">
+          <CardContent className="pt-4">
+            <Table>
+              <TableHeader>
+                <TableRow className="text-xs text-gray-400 uppercase">
+                  <TableHead>Origem</TableHead>
+                  <TableHead>Descrição</TableHead>
+                  <TableHead>Categoria</TableHead>
+                  <TableHead>Forma</TableHead>
+                  <TableHead>Data</TableHead>
+                  <TableHead>Valor</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtradas.map((conta) => (
+                  <TableRow key={conta.id} className="text-sm hover:bg-gray-50 dark:hover:bg-neutral-800">
+                    <TableCell>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
+                        {conta.origem}
+                      </span>
+                    </TableCell>
+                    <TableCell className="font-medium">{conta.descricao || "—"}</TableCell>
+                    <TableCell>{conta.categoria || "—"}</TableCell>
+                    <TableCell>{conta.forma || "—"}</TableCell>
+                    <TableCell className="text-gray-500 text-xs">
+                      {conta.data ? new Date(conta.data).toLocaleDateString("pt-BR") : "—"}
+                    </TableCell>
+                    <TableCell className="font-semibold text-green-600">R$ {fmt(conta.valor)}</TableCell>
+                    <TableCell>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
+                        {conta.status}
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ─── Componente principal ────────────────────────────────────────────────────
 export default function ContasPagar({
   folhas = [],
@@ -489,6 +663,7 @@ export default function ContasPagar({
   }, [lancamentos]);
 
   const grandTotal = totalFolhaMes + totalComissoesMes + totalComprasPendentes + totalDespesasPendentes;
+  const isLoadingPagas = isLoadingFolha || isLoadingComissoes || isLoadingCompras || isLoadingLancamentos;
 
   return (
     <div className="space-y-4">
@@ -546,6 +721,10 @@ export default function ContasPagar({
             <TrendingUp className="w-4 h-4 mr-1.5" />
             Despesas
           </TabsTrigger>
+          <TabsTrigger value="pagas" className="data-[state=active]:bg-green-50 data-[state=active]:text-green-700 px-4 py-2 rounded-md text-sm">
+            <CheckCircle2 className="w-4 h-4 mr-1.5" />
+            Pagas
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="folha">
@@ -559,6 +738,15 @@ export default function ContasPagar({
         </TabsContent>
         <TabsContent value="despesas">
           <DespesasTab lancamentos={lancamentos} isLoading={isLoadingLancamentos} />
+        </TabsContent>
+        <TabsContent value="pagas">
+          <PagasTab
+            folhas={folhas}
+            comissoes={comissoes}
+            contasPagarCompras={contasPagarCompras}
+            lancamentos={lancamentos}
+            isLoading={isLoadingPagas}
+          />
         </TabsContent>
       </Tabs>
     </div>

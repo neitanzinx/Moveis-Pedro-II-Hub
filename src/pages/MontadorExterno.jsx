@@ -1326,7 +1326,7 @@ export default function MontadorExterno() {
                             <div>
                                 <Label className="text-gray-700">Data da Montagem</Label>
                                 <Input
-                                    type="date"
+                                    type="date" lang="pt-BR"
                                     value={agendamentoData.data}
                                     onChange={e => setAgendamentoData({ ...agendamentoData, data: e.target.value })}
                                     min={new Date().toISOString().split('T')[0]}
@@ -1393,7 +1393,7 @@ export default function MontadorExterno() {
                                 <div>
                                     <Label className="text-sm font-medium">Nova Data</Label>
                                     <Input
-                                        type="date"
+                                        type="date" lang="pt-BR"
                                         value={reagendarData.data}
                                         onChange={e => setReagendarData({ ...reagendarData, data: e.target.value })}
                                         className="h-12 rounded-xl mt-1"

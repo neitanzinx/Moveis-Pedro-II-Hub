@@ -514,7 +514,7 @@ function FeriasModal({ ferias, colaboradores, onClose }) {
                         <div>
                             <Label>Data Início *</Label>
                             <Input
-                                type="date"
+                                type="date" lang="pt-BR"
                                 value={formData.data_inicio}
                                 onChange={(e) => setFormData(prev => ({ ...prev, data_inicio: e.target.value }))}
                                 onBlur={calcularDias}
@@ -523,7 +523,7 @@ function FeriasModal({ ferias, colaboradores, onClose }) {
                         <div>
                             <Label>Data Fim</Label>
                             <Input
-                                type="date"
+                                type="date" lang="pt-BR"
                                 value={formData.data_fim}
                                 onChange={(e) => setFormData(prev => ({ ...prev, data_fim: e.target.value }))}
                                 onBlur={calcularDias}
@@ -683,7 +683,7 @@ function LicencaModal({ licenca, colaboradores, onClose }) {
                         <div>
                             <Label>Data Início *</Label>
                             <Input
-                                type="date"
+                                type="date" lang="pt-BR"
                                 value={formData.data_inicio}
                                 onChange={(e) => setFormData(prev => ({ ...prev, data_inicio: e.target.value }))}
                                 onBlur={calcularDias}
@@ -692,7 +692,7 @@ function LicencaModal({ licenca, colaboradores, onClose }) {
                         <div>
                             <Label>Data Fim</Label>
                             <Input
-                                type="date"
+                                type="date" lang="pt-BR"
                                 value={formData.data_fim}
                                 onChange={(e) => setFormData(prev => ({ ...prev, data_fim: e.target.value }))}
                                 onBlur={calcularDias}

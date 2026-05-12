@@ -257,11 +257,11 @@ export default function RelatorioMontadores() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <Label className="text-xs text-gray-500">Data inicio</Label>
-              <Input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="mt-1" />
+              <Input type="date" lang="pt-BR" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="mt-1" />
             </div>
             <div>
               <Label className="text-xs text-gray-500">Data fim</Label>
-              <Input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="mt-1" />
+              <Input type="date" lang="pt-BR" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="mt-1" />
             </div>
             <div>
               <Label className="text-xs text-gray-500">Montador</Label>

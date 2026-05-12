@@ -339,7 +339,7 @@ export default function AssistenciaTecnicaModal({
                             <div>
                                 <Label>Data de Abertura *</Label>
                                 <Input
-                                    type="date"
+                                    type="date" lang="pt-BR"
                                     value={formData.data_abertura}
                                     onChange={(e) => setFormData({ ...formData, data_abertura: e.target.value })}
                                     required
@@ -596,7 +596,7 @@ export default function AssistenciaTecnicaModal({
                             <div>
                                 <Label>Data de Resolução</Label>
                                 <Input
-                                    type="date"
+                                    type="date" lang="pt-BR"
                                     value={formData.data_resolucao}
                                     onChange={(e) => setFormData({ ...formData, data_resolucao: e.target.value })}
                                 />

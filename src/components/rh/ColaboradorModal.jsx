@@ -354,7 +354,7 @@ export default function ColaboradorModal({
                             <div>
                                 <Label>Data de Nascimento</Label>
                                 <Input
-                                    type="date"
+                                    type="date" lang="pt-BR"
                                     value={formData.data_nascimento}
                                     onChange={(e) =>
                                         handleChange("data_nascimento", e.target.value)
@@ -578,7 +578,7 @@ export default function ColaboradorModal({
                             <div>
                                 <Label>Data de Admissão</Label>
                                 <Input
-                                    type="date"
+                                    type="date" lang="pt-BR"
                                     value={formData.data_admissao}
                                     onChange={(e) =>
                                         handleChange("data_admissao", e.target.value)
@@ -605,7 +605,7 @@ export default function ColaboradorModal({
                                     <div>
                                         <Label>Data de Demissão</Label>
                                         <Input
-                                            type="date"
+                                            type="date" lang="pt-BR"
                                             value={formData.data_demissao}
                                             onChange={(e) =>
                                                 handleChange(

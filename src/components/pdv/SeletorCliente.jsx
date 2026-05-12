@@ -388,7 +388,7 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                 <div>
                   <Label>Data de Nascimento</Label>
                   <Input
-                    type="date"
+                    type="date" lang="pt-BR"
                     value={novoCliente.data_nascimento}
                     onChange={e => setNovoCliente({ ...novoCliente, data_nascimento: e.target.value })}
                   />

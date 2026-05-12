@@ -148,7 +148,7 @@ export default function AgendarEntregaModal({ isOpen, onClose, entrega, entregas
               Data da Entrega
             </Label>
             <Input
-              type="date"
+              type="date" lang="pt-BR"
               value={formData.data_agendada}
               onChange={e => setFormData({ ...formData, data_agendada: e.target.value })}
               min={format(hoje, 'yyyy-MM-dd')}
