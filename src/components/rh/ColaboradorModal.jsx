@@ -51,9 +51,13 @@ const ESTADOS = [
     "SP", "SE", "TO",
 ];
 const TIPO_PAGAMENTO = ["Mensal", "Quinzenal", "Semanal"];
+const RECEBE_VALE_OPCOES = [
+    { value: "sim", label: "Sim" },
+    { value: "nao", label: "Não" },
+];
 const DIAS_PAGAMENTO = Array.from({ length: 31 }, (_, i) => i + 1);
 const INSALUBRIDADE_OPCOES = [
-    { value: "", label: "Não aplicável" },
+    { value: "nao_aplicavel", label: "Não aplicável" },
     { value: "minimo", label: "Grau Mínimo (10%)" },
     { value: "medio", label: "Grau Médio (20%)" },
     { value: "maximo", label: "Grau Máximo (40%)" },
@@ -120,6 +124,14 @@ export default function ColaboradorModal({
         numero_dependentes: colaborador?.numero_dependentes || 0,
         dia_pagamento: colaborador?.dia_pagamento || 5,
         tipo_pagamento: colaborador?.tipo_pagamento || "Mensal",
+        recebe_vale: typeof colaborador?.recebe_vale === "boolean"
+            ? colaborador.recebe_vale
+            : !!(
+                Number(colaborador?.vale_transporte) ||
+                Number(colaborador?.vale_alimentacao) ||
+                Number(colaborador?.vale_refeicao)
+            ),
+        dia_vale: colaborador?.dia_vale || 20,
         vale_transporte: colaborador?.vale_transporte || "",
         vale_alimentacao: colaborador?.vale_alimentacao || "",
         vale_refeicao: colaborador?.vale_refeicao || "",
@@ -128,6 +140,7 @@ export default function ColaboradorModal({
         bonus_mensal: colaborador?.bonus_mensal || "",
         outros_beneficios: colaborador?.outros_beneficios || "",
         descricao_outros_beneficios: colaborador?.descricao_outros_beneficios || "",
+        pensao_alimenticia: Number(colaborador?.pensao_alimenticia) || 0,
         // Dados bancários
         banco: colaborador?.banco || "",
         agencia: colaborador?.agencia || "",
@@ -488,7 +501,7 @@ export default function ColaboradorModal({
                                         <SelectValue placeholder="Selecione o cargo" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {CARGOS.map((c) => (
+                                        {CARGOS.filter((c) => c?.value).map((c) => (
                                             <SelectItem key={c.value} value={c.value}>
                                                 <div className="flex items-center gap-2">
                                                     {createElement(c.icon, {
@@ -514,7 +527,7 @@ export default function ColaboradorModal({
                                             <SelectValue placeholder="Selecione a loja" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {lojasReal.map((l) => (
+                                            {lojasReal.filter((l) => l?.nome).map((l) => (
                                                 <SelectItem key={l.id} value={l.nome}>
                                                     {l.nome}
                                                 </SelectItem>
@@ -624,9 +637,9 @@ export default function ColaboradorModal({
                                 <div>
                                     <Label>Insalubridade</Label>
                                     <Select
-                                        value={formData.insalubridade_grau}
+                                        value={formData.insalubridade_grau || "nao_aplicavel"}
                                         onValueChange={(v) =>
-                                            handleChange("insalubridade_grau", v)
+                                            handleChange("insalubridade_grau", v === "nao_aplicavel" ? "" : v)
                                         }
                                     >
                                         <SelectTrigger>
@@ -764,6 +777,48 @@ export default function ColaboradorModal({
                                     </SelectContent>
                                 </Select>
                             </div>
+                            <div>
+                                <Label>Recebe Vale</Label>
+                                <Select
+                                    value={formData.recebe_vale ? "sim" : "nao"}
+                                    onValueChange={(v) =>
+                                        handleChange("recebe_vale", v === "sim")
+                                    }
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {RECEBE_VALE_OPCOES.map((opt) => (
+                                            <SelectItem key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            {formData.recebe_vale && (
+                                <div>
+                                    <Label>Dia do Vale</Label>
+                                    <Select
+                                        value={String(formData.dia_vale || 20)}
+                                        onValueChange={(v) =>
+                                            handleChange("dia_vale", Number(v))
+                                        }
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Dia" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {DIAS_PAGAMENTO.map((d) => (
+                                                <SelectItem key={d} value={String(d)}>
+                                                    Dia {d}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
                         </div>
 
                         <div className="border-t pt-4" style={{ borderColor: "#E5E0D8" }}>
@@ -884,6 +939,48 @@ export default function ColaboradorModal({
                         </div>
 
                         <div className="border-t pt-4" style={{ borderColor: "#E5E0D8" }}>
+                            <SectionTitle>Tributário</SectionTitle>
+                            <div className="grid grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <Label>Pensão Alimenticia (R$)</Label>
+                                    <Input
+                                        type="number"
+                                        value={formData.pensao_alimenticia}
+                                        onChange={(e) =>
+                                            handleChange(
+                                                "pensao_alimenticia",
+                                                Number(e.target.value)
+                                            )
+                                        }
+                                        placeholder="0,00"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-3 text-sm">
+                                <div className="bg-red-50 rounded-lg p-3">
+                                    <p className="text-xs text-red-600">INSS (Desconto)</p>
+                                    <p className="font-bold text-red-700 mt-0.5">
+                                        {formatCurrency(totals.inss)}
+                                    </p>
+                                    <p className="text-xs text-gray-500 mt-1">{totals.inss_faixa}</p>
+                                </div>
+                                <div className="bg-yellow-50 rounded-lg p-3">
+                                    <p className="text-xs text-yellow-700">FGTS (Empresa)</p>
+                                    <p className="font-bold text-yellow-800 mt-0.5">
+                                        {formatCurrency(totals.fgts)}
+                                    </p>
+                                </div>
+                                <div className="bg-purple-50 rounded-lg p-3">
+                                    <p className="text-xs text-purple-600">IRRF (Desconto)</p>
+                                    <p className="font-bold text-purple-700 mt-0.5">
+                                        {formatCurrency(totals.irrf)}
+                                    </p>
+                                    <p className="text-xs text-gray-500 mt-1">{totals.irrf_faixa}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="border-t pt-4" style={{ borderColor: "#E5E0D8" }}>
                             <SectionTitle>Dados Bancários</SectionTitle>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -936,7 +1033,7 @@ export default function ColaboradorModal({
                                     className="font-semibold mb-3 text-sm"
                                     style={{ color: "#07593f" }}
                                 >
-                                    Resumo Mensal Estimado (CLT 2025)
+                                    Resumo Mensal Estimado
                                 </h3>
                                 <div className="grid grid-cols-3 gap-3 text-sm">
                                     <div className="bg-gray-50 rounded-lg p-3">

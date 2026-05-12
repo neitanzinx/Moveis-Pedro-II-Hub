@@ -195,13 +195,17 @@ export default function ColaboradorDetalhesModal({ colaborador, onClose, onEdit,
                     )}
 
                     {/* Benefícios */}
-                    {(colaborador.vale_transporte || colaborador.vale_alimentacao || colaborador.vale_refeicao || colaborador.plano_saude || colaborador.plano_odontologico || colaborador.bonus_mensal || colaborador.outros_beneficios || colaborador.adicional_noturno || colaborador.periculosidade || colaborador.insalubridade_grau) && (
+                    {(colaborador.recebe_vale !== undefined || colaborador.dia_vale || colaborador.vale_transporte || colaborador.vale_alimentacao || colaborador.vale_refeicao || colaborador.plano_saude || colaborador.plano_odontologico || colaborador.bonus_mensal || colaborador.outros_beneficios || colaborador.pensao_alimenticia || colaborador.adicional_noturno || colaborador.periculosidade || colaborador.insalubridade_grau) && (
                         <div>
                             <h3 className="font-semibold mb-3 flex items-center gap-2" style={{ color: '#07593f' }}>
                                 <DollarSign className="w-4 h-4" />
                                 Benefícios e Adicionais
                             </h3>
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 rounded-xl border" style={{ borderColor: '#E5E0D8' }}>
+                                <InfoItem icon={Calendar} label="Recebe Vale" value={colaborador.recebe_vale ? 'Sim' : 'Não'} />
+                                {colaborador.recebe_vale && (
+                                    <InfoItem icon={Calendar} label="Dia do Vale" value={colaborador.dia_vale ? `Todo dia ${colaborador.dia_vale}` : null} />
+                                )}
                                 <InfoItem icon={DollarSign} label="Vale Transporte" value={colaborador.vale_transporte ? `R$ ${Number(colaborador.vale_transporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
                                 <InfoItem icon={DollarSign} label="Vale Alimentação" value={colaborador.vale_alimentacao ? `R$ ${Number(colaborador.vale_alimentacao).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
                                 <InfoItem icon={DollarSign} label="Vale Refeição" value={colaborador.vale_refeicao ? `R$ ${Number(colaborador.vale_refeicao).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
@@ -209,6 +213,7 @@ export default function ColaboradorDetalhesModal({ colaborador, onClose, onEdit,
                                 <InfoItem icon={DollarSign} label="Plano Odontológico" value={colaborador.plano_odontologico ? `R$ ${Number(colaborador.plano_odontologico).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
                                 <InfoItem icon={DollarSign} label="Bônus Mensal" value={colaborador.bonus_mensal ? `R$ ${Number(colaborador.bonus_mensal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
                                 {colaborador.outros_beneficios && <InfoItem icon={DollarSign} label={colaborador.descricao_outros_beneficios || "Outros Benefícios"} value={`R$ ${Number(colaborador.outros_beneficios).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} />}
+                                <InfoItem icon={DollarSign} label="Pensão Alimentícia" value={colaborador.pensao_alimenticia ? `R$ ${Number(colaborador.pensao_alimenticia).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
                                 {colaborador.adicional_noturno && <InfoItem icon={Moon} label="Adicional Noturno" value="+20%" />}
                                 {colaborador.periculosidade && <InfoItem icon={Zap} label="Periculosidade" value="+30%" />}
                                 <InfoItem icon={ShieldAlert} label="Insalubridade" value={colaborador.insalubridade_grau ? { minimo: 'Grau Mínimo (10%)', medio: 'Grau Médio (20%)', maximo: 'Grau Máximo (40%)' }[colaborador.insalubridade_grau] : null} />

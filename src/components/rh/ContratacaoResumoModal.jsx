@@ -75,6 +75,10 @@ export default function ContratacaoResumoModal({ colaborador, onClose, onGenerat
 
     const diaPagamento = colaborador.dia_pagamento || 5;
     const tipoPagamento = colaborador.tipo_pagamento || 'Mensal';
+    const recebeVale = typeof colaborador.recebe_vale === 'boolean'
+        ? colaborador.recebe_vale
+        : !!(valeTransporte || valeAlimentacao || valeRefeicao);
+    const diaVale = colaborador.dia_vale || 20;
 
     const handlePrint = () => {
         window.print();
@@ -176,6 +180,9 @@ export default function ContratacaoResumoModal({ colaborador, onClose, onGenerat
                                 {resumo.irrf > 0 && (
                                     <DataRow label={`IRRF (${resumo.irrf_faixa})`} value={`- ${formatCurrency(resumo.irrf)}`} />
                                 )}
+                                {resumo.pensao_alimenticia > 0 && (
+                                    <DataRow label="Pensão Alimentícia" value={`- ${formatCurrency(resumo.pensao_alimenticia)}`} />
+                                )}
                                 {resumo.vale_transporte > 0 && (
                                     <DataRow label="Desc. VT (6% CLT)" value={`- ${formatCurrency(resumo.vale_transporte)}`} />
                                 )}
@@ -220,6 +227,12 @@ export default function ContratacaoResumoModal({ colaborador, onClose, onGenerat
                                 <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
                                     {tipoPagamento}
                                 </Badge>
+                            </div>
+                            <div className="mt-3 pt-3 border-t border-amber-200">
+                                <p className="text-sm text-gray-600">Recebe Vale</p>
+                                <p className="text-base font-semibold text-amber-700">
+                                    {recebeVale ? `Sim, todo dia ${diaVale}` : 'Não'}
+                                </p>
                             </div>
                         </CardContent>
                     </Card>

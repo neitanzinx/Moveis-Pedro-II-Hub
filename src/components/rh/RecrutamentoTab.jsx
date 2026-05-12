@@ -679,7 +679,7 @@ function CandidatoModal({ candidato, vagas, onClose }) {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="none">Nenhuma vaga específica</SelectItem>
-                                {vagas.map(v => (
+                                {vagas.filter(v => v?.id).map(v => (
                                     <SelectItem key={v.id} value={v.id}>{v.titulo}</SelectItem>
                                 ))}
                             </SelectContent>

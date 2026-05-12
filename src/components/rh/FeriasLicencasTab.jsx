@@ -503,7 +503,7 @@ function FeriasModal({ ferias, colaboradores, onClose }) {
                                 <SelectValue placeholder="Selecione o colaborador" />
                             </SelectTrigger>
                             <SelectContent>
-                                {colaboradores.map(c => (
+                                {colaboradores.filter(c => c?.id).map(c => (
                                     <SelectItem key={c.id} value={c.id}>{c.nome_completo}</SelectItem>
                                 ))}
                             </SelectContent>
@@ -658,7 +658,7 @@ function LicencaModal({ licenca, colaboradores, onClose }) {
                                 <SelectValue placeholder="Selecione o colaborador" />
                             </SelectTrigger>
                             <SelectContent>
-                                {colaboradores.map(c => (
+                                {colaboradores.filter(c => c?.id).map(c => (
                                     <SelectItem key={c.id} value={c.id}>{c.nome_completo}</SelectItem>
                                 ))}
                             </SelectContent>

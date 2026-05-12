@@ -298,10 +298,12 @@ export function calcularFolhaCompleta(colaborador, extras = {}) {
 
     // 3. DESCONTOS OBRIGATÓRIOS
     const inssResult = calcularINSS(salarioBruto);
+    const pensaoAlimenticia = Number(colaborador.pensao_alimenticia) || 0;
     const irrfResult = calcularIRRF(
         salarioBruto,
         inssResult.valor,
-        Number(colaborador.numero_dependentes) || 0
+        Number(colaborador.numero_dependentes) || 0,
+        pensaoAlimenticia
     );
     const descontoVT = calcularDescontoVT(salarioBase, Number(colaborador.vale_transporte) || 0);
     const outrosDescontos = Number(extras.outros_descontos) || 0;
@@ -313,7 +315,7 @@ export function calcularFolhaCompleta(colaborador, extras = {}) {
     const fgts = calcularFGTS(salarioBruto);
 
     // 6. SALÁRIO LÍQUIDO
-    const totalDescontos = inssResult.valor + irrfResult.valor + descontoVT + outrosDescontos;
+    const totalDescontos = inssResult.valor + irrfResult.valor + descontoVT + pensaoAlimenticia + outrosDescontos;
     const totalBeneficios = salarioFamilia;
     const salarioLiquido = salarioBruto - totalDescontos + totalBeneficios;
 
@@ -337,6 +339,7 @@ export function calcularFolhaCompleta(colaborador, extras = {}) {
         irrf_faixa: irrfResult.faixa,
         irrf_base_calculo: irrfResult.baseCalculo,
         vale_transporte: descontoVT,
+        pensao_alimenticia: pensaoAlimenticia,
         outros_descontos: outrosDescontos,
 
         // Benefícios
@@ -353,10 +356,11 @@ export function calcularFolhaCompleta(colaborador, extras = {}) {
 }
 
 /**
- * Gera um resumo estimado para preview (usada no ColaboradorModal e ContratacaoResumoModal)
+ * Gera um resumo EXATO e COMPLETO para preview e análise
+ * Retorna TODAS as informações necessárias: cálculos + dados do colaborador
  * 
- * @param {Object} colaborador - Dados do formulário do colaborador
- * @returns {Object} - Resumo com estimativas
+ * @param {Object} colaborador - Dados completos do formulário do colaborador
+ * @returns {Object} - Resumo exato com todas as informações necessárias
  */
 export function gerarResumoEstimado(colaborador) {
     const folha = calcularFolhaCompleta(colaborador);
@@ -373,9 +377,94 @@ export function gerarResumoEstimado(colaborador) {
     const totalBeneficiosEmpresa = valeTransporte + valeAlimentacao + valeRefeicao +
         planoSaude + planoOdontologico + bonusMensal + outrosBeneficios;
 
+    // TODOS os cálculos da folha
+    const salarioBrutoTotal = folha.salario_bruto + folha.adicional_noturno + folha.insalubridade + folha.periculosidade;
+    
+    // Total de descontos do colaborador (o que sai do seu bolso)
+    const descontoColaborador = folha.inss + folha.irrf + folha.vale_transporte + folha.pensao_alimenticia;
+    
+    // Custo total para empresa (salário + encargos + benefícios)
+    const custoBrutoEmpresa = folha.salario_bruto + folha.fgts;
+    const custoTotalEmpresa = custoBrutoEmpresa + totalBeneficiosEmpresa;
+
     return {
+        // ═════════════════════════════════════════════════════════════
+        // INFORMAÇÕES DO CONTRATO
+        // ═════════════════════════════════════════════════════════════
+        nome_completo: colaborador.nome_completo || '',
+        cpf: colaborador.cpf || '',
+        cargo: colaborador.cargo || '',
+        tipo_contrato: colaborador.tipo_contrato || 'CLT',
+        status: colaborador.status || 'Ativo',
+        data_admissao: colaborador.data_admissao || '',
+        carga_horaria: Number(colaborador.carga_horaria) || 44,
+        numero_dependentes: Number(colaborador.numero_dependentes) || 0,
+        
+        // ═════════════════════════════════════════════════════════════
+        // INFORMAÇÕES DE PAGAMENTO
+        // ═════════════════════════════════════════════════════════════
+        dia_pagamento: Number(colaborador.dia_pagamento) || 5,
+        tipo_pagamento: colaborador.tipo_pagamento || 'Mensal',
+        recebe_vale: !!colaborador.recebe_vale,
+        dia_vale: colaborador.recebe_vale ? (Number(colaborador.dia_vale) || 20) : null,
+
+        // ═════════════════════════════════════════════════════════════
+        // REMUNERAÇÃO BASE
+        // ═════════════════════════════════════════════════════════════
         ...folha,
+
+        // ═════════════════════════════════════════════════════════════
+        // BENEFÍCIOS DETALHADOS (empresa fornece/paga)
+        // ═════════════════════════════════════════════════════════════
+        vale_transporte_beneficio: valeTransporte,
+        vale_alimentacao_beneficio: valeAlimentacao,
+        vale_refeicao_beneficio: valeRefeicao,
+        plano_saude_beneficio: planoSaude,
+        plano_odontologico_beneficio: planoOdontologico,
+        bonus_mensal_beneficio: bonusMensal,
+        outros_beneficios_beneficio: outrosBeneficios,
+        descricao_outros_beneficios: colaborador.descricao_outros_beneficios || '',
         beneficios_empresa: totalBeneficiosEmpresa,
-        custo_total_empresa: folha.salario_bruto + folha.fgts + totalBeneficiosEmpresa,
+
+        // ═════════════════════════════════════════════════════════════
+        // ADICIONAIS E ESPECIFICIDADES
+        // ═════════════════════════════════════════════════════════════
+        adicional_noturno_ativo: !!colaborador.adicional_noturno,
+        insalubridade_grau: colaborador.insalubridade_grau || '',
+        periculosidade_ativo: !!colaborador.periculosidade,
+
+        // ═════════════════════════════════════════════════════════════
+        // RESUMO FINANCEIRO MENSAL (exato)
+        // ═════════════════════════════════════════════════════════════
+        salario_bruto_total: Math.round(salarioBrutoTotal * 100) / 100,
+        total_desconto_colaborador: Math.round(descontoColaborador * 100) / 100,
+        salario_liquido_mensal: Math.round(folha.salario_liquido * 100) / 100,
+        
+        // ═════════════════════════════════════════════════════════════
+        // CUSTOS EMPRESA (mensal)
+        // ═════════════════════════════════════════════════════════════
+        custo_bruto_empresa: Math.round(custoBrutoEmpresa * 100) / 100,
+        custo_total_empresa: Math.round(custoTotalEmpresa * 100) / 100,
+
+        // ═════════════════════════════════════════════════════════════
+        // ENCARGOS DETALHADOS PARA EMPRESA
+        // ═════════════════════════════════════════════════════════════
+        encargo_fgts_mensal: Math.round(folha.fgts * 100) / 100,
+        encargo_inss_patronal_estimado: Math.round((folha.salario_bruto * 0.20) * 100) / 100, // 20% (aproximado)
+        encargo_fgts_13_estimado: Math.round((folha.salario_bruto * 0.08 / 12) * 100) / 100, // 13º proporcional
+
+        // ═════════════════════════════════════════════════════════════
+        // DADOS BANCÁRIOS
+        // ═════════════════════════════════════════════════════════════
+        banco: colaborador.banco || '',
+        agencia: colaborador.agencia || '',
+        conta: colaborador.conta || '',
+        pix: colaborador.pix || '',
+
+        // ═════════════════════════════════════════════════════════════
+        // TIMESTAMP DA GERAÇÃO
+        // ═════════════════════════════════════════════════════════════
+        data_geracao: new Date().toISOString().split('T')[0],
+        hora_geracao: new Date().toTimeString().split(' ')[0],
     };
 }

@@ -172,6 +172,7 @@ export default function FolhaPagamentoTab() {
 
             // 2. Create Financial Entry (Optional)
             if (gerarLancamentoFinanceiro) {
+                // Salary entry
                 await base44.entities.LancamentoFinanceiro.create({
                     descricao: `Pagamento Folha - ${MESES[folhaParaPagar.mes_referencia - 1]}/${folhaParaPagar.ano_referencia} - ${folhaParaPagar.colaborador_nome}`,
                     valor: -Number(folhaParaPagar.salario_liquido),
@@ -181,6 +182,32 @@ export default function FolhaPagamentoTab() {
                     forma_pagamento: 'Transferência',
                     status: 'Pago'
                 });
+
+                // INSS entry (if > 0)
+                if (Number(folhaParaPagar.inss) > 0) {
+                    await base44.entities.LancamentoFinanceiro.create({
+                        descricao: `INSS Descontado - ${MESES[folhaParaPagar.mes_referencia - 1]}/${folhaParaPagar.ano_referencia} - ${folhaParaPagar.colaborador_nome}`,
+                        valor: -Number(folhaParaPagar.inss),
+                        tipo: 'despesa',
+                        categoria_nome: 'INSS / Encargos',
+                        data_lancamento: new Date().toISOString().slice(0, 10),
+                        forma_pagamento: 'Transferência',
+                        status: 'Pago'
+                    });
+                }
+
+                // FGTS entry (if > 0)
+                if (Number(folhaParaPagar.fgts) > 0) {
+                    await base44.entities.LancamentoFinanceiro.create({
+                        descricao: `FGTS Recolhido - ${MESES[folhaParaPagar.mes_referencia - 1]}/${folhaParaPagar.ano_referencia} - ${folhaParaPagar.colaborador_nome}`,
+                        valor: -Number(folhaParaPagar.fgts),
+                        tipo: 'despesa',
+                        categoria_nome: 'FGTS / Encargos',
+                        data_lancamento: new Date().toISOString().slice(0, 10),
+                        forma_pagamento: 'Transferência',
+                        status: 'Pago'
+                    });
+                }
             }
 
             queryClient.invalidateQueries(['folhas_pagamento']);
@@ -547,7 +574,7 @@ export default function FolhaPagamentoTab() {
                                     htmlFor="gerarLancamento"
                                     className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-gray-700"
                                 >
-                                    Gerar despesa no Financeiro automaticamente
+                                    Gerar no Financeiro: Salário + INSS + FGTS automaticamente
                                 </label>
                             </div>
                             <p className="text-xs text-gray-500 mt-2">

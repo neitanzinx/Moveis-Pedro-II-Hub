@@ -168,7 +168,7 @@ export default function DocumentosTab() {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="todos">Todos os Colaboradores</SelectItem>
-                                {colaboradoresAtivos.map(c => (
+                                {colaboradoresAtivos.filter(c => c?.id).map(c => (
                                     <SelectItem key={c.id} value={c.id}>{c.nome_completo}</SelectItem>
                                 ))}
                             </SelectContent>
@@ -432,7 +432,7 @@ function DocumentoUploadModal({ colaboradores, onClose }) {
                                 <SelectValue placeholder="Selecione o colaborador" />
                             </SelectTrigger>
                             <SelectContent>
-                                {colaboradores.map(c => (
+                                {colaboradores.filter(c => c?.id).map(c => (
                                     <SelectItem key={c.id} value={c.id}>{c.nome_completo}</SelectItem>
                                 ))}
                             </SelectContent>
