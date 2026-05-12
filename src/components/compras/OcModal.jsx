@@ -153,29 +153,32 @@ function buildItemPricingFromCostAndMarkup(custo, markupMultiplicador, markupPer
 
 function calculateTotalCost(precoCusto, additionalCosts = {}) {
   let total = precoCusto;
-  ipi_tipo: 'fixo',
+  const custos = {
+    ipi_tipo: 'fixo',
     ipi_valor: 0,
     frete_tipo: 'fixo',
     frete_valor: 0,
     montagem_valor: 0,
     custo_total: 0,
+    ...additionalCosts,
+  };
     
   // IPI
-  if (additionalCosts.ipi_tipo === 'fixo') {
-    total += Number(additionalCosts.ipi_valor) || 0;
-  } else if (additionalCosts.ipi_tipo === 'porcentagem') {
-    total += precoCusto * ((Number(additionalCosts.ipi_valor) || 0) / 100);
+  if (custos.ipi_tipo === 'fixo') {
+    total += Number(custos.ipi_valor) || 0;
+  } else if (custos.ipi_tipo === 'porcentagem') {
+    total += precoCusto * ((Number(custos.ipi_valor) || 0) / 100);
   }
   
   // Frete
-  if (additionalCosts.frete_tipo === 'fixo') {
-    total += Number(additionalCosts.frete_valor) || 0;
-  } else if (additionalCosts.frete_tipo === 'porcentagem') {
-    total += precoCusto * ((Number(additionalCosts.frete_valor) || 0) / 100);
+  if (custos.frete_tipo === 'fixo') {
+    total += Number(custos.frete_valor) || 0;
+  } else if (custos.frete_tipo === 'porcentagem') {
+    total += precoCusto * ((Number(custos.frete_valor) || 0) / 100);
   }
   
   // Montagem (sempre fixo)
-  total += Number(additionalCosts.montagem_valor) || 0;
+  total += Number(custos.montagem_valor) || 0;
   
   return total;
 }

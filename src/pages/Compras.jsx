@@ -1523,24 +1523,17 @@ export default function Compras() {
             </CardHeader>
             <CardContent>
               <div className="rounded-lg border overflow-hidden">
-                <OcTable
-                  ocs={ocs}
-                  onEdit={setOcParaEditar}
-                  onDelete={handleDeleteOc}
-                  onReceive={handleReceberOc}
-                  onSend={handleEnviarOc}
-                  onCancel={handleCancelarOc}
-                  onSubmitPaymentApproval={handleAprovarPagamento}
-                  formasAutoAprovadas={formasAutoAprovadas}
-                  isLoading={ocIsLoading}
-                  onCriarLancamentoFinanceiro={handleCriarLancamentoFinanceiro}
-                />
-                <CriarLancamentoFromOcModal
-                  oc={ocParaLancamento}
-                  open={modalLancamentoOpen && !!ocParaLancamento}
-                  onClose={() => { setModalLancamentoOpen(false); setOcParaLancamento(null); }}
-                  categorias={categorias}
-                />
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50">
+                      <TableHead>Produto</TableHead>
+                      <TableHead>Fornecedor</TableHead>
+                      <TableHead className="text-right">Preço Anterior</TableHead>
+                      <TableHead className="text-right">Preço Novo</TableHead>
+                      <TableHead className="text-right">Delta %</TableHead>
+                      <TableHead>Data</TableHead>
+                    </TableRow>
+                  </TableHeader>
                   <TableBody>
                     {analisePrecos.length === 0 ? (
                       <TableRow>
