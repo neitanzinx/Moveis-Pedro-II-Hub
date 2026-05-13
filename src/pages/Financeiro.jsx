@@ -1,11 +1,11 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { base44 } from "@/lib/supabase";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DollarSign, AlertCircle, Plus, BarChart3,
-  LayoutDashboard, TrendingDown, TrendingUp
+  LayoutDashboard, TrendingDown, TrendingUp, ShoppingCart
 } from "lucide-react";
 import VisaoGeral from "../components/financeiro/VisaoGeral";
 import ContasReceber from "../components/financeiro/ContasReceber";
@@ -15,15 +15,54 @@ import LancamentosList from "../components/financeiro/LancamentosList";
 import FinanceiroCharts from "../components/financeiro/FinanceiroCharts";
 import RecorrentesManager from "../components/financeiro/RecorrentesManager";
 import VencimentosProximos from "../components/financeiro/VencimentosProximos";
+import AprovacaoComprasTab from "../components/financeiro/AprovacaoComprasTab";
 import { isVendaCancelada } from "@/utils/vendaStatus";
+
+function getLancamentoCompetenciaDate(lancamento) {
+  return lancamento?.data_vencimento || lancamento?.data_lancamento || lancamento?.created_at || null;
+}
+
+const MESES_OPTIONS = [
+  { value: "01", label: "Janeiro" },
+  { value: "02", label: "Fevereiro" },
+  { value: "03", label: "Março" },
+  { value: "04", label: "Abril" },
+  { value: "05", label: "Maio" },
+  { value: "06", label: "Junho" },
+  { value: "07", label: "Julho" },
+  { value: "08", label: "Agosto" },
+  { value: "09", label: "Setembro" },
+  { value: "10", label: "Outubro" },
+  { value: "11", label: "Novembro" },
+  { value: "12", label: "Dezembro" },
+];
+
+function getMesAnoParts(mesAno) {
+  if (!mesAno || !/^\d{4}-\d{2}$/.test(mesAno)) {
+    const now = new Date();
+    return {
+      ano: String(now.getFullYear()),
+      mes: String(now.getMonth() + 1).padStart(2, "0"),
+    };
+  }
+
+  const [ano, mes] = mesAno.split("-");
+  return { ano, mes };
+}
 
 
 export default function Financeiro() {
   const { user, loading, can } = useAuth();
   const [activeTab, setActiveTab] = useState("visao-geral");
   const [mesAno, setMesAno] = useState(new Date().toISOString().slice(0, 7));
+  const partesMesAno = useMemo(() => getMesAnoParts(mesAno), [mesAno]);
+  const [anoInput, setAnoInput] = useState(partesMesAno.ano);
   const canViewFinanceiro = can('view_financeiro') || can('manage_financeiro');
   const canManage = can('manage_financeiro');
+
+  useEffect(() => {
+    setAnoInput(partesMesAno.ano);
+  }, [partesMesAno.ano]);
 
   const queryOpts = { enabled: !!user && canViewFinanceiro };
 
@@ -82,6 +121,19 @@ export default function Financeiro() {
     ...queryOpts,
   });
 
+  const { data: ocsPendentes = [], isLoading: loadingOcsPendentes } = useQuery({
+    queryKey: ['compras-pendentes-aprovacao'],
+    queryFn: async () => {
+      try {
+        return await base44.entities.ComprasOrden.filter({ pagamento_status: 'pendente_aprovacao' }, '-created_at') || [];
+      } catch {
+        return [];
+      }
+    },
+    ...queryOpts,
+    refetchInterval: 30000,
+  });
+
   if (loading || !user) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -103,11 +155,12 @@ export default function Financeiro() {
 
   const listaLancamentos = Array.isArray(lancamentos) ? lancamentos : [];
   const lancamentosDoMes = listaLancamentos.filter(
-    (l) => l.data_lancamento?.slice(0, 7) === mesAno
+    (l) => getLancamentoCompetenciaDate(l)?.slice(0, 7) === mesAno
   );
   const vendasDoMes = vendas.filter(
     (v) => v.data_venda?.slice(0, 7) === mesAno && !isVendaCancelada(v)
   );
+  const pendentesCount = ocsPendentes.length;
 
   const TABS = [
     { id: "visao-geral",    label: "Visão Geral",       icon: LayoutDashboard },
@@ -115,6 +168,7 @@ export default function Financeiro() {
     { id: "contas-pagar",   label: "Saídas",             icon: TrendingUp },
     { id: "lancamentos",    label: "Lançamentos",        icon: DollarSign },
     { id: "graficos",       label: "Gráficos",           icon: BarChart3 },
+    { id: "aprovacao-compras", label: "Aprovação de Compras", icon: ShoppingCart, count: pendentesCount },
     ...(canManage ? [{ id: "novo", label: "Novo", icon: Plus }] : []),
   ];
 
@@ -126,12 +180,42 @@ export default function Financeiro() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Controle Financeiro</h1>
           <p className="text-sm text-gray-500">Gestão financeira integrada</p>
         </div>
-        <input
-          type="month"
-          value={mesAno}
-          onChange={(e) => setMesAno(e.target.value)}
-          className="border rounded px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:border-neutral-800"
-        />
+        <div className="flex items-center gap-2">
+          <select
+            value={partesMesAno.mes}
+            onChange={(e) => {
+              const anoBase = anoInput.length === 4 ? anoInput : partesMesAno.ano;
+              setMesAno(`${anoBase}-${e.target.value}`);
+            }}
+            className="border rounded px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:border-neutral-800"
+          >
+            {MESES_OPTIONS.map((mes) => (
+              <option key={mes.value} value={mes.value}>
+                {mes.label}
+              </option>
+            ))}
+          </select>
+
+          <input
+            type="text"
+            inputMode="numeric"
+            placeholder="Ano"
+            value={anoInput}
+            onChange={(e) => {
+              const somenteDigitos = e.target.value.replace(/\D/g, "").slice(0, 4);
+              setAnoInput(somenteDigitos);
+              if (somenteDigitos.length === 4) {
+                setMesAno(`${somenteDigitos}-${partesMesAno.mes}`);
+              }
+            }}
+            onBlur={() => {
+              if (anoInput.length !== 4) {
+                setAnoInput(partesMesAno.ano);
+              }
+            }}
+            className="w-24 border rounded px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:border-neutral-800"
+          />
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
@@ -146,6 +230,11 @@ export default function Financeiro() {
               >
                 <tab.icon className="w-4 h-4 mr-2" />
                 {tab.label}
+                {tab.count > 0 && (
+                  <span className="ml-2 bg-amber-100 text-amber-800 text-xs font-bold px-1.5 py-0.5 rounded-full">
+                    {tab.count}
+                  </span>
+                )}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -205,6 +294,15 @@ export default function Financeiro() {
 
           <TabsContent value="categorias">
             {/* removido — categorias agora ficam dentro do formulário de lançamento */}
+          </TabsContent>
+
+          <TabsContent value="aprovacao-compras">
+            <AprovacaoComprasTab
+              ocs={ocsPendentes}
+              categorias={categorias}
+              isLoading={loadingOcsPendentes}
+              currentUser={user}
+            />
           </TabsContent>
 
           {canManage && (

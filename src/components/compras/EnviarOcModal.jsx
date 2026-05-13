@@ -50,17 +50,20 @@ export default function EnviarOcModal({
   isConfirmando = false,
 }) {
   const { user } = useAuth();
-  const { lojas } = useTenant();
+  const { lojas, organization } = useTenant();
   const [itensOc, setItensOc] = useState([]);
   const [isLoadingItens, setIsLoadingItens] = useState(false);
   const [canalEnvio, setCanalEnvio] = useState('email');
 
-  // Obter nome da loja da OC (se disponível)
+  // Obter nome da loja da OC (com fallback para organização)
   const lojaName = useMemo(() => {
-    if (!oc?.metadata?.loja_id || !lojas) return '';
-    const loja = lojas.find(l => l.id === oc.metadata.loja_id);
-    return loja?.nome || '';
-  }, [oc?.metadata?.loja_id, lojas]);
+    if (oc?.metadata?.loja_id && lojas) {
+      const loja = lojas.find(l => l.id === oc.metadata.loja_id);
+      if (loja?.nome) return loja.nome;
+    }
+    // Fallback: usar nome da organização/empresa
+    return organization?.name || '';
+  }, [oc?.metadata?.loja_id, lojas, organization?.name]);
 
   useEffect(() => {
     if (!open || !oc?.id) {

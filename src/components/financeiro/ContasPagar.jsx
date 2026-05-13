@@ -453,18 +453,25 @@ function PagasTab({
   comissoes = [],
   contasPagarCompras = [],
   lancamentos = [],
+  mesAno,
   isLoading = false,
 }) {
   const [busca, setBusca] = useState("");
 
   const toStatus = (v) => String(v || "").trim().toLowerCase();
   const isPago = (status) => ["pago", "paga", "quitado", "liquidado"].includes(toStatus(status));
+  const isDoMesSelecionado = (dateValue) => {
+    if (!mesAno) return true;
+    if (!dateValue) return false;
+    const dateStr = String(dateValue);
+    return dateStr.slice(0, 7) === mesAno;
+  };
 
   const contasPagas = useMemo(() => {
     const contas = [];
 
     folhas
-      .filter((f) => isPago(f.status))
+      .filter((f) => isPago(f.status) && isDoMesSelecionado(f.data_pagamento || f.updated_at || f.created_at))
       .forEach((f) => {
         contas.push({
           id: `folha-${f.id}`,
@@ -479,7 +486,7 @@ function PagasTab({
       });
 
     comissoes
-      .filter((c) => isPago(c.status))
+      .filter((c) => isPago(c.status) && isDoMesSelecionado(c.data_pagamento || c.data_calculo || c.updated_at || c.created_at))
       .forEach((c) => {
         contas.push({
           id: `comissao-${c.id}`,
@@ -494,7 +501,7 @@ function PagasTab({
       });
 
     contasPagarCompras
-      .filter((c) => isPago(c.status))
+      .filter((c) => isPago(c.status) && isDoMesSelecionado(c.data_vencimento || c.data_pagamento || c.updated_at || c.created_at))
       .forEach((c) => {
         contas.push({
           id: `compra-${c.id}`,
@@ -503,13 +510,17 @@ function PagasTab({
           categoria: "Contas de Compras",
           forma: c.forma_pagamento || "—",
           valor: Number(c.valor_total || c.valor || 0),
-          data: c.data_pagamento || c.updated_at || c.created_at || null,
+          data: c.data_vencimento || c.data_pagamento || c.updated_at || c.created_at || null,
           status: c.status || "Pago",
         });
       });
 
     lancamentos
-      .filter((l) => normalizeTipo(l.tipo) === "saida" && (l.pago === true || isPago(l.status)))
+      .filter((l) =>
+        normalizeTipo(l.tipo) === "saida" &&
+        (l.pago === true || isPago(l.status)) &&
+        isDoMesSelecionado(l.data_vencimento || l.data_lancamento_real || l.data_lancamento || l.updated_at || l.created_at)
+      )
       .forEach((l) => {
         contas.push({
           id: `lancamento-${l.id}`,
@@ -518,7 +529,7 @@ function PagasTab({
           categoria: l.categoria_nome || "Sem categoria",
           forma: l.forma_pagamento || "—",
           valor: Math.abs(Number(l.valor || 0)),
-          data: l.data_lancamento_real || l.data_lancamento || l.updated_at || l.created_at || null,
+          data: l.data_vencimento || l.data_lancamento_real || l.data_lancamento || l.updated_at || l.created_at || null,
           status: l.status || "Pago",
         });
       });
@@ -528,7 +539,7 @@ function PagasTab({
       const db = b.data ? new Date(b.data).getTime() : 0;
       return db - da;
     });
-  }, [folhas, comissoes, contasPagarCompras, lancamentos]);
+  }, [folhas, comissoes, contasPagarCompras, lancamentos, mesAno]);
 
   const filtradas = useMemo(() => {
     if (!busca) return contasPagas;
@@ -745,6 +756,7 @@ export default function ContasPagar({
             comissoes={comissoes}
             contasPagarCompras={contasPagarCompras}
             lancamentos={lancamentos}
+            mesAno={mesAno}
             isLoading={isLoadingPagas}
           />
         </TabsContent>

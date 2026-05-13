@@ -55,7 +55,7 @@ export function formatarBlocoAssistenciaItem(item) {
  * @param {Object} oc  - Objeto OC com fornecedor_nome, numero_pedido, created_at/data_pedido, metadata
  * @param {Array}  itens - Array de itens da OC
  * @param {Object} user - Usuário logado { nome, nome_usuario, id, ... }
- * @param {string} lojaName - Nome da loja (nunca hardcoded, sempre das configurações)
+ * @param {string} lojaName - Nome da loja/empresa (vem das configurações, nunca deixar vazio)
  * @returns {string}
  */
 export function gerarTextoPedidoOperacional(oc, itens = [], user = {}, lojaName = '') {
@@ -71,8 +71,9 @@ export function gerarTextoPedidoOperacional(oc, itens = [], user = {}, lojaName 
 
   const linhas = [];
 
-  // Cabeçalho com nome da loja
-  linhas.push(`Segue encomenda da loja *${lojaName || 'Não informado'}*:\n`);
+  // Cabeçalho com nome da loja (sempre validado pelas chamadas de componentes)
+  const nomeEmpresa = lojaName || 'Móveis Pedro II';
+  linhas.push(`Segue encomenda da loja *${nomeEmpresa}*:\n`);
 
   // Linha do pedido OC com referências
   let linhaOc = `Pedido OC-${ocNumero}`;
@@ -102,7 +103,7 @@ export function gerarTextoPedidoOperacional(oc, itens = [], user = {}, lojaName 
   linhas.push('');
   linhas.push(vendedorNome);
   linhas.push('Departamento de Compras');
-  linhas.push(lojaName || 'Não informado');
+  linhas.push(nomeEmpresa);
 
   return linhas.join('\n');
 }

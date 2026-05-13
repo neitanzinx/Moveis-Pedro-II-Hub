@@ -235,7 +235,7 @@ export default function OcModal({
 }) {
   const queryClient = useQueryClient();
   const { user, can } = useAuth();
-  const { lojas } = useTenant();
+  const { lojas, organization } = useTenant();
   const isNovoOuDuplicar = !oc || oc.duplicar;
   const isVer = modo === 'ver';
 
@@ -695,9 +695,17 @@ export default function OcModal({
 
   const handleCopiarPedido = async () => {
     try {
-      // Obter nome da loja
+      // Obter nome da loja com fallback para organização
       const lojaId = oc?.metadata?.loja_id || null;
-      const lojaName = lojaId && lojas ? (lojas.find(l => l.id === lojaId)?.nome || '') : '';
+      let lojaName = '';
+      if (lojaId && lojas) {
+        const loja = lojas.find(l => l.id === lojaId);
+        lojaName = loja?.nome || '';
+      }
+      // Fallback: usar nome da organização/empresa
+      if (!lojaName && organization?.name) {
+        lojaName = organization.name;
+      }
       
       const textoPedido = gerarTextoPedidoOperacional(
         oc || { fornecedor_nome: formData.fornecedor_nome, numero_pedido: '', data_pedido: null, metadata: {} },

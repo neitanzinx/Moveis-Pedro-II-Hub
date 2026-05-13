@@ -107,8 +107,8 @@ function ItemRow({ lanc, onStatusChange, updating }) {
   );
 }
 
-function Grupo({ titulo, icon: Icon, cor, items, total, onStatusChange, updatingId }) {
-  const [aberto, setAberto] = useState(true);
+function Grupo({ titulo, icon: Icon, cor, items, total, onStatusChange, updatingId, defaultAberto = false }) {
+  const [aberto, setAberto] = useState(defaultAberto);
   if (items.length === 0) return null;
   return (
     <div className="space-y-1">
@@ -329,6 +329,7 @@ export default function VencimentosProximos({ lancamentos = [] }) {
             total={sem.total}
             onStatusChange={handleStatusChange}
             updatingId={updatingId}
+            defaultAberto={false}
           />
         ))}
       </CardContent>
