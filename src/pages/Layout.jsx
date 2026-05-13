@@ -97,7 +97,8 @@ export default function Layout({ children, currentPageName }) {
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const [buscaAberta, setBuscaAberta] = useState(false);
   const [novoUsuarioModalOpen, setNovoUsuarioModalOpen] = useState(false);
-  const { isSystemOnline, isWhatsAppConnected } = useConnectionStatus();
+  const shouldMonitorWhatsApp = location.pathname === '/admin/Configuracoes' || location.pathname === '/admin/CatalogoWhatsApp';
+  const { isSystemOnline, isWhatsAppConnected } = useConnectionStatus(shouldMonitorWhatsApp);
 
   useEffect(() => {
     localStorage.setItem('darkMode', darkMode);

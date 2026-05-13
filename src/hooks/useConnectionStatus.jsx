@@ -3,10 +3,30 @@ import { whatsappService } from '@/services/whatsappService';
 import { getOfflineQueue, removeOfflineQueueItem } from '@/utils/offlineQueue';
 import { toast } from "sonner";
 
-export function useConnectionStatus() {
-    const [isSystemOnline, setIsSystemOnline] = useState(navigator.onLine);
-    const [isWhatsAppConnected, setIsWhatsAppConnected] = useState(true); // Assume true initially to avoid flashing offline
+const WHATSAPP_STATUS_CACHE_KEY = 'whatsapp_connection_status';
+
+export function useConnectionStatus(enabled = false) {
+    function readCachedStatus() {
+        try {
+            const cached = localStorage.getItem(WHATSAPP_STATUS_CACHE_KEY);
+            if (cached === null) return false;
+            return cached === 'true';
+        } catch {
+            return false;
+        }
+    }
+
+    function writeCachedStatus(status) {
+        try {
+            localStorage.setItem(WHATSAPP_STATUS_CACHE_KEY, status ? 'true' : 'false');
+        } catch {
+            // Ignora falhas de storage para não impactar o layout.
+        }
+    }
+
     const prevWhatsAppConnected = useRef(true);
+    const [isWhatsAppConnected, setIsWhatsAppConnected] = useState(readCachedStatus());
+    const [isSystemOnline, setIsSystemOnline] = useState(navigator.onLine);
 
     // Função de sincronização da fila offline (compartilhada entre triggers)
     const syncOfflineQueue = useCallback(async () => {
@@ -58,10 +78,14 @@ export function useConnectionStatus() {
             window.removeEventListener('online', handleOnline);
             window.removeEventListener('offline', handleOffline);
         };
-    }, [syncOfflineQueue]);
+    }, [enabled, syncOfflineQueue]);
 
     // Monitor WhatsApp Bot status
     useEffect(() => {
+        if (!enabled) {
+            return undefined;
+        }
+
         const checkWhatsAppStatus = async () => {
             const status = await whatsappService.checkStatus();
 
@@ -74,6 +98,7 @@ export function useConnectionStatus() {
 
             prevWhatsAppConnected.current = status;
             setIsWhatsAppConnected(status);
+            writeCachedStatus(status);
         };
 
         // Check immediately on mount

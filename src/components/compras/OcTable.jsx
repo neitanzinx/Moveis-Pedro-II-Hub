@@ -27,6 +27,7 @@ import {
   CheckCircle,
   XCircle,
   CreditCard,
+  DollarSign,
 } from "lucide-react";
 import { formatarData } from "@/utils/formatters";
 

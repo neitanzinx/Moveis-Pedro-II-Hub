@@ -113,44 +113,75 @@ function AuthTimeoutFallback({ error, onRetry }) {
     );
 }
 
-    function OperatorAuthTimeoutFallback({ error, onRetry }) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 to-red-50 p-6">
-                <div className="w-full max-w-xl rounded-2xl border border-amber-200 bg-white p-8 shadow-sm">
-                    <h1 className="text-xl font-semibold text-slate-900">Falha temporaria de autenticacao do operador</h1>
-                    <p className="mt-3 text-sm text-slate-600">
-                        Nao foi possivel validar a sessao do painel operador dentro do tempo limite.
-                        O fluxo foi interrompido para evitar redirecionamentos em loop.
+function OperatorAuthTimeoutFallback({ error, onRetry }) {
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 to-red-50 p-6">
+            <div className="w-full max-w-xl rounded-2xl border border-amber-200 bg-white p-8 shadow-sm">
+                <h1 className="text-xl font-semibold text-slate-900">Falha temporaria de autenticacao do operador</h1>
+                <p className="mt-3 text-sm text-slate-600">
+                    Nao foi possivel validar a sessao do painel operador dentro do tempo limite.
+                    O fluxo foi interrompido para evitar redirecionamentos em loop.
+                </p>
+                {error?.source && (
+                    <p className="mt-3 rounded-md bg-slate-100 px-3 py-2 text-xs text-slate-700">
+                        Origem: {error.source}
                     </p>
-                    {error?.source && (
-                        <p className="mt-3 rounded-md bg-slate-100 px-3 py-2 text-xs text-slate-700">
-                            Origem: {error.source}
-                        </p>
-                    )}
-                    {error?.message && (
-                        <p className="mt-3 text-sm text-slate-600">
-                            {error.message}
-                        </p>
-                    )}
-                    <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                        <button
-                            type="button"
-                            onClick={onRetry}
-                            className="inline-flex items-center justify-center rounded-lg bg-[#07593f] px-4 py-2 text-sm font-medium text-white hover:bg-[#064b35]"
-                        >
-                            Tentar novamente
-                        </button>
-                        <Link
-                            to="/operador/login"
-                            className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                        >
-                            Ir para login do operador
-                        </Link>
-                    </div>
+                )}
+                {error?.message && (
+                    <p className="mt-3 text-sm text-slate-600">
+                        {error.message}
+                    </p>
+                )}
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                    <button
+                        type="button"
+                        onClick={onRetry}
+                        className="inline-flex items-center justify-center rounded-lg bg-[#07593f] px-4 py-2 text-sm font-medium text-white hover:bg-[#064b35]"
+                    >
+                        Tentar novamente
+                    </button>
+                    <Link
+                        to="/operador/login"
+                        className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                        Ir para login do operador
+                    </Link>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+function OperatorRouteGate() {
+    const { loading: operatorLoading, hasSession: operatorHasSession, isOperator, authError: operatorAuthError, retryAuth: retryOperatorAuth } = useOperatorAuth();
+
+    if (operatorAuthError) {
+        return <OperatorAuthTimeoutFallback error={operatorAuthError} onRetry={retryOperatorAuth} />;
+    }
+
+    if (operatorLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-800"></div>
             </div>
         );
     }
+
+    if (!isOperator) {
+        return <Navigate to={operatorHasSession ? "/login" : "/operador/login"} replace />;
+    }
+
+    return (
+        <Suspense fallback={<PageLoadingFallback />}>
+            <OperatorLayout>
+                <Routes>
+                    <Route path="/operador" element={<PainelSaaSOperador />} />
+                    <Route path="/operador/*" element={<Navigate to="/operador" replace />} />
+                </Routes>
+            </OperatorLayout>
+        </Suspense>
+    );
+}
 
 
 const PAGES = {
@@ -185,7 +216,6 @@ function _getCurrentPage(url) {
 function PagesContent() {
     const location = useLocation();
     const { user, loading, can, authError, retryAuth } = useAuth();
-    const { loading: operatorLoading, hasSession: operatorHasSession, isOperator, authError: operatorAuthError, retryAuth: retryOperatorAuth } = useOperatorAuth();
     const { isModuleActive } = useTenant();
     const currentPage = _getCurrentPage(location.pathname);
 
@@ -298,32 +328,7 @@ function PagesContent() {
 
     // ===== ROTAS OPERADOR (SEPARADAS DO /admin) =====
     if (location.pathname.startsWith('/operador')) {
-        if (operatorAuthError) {
-            return <OperatorAuthTimeoutFallback error={operatorAuthError} onRetry={retryOperatorAuth} />;
-        }
-
-        if (operatorLoading) {
-            return (
-                <div className="min-h-screen flex items-center justify-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-800"></div>
-                </div>
-            );
-        }
-
-        if (!isOperator) {
-            return <Navigate to={operatorHasSession ? "/login" : "/operador/login"} replace />;
-        }
-
-        return (
-            <Suspense fallback={<PageLoadingFallback />}>
-                <OperatorLayout>
-                    <Routes>
-                        <Route path="/operador" element={<PainelSaaSOperador />} />
-                        <Route path="/operador/*" element={<Navigate to="/operador" replace />} />
-                    </Routes>
-                </OperatorLayout>
-            </Suspense>
-        );
+        return <OperatorRouteGate />;
     }
 
     // ===== ROTAS ADMIN (Requerem autenticação do sistema interno) =====

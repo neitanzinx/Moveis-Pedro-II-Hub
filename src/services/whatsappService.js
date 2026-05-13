@@ -40,7 +40,6 @@ export const whatsappService = {
             const data = await response.json();
             return data.status === 'connected' || data.status === 'online';
         } catch (error) {
-            console.error("Erro ao verificar status do WhatsApp:", error);
             return false;
         }
     },

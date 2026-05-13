@@ -2,6 +2,35 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 const OPERATOR_AUTH_TIMEOUT_MS = 4000;
+const OPERATOR_AUTH_CACHE_KEY = "operator_auth_cache";
+
+function readCachedOperatorAuth() {
+  try {
+    const raw = localStorage.getItem(OPERATOR_AUTH_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.user || !parsed.profile) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedOperatorAuth(payload) {
+  try {
+    localStorage.setItem(OPERATOR_AUTH_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignora falhas de storage para não bloquear o login.
+  }
+}
+
+function clearCachedOperatorAuth() {
+  try {
+    localStorage.removeItem(OPERATOR_AUTH_CACHE_KEY);
+  } catch {
+    // Ignora falhas de storage.
+  }
+}
 
 export function useOperatorAuth() {
   const [loading, setLoading] = useState(true);
@@ -51,50 +80,86 @@ export function useOperatorAuth() {
   useEffect(() => {
     let mounted = true;
 
-    const startLoadingFailsafe = () => {
-      return setTimeout(() => {
+    const applyCache = (cachedAuth) => {
+      if (!cachedAuth || !mounted) return false;
+      setUser(cachedAuth.user);
+      setOperatorProfile(cachedAuth.profile);
+      return true;
+    };
+
+    const clearState = () => {
+      if (!mounted) return;
+      setUser(null);
+      setOperatorProfile(null);
+    };
+
+    const syncWithSession = async (sessionUserOverride = null) => {
+      const cachedAuth = readCachedOperatorAuth();
+      const failsafeId = setTimeout(() => {
         if (mounted) {
           setLoading(false);
         }
       }, OPERATOR_AUTH_TIMEOUT_MS);
-    };
-
-    const syncAuthState = async () => {
-      const failsafeId = startLoadingFailsafe();
 
       try {
-        setLoading(true);
-        setAuthError(null);
+        if (mounted) {
+          setLoading(true);
+          setAuthError(null);
+        }
 
-        const {
-          data: { session },
-        } = await withTimeout(
-          supabase.auth.getSession(),
-          OPERATOR_AUTH_TIMEOUT_MS,
-          'supabase.auth.getSession'
-        );
+        if (cachedAuth) {
+          applyCache(cachedAuth);
+          if (mounted) setLoading(false);
+        }
 
-        const sessionUser = session?.user || null;
+        let sessionUser = sessionUserOverride;
+
+        if (!sessionUserOverride) {
+          const {
+            data: { session },
+          } = await withTimeout(
+            supabase.auth.getSession(),
+            OPERATOR_AUTH_TIMEOUT_MS,
+            'supabase.auth.getSession'
+          );
+          sessionUser = session?.user || null;
+        }
 
         if (!sessionUser) {
-          if (mounted) {
-            setUser(null);
-            setOperatorProfile(null);
-          }
+          clearCachedOperatorAuth();
+          clearState();
           return;
         }
 
         const profile = await loadOperatorProfile(sessionUser.id);
 
+        if (!profile) {
+          clearCachedOperatorAuth();
+          clearState();
+          return;
+        }
+
+        const mergedUser = { ...sessionUser, ...profile };
+
         if (mounted) {
-          setUser(sessionUser);
+          setUser(mergedUser);
           setOperatorProfile(profile);
         }
+
+        writeCachedOperatorAuth({ user: mergedUser, profile });
       } catch (error) {
         console.error("Erro ao validar sessão do operador:", error);
+
+        if (isTimeoutError(error) && cachedAuth) {
+          applyCache(cachedAuth);
+          if (mounted) {
+            setAuthError(null);
+          }
+          return;
+        }
+
         if (mounted) {
-          setUser(null);
-          setOperatorProfile(null);
+          clearState();
           if (isTimeoutError(error)) {
             setAuthError({
               code: 'operator-auth-timeout',
@@ -111,60 +176,31 @@ export function useOperatorAuth() {
       }
     };
 
-    syncAuthState();
+    syncWithSession();
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const failsafeId = startLoadingFailsafe();
+      const sessionUser = session?.user || null;
 
-      try {
+      if (!sessionUser) {
+        clearCachedOperatorAuth();
+        clearState();
         if (mounted) {
           setAuthError(null);
-        }
-
-        const sessionUser = session?.user || null;
-
-        if (!sessionUser) {
-          if (mounted) {
-            setUser(null);
-            setOperatorProfile(null);
-          }
-          return;
-        }
-
-        const profile = await loadOperatorProfile(sessionUser.id);
-
-        if (mounted) {
-          setUser(sessionUser);
-          setOperatorProfile(profile);
-        }
-      } catch (error) {
-        console.error("Erro ao sincronizar autenticação do operador:", error);
-        if (mounted) {
-          setUser(null);
-          setOperatorProfile(null);
-          if (isTimeoutError(error)) {
-            setAuthError({
-              code: 'operator-auth-timeout',
-              source: error?.message?.replace('Timeout em ', '') || 'operator-auth',
-              message: 'Nao foi possivel sincronizar a sessao do operador dentro do tempo esperado.'
-            });
-          }
-        }
-      } finally {
-        clearTimeout(failsafeId);
-        if (mounted) {
           setLoading(false);
         }
+        return;
       }
+
+      await syncWithSession(sessionUser);
     });
 
     return () => {
       mounted = false;
       subscription?.unsubscribe();
     };
-  }, [isTimeoutError, loadOperatorProfile, withTimeout, authAttempt]);
+  }, [authAttempt, isTimeoutError, loadOperatorProfile, withTimeout]);
 
   const retryAuth = useCallback(() => {
     setLoading(true);
@@ -184,25 +220,33 @@ export function useOperatorAuth() {
 
     if (!profile) {
       await supabase.auth.signOut();
+      clearCachedOperatorAuth();
       throw new Error("Sua conta nao tem acesso ao painel operador.");
     }
+
+    const mergedUser = { ...sessionUser, ...profile };
 
     await supabase
       .from("saas_operator_users")
       .update({ last_login_at: new Date().toISOString() })
       .eq("id", profile.id);
 
-    setUser(sessionUser);
+    setUser(mergedUser);
     setOperatorProfile(profile);
+    setAuthError(null);
+    setLoading(false);
+    writeCachedOperatorAuth({ user: mergedUser, profile });
 
-    return { user: sessionUser, operatorProfile: profile };
+    return { user: mergedUser, operatorProfile: profile };
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
+    clearCachedOperatorAuth();
     setUser(null);
     setOperatorProfile(null);
     setAuthError(null);
+    setLoading(false);
   };
 
   return {
