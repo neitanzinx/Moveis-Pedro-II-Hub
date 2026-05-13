@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,19 +11,36 @@ import { verificarConciliacao } from "@/lib/conciliacaoInteligente";
 import ConciliacaoAlertModal from "@/components/financeiro/ConciliacaoAlertModal";
 
 export default function CriarLancamentoFromOcModal({ oc, open, onClose, categorias }) {
+  const ocAtual = oc || null;
   const [form, setForm] = useState({
     categoria_id: "",
-    descricao: `Compra OC #${oc?.numero_pedido || ""}`,
-    valor: oc?.valor_total || "",
+    descricao: `Compra OC #${ocAtual?.numero_pedido || ""}`,
+    valor: ocAtual?.valor_total || "",
     status: "Pendente",
     data_vencimento: "",
-    forma_pagamento: oc?.forma_pagamento_oc || "",
+    forma_pagamento: ocAtual?.forma_pagamento_oc || "",
     observacao: "",
   });
   const [error, setError] = useState("");
   const [conciliacaoState, setConciliacaoState] = useState(null);
   const queryClient = useQueryClient();
   const confirm = useConfirm();
+
+  useEffect(() => {
+    if (!open || !ocAtual) return;
+
+    setForm({
+      categoria_id: "",
+      descricao: `Compra OC #${ocAtual.numero_pedido || ""}`,
+      valor: ocAtual.valor_total || "",
+      status: "Pendente",
+      data_vencimento: "",
+      forma_pagamento: ocAtual.forma_pagamento_oc || "",
+      observacao: "",
+    });
+    setError("");
+    setConciliacaoState(null);
+  }, [open, ocAtual]);
 
   const { data: todosLancamentos = [] } = useQuery({
     queryKey: ['lancamentos-financeiros'],
@@ -47,12 +64,13 @@ export default function CriarLancamentoFromOcModal({ oc, open, onClose, categori
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    if (!ocAtual) return setError("Nenhuma ordem de compra foi selecionada.");
     if (!form.categoria_id) return setError("Selecione uma categoria.");
     if (!form.valor || isNaN(Number(form.valor))) return setError("Valor inválido.");
     if (!form.data_vencimento) return setError("Informe a data de vencimento.");
     const confirmed = await confirm({
       title: "Criar Lançamento Financeiro",
-      message: `Deseja criar o lançamento para a OC #${oc.numero_pedido}?`,
+      message: `Deseja criar o lançamento para a OC #${ocAtual.numero_pedido}?`,
       confirmText: "Criar Lançamento",
       cancelText: "Cancelar",
     });
@@ -67,9 +85,9 @@ export default function CriarLancamentoFromOcModal({ oc, open, onClose, categori
       data_vencimento: form.data_vencimento,
       forma_pagamento: form.forma_pagamento,
       observacao: form.observacao,
-      numero_pedido: oc.numero_pedido,
-      fornecedor_nome: oc.fornecedor_nome,
-      origem: `OC#${oc.numero_pedido}`
+      numero_pedido: ocAtual.numero_pedido,
+      fornecedor_nome: ocAtual.fornecedor_nome,
+      origem: `OC#${ocAtual.numero_pedido}`
     };
     // Conciliação inteligente
     const { duplicatas } = verificarConciliacao(payload, todosLancamentos);
@@ -103,14 +121,19 @@ export default function CriarLancamentoFromOcModal({ oc, open, onClose, categori
             Preencha os dados para criar o lançamento desta compra no financeiro.
           </DialogDescription>
         </DialogHeader>
+        {!ocAtual ? (
+          <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+            Selecione uma ordem de compra para criar o lançamento.
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
             <label className="block text-xs font-medium">Ordem de Compra</label>
-            <Input value={oc.numero_pedido} readOnly className="bg-gray-100" />
+            <Input value={ocAtual.numero_pedido} readOnly className="bg-gray-100" />
           </div>
           <div>
             <label className="block text-xs font-medium">Fornecedor</label>
-            <Input value={oc.fornecedor_nome} readOnly className="bg-gray-100" />
+            <Input value={ocAtual.fornecedor_nome} readOnly className="bg-gray-100" />
           </div>
           <div>
             <label className="block text-xs font-medium">Valor Total</label>
@@ -162,6 +185,7 @@ export default function CriarLancamentoFromOcModal({ oc, open, onClose, categori
             <Button type="submit" disabled={mutation.isPending}>{mutation.isPending ? "Salvando..." : "Criar Lançamento"}</Button>
           </div>
         </form>
+        )}
       </DialogContent>
     </Dialog>
   );
