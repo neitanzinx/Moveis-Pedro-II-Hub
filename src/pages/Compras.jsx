@@ -43,19 +43,6 @@ import { useTenant } from '@/contexts/TenantContext';
 import { comprasService } from '@/services/comprasService';
 import OcTable from '@/components/compras/OcTable';
 import CriarLancamentoFromOcModal from '@/components/compras/CriarLancamentoFromOcModal';
-  // Categorias financeiras para o modal de lançamento
-  const { data: categorias = [] } = useQuery({
-    queryKey: ['categorias-financeiras'],
-    queryFn: async () => await base44.entities.CategoriaFinanceira.list('nome') || [],
-  });
-  // Estado do modal de lançamento financeiro
-  const [modalLancamentoOpen, setModalLancamentoOpen] = useState(false);
-  const [ocParaLancamento, setOcParaLancamento] = useState(null);
-  // Handler para abrir modal de lançamento financeiro
-  const handleCriarLancamentoFinanceiro = (oc) => {
-    setOcParaLancamento(oc);
-    setModalLancamentoOpen(true);
-  };
 import OcModal from '@/components/compras/OcModal';
 import SolicitacoesReposicaoTab from '@/components/compras/SolicitacoesReposicaoTab';
 import RecebimentoModal from '@/components/compras/RecebimentoModal';
@@ -98,6 +85,22 @@ export default function Compras() {
   const confirm = useConfirm();
   const { user, can, filterData } = useAuth();
   const { settings } = useTenant();
+
+  // Categorias financeiras para o modal de lançamento
+  const { data: categorias = [] } = useQuery({
+    queryKey: ['categorias-financeiras'],
+    queryFn: async () => await base44.entities.CategoriaFinanceira.list('nome') || [],
+  });
+
+  // Estado do modal de lançamento financeiro
+  const [modalLancamentoOpen, setModalLancamentoOpen] = useState(false);
+  const [ocParaLancamento, setOcParaLancamento] = useState(null);
+
+  // Handler para abrir modal de lançamento financeiro
+  const handleCriarLancamentoFinanceiro = (oc) => {
+    setOcParaLancamento(oc);
+    setModalLancamentoOpen(true);
+  };
 
   // Verificar permissões
   const temPermissaoVisualizacao = can('view_compras') || can('manage_compras');
@@ -1396,6 +1399,7 @@ export default function Compras() {
             <CardContent>
           <OcTable ocs={ocsFiltradas} isLoading={ocIsLoading} onEdit={handleEditarOc} onDelete={handleDeletarOc} onReceive={handleReceberOc} onSend={handleEnviarOc} onCancel={handleCancelarOc}
               formasAutoAprovadas={formasAutoAprovadas}
+              onCriarLancamentoFinanceiro={handleCriarLancamentoFinanceiro}
               onSubmitPaymentApproval={(oc) => {
                 if (formasAutoAprovadas.includes(oc.forma_pagamento_oc)) {
                   toast.info('Esta forma de pagamento está configurada para aprovação automática');
@@ -1945,6 +1949,16 @@ export default function Compras() {
           setOcParaAprovacaoPagamento(null);
         }}
         oc={ocParaAprovacaoPagamento}
+      />
+
+      <CriarLancamentoFromOcModal
+        oc={ocParaLancamento}
+        open={modalLancamentoOpen}
+        onClose={() => {
+          setModalLancamentoOpen(false);
+          setOcParaLancamento(null);
+        }}
+        categorias={categorias}
       />
     </div>
   );

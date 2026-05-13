@@ -106,7 +106,8 @@ export default function ColaboradorModal({
         cidade: colaborador?.cidade || "",
         estado: colaborador?.estado || "",
         // Profissional
-        cargo: colaborador?.cargo || "",
+        descricao_cargo: colaborador?.descricao_cargo || "",
+        roles_sistema: colaborador?.roles_sistema && Array.isArray(colaborador.roles_sistema) ? colaborador.roles_sistema : [],
         loja: colaborador?.loja || "",
         status: colaborador?.status || "Ativo",
         tipo_contrato: colaborador?.tipo_contrato || "CLT",
@@ -151,7 +152,7 @@ export default function ColaboradorModal({
     });
 
     const [saving, setSaving] = useState(false);
-    const usaPinMontagem = formData.cargo === "Montador";
+    const usaPinMontagem = formData.roles_sistema && formData.roles_sistema.includes("Montador");
 
     const totals = useMemo(() => gerarResumoEstimado(formData), [formData]);
 
@@ -159,16 +160,17 @@ export default function ColaboradorModal({
         mutationFn: async (data) => {
             const colaboradorData = { ...data };
             delete colaboradorData.loja;
-            colaboradorData.pin_montagem = data.cargo === "Montador" ? data.pin_montagem : null;
+            colaboradorData.pin_montagem = data.roles_sistema?.includes("Montador") ? data.pin_montagem : null;
             const createdColab = await base44.entities.Colaborador.create(colaboradorData);
-            if (data.user_id && data.cargo) {
+            if (data.user_id && data.roles_sistema && data.roles_sistema.length > 0) {
                 try {
-                    const cargoConfig = getCargoConfig(data.cargo);
+                    const primaryRole = data.roles_sistema[0];
+                    const cargoConfig = getCargoConfig(primaryRole);
                     await base44.entities.User.update(data.user_id, {
-                        cargo: data.cargo,
+                        roles: data.roles_sistema,
                         full_name: data.nome_completo,
                         loja: cargoConfig?.requiresStore ? data.loja : null,
-                        is_vendedor: data.cargo === "Vendedor",
+                        is_vendedor: data.roles_sistema.includes("Vendedor"),
                     });
                 } catch (syncError) {
                     console.error("Erro ao sincronizar com public_users:", syncError);
@@ -195,16 +197,17 @@ export default function ColaboradorModal({
         mutationFn: async ({ id, data }) => {
             const colaboradorData = { ...data };
             delete colaboradorData.loja;
-            colaboradorData.pin_montagem = data.cargo === "Montador" ? data.pin_montagem : null;
+            colaboradorData.pin_montagem = data.roles_sistema?.includes("Montador") ? data.pin_montagem : null;
             const updatedColab = await base44.entities.Colaborador.update(id, colaboradorData);
-            if (data.user_id && data.cargo) {
+            if (data.user_id && data.roles_sistema && data.roles_sistema.length > 0) {
                 try {
-                    const cargoConfig = getCargoConfig(data.cargo);
+                    const primaryRole = data.roles_sistema[0];
+                    const cargoConfig = getCargoConfig(primaryRole);
                     await base44.entities.User.update(data.user_id, {
-                        cargo: data.cargo,
+                        roles: data.roles_sistema,
                         full_name: data.nome_completo,
                         loja: cargoConfig?.requiresStore ? data.loja : null,
-                        is_vendedor: data.cargo === "Vendedor",
+                        is_vendedor: data.roles_sistema.includes("Vendedor"),
                     });
                 } catch (syncError) {
                     console.error("Erro ao sincronizar com public_users:", syncError);
@@ -489,34 +492,55 @@ export default function ColaboradorModal({
 
                     {/* ── Profissional ── */}
                     <TabsContent value="profissional" className="space-y-5 mt-4">
-                        <SectionTitle>Cargo e Vínculo</SectionTitle>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <Label>Cargo</Label>
-                                <Select
-                                    value={formData.cargo}
-                                    onValueChange={(v) => handleChange("cargo", v)}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Selecione o cargo" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {CARGOS.filter((c) => c?.value).map((c) => (
-                                            <SelectItem key={c.value} value={c.value}>
-                                                <div className="flex items-center gap-2">
-                                                    {createElement(c.icon, {
-                                                        className: "w-4 h-4",
-                                                        style: { color: c.color },
-                                                    })}
-                                                    {c.label}
-                                                </div>
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                        <SectionTitle>Cargo (Descrição da Função)</SectionTitle>
+                        <div>
+                            <Label>Descrição do Cargo</Label>
+                            <p className="text-xs text-gray-500 mb-1">Descreva a função do colaborador (ex: Gerente de Loja, Vendedor, Auxiliar Administrativo)</p>
+                            <Input
+                                value={formData.descricao_cargo}
+                                onChange={(e) => handleChange("descricao_cargo", e.target.value)}
+                                placeholder="Ex: Gerente de Loja, Vendedor, Auxiliar de Estoque..."
+                            />
+                        </div>
 
-                            {getCargoConfig(formData.cargo)?.requiresStore && (
+                        <SectionTitle>Papéis do Sistema (Permissões)</SectionTitle>
+                        <p className="text-xs text-gray-600 mb-3">Selecione um ou mais papéis para definir quais permissões o colaborador terá no sistema.</p>
+                        <div className="grid grid-cols-2 gap-4">
+                            {CARGOS.filter((c) => c?.value).map((c) => {
+                                const isSelected = formData.roles_sistema?.includes(c.value);
+                                return (
+                                    <Card key={c.value} className={`cursor-pointer border-2 transition-all ${isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                                        <CardContent className="p-3">
+                                            <label className="flex items-start gap-3 cursor-pointer">
+                                                <Checkbox
+                                                    checked={isSelected}
+                                                    onCheckedChange={(checked) => {
+                                                        const newRoles = checked
+                                                            ? [...(formData.roles_sistema || []), c.value]
+                                                            : (formData.roles_sistema || []).filter(r => r !== c.value);
+                                                        handleChange("roles_sistema", newRoles);
+                                                    }}
+                                                    className="mt-0.5"
+                                                />
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2">
+                                                        {createElement(c.icon, {
+                                                            className: "w-4 h-4",
+                                                            style: { color: c.color },
+                                                        })}
+                                                        <span className="font-medium text-sm">{c.label}</span>
+                                                    </div>
+                                                    <p className="text-xs text-gray-600 mt-1">{c.description}</p>
+                                                </div>
+                                            </label>
+                                        </CardContent>
+                                    </Card>
+                                );
+                            })}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 mt-5">
+                            {formData.roles_sistema?.some(r => getCargoConfig(r)?.requiresStore) && (
                                 <div>
                                     <Label>Loja</Label>
                                     <Select

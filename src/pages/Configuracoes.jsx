@@ -17,6 +17,7 @@ import ConfiguracaoWhatsAppBot from "../components/configuracoes/ConfiguracaoWha
 import GestaoFuncionarios from "../components/configuracoes/GestaoFuncionarios";
 import ConfiguracaoPrazos from "../components/configuracoes/ConfiguracaoPrazos";
 import ConfiguracaoComprasPagamento from "../components/configuracoes/ConfiguracaoComprasPagamento";
+import ConfiguracaoPapeisSistema from "../components/configuracoes/ConfiguracaoPapeisSistema";
 
 
 const MENU_CONFIG = {
@@ -62,6 +63,7 @@ const MENU_CONFIG = {
     items: [
       { id: "funcionarios", label: "Funcionários", icon: Users },
       { id: "cargos", label: "Perfis de Acesso", icon: Shield },
+      { id: "papeis-sistema", label: "Papéis do Sistema", icon: UserCheck },
     ]
   },
   seguranca: {
@@ -136,6 +138,7 @@ export default function Configuracoes() {
       case "fiscais": return <ConfiguracaoNfe />;
       case "funcionarios": return <GestaoFuncionarios currentUser={user} />;
       case "cargos": return <GestaoCargos />;
+      case "papeis-sistema": return <ConfiguracaoPapeisSistema />;
       case "auditoria": return <AuditLogPage />;
       case "prazos": return <ConfiguracaoPrazos />;
       case "compras-pagamento": return <ConfiguracaoComprasPagamento />;
