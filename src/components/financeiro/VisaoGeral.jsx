@@ -6,13 +6,12 @@ import {
   Target, Users, ShoppingCart, ArrowUp, ArrowDown
 } from "lucide-react";
 import {
-  calcularDRE,
-  calcularReceitaRecebida,
+  calcularDREPorPeriodo,
+  calcularReceitaRecebidaPorPeriodo,
   calcularContasReceber,
-  calcularTotalFolha,
-  calcularTotalComissoes,
-  filtrarPorMes,
-  normalizeTipo,
+  calcularTotalEntradasPorPeriodo,
+  calcularTotalSaidasPorPeriodo,
+  calcularDRESerieMensal12Meses,
 } from "@/services/financeiroAggregation";
 import { isVendaCancelada } from "@/utils/vendaStatus";
 
@@ -77,15 +76,25 @@ export default function VisaoGeral({
   contasPagarCompras = [],
   metas = [],
   mesAno,
+  dreModo = "mensal",
+  dreDataInicio,
+  dreDataFim,
 }) {
+  const periodoDre = useMemo(
+    () => (dreModo === "intervalo"
+      ? { modo: "intervalo", dataInicio: dreDataInicio, dataFim: dreDataFim }
+      : { modo: "mensal", mesAno }),
+    [dreModo, dreDataInicio, dreDataFim, mesAno]
+  );
+
   const dre = useMemo(
-    () => calcularDRE({ vendas, lancamentos, folhas, comissoes, mesAno }),
-    [vendas, lancamentos, folhas, comissoes, mesAno]
+    () => calcularDREPorPeriodo({ vendas, lancamentos, folhas, comissoes, periodo: periodoDre }),
+    [vendas, lancamentos, folhas, comissoes, periodoDre]
   );
 
   const receitaRecebida = useMemo(
-    () => calcularReceitaRecebida(vendas, mesAno),
-    [vendas, mesAno]
+    () => calcularReceitaRecebidaPorPeriodo(vendas, periodoDre),
+    [vendas, periodoDre]
   );
 
   const { total: totalReceber, itens: itensReceber } = useMemo(
@@ -93,30 +102,19 @@ export default function VisaoGeral({
     [vendas]
   );
 
-  const lancamentosDoMes = useMemo(
-    () => lancamentos.filter((l) => l.data_lancamento?.slice(0, 7) === mesAno),
-    [lancamentos, mesAno]
+  const totalEntradasLancamentos = useMemo(
+    () => calcularTotalEntradasPorPeriodo(lancamentos, periodoDre),
+    [lancamentos, periodoDre]
   );
 
-  const totalEntradasLancamentos = lancamentosDoMes
-    .filter((l) => normalizeTipo(l.tipo) === "entrada")
-    .reduce((s, l) => s + Math.abs(l.valor || 0), 0);
-
-  const totalSaidasLancamentos = lancamentosDoMes
-    .filter((l) => normalizeTipo(l.tipo) === "saida")
-    .reduce((s, l) => s + Math.abs(l.valor || 0), 0);
+  const totalSaidasLancamentos = useMemo(
+    () => calcularTotalSaidasPorPeriodo(lancamentos, periodoDre),
+    [lancamentos, periodoDre]
+  );
 
   const saldoCaixa = totalEntradasLancamentos - totalSaidasLancamentos;
-
-  const totalFolhaMes = useMemo(
-    () => calcularTotalFolha(folhas, mesAno),
-    [folhas, mesAno]
-  );
-
-  const totalComissoesMes = useMemo(
-    () => calcularTotalComissoes(comissoes, mesAno),
-    [comissoes, mesAno]
-  );
+  const totalFolhaMes = dre.totalFolha;
+  const totalComissoesMes = dre.totalComissoes;
 
   // Contas a pagar de compras: apenas pendentes/vencidas
   const totalContasPagarCompras = useMemo(() => {
@@ -137,6 +135,44 @@ export default function VisaoGeral({
     ? Math.round((dre.receitaBruta / metaMes.valor_meta) * 100)
     : null;
 
+  const vendasNoPeriodo = useMemo(() => {
+    if (dreModo !== "intervalo") {
+      return vendas.filter((v) => v.data_venda?.slice(0, 7) === mesAno && !isVendaCancelada(v));
+    }
+
+    const inicio = dreDataInicio ? new Date(dreDataInicio) : null;
+    const fim = dreDataFim ? new Date(dreDataFim) : null;
+    if (!inicio || !fim) return [];
+    fim.setHours(23, 59, 59, 999);
+
+    return vendas.filter((v) => {
+      if (isVendaCancelada(v)) return false;
+      const dataVenda = new Date(v.data_venda);
+      if (Number.isNaN(dataVenda.getTime())) return false;
+      return dataVenda >= inicio && dataVenda <= fim;
+    });
+  }, [vendas, dreModo, mesAno, dreDataInicio, dreDataFim]);
+
+  const mesAnoFinalTendencia = useMemo(() => {
+    if (dreModo === "mensal") return mesAno;
+    if (dreDataFim?.length >= 7) return dreDataFim.slice(0, 7);
+    return new Date().toISOString().slice(0, 7);
+  }, [dreModo, mesAno, dreDataFim]);
+
+  const dreTendencia = useMemo(
+    () => calcularDRESerieMensal12Meses({ vendas, lancamentos, mesAnoFinal: mesAnoFinalTendencia }),
+    [vendas, lancamentos, mesAnoFinalTendencia]
+  );
+
+  const maxLucroAbsoluto = useMemo(() => {
+    const valores = dreTendencia.map((m) => Math.abs(m.lucroOperacional || 0));
+    return Math.max(1, ...valores);
+  }, [dreTendencia]);
+
+  const descricaoPeriodoDre = dreModo === "mensal"
+    ? mesAno
+    : `${dreDataInicio || "--"} até ${dreDataFim || "--"}`;
+
   // Qtd de vendas atrasadas A/R
   const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
   const receiverVencidas = itensReceber.filter((v) => {
@@ -151,7 +187,7 @@ export default function VisaoGeral({
         <KPICard
           titulo="Receita Bruta"
           valor={dre.receitaBruta}
-          subtitulo={`${vendas.filter((v) => v.data_venda?.slice(0, 7) === mesAno && !isVendaCancelada(v)).length} pedido(s)`}
+          subtitulo={`${vendasNoPeriodo.length} pedido(s)`}
           icon={ShoppingCart}
           cor="green"
         />
@@ -201,10 +237,10 @@ export default function VisaoGeral({
           <CardHeader className="pb-3">
             <CardTitle className="text-base font-semibold text-gray-800 dark:text-white flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-green-600" />
-              DRE Simplificado — {mesAno}
+              DRE Simplificado — {descricaoPeriodoDre}
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-0.5">
+          <CardContent className="space-y-3">
             <DRELinha label="(+) Receita Bruta de Vendas" valor={dre.receitaBruta} />
             {dre.descontos > 0 && (
               <DRELinha label="(–) Descontos Concedidos" valor={dre.descontos} negativo nivel={1} />
@@ -220,6 +256,33 @@ export default function VisaoGeral({
               <DRELinha label="(–) Comissões de Vendas" valor={totalComissoesMes} negativo nivel={1} />
             )}
             <DRELinha label="(=) Resultado Operacional" valor={dre.resultadoOperacional} destaque />
+
+            <div className="pt-3 border-t border-gray-200 dark:border-neutral-700">
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                Tendência de Resultado Operacional (12 meses)
+              </p>
+              <div className="space-y-1.5">
+                {dreTendencia.map((item) => {
+                  const valor = item.lucroOperacional || 0;
+                  const percentual = (Math.abs(valor) / maxLucroAbsoluto) * 100;
+                  const positivo = valor >= 0;
+                  return (
+                    <div key={item.mesAno} className="grid grid-cols-[56px_1fr_112px] items-center gap-2 text-xs">
+                      <span className="text-gray-500 dark:text-gray-400">{item.label}</span>
+                      <div className="w-full h-2 rounded-full bg-gray-100 dark:bg-neutral-800 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${positivo ? "bg-emerald-500" : "bg-red-500"}`}
+                          style={{ width: `${Math.min(100, percentual)}%` }}
+                        />
+                      </div>
+                      <span className={`text-right tabular-nums font-medium ${positivo ? "text-emerald-600" : "text-red-600"}`}>
+                        R$ {fmt(valor)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -359,7 +422,7 @@ export default function VisaoGeral({
                 })}
               {itensReceber.length > 5 && (
                 <p className="text-xs text-center text-gray-400 pt-1">
-                  + {itensReceber.length - 5} pedido(s) — veja tudo em "Contas a Receber"
+                  + {itensReceber.length - 5} pedido(s) - veja tudo em &quot;Contas a Receber&quot;
                 </p>
               )}
             </div>

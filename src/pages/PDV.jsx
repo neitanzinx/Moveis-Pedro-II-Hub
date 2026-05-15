@@ -440,7 +440,8 @@ export default function PDV() {
           bairro: parsed.bairro || "",
           endereco: parsed.endereco || "",
           aguardandoLiberacao: false,
-          _cliente_id_pendente: parsed.cliente_id // Guardar para buscar o objeto cliente completo
+          _cliente_id_pendente: parsed.cliente_id, // Guardar para buscar o objeto cliente completo
+          _orcamento_id: parsed.orcamento_id || null // Guardar para verificar duplicata
         };
       }
 
@@ -491,6 +492,7 @@ export default function PDV() {
   const [pagamentoEntrega, setPagamentoEntrega] = useState(initialState?.pagamentoEntrega || { ativo: false, valor: 0, forma: "" });
   const [preferenciasEntrega, setPreferenciasEntrega] = useState(initialState?.preferenciasEntrega || { dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
   const [aguardandoLiberacao, setAguardandoLiberacao] = useState(initialState?.aguardandoLiberacao || false);
+  const [orcamentoOrigemId, setOrcamentoOrigemId] = useState(initialState?._orcamento_id || null);
   const [modalPreferenciasOpen, setModalPreferenciasOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [savingOrcamento, setSavingOrcamento] = useState(false);
@@ -537,6 +539,7 @@ export default function PDV() {
       setAguardandoLiberacao(false);
       setCupomAplicado(null);
       setTokenGerencial(null);
+      setOrcamentoOrigemId(parsed.orcamento_id || null);
 
       // Buscar o cliente completo pelo ID
       if (parsed.cliente_id) {
@@ -1294,6 +1297,17 @@ export default function PDV() {
     isProcessingRef.current = true;
     setLoading(true);
 
+    // 🛡️ Proteção contra venda duplicada originada de orçamento
+    if (orcamentoOrigemId) {
+      const vendaExistente = (vendas || []).find(v => v.orcamento_origem_id === orcamentoOrigemId);
+      if (vendaExistente) {
+        toast.error(`Este orçamento já foi convertido na venda #${vendaExistente.numero_pedido}. Não é possível criar uma segunda venda a partir do mesmo orçamento.`);
+        isProcessingRef.current = false;
+        setLoading(false);
+        return;
+      }
+    }
+
     // Validações
     if (!clienteSelecionado) {
       isProcessingRef.current = false;
@@ -1440,7 +1454,8 @@ export default function PDV() {
       cupom_codigo: cupomAplicado?.codigo || null,
       cupom_desconto: cupomAplicado ? desconto : 0,
       triagem_realizada: todosRetiram,
-      data_triagem: todosRetiram ? new Date().toISOString() : null
+      data_triagem: todosRetiram ? new Date().toISOString() : null,
+      orcamento_origem_id: orcamentoOrigemId || null
     };
 
     if
@@ -1785,6 +1800,7 @@ export default function PDV() {
     setPreferenciasEntrega({ dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
     setAguardandoLiberacao(false);
     setCupomAplicado(null);
+    setOrcamentoOrigemId(null);
     setEtapa(1);
     sessionStorage.removeItem(PDV_STATE_KEY);
   };

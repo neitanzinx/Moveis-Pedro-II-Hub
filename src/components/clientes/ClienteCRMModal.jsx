@@ -38,15 +38,55 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { formatarCPFCNPJ, formatarTelefone } from '@/utils/formatters';
 
+const normalizarTexto = (value) => (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+const somenteDigitos = (value) => (value || '').replace(/\D/g, '');
+
 export function ClienteCRMModal({ cliente, isOpen, onClose }) {
     // Busca o histórico de vendas do cliente
+    // Usa base44.entities.Venda.list() (método comprovado pelo app) e filtra em memória.
+    // Queries diretas via supabase.from() retornam 400 por exigência do header Range.
     const { data: vendas, isLoading } = useQuery({
-        queryKey: ['vendas-crm', cliente?.id],
+        queryKey: ['vendas-crm-v2', cliente?.id],
         queryFn: async () => {
             if (!cliente?.id) return [];
-            const { data, error } = await base44.entities.Venda.filter({ cliente_id: cliente.id });
-            if (error) throw error;
-            return data || [];
+
+            const nomeCliente = normalizarTexto(cliente?.nome_completo || '');
+            const telefoneCliente = somenteDigitos(cliente?.telefone);
+
+            const todasVendas = await base44.entities.Venda.list('-data_venda');
+
+            const idsVistos = new Set();
+            return (todasVendas || []).filter((venda) => {
+                // Deduplicação por id (garante contra cache antigo ou registros duplicados no DB)
+                if (idsVistos.has(venda.id)) return false;
+
+                // 1. Match por cliente_id (BIGINT ou UUID)
+                if (venda?.cliente_id != null && String(venda.cliente_id) === String(cliente.id)) {
+                    idsVistos.add(venda.id);
+                    return true;
+                }
+                // 2. Match por nome normalizado
+                const nomeVenda = normalizarTexto(venda?.cliente_nome);
+                if (nomeCliente && nomeVenda &&
+                    (nomeVenda.includes(nomeCliente) || nomeCliente.includes(nomeVenda))) {
+                    idsVistos.add(venda.id);
+                    return true;
+                }
+                // 3. Match por telefone (últimos 8 dígitos)
+                const telefoneVenda = somenteDigitos(venda?.cliente_telefone);
+                if (telefoneCliente.length >= 8 && telefoneVenda.length >= 8 &&
+                    (telefoneVenda.endsWith(telefoneCliente.slice(-8)) ||
+                        telefoneCliente.endsWith(telefoneVenda.slice(-8)))) {
+                    idsVistos.add(venda.id);
+                    return true;
+                }
+                return false;
+            });
         },
         enabled: !!cliente?.id && isOpen,
     });
@@ -244,7 +284,7 @@ export function ClienteCRMModal({ cliente, isOpen, onClose }) {
                                                     <TableRow>
                                                         <TableCell colSpan={4} className="h-24 text-center">Carregando histórico...</TableCell>
                                                     </TableRow>
-                                                ) : vendas?.length === 0 ? (
+                                                ) : !Array.isArray(vendas) || vendas.length === 0 ? (
                                                     <TableRow>
                                                         <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
                                                             Nenhum registro de venda encontrado.

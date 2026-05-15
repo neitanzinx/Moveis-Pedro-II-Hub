@@ -50,11 +50,23 @@ function getMesAnoParts(mesAno) {
   return { ano, mes };
 }
 
+function getTodayYmd() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function getMonthStartYmd() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
 
 export default function Financeiro() {
   const { user, loading, can } = useAuth();
   const [activeTab, setActiveTab] = useState("visao-geral");
   const [mesAno, setMesAno] = useState(new Date().toISOString().slice(0, 7));
+  const [dreModo, setDreModo] = useState("mensal");
+  const [dreDataInicio, setDreDataInicio] = useState(getMonthStartYmd());
+  const [dreDataFim, setDreDataFim] = useState(getTodayYmd());
   const partesMesAno = useMemo(() => getMesAnoParts(mesAno), [mesAno]);
   const [anoInput, setAnoInput] = useState(partesMesAno.ano);
   const canViewFinanceiro = can('view_financeiro') || can('manage_financeiro');
@@ -216,6 +228,37 @@ export default function Financeiro() {
             }}
             className="w-24 border rounded px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:border-neutral-800"
           />
+
+          {activeTab === "visao-geral" && (
+            <>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">D.R.E.</span>
+              <select
+                value={dreModo}
+                onChange={(e) => setDreModo(e.target.value)}
+                className="border rounded px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:border-neutral-800"
+              >
+                <option value="mensal">Mensal</option>
+                <option value="intervalo">Período</option>
+              </select>
+
+              {dreModo === "intervalo" && (
+                <>
+                  <input
+                    type="date"
+                    value={dreDataInicio}
+                    onChange={(e) => setDreDataInicio(e.target.value)}
+                    className="border rounded px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:border-neutral-800"
+                  />
+                  <input
+                    type="date"
+                    value={dreDataFim}
+                    onChange={(e) => setDreDataFim(e.target.value)}
+                    className="border rounded px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:border-neutral-800"
+                  />
+                </>
+              )}
+            </>
+          )}
         </div>
       </div>
 
@@ -251,6 +294,9 @@ export default function Financeiro() {
               contasPagarCompras={contasPagarCompras}
               metas={metas}
               mesAno={mesAno}
+              dreModo={dreModo}
+              dreDataInicio={dreDataInicio}
+              dreDataFim={dreDataFim}
             />
           </TabsContent>
 
@@ -313,6 +359,9 @@ export default function Financeiro() {
           )}
         </div>
       </Tabs>
+      
+      {/* Modal global de detalhes de lançamentos (escuta eventos customizados) */}
+      <LancamentosList onlyModal categorias={categorias} />
     </div>
   );
 }

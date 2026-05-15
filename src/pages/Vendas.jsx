@@ -26,6 +26,7 @@ import TransferirMontagemModal from "../components/vendas/TransferirMontagemModa
 import { VendaDetalhesModal } from "@/components/vendas/VendaDetalhesModal";
 import { getVendaFinanceiro, getVendaResumoLogistico, isStatusCancelado, isVendaCancelada } from "@/utils/vendaStatus";
 import { buildProductDisplayName } from "@/utils/productReference";
+import { MONEY_EPSILON, toMoneyNumber } from "@/utils/deliveryPayment";
 
 export default function Vendas() {
     const [search, setSearch] = useState("");
@@ -36,6 +37,13 @@ export default function Vendas() {
     const [clienteParaNfe, setClienteParaNfe] = useState(null);
     const [selectedVendaDetalhes, setSelectedVendaDetalhes] = useState(null);
     const [isDetalhesModalOpen, setIsDetalhesModalOpen] = useState(false);
+    const [modalPagamentoVenda, setModalPagamentoVenda] = useState(null);
+    const [pagamentoForm, setPagamentoForm] = useState({
+        valor: "",
+        forma_pagamento: "PIX",
+        data_pagamento: new Date().toISOString().slice(0, 10),
+        observacao: ""
+    });
 
     const liberarEntregaMutation = useMutation({
         mutationFn: (id) => base44.entities.Entrega.update(id, {
@@ -71,6 +79,7 @@ export default function Vendas() {
     // Hook de Autenticação e Controle de Acesso
     const { user, filterData, can } = useAuth();
     const canCancelVendas = can('cancel_vendas');
+    const canManagePayments = can('manage_financeiro') || can('manage_vendas');
 
 
     const { data: vendas = [], isLoading } = useQuery({
@@ -323,6 +332,117 @@ export default function Vendas() {
             toast.success("Venda cancelada! Entregas, montagens, assistências, lançamentos e encomendas vinculadas também foram sinalizados.");
         }
     });
+
+    const registrarPagamentoMutation = useMutation({
+        mutationFn: async ({ venda, valorRecebido, formaPagamento, dataPagamento, observacao }) => {
+            if (!venda?.id) throw new Error('Venda inválida para registrar pagamento.');
+            if (isVendaCancelada(venda)) throw new Error('Não é possível registrar pagamento em venda cancelada.');
+
+            const financeiroAtual = venda.financeiro || getVendaFinanceiro(venda, { entregas, lancamentos });
+            const saldoAtual = Math.max(toMoneyNumber(financeiroAtual.valorRestante), 0);
+            const totalVenda = Math.max(toMoneyNumber(financeiroAtual.total || venda.valor_total), 0);
+            const valorPagoAtual = Math.max(toMoneyNumber(financeiroAtual.valorPago || venda.valor_pago), 0);
+            const valorRecebidoNum = Math.max(toMoneyNumber(valorRecebido), 0);
+
+            if (valorRecebidoNum <= MONEY_EPSILON) {
+                throw new Error('Informe um valor de pagamento maior que zero.');
+            }
+
+            if (valorRecebidoNum > saldoAtual + MONEY_EPSILON) {
+                throw new Error(`O valor informado excede o saldo pendente de R$ ${saldoAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`);
+            }
+
+            const novoValorPago = Math.min(totalVenda, valorPagoAtual + valorRecebidoNum);
+            const novoValorRestante = Math.max(totalVenda - novoValorPago, 0);
+            const quitada = novoValorRestante <= MONEY_EPSILON;
+            const statusVenda = quitada ? 'Pago' : 'Pagamento Pendente';
+
+            await base44.entities.Venda.update(venda.id, {
+                valor_pago: novoValorPago,
+                valor_restante: novoValorRestante,
+                status: statusVenda,
+                pagamento_entrega_observacao: observacao || null,
+            });
+
+            await base44.entities.LancamentoFinanceiro.create({
+                descricao: `Pagamento na loja - Venda #${venda.numero_pedido}`,
+                valor: valorRecebidoNum,
+                tipo: 'receita',
+                data_lancamento: dataPagamento,
+                data_vencimento: dataPagamento,
+                pago: true,
+                forma_pagamento: formaPagamento,
+                status: 'Pago',
+                observacao: observacao || 'Pagamento antecipado registrado na listagem de vendas.',
+                venda_id: venda.id,
+                numero_pedido: venda.numero_pedido,
+            });
+
+            if (quitada) {
+                const pendentesVenda = (lancamentos || []).filter((l) =>
+                    l.venda_id === venda.id &&
+                    String(l.tipo || '').toLowerCase() === 'receita' &&
+                    String(l.status || '').toLowerCase() === 'pendente'
+                );
+
+                for (const lancamento of pendentesVenda) {
+                    await base44.entities.LancamentoFinanceiro.update(lancamento.id, {
+                        status: 'Pago',
+                        pago: true,
+                        data_lancamento_real: dataPagamento,
+                        observacao: `${lancamento.observacao || ''} [Quitado na loja antes da entrega]`.trim(),
+                    });
+                }
+            }
+
+            return { valorRecebidoNum, novoValorRestante, quitada };
+        },
+        onSuccess: ({ valorRecebidoNum, novoValorRestante, quitada }) => {
+            queryClient.invalidateQueries({ queryKey: ['vendas'] });
+            queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
+            queryClient.invalidateQueries({ queryKey: ['entregas'] });
+            queryClient.invalidateQueries({ queryKey: ['vendas-financeiro'] });
+
+            toast.success(
+                `Pagamento de R$ ${valorRecebidoNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} registrado. ${quitada ? 'Venda quitada.' : `Saldo restante: R$ ${novoValorRestante.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`}`
+            );
+            setModalPagamentoVenda(null);
+            setPagamentoForm({
+                valor: "",
+                forma_pagamento: "PIX",
+                data_pagamento: new Date().toISOString().slice(0, 10),
+                observacao: ""
+            });
+        },
+        onError: (error) => {
+            toast.error(error?.message || 'Não foi possível registrar o pagamento.');
+        }
+    });
+
+    const abrirModalPagamento = (venda) => {
+        const financeiro = venda.financeiro || getVendaFinanceiro(venda, { entregas, lancamentos });
+        const saldoAtual = Math.max(toMoneyNumber(financeiro.valorRestante), 0);
+
+        setPagamentoForm({
+            valor: saldoAtual > 0 ? saldoAtual.toFixed(2) : "",
+            forma_pagamento: venda.forma_pagamento_entrega || venda.forma_pagamento || "PIX",
+            data_pagamento: new Date().toISOString().slice(0, 10),
+            observacao: ""
+        });
+        setModalPagamentoVenda(venda);
+    };
+
+    const confirmarPagamentoAntecipado = () => {
+        if (!modalPagamentoVenda) return;
+
+        registrarPagamentoMutation.mutate({
+            venda: modalPagamentoVenda,
+            valorRecebido: pagamentoForm.valor,
+            formaPagamento: pagamentoForm.forma_pagamento,
+            dataPagamento: pagamentoForm.data_pagamento,
+            observacao: pagamentoForm.observacao,
+        });
+    };
 
     // Mutation para solicitar reagendamento
     const reagendarMutation = useMutation({
@@ -705,6 +825,20 @@ export default function Vendas() {
                                                         )
                                                     )}
 
+                                                    {canManagePayments && financeiro.valorRestante > MONEY_EPSILON && !isVendaCancelada(venda) && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                abrirModalPagamento(venda);
+                                                            }}
+                                                            title="Atualizar Pagamento"
+                                                        >
+                                                            <CreditCard className="w-4 h-4 text-emerald-600" />
+                                                        </Button>
+                                                    )}
+
                                                     <Button variant="ghost" size="icon" onClick={(e) => {
                                                         e.stopPropagation();
                                                         const clienteCompleto = clientes.find(c => c.id === venda.cliente_id) || { nome_completo: venda.cliente_nome, telefone: venda.cliente_telefone };
@@ -1002,6 +1136,90 @@ export default function Vendas() {
                 montagens={montagens}
                 lancamentos={lancamentos}
             />
+
+            <Dialog open={!!modalPagamentoVenda} onOpenChange={(open) => !open && setModalPagamentoVenda(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-emerald-700">
+                            <CreditCard className="w-5 h-5" />
+                            Atualizar Pagamento
+                        </DialogTitle>
+                        <DialogDescription>
+                            Registre pagamento antecipado na loja para o pedido #{modalPagamentoVenda?.numero_pedido}.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="rounded-lg border bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                            Saldo atual: <strong>R$ {toMoneyNumber(modalPagamentoVenda?.financeiro?.valorRestante).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Valor recebido</Label>
+                            <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={pagamentoForm.valor}
+                                onChange={(e) => setPagamentoForm((prev) => ({ ...prev, valor: e.target.value }))}
+                                placeholder="0,00"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Forma de pagamento</Label>
+                            <Select
+                                value={pagamentoForm.forma_pagamento}
+                                onValueChange={(value) => setPagamentoForm((prev) => ({ ...prev, forma_pagamento: value }))}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Selecione" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="Dinheiro">Dinheiro</SelectItem>
+                                    <SelectItem value="PIX">PIX</SelectItem>
+                                    <SelectItem value="Cartão de Débito">Cartão de Débito</SelectItem>
+                                    <SelectItem value="Cartão de Crédito">Cartão de Crédito</SelectItem>
+                                    <SelectItem value="Boleto">Boleto</SelectItem>
+                                    <SelectItem value="Transferência">Transferência</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Data do pagamento</Label>
+                            <Input
+                                type="date"
+                                value={pagamentoForm.data_pagamento}
+                                onChange={(e) => setPagamentoForm((prev) => ({ ...prev, data_pagamento: e.target.value }))}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Observação</Label>
+                            <Textarea
+                                rows={3}
+                                placeholder="Ex: Cliente antecipou pagamento na loja."
+                                value={pagamentoForm.observacao}
+                                onChange={(e) => setPagamentoForm((prev) => ({ ...prev, observacao: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setModalPagamentoVenda(null)}>
+                            Cancelar
+                        </Button>
+                        <Button
+                            onClick={confirmarPagamentoAntecipado}
+                            disabled={registrarPagamentoMutation.isPending}
+                            className="bg-emerald-600 hover:bg-emerald-700"
+                        >
+                            {registrarPagamentoMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                            Confirmar Pagamento
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Modal Solicitar Reagendamento */}
             <Dialog open={!!modalReagendamento} onOpenChange={() => setModalReagendamento(null)}>

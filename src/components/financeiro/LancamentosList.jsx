@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,10 +31,22 @@ import {
   Loader2,
   Pencil,
   Upload,
-  Save
+  Save,
+  AlertTriangle
 } from "lucide-react";
 
-export default function LancamentosList({ lancamentos, categorias, isLoading }) {
+// Formata dígitos digitados em moeda brasileira: "150050" → "1.500,50"
+const formatCurrencyMask = (raw) => {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+  const padded = digits.padStart(3, "0");
+  const cents = padded.slice(-2);
+  const intPart = padded.slice(0, -2).replace(/^0+(?=\d)/, "") || "0";
+  const intFormatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${intFormatted},${cents}`;
+};
+
+export default function LancamentosList({ lancamentos = [], categorias = [], isLoading, onlyModal = false }) {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { user } = useAuth();
@@ -43,6 +55,12 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
   const [isEditing, setIsEditing] = useState(false);
   const [detalhesError, setDetalhesError] = useState("");
   const [uploadingAnexo, setUploadingAnexo] = useState(false);
+
+  // Estado do modal de confirmação rígida para excluir lançamentos pagos
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteConfirmNome, setDeleteConfirmNome] = useState("");
+  const [deleteConfirmValor, setDeleteConfirmValor] = useState("");
+  const [deleteConfirmError, setDeleteConfirmError] = useState("");
   const [detalhesForm, setDetalhesForm] = useState({
     tipo: "Entrada",
     categoria_id: "",
@@ -203,6 +221,14 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
     setIsDetalhesOpen(true);
   };
 
+  useEffect(() => {
+    const handleOpenModal = (e) => {
+      if (e.detail) abrirDetalhes(e.detail);
+    };
+    window.addEventListener("openLancamentoDetalhes", handleOpenModal);
+    return () => window.removeEventListener("openLancamentoDetalhes", handleOpenModal);
+  }, []);
+
   const handleCloseDetalhes = (open) => {
     setIsDetalhesOpen(open);
     if (!open) {
@@ -277,14 +303,48 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
     );
   };
 
-  const handleDelete = async (id) => {
-    const confirmed = await confirm({
-      title: "Excluir Lançamento",
-      message: "Tem certeza que deseja excluir este lançamento?",
-      confirmText: "Excluir",
-      variant: "destructive"
-    });
-    if (confirmed) deleteMutation.mutate(id);
+  // Abre o modal rígido de exclusão (para qualquer lançamento)
+  const handleDelete = (lanc) => {
+    setSelectedLancamento(lanc);
+    setDeleteConfirmNome("");
+    setDeleteConfirmValor("");
+    setDeleteConfirmError("");
+    setDeleteConfirmOpen(true);
+  };
+
+  // Alias usado dentro do modal de detalhes
+  const abrirDeletePago = () => {
+    setDeleteConfirmNome("");
+    setDeleteConfirmValor("");
+    setDeleteConfirmError("");
+    setDeleteConfirmOpen(true);
+  };
+
+  // Valida e executa a exclusão do lançamento pago
+  const confirmarDeletePago = () => {
+    const lanc = selectedLancamento;
+    if (!lanc) return;
+
+    const nomeEsperado = (lanc.descricao || "").trim();
+    const valorEsperado = Math.abs(lanc.valor || 0);
+
+    if (deleteConfirmNome.trim() !== nomeEsperado) {
+      setDeleteConfirmError("O nome digitado não corresponde ao lançamento.");
+      return;
+    }
+
+    // aceita tanto vírgula quanto ponto como separador decimal
+    const valorDigitado = parseFloat(
+      deleteConfirmValor.replace(/\./g, "").replace(",", ".")
+    );
+    if (isNaN(valorDigitado) || Math.abs(valorDigitado - valorEsperado) > 0.009) {
+      setDeleteConfirmError("O valor digitado não corresponde ao lançamento.");
+      return;
+    }
+
+    setDeleteConfirmOpen(false);
+    setIsDetalhesOpen(false);
+    deleteMutation.mutate(lanc.id);
   };
 
   // Separar impostos/taxas por categoria
@@ -494,7 +554,7 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
                             className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDelete(lanc.id);
+                              handleDelete(lanc);
                             }}
                             disabled={deleteMutation.isPending}
                           >
@@ -512,6 +572,341 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
       </CardContent>
     </Card>
   );
+
+  if (onlyModal) {
+    return (
+      <Dialog open={isDetalhesOpen} onOpenChange={handleCloseDetalhes}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <DialogTitle>Detalhes do lançamento</DialogTitle>
+                <DialogDescription>
+                  Visualize todas as informações e, se necessário, edite os dados do lançamento.
+                </DialogDescription>
+              </div>
+              <Button
+                type="button"
+                variant={isEditing ? "secondary" : "outline"}
+                onClick={() => {
+                  setDetalhesError("");
+                  setIsEditing((prev) => !prev);
+                }}
+              >
+                <Pencil className="w-4 h-4 mr-2" />
+                {isEditing ? "Cancelar edição" : "Editar"}
+              </Button>
+            </div>
+          </DialogHeader>
+
+          {selectedLancamento && (
+            <div className="space-y-4">
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label>Tipo</Label>
+                  {isEditing ? (
+                    <Select
+                      value={detalhesForm.tipo}
+                      onValueChange={(value) => setDetalhesForm((prev) => ({ ...prev, tipo: value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Entrada">Entrada</SelectItem>
+                        <SelectItem value="Saída">Saída</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{detalhesForm.tipo}</p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Status</Label>
+                  {isEditing ? (
+                    <Select
+                      value={detalhesForm.status}
+                      onValueChange={(value) => setDetalhesForm((prev) => ({ ...prev, status: value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Pago">Pago</SelectItem>
+                        <SelectItem value="Pendente">Pendente</SelectItem>
+                        <SelectItem value="Cancelado">Cancelado</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div>{getStatusBadge(detalhesForm.status)}</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label>Descrição</Label>
+                {isEditing ? (
+                  <Input
+                    value={detalhesForm.descricao}
+                    onChange={(e) => setDetalhesForm((prev) => ({ ...prev, descricao: e.target.value }))}
+                  />
+                ) : (
+                  <p className="text-sm text-gray-700 dark:text-gray-300">{detalhesForm.descricao || "-"}</p>
+                )}
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <Label>Valor (R$)</Label>
+                  {isEditing ? (
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={detalhesForm.valor}
+                      onChange={(e) => setDetalhesForm((prev) => ({ ...prev, valor: e.target.value }))}
+                    />
+                  ) : (
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{formatMoney(detalhesForm.valor)}</p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Data do lançamento</Label>
+                  {isEditing ? (
+                    <Input
+                      type="date" lang="pt-BR"
+                      value={detalhesForm.data_lancamento || ""}
+                      onChange={(e) => setDetalhesForm((prev) => ({ ...prev, data_lancamento: e.target.value }))}
+                    />
+                  ) : (
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{formatDate(detalhesForm.data_lancamento)}</p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Data de vencimento</Label>
+                  {isEditing ? (
+                    <Input
+                      type="date" lang="pt-BR"
+                      value={detalhesForm.data_vencimento || ""}
+                      onChange={(e) => setDetalhesForm((prev) => ({ ...prev, data_vencimento: e.target.value }))}
+                    />
+                  ) : (
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{formatDate(detalhesForm.data_vencimento)}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label>Data de pagamento real</Label>
+                {isEditing ? (
+                  <Input
+                    type="date" lang="pt-BR"
+                    value={detalhesForm.data_lancamento_real || ""}
+                    onChange={(e) => setDetalhesForm((prev) => ({ ...prev, data_lancamento_real: e.target.value }))}
+                  />
+                ) : (
+                  <p className="text-sm text-gray-700 dark:text-gray-300">{formatDate(detalhesForm.data_lancamento_real)}</p>
+                )}
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label>Categoria</Label>
+                  {isEditing ? (
+                    <Select
+                      value={detalhesForm.categoria_id || "sem-categoria"}
+                      onValueChange={(value) => {
+                        if (value === "sem-categoria") {
+                          setDetalhesForm((prev) => ({ ...prev, categoria_id: "", categoria_nome: "" }));
+                          return;
+                        }
+                        const categoria = categorias.find((cat) => cat.id === value);
+                        setDetalhesForm((prev) => ({
+                          ...prev,
+                          categoria_id: value,
+                          categoria_nome: categoria?.nome || prev.categoria_nome
+                        }));
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="sem-categoria">Sem categoria</SelectItem>
+                        {categorias.map((cat) => (
+                          <SelectItem key={cat.id} value={cat.id}>{cat.nome}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{detalhesForm.categoria_nome || "-"}</p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Forma de pagamento</Label>
+                  {isEditing ? (
+                    <Select
+                      value={detalhesForm.forma_pagamento || "Dinheiro"}
+                      onValueChange={(value) => setDetalhesForm((prev) => ({ ...prev, forma_pagamento: value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Dinheiro">Dinheiro</SelectItem>
+                        <SelectItem value="Crédito">Crédito</SelectItem>
+                        <SelectItem value="Débito">Débito</SelectItem>
+                        <SelectItem value="Pix">Pix</SelectItem>
+                        <SelectItem value="Transferência">Transferência</SelectItem>
+                        <SelectItem value="Boleto">Boleto</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{detalhesForm.forma_pagamento || "-"}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label>Observações</Label>
+                {isEditing ? (
+                  <Textarea
+                    rows={3}
+                    value={detalhesForm.observacao}
+                    onChange={(e) => setDetalhesForm((prev) => ({ ...prev, observacao: e.target.value }))}
+                  />
+                ) : (
+                  <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{detalhesForm.observacao || "-"}</p>
+                )}
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label>Recorrente</Label>
+                  {isEditing ? (
+                    <Select
+                      value={detalhesForm.recorrente ? "sim" : "nao"}
+                      onValueChange={(value) => setDetalhesForm((prev) => ({ ...prev, recorrente: value === "sim" }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="sim">Sim</SelectItem>
+                        <SelectItem value="nao">Não</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{detalhesForm.recorrente ? "Sim" : "Não"}</p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label>Periodicidade</Label>
+                  {isEditing ? (
+                    <Select
+                      value={detalhesForm.recorrencia_tipo || "Mensal"}
+                      onValueChange={(value) => setDetalhesForm((prev) => ({ ...prev, recorrencia_tipo: value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Mensal">Mensal</SelectItem>
+                        <SelectItem value="Trimestral">Trimestral</SelectItem>
+                        <SelectItem value="Semestral">Semestral</SelectItem>
+                        <SelectItem value="Anual">Anual</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{detalhesForm.recorrencia_tipo || "-"}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Comprovante / documento</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {detalhesForm.anexo_url ? (
+                    <Button type="button" variant="outline" onClick={() => window.open(detalhesForm.anexo_url, "_blank")}>
+                      <Eye className="w-4 h-4 mr-2" />
+                      Ver anexo atual
+                    </Button>
+                  ) : (
+                    <p className="text-sm text-gray-500">Sem anexo</p>
+                  )}
+
+                  {isEditing && (
+                    <>
+                      <Label className="inline-flex items-center gap-2 px-3 py-2 rounded-md border cursor-pointer text-sm hover:bg-gray-50">
+                        <Upload className="w-4 h-4" />
+                        {uploadingAnexo ? "Enviando..." : "Anexar comprovante"}
+                        <Input
+                          type="file"
+                          accept="image/*,.pdf"
+                          className="hidden"
+                          disabled={uploadingAnexo}
+                          onChange={handleAnexoUpload}
+                        />
+                      </Label>
+                      {detalhesForm.anexo_url && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setDetalhesForm((prev) => ({ ...prev, anexo_url: "" }))}
+                        >
+                          Remover anexo
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4 text-xs text-gray-500">
+                <p><strong>ID:</strong> {selectedLancamento.id}</p>
+                <p><strong>Criado em:</strong> {formatDate(selectedLancamento.created_at)}</p>
+                <p><strong>Pago por:</strong> {selectedPaidDeclaration?.nome || '-'}</p>
+                <p><strong>Pago em:</strong> {selectedPaidDeclaration?.em ? formatDateTime(selectedPaidDeclaration.em) : '-'}</p>
+                <p><strong>Pedido:</strong> {selectedLancamento.numero_pedido || '-'}</p>
+                <p><strong>Venda vinculada:</strong> {selectedLancamento.venda_id || '-'}</p>
+              </div>
+
+              {detalhesError && (
+                <p className="text-sm text-red-600">{detalhesError}</p>
+              )}
+
+              <div className="flex items-center justify-between gap-3 pt-2">
+                {/* Botão destrutivo: só visível para lançamentos pagos e fora do modo edição */}
+                {!isEditing && selectedLancamento?.status === "Pago" && (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="flex items-center gap-2 opacity-90 hover:opacity-100"
+                    onClick={abrirDeletePago}
+                    disabled={deleteMutation.isPending}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Cancelar e Excluir
+                  </Button>
+                )}
+                <div className="flex-1" />
+                {isEditing && (
+                  <Button type="button" onClick={handleSaveDetalhes} disabled={updateMutation.isPending || uploadingAnexo}>
+                    <Save className="w-4 h-4 mr-2" />
+                    {updateMutation.isPending ? "Salvando..." : "Salvar alterações"}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -898,14 +1293,112 @@ export default function LancamentosList({ lancamentos, categorias, isLoading }) 
                 <p className="text-sm text-red-600">{detalhesError}</p>
               )}
 
-              {isEditing && (
-                <div className="flex justify-end">
+              <div className="flex items-center justify-between gap-3 pt-2">
+                {/* Botão destrutivo: só visível para lançamentos pagos e fora do modo edição */}
+                {!isEditing && selectedLancamento?.status === "Pago" && (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="flex items-center gap-2 opacity-90 hover:opacity-100"
+                    onClick={abrirDeletePago}
+                    disabled={deleteMutation.isPending}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Cancelar e Excluir
+                  </Button>
+                )}
+                <div className="flex-1" />
+                {isEditing && (
                   <Button type="button" onClick={handleSaveDetalhes} disabled={updateMutation.isPending || uploadingAnexo}>
                     <Save className="w-4 h-4 mr-2" />
                     {updateMutation.isPending ? "Salvando..." : "Salvar alterações"}
                   </Button>
-                </div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de confirmação rígida: excluir lançamento */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={(open) => {
+        if (!open) setDeleteConfirmOpen(false);
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <DialogTitle className="text-red-700 dark:text-red-400">Excluir lançamento</DialogTitle>
+                <DialogDescription>
+                  Esta ação é <strong>irreversível</strong>. O lançamento será permanentemente excluído.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {selectedLancamento && (
+            <div className="space-y-4 pt-2">
+              <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 text-sm space-y-1">
+                <p><span className="font-semibold text-gray-700 dark:text-gray-300">Lançamento:</span> {selectedLancamento.descricao}</p>
+                <p><span className="font-semibold text-gray-700 dark:text-gray-300">Valor:</span> {formatMoney(selectedLancamento.valor)}</p>
+                <p><span className="font-semibold text-gray-700 dark:text-gray-300">Status:</span> {selectedLancamento.status || "Pendente"}</p>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">
+                  1. Digite o <span className="font-bold">nome exato</span> do lançamento para confirmar:
+                </Label>
+                <Input
+                  placeholder={selectedLancamento.descricao}
+                  value={deleteConfirmNome}
+                  onChange={(e) => { setDeleteConfirmNome(e.target.value); setDeleteConfirmError(""); }}
+                  className="border-red-300 focus:ring-red-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">
+                  2. Digite o <span className="font-bold">valor exato</span> do lançamento (ex: {Math.abs(selectedLancamento.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}):
+                </Label>
+                <Input
+                  placeholder="0,00"
+                  value={deleteConfirmValor}
+                  onChange={(e) => {
+                    setDeleteConfirmValor(formatCurrencyMask(e.target.value));
+                    setDeleteConfirmError("");
+                  }}
+                  className="border-red-300 focus:ring-red-500"
+                />
+              </div>
+
+              {deleteConfirmError && (
+                <p className="text-sm text-red-600 font-medium flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {deleteConfirmError}
+                </p>
               )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDeleteConfirmOpen(false)}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={confirmarDeletePago}
+                  disabled={deleteMutation.isPending}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  {deleteMutation.isPending ? "Excluindo..." : "Confirmar exclusão"}
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>

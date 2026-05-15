@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from "react";
-import { base44 } from "@/api/base44Client";
+import React, { useState, useMemo, useCallback } from "react";
+import { base44 } from "@/lib/supabase";
 import { useLojas } from "@/hooks/useLojas";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +29,10 @@ import RelatorioMontadores from "@/components/relatorios/RelatorioMontadores";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { isVendaCancelada } from "@/utils/vendaStatus";
+import {
+  calcularDRECompleto,
+  calcularDRESerieMensal12Meses,
+} from "@/services/financeiroAggregation";
 
 const COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#f97316'];
 const GRADIENT_COLORS = {
@@ -130,13 +134,19 @@ export default function RelatoriosAvancados() {
   const { user, loading: authLoading, can } = useAuth();
   const queryClient = useQueryClient();
   const isAdmin = user?.cargo === 'Administrador';
+  const hojeYmd = new Date().toISOString().split('T')[0];
+  const mesAtual = new Date().toISOString().slice(0, 7);
   const [filtros, setFiltros] = useState({
     dataInicio: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
-    dataFim: new Date().toISOString().split('T')[0],
+    dataFim: hojeYmd,
     loja: "todas",
     vendedor: "todos",
     status: "todos"
   });
+  const [drePeriodo, setDrePeriodo] = useState("mensal");
+  const [dreMesAno, setDreMesAno] = useState(mesAtual);
+  const [dreDataInicio, setDreDataInicio] = useState(filtros.dataInicio);
+  const [dreDataFim, setDreDataFim] = useState(hojeYmd);
   const [activeTab, setActiveTab] = useState("visao-geral");
 
   // Queries
@@ -198,6 +208,15 @@ export default function RelatoriosAvancados() {
   const [produtoDetalhe, setProdutoDetalhe] = useState(null);
 
   // Filtrar vendas (moved to useMemo to maintain hooks order)
+  const getVendedorNome = useCallback((venda) => {
+    let vendedorNome = venda.responsavel_nome || venda.vendedor_nome || 'Não informado';
+    if (venda.responsavel_id) {
+      const u = users.find((userItem) => userItem.id === venda.responsavel_id);
+      if (u && u.full_name) vendedorNome = u.full_name;
+    }
+    return vendedorNome;
+  }, [users]);
+
   const vendasFiltradas = useMemo(() => {
     return vendas.filter(v => {
       const dataVenda = new Date(v.data_venda);
@@ -205,11 +224,7 @@ export default function RelatoriosAvancados() {
       const dataFim = new Date(filtros.dataFim);
       dataFim.setHours(23, 59, 59);
 
-      let vendedorNome = v.responsavel_nome || v.vendedor_nome || 'Não informado';
-      if (v.responsavel_id) {
-        const u = users.find(user => user.id === v.responsavel_id);
-        if (u && u.full_name) vendedorNome = u.full_name;
-      }
+      const vendedorNome = getVendedorNome(v);
 
       return (
         dataVenda >= dataInicio &&
@@ -219,7 +234,18 @@ export default function RelatoriosAvancados() {
         (filtros.status === "todos" || v.status === filtros.status)
       );
     });
-  }, [vendas, filtros, users]);
+  }, [vendas, filtros, getVendedorNome]);
+
+  const vendasFiltradasDre = useMemo(() => {
+    return vendas.filter((v) => {
+      const vendedorNome = getVendedorNome(v);
+      return (
+        (filtros.loja === "todas" || v.loja === filtros.loja) &&
+        (filtros.vendedor === "todos" || vendedorNome === filtros.vendedor) &&
+        (filtros.status === "todos" || v.status === filtros.status)
+      );
+    });
+  }, [vendas, filtros, getVendedorNome]);
 
   // Dados para gráficos (all useMemo hooks MUST be before any conditional returns)
   const vendasPorDia = useMemo(() => {
@@ -423,86 +449,53 @@ export default function RelatoriosAvancados() {
   }, [vendasFiltradas]);
 
   // ============ D.R.E. CALCULATIONS ============
-  const dreData = useMemo(() => {
-    // Create products map for cost lookup
-    const produtosMap = {};
-    produtos.forEach(p => {
-      produtosMap[p.id] = p;
-    });
-
-    // Receita Bruta (total sales)
-    const receitaBruta = vendasFiltradas.reduce((sum, v) => sum + (v.valor_total || 0), 0);
-
-    // Deduções (discounts + cancelled sales)
-    const descontos = vendasFiltradas.reduce((sum, v) => sum + (v.desconto || 0) + (v.cupom_desconto || 0), 0);
-    const vendasCanceladas = vendasFiltradas
-      .filter(v => isVendaCancelada(v))
-      .reduce((sum, v) => sum + (v.valor_total || 0), 0);
-    const deducoes = descontos + vendasCanceladas;
-
-    // Receita Líquida
-    const receitaLiquida = receitaBruta - deducoes;
-
-    // CMV (Cost of Goods Sold) - calculate from product costs in items
-    let cmv = 0;
-    vendasFiltradas.forEach(v => {
-      if (!isVendaCancelada(v)) {
-        v.itens?.forEach(item => {
-          const produto = produtosMap[item.produto_id];
-          const custoProduto = produto?.preco_custo || (item.preco_unitario * 0.6); // Fallback: 60% do preço venda
-          cmv += custoProduto * (item.quantidade || 1);
-        });
-      }
-    });
-
-    // Lucro Bruto
-    const lucroBruto = receitaLiquida - cmv;
-
-    // Filter lancamentos by date
-    const lancamentosFiltrados = lancamentos.filter(l => {
-      const dataLanc = new Date(l.data_lancamento || l.data_vencimento);
-      const dataInicio = new Date(filtros.dataInicio);
-      const dataFim = new Date(filtros.dataFim);
-      dataFim.setHours(23, 59, 59);
-      return dataLanc >= dataInicio && dataLanc <= dataFim;
-    });
-
-    // Despesas Operacionais (from lancamentos_financeiros)
-    const despesasOperacionais = lancamentosFiltrados
-      .filter(l => l.tipo?.toLowerCase() === 'despesa')
-      .reduce((sum, l) => sum + (l.valor || 0), 0);
-
-    // Group expenses by category for breakdown
-    const despesasPorCategoria = {};
-    lancamentosFiltrados
-      .filter(l => l.tipo?.toLowerCase() === 'despesa')
-      .forEach(l => {
-        const cat = l.categoria_nome || 'Outras Despesas';
-        despesasPorCategoria[cat] = (despesasPorCategoria[cat] || 0) + (l.valor || 0);
-      });
-
-    // Lucro Operacional
-    const lucroOperacional = lucroBruto - despesasOperacionais;
-
-    // Margem Bruta e Líquida (percentuais)
-    const margemBruta = receitaLiquida > 0 ? (lucroBruto / receitaLiquida) * 100 : 0;
-    const margemLiquida = receitaLiquida > 0 ? (lucroOperacional / receitaLiquida) * 100 : 0;
+  const drePeriodoConfig = useMemo(() => {
+    if (drePeriodo === "intervalo") {
+      return {
+        modo: "intervalo",
+        dataInicio: dreDataInicio,
+        dataFim: dreDataFim,
+      };
+    }
 
     return {
-      receitaBruta,
-      descontos,
-      vendasCanceladas,
-      deducoes,
-      receitaLiquida,
-      cmv,
-      lucroBruto,
-      despesasOperacionais,
-      despesasPorCategoria: Object.entries(despesasPorCategoria).map(([nome, valor]) => ({ nome, valor })).sort((a, b) => b.valor - a.valor),
-      lucroOperacional,
-      margemBruta,
-      margemLiquida
+      modo: "mensal",
+      mesAno: dreMesAno,
     };
-  }, [vendasFiltradas, lancamentos, produtos, filtros]);
+  }, [drePeriodo, dreMesAno, dreDataInicio, dreDataFim]);
+
+  const drePeriodoLabel = useMemo(() => {
+    const formatDateSafe = (value) => {
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return "--/--/----";
+      return d.toLocaleDateString('pt-BR');
+    };
+
+    if (drePeriodo === "intervalo") {
+      return `${formatDateSafe(dreDataInicio)} a ${formatDateSafe(dreDataFim)}`;
+    }
+    const [ano, mes] = dreMesAno.split('-');
+    return `${mes}/${ano}`;
+  }, [drePeriodo, dreMesAno, dreDataInicio, dreDataFim]);
+
+  const dreData = useMemo(() => {
+    return calcularDRECompleto({
+      vendas: vendasFiltradasDre,
+      lancamentos,
+      produtos,
+      periodo: drePeriodoConfig,
+    });
+  }, [vendasFiltradasDre, lancamentos, produtos, drePeriodoConfig]);
+
+  const dreSerieMensal = useMemo(
+    () => calcularDRESerieMensal12Meses({
+      vendas: vendasFiltradasDre,
+      lancamentos,
+      produtos,
+      mesAnoFinal: drePeriodo === "mensal" ? dreMesAno : dreDataFim.slice(0, 7),
+    }),
+    [vendasFiltradasDre, lancamentos, produtos, drePeriodo, dreMesAno, dreDataFim]
+  );
 
   // ============ ABC CURVE CALCULATIONS ============
   const curvaABCData = useMemo(() => {
@@ -1518,11 +1511,59 @@ export default function RelatoriosAvancados() {
                   Demonstração do Resultado do Exercício (D.R.E.)
                 </CardTitle>
                 <p className="text-sm text-gray-500">
-                  Período: {new Date(filtros.dataInicio).toLocaleDateString('pt-BR')} a {new Date(filtros.dataFim).toLocaleDateString('pt-BR')}
+                  Período: {drePeriodoLabel}
                 </p>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
+                  <div className="grid md:grid-cols-4 gap-3 p-3 rounded-lg bg-gray-50 dark:bg-neutral-800">
+                    <div>
+                      <Label className="text-xs text-gray-500">Periodicidade</Label>
+                      <Select value={drePeriodo} onValueChange={setDrePeriodo}>
+                        <SelectTrigger className="mt-1 bg-white dark:bg-neutral-900">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="mensal">Mensal</SelectItem>
+                          <SelectItem value="intervalo">Período personalizado</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {drePeriodo === "mensal" ? (
+                      <div>
+                        <Label className="text-xs text-gray-500">Mês de referência</Label>
+                        <Input
+                          type="month"
+                          className="mt-1 bg-white dark:bg-neutral-900"
+                          value={dreMesAno}
+                          onChange={(e) => setDreMesAno(e.target.value)}
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <Label className="text-xs text-gray-500">Data início</Label>
+                          <Input
+                            type="date"
+                            className="mt-1 bg-white dark:bg-neutral-900"
+                            value={dreDataInicio}
+                            onChange={(e) => setDreDataInicio(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-gray-500">Data fim</Label>
+                          <Input
+                            type="date"
+                            className="mt-1 bg-white dark:bg-neutral-900"
+                            value={dreDataFim}
+                            onChange={(e) => setDreDataFim(e.target.value)}
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+
                   {/* D.R.E. Table */}
                   <div className="rounded-lg border border-gray-200 dark:border-neutral-700 overflow-hidden">
                     <table className="w-full">
@@ -1609,6 +1650,26 @@ export default function RelatoriosAvancados() {
                       </tbody>
                     </table>
                   </div>
+
+                  <Card className="border border-gray-200 dark:border-neutral-700 shadow-none">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base">Tendência de 12 Meses</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={280}>
+                        <LineChart data={dreSerieMensal}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                          <YAxis tick={{ fontSize: 11 }} />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Legend />
+                          <Line type="monotone" dataKey="receitaLiquida" name="Receita Líquida" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="despesasOperacionais" name="Despesas Operacionais" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="lucroOperacional" name="Lucro Operacional" stroke="#10b981" strokeWidth={2.5} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
 
                   {/* Expense Breakdown */}
                   {dreData.despesasPorCategoria.length > 0 && (

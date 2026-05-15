@@ -1,11 +1,11 @@
-import React, { useState, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useMemo } from "react";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, TrendingDown, DollarSign, CheckCircle2, Clock } from "lucide-react";
+import { Search, TrendingDown, DollarSign, CheckCircle2, Clock, AlertCircle } from "lucide-react";
 import { normalizeTipo } from "@/services/financeiroAggregation";
 import { isVendaCancelada } from "@/utils/vendaStatus";
 
@@ -14,24 +14,30 @@ const fmt = (v) =>
 
 const EPSILON = 0.01;
 
-const STATUS_COLORS = {
-  vencida:   { bg: "bg-red-100 dark:bg-red-900/30",    text: "text-red-700 dark:text-red-400",    label: "Vencido" },
-  em_dia:    { bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-700 dark:text-green-400", label: "Em dia" },
-  sem_prazo: { bg: "bg-gray-100 dark:bg-neutral-700",   text: "text-gray-600 dark:text-gray-400",  label: "Sem prazo" },
-};
-
 // ─── Já Entrou ──────────────────────────────────────────────────────────────────
-function SecaoJaEntrou({ vendas, lancamentos, mesAno }) {
+
+// Utilitário para checar se a venda está entregue
+function isVendaEntregue(venda, entregas) {
+  if (!venda || !Array.isArray(entregas)) return false;
+  return entregas.some(
+    (e) =>
+      (e.venda_id === venda.id || e.numero_pedido === venda.numero_pedido) &&
+      (e.status === "Entregue" || e.status === "entregue")
+  );
+}
+
+function SecaoJaEntrou({ vendas, lancamentos, entregas, mesAno }) {
   const [busca, setBusca] = useState("");
 
-  const vendasPagas = useMemo(() =>
+  const vendasPagasEEntregues = useMemo(() =>
     vendas.filter(
       (v) =>
         !isVendaCancelada(v) &&
         (v.valor_pago || 0) > EPSILON &&
         (v.valor_restante || 0) <= EPSILON &&
-        v.data_venda?.slice(0, 7) === mesAno
-    ), [vendas, mesAno]);
+        v.data_venda?.slice(0, 7) === mesAno &&
+        isVendaEntregue(v, entregas)
+    ), [vendas, entregas, mesAno]);
 
   const lancsEntradaPagos = useMemo(() =>
     lancamentos.filter(
@@ -41,16 +47,17 @@ function SecaoJaEntrou({ vendas, lancamentos, mesAno }) {
         l.data_lancamento?.slice(0, 7) === mesAno
     ), [lancamentos, mesAno]);
 
-  const totalVendas = vendasPagas.reduce((s, v) => s + (v.valor_pago || 0), 0);
+
+  const totalVendas = vendasPagasEEntregues.reduce((s, v) => s + (v.valor_pago || 0), 0);
   const totalLancs  = lancsEntradaPagos.reduce((s, l) => s + Math.abs(l.valor || 0), 0);
 
   const vendasFiltradas = useMemo(() => {
-    if (!busca) return vendasPagas;
+    if (!busca) return vendasPagasEEntregues;
     const t = busca.toLowerCase();
-    return vendasPagas.filter(
+    return vendasPagasEEntregues.filter(
       (v) => v.cliente_nome?.toLowerCase().includes(t) || v.numero_pedido?.toLowerCase().includes(t)
     );
-  }, [vendasPagas, busca]);
+  }, [vendasPagasEEntregues, busca]);
 
   const lancsFiltrados = useMemo(() => {
     if (!busca) return lancsEntradaPagos;
@@ -64,9 +71,9 @@ function SecaoJaEntrou({ vendas, lancamentos, mesAno }) {
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: "Vendas recebidas",      total: totalVendas,              count: vendasPagas.length,        cor: "text-green-600" },
+          { label: "Vendas recebidas",      total: totalVendas,              count: vendasPagasEEntregues.length,        cor: "text-green-600" },
           { label: "Lançamentos recebidos", total: totalLancs,               count: lancsEntradaPagos.length,  cor: "text-blue-600" },
-          { label: "Total entrado",         total: totalVendas + totalLancs, count: vendasPagas.length + lancsEntradaPagos.length, cor: "text-green-700" },
+          { label: "Total entrado",         total: totalVendas + totalLancs, count: vendasPagasEEntregues.length + lancsEntradaPagos.length, cor: "text-green-700" },
         ].map((item) => (
           <Card key={item.label} className="border-0 shadow-md">
             <CardContent className="pt-4 pb-3">
@@ -187,7 +194,17 @@ function SecaoParaEntrar({ vendas, lancamentos, entregas }) {
       const dataAgendada = entrega?.data_agendada ? entrega.data_agendada.slice(0, 10) : null;
       const vencida  = dataAgendada && new Date(dataAgendada + "T00:00:00") < hoje;
       const semPrazo = !dataAgendada;
-      return { ...v, _status: vencida ? "vencida" : semPrazo ? "sem_prazo" : "em_dia", _dataAgendada: dataAgendada || null };
+      const entregaStatus = String(entrega?.status || "").toLowerCase();
+      const entregaConcluida = entregaStatus === "entregue";
+
+      return {
+        ...v,
+        _status: vencida ? "vencida" : semPrazo ? "sem_prazo" : "em_dia",
+        _dataAgendada: dataAgendada || null,
+        _entregaStatus: entrega?.status || null,
+        _temEntrega: Boolean(entrega),
+        _entregaConcluida: entregaConcluida,
+      };
     }), [vendasPendentes, entregaMap, hoje]);
 
   const vendasFiltradas = useMemo(() => {
@@ -219,9 +236,25 @@ function SecaoParaEntrar({ vendas, lancamentos, entregas }) {
   const totalVendas = vendasPendentes.reduce((s, v) => s + (v.valor_restante || 0), 0);
   const totalLancs  = lancsEntradaPendentes.reduce((s, l) => s + Math.abs(l.valor || 0), 0);
   const vencidas    = vendasComStatus.filter((v) => v._status === "vencida").length;
+  const projecaoComEntrega = vendasFiltradas.filter((v) => v._temEntrega);
+  const projecaoSemEntrega = vendasFiltradas.filter((v) => !v._temEntrega);
+  const totalComEntrega = projecaoComEntrega.reduce((s, v) => s + (v.valor_restante || 0), 0);
+  const totalSemEntrega = projecaoSemEntrega.reduce((s, v) => s + (v.valor_restante || 0), 0);
 
   return (
     <div className="space-y-4">
+      <Card className="border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800/60">
+        <CardContent className="py-3 px-4">
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-300 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4" />
+            Projeção de Entrada
+          </p>
+          <p className="text-xs text-amber-800 dark:text-amber-200 mt-1">
+            Os valores abaixo representam entradas previstas. O valor é contabilizado no caixa e na receita quando a entrega for concluída e o pagamento marcado como pago.
+          </p>
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-3 gap-4">
         {[
           { label: "Vendas pendentes",       total: totalVendas,              count: vendasPendentes.length,        cor: "text-orange-600" },
@@ -236,6 +269,23 @@ function SecaoParaEntrar({ vendas, lancamentos, entregas }) {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Card className="border-0 shadow-md">
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Projeção com entrega vinculada</p>
+            <p className="text-xl font-bold text-orange-700">R$ {fmt(totalComEntrega)}</p>
+            <p className="text-xs text-gray-400">{projecaoComEntrega.length} pedido(s)</p>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-md">
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Projeção sem entrega vinculada</p>
+            <p className="text-xl font-bold text-orange-700">R$ {fmt(totalSemEntrega)}</p>
+            <p className="text-xs text-gray-400">{projecaoSemEntrega.length} pedido(s)</p>
+          </CardContent>
+        </Card>
       </div>
 
       <Card className="border-0 shadow-md">
@@ -279,12 +329,12 @@ function SecaoParaEntrar({ vendas, lancamentos, entregas }) {
                     <TableHead>Pedido</TableHead><TableHead>Cliente</TableHead><TableHead>Loja</TableHead>
                     <TableHead>Total</TableHead><TableHead>Pago</TableHead>
                     <TableHead className="text-orange-600">Saldo</TableHead>
+                    <TableHead>Contexto</TableHead>
                     <TableHead>Prazo</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {vendasFiltradas.map((v) => {
-                    const c = STATUS_COLORS[v._status] || STATUS_COLORS.sem_prazo;
                     return (
                       <TableRow key={v.id} className="text-sm hover:bg-gray-50 dark:hover:bg-neutral-800">
                         <TableCell className="font-medium text-green-700 dark:text-green-400">#{v.numero_pedido || "—"}</TableCell>
@@ -293,6 +343,11 @@ function SecaoParaEntrar({ vendas, lancamentos, entregas }) {
                         <TableCell>R$ {fmt(v.valor_total)}</TableCell>
                         <TableCell className="text-green-600">R$ {fmt(v.valor_pago)}</TableCell>
                         <TableCell className="font-semibold text-orange-600">R$ {fmt(v.valor_restante)}</TableCell>
+                        <TableCell className="text-xs text-gray-500">
+                          {v._temEntrega
+                            ? (v._entregaConcluida ? "Entrega concluída (pagamento pendente)" : `Com entrega (${v._entregaStatus || "status não definido"})`)
+                            : "Sem entrega vinculada"}
+                        </TableCell>
                         <TableCell className="text-gray-500 text-xs">
                           {v._dataAgendada
                             ? new Date(v._dataAgendada.slice(0, 10) + "T00:00:00").toLocaleDateString("pt-BR")
@@ -375,7 +430,7 @@ export default function ContasReceber({ vendas = [], lancamentos = [], entregas 
         <SecaoParaEntrar vendas={vendas} lancamentos={lancamentos} entregas={entregas} />
       </TabsContent>
       <TabsContent value="ja-entrou">
-        <SecaoJaEntrou vendas={vendas} lancamentos={lancamentos} mesAno={mesAno} />
+        <SecaoJaEntrou vendas={vendas} lancamentos={lancamentos} entregas={entregas} mesAno={mesAno} />
       </TabsContent>
     </Tabs>
   );

@@ -2,8 +2,9 @@
 import React, { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
-import { TrendingDown, Calendar, AlertTriangle, Clock, Siren } from "lucide-react";
+import { TrendingDown, Calendar, AlertTriangle, Clock, Siren, ChevronDown } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useAuth } from "@/hooks/useAuth";
@@ -50,7 +51,10 @@ function ItemRow({ lanc, onStatusChange, updating }) {
     : "—";
 
   return (
-    <div className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 dark:hover:bg-neutral-800/60 group">
+    <div 
+      className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 dark:hover:bg-neutral-800/60 group cursor-pointer"
+      onClick={() => window.dispatchEvent(new CustomEvent("openLancamentoDetalhes", { detail: lanc }))}
+    >
       <div className="flex items-center gap-3 min-w-0">
         <div className="w-7 h-7 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
           <TrendingDown className="w-3.5 h-3.5 text-red-600" />
@@ -67,28 +71,30 @@ function ItemRow({ lanc, onStatusChange, updating }) {
       <div className="flex items-center gap-2 ml-3 flex-shrink-0">
         <span className="text-sm font-bold text-red-600">{fmt(lanc.valor)}</span>
         {lanc.status === "Pendente" ? (
-          <Select
-            value={lanc.status}
-            onValueChange={(value) => onStatusChange(lanc, value)}
-            disabled={updating}
-          >
-            <SelectTrigger className="h-6 w-[90px] text-[10px] border-0 bg-transparent hover:bg-gray-100 dark:hover:bg-neutral-800">
-              <SelectValue>
-                <Badge className="bg-yellow-100 text-yellow-800 text-[10px]">Pendente</Badge>
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Pago">
-                <Badge className="bg-green-100 text-green-800 text-[10px]">Pago</Badge>
-              </SelectItem>
-              <SelectItem value="Pendente">
-                <Badge className="bg-yellow-100 text-yellow-800 text-[10px]">Pendente</Badge>
-              </SelectItem>
-              <SelectItem value="Cancelado">
-                <Badge className="bg-gray-100 text-gray-600 text-[10px]">Cancelado</Badge>
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          <div onClick={(e) => e.stopPropagation()}>
+            <Select
+              value={lanc.status}
+              onValueChange={(value) => onStatusChange(lanc, value)}
+              disabled={updating}
+            >
+              <SelectTrigger className="h-6 w-[90px] text-[10px] border-0 bg-transparent hover:bg-gray-100 dark:hover:bg-neutral-800">
+                <SelectValue>
+                  <Badge className="bg-yellow-100 text-yellow-800 text-[10px]">Pendente</Badge>
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Pago">
+                  <Badge className="bg-green-100 text-green-800 text-[10px]">Pago</Badge>
+                </SelectItem>
+                <SelectItem value="Pendente">
+                  <Badge className="bg-yellow-100 text-yellow-800 text-[10px]">Pendente</Badge>
+                </SelectItem>
+                <SelectItem value="Cancelado">
+                  <Badge className="bg-gray-100 text-gray-600 text-[10px]">Cancelado</Badge>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         ) : (
           <Badge
             className={
@@ -144,6 +150,7 @@ export default function VencimentosProximos({ lancamentos = [] }) {
   const confirm = useConfirm();
   const { user } = useAuth();
   const [updatingId, setUpdatingId] = useState(null);
+  const [visibleWeeks, setVisibleWeeks] = useState(3);
 
   const grupos = useMemo(() => {
     const pendentes = lancamentos.filter(
@@ -319,7 +326,7 @@ export default function VencimentosProximos({ lancamentos = [] }) {
           onStatusChange={handleStatusChange}
           updatingId={updatingId}
         />
-        {grupos.semanasOrdenadas.map((sem) => (
+        {grupos.semanasOrdenadas.slice(0, visibleWeeks).map((sem) => (
           <Grupo
             key={sem.key}
             titulo={sem.label}
@@ -332,6 +339,19 @@ export default function VencimentosProximos({ lancamentos = [] }) {
             defaultAberto={false}
           />
         ))}
+        {visibleWeeks < grupos.semanasOrdenadas.length && (
+          <div className="pt-2 flex justify-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setVisibleWeeks((prev) => prev + 3)}
+              className="text-xs text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 gap-1"
+            >
+              <ChevronDown className="w-3 h-3" />
+              Exibir mais
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

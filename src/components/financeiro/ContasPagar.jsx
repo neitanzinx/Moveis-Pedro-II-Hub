@@ -422,7 +422,11 @@ function DespesasTab({ lancamentos = [], isLoading }) {
               </TableHeader>
               <TableBody>
                 {filtradas.map((lanc) => (
-                  <TableRow key={lanc.id} className="text-sm hover:bg-gray-50 dark:hover:bg-neutral-800">
+                  <TableRow 
+                    key={lanc.id} 
+                    className="text-sm hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"
+                    onClick={() => window.dispatchEvent(new CustomEvent("openLancamentoDetalhes", { detail: lanc }))}
+                  >
                     <TableCell className="font-medium">{lanc.descricao || "—"}</TableCell>
                     <TableCell>{lanc.categoria_nome || "—"}</TableCell>
                     <TableCell className="text-gray-500 text-xs">
@@ -531,6 +535,7 @@ function PagasTab({
           valor: Math.abs(Number(l.valor || 0)),
           data: l.data_vencimento || l.data_lancamento_real || l.data_lancamento || l.updated_at || l.created_at || null,
           status: l.status || "Pago",
+          _raw: l,
         });
       });
 
@@ -604,7 +609,15 @@ function PagasTab({
               </TableHeader>
               <TableBody>
                 {filtradas.map((conta) => (
-                  <TableRow key={conta.id} className="text-sm hover:bg-gray-50 dark:hover:bg-neutral-800">
+                  <TableRow 
+                    key={conta.id} 
+                    className={`text-sm hover:bg-gray-50 dark:hover:bg-neutral-800 ${conta.origem === 'Despesas' ? 'cursor-pointer' : ''}`}
+                    onClick={() => {
+                      if (conta.origem === 'Despesas' && conta._raw) {
+                        window.dispatchEvent(new CustomEvent("openLancamentoDetalhes", { detail: conta._raw }));
+                      }
+                    }}
+                  >
                     <TableCell>
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
                         {conta.origem}

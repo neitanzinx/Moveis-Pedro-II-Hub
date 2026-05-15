@@ -43,6 +43,7 @@ export default function Orcamentos() {
             const orcamentoFull = await base44.entities.Orcamento.getById(orcamento.id);
             const pdvState = {
                 cliente_id: orcamentoFull.cliente_id,
+                orcamento_id: orcamentoFull.id,
                 itens: (orcamentoFull.itens || []).map(item => ({
                     ...item,
                     preco_sugerido: item.preco_sugerido || item.preco_unitario,
@@ -59,6 +60,9 @@ export default function Orcamentos() {
                 endereco: orcamentoFull.endereco || "",
                 valor_frete: parseFloat(orcamentoFull.valor_frete) || 0
             };
+            // Marcar o orçamento como Convertido para impedir dupla conversão
+            await base44.entities.Orcamento.update(orcamentoFull.id, { status: 'Convertido' });
+            queryClient.invalidateQueries({ queryKey: ['orcamentos'] });
             sessionStorage.setItem('moveispedroii_pdv_state', JSON.stringify(pdvState));
             // Disparar evento customizado para o PDV detectar (SPA)
             window.dispatchEvent(new Event('orcamento-para-pdv'));
