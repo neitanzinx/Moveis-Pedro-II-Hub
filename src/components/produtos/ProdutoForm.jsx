@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, Search, Upload, X, GripVertical, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-const categorias = ["Sofá", "Cama", "Mesa", "Cadeira", "Armário", "Estante", "Rack", "Poltrona", "Escrivaninha", "Criado-mudo", "Buffet", "Aparador", "Banco", "Outros"];
+const categorias = ["Sofá", "Cama", "Mesa", "Cadeira", "Armário", "Estante", "Rack", "Poltrona", "Escrivaninha", "Criado-mudo", "Buffet", "Aparador", "Banco", "Travesseiro", "Almofada", "Decorações", "Utensílios", "Outros"];
 const ambientes = ["Quarto", "Sala", "Cozinha", "Escritório", "Banheiro", "Área Externa", "Hall", "Varanda"];
 
 export default function ProdutoForm({ produto = null, onSave, isLoading }) {
@@ -67,7 +67,7 @@ export default function ProdutoForm({ produto = null, onSave, isLoading }) {
         prompt: `Encontre informações sobre o produto móvel com código de barras: ${formData.codigo_barras}. 
         Retorne APENAS dados de móveis e produtos relacionados.
         Se não encontrar informações ou se for um produto irrelevante (como alimentos, eletrônicos, etc), retorne null.
-        Caso encontre, retorne as informações básicas: nome, categoria (escolha entre: Sofá, Cama, Mesa, Cadeira, Armário, Estante, Rack, Poltrona, Escrivaninha, Criado-mudo, Buffet, Aparador, Banco, Outros), descrição breve, material, cor.`,
+        Caso encontre, retorne as informações básicas: nome, categoria (escolha entre: Sofá, Cama, Mesa, Cadeira, Armário, Estante, Rack, Poltrona, Escrivaninha, Criado-mudo, Buffet, Aparador, Banco, Travesseiro, Almofada, Decorações, Utensílios, Outros), descrição breve, material, cor.`,
         add_context_from_internet: true,
         response_json_schema: {
           type: "object",

@@ -23,6 +23,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import {
     Package,
     Palette,
@@ -38,6 +40,7 @@ import {
     Upload,
     X,
     Link as LinkIcon,
+    ChevronsUpDown,
     Warehouse
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -55,6 +58,7 @@ import {
     generateSKU
 } from '@/utils/productFormatters';
 import { calculateFinalPriceFromMarkup, toMultiplierFromPercent, toPercentFromMultiplier } from '@/utils/markupCalculator';
+import FornecedorModal from '@/components/cadastros/FornecedorModal';
 import FurnitureColorPicker, { getColorHex } from './FurnitureColorPicker';
 import ProdutoHistoricoTab from './ProdutoHistoricoTab';
 
@@ -76,6 +80,9 @@ const FIELD_TO_SECTION = {
     preco_venda: 'secao-financeiro-estoque',
     valor_montagem: 'secao-financeiro-estoque',
     preco_custo_tabela: 'secao-financeiro-estoque',
+    impostos_percentual: 'secao-financeiro-estoque',
+    frete_custo: 'secao-financeiro-estoque',
+    ipi_percentual: 'secao-financeiro-estoque',
     estoque_cd: 'secao-financeiro-estoque',
     estoque_minimo: 'secao-financeiro-estoque',
     estoque_ideal: 'secao-financeiro-estoque',
@@ -91,7 +98,129 @@ const FIELD_TO_SECTION = {
     fotos: 'secao-fotos'
 };
 
+const FornecedorCombobox = ({ fornecedores = [], value, onChange, disabled }) => {
+    const [open, setOpen] = useState(false);
+    const fornecedorSelecionado = fornecedores.find((f) => String(f.id) === String(value));
+    const label = fornecedorSelecionado
+        ? (fornecedorSelecionado.nome || fornecedorSelecionado.nome_empresa || 'Fornecedor')
+        : 'Selecione o fornecedor';
+
+    const fornecedoresFiltrados = useMemo(
+        () => [...fornecedores].sort((a, b) => (a.nome_empresa || a.nome || '').localeCompare((b.nome_empresa || b.nome || ''), 'pt-BR')),
+        [fornecedores]
+    );
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    disabled={disabled}
+                    className="w-full justify-between bg-white"
+                >
+                    <span className="truncate">{label}</span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[360px] p-0" align="start">
+                <Command>
+                    <CommandInput placeholder="Buscar fornecedor..." />
+                    <CommandList>
+                        <CommandEmpty>Nenhum fornecedor encontrado.</CommandEmpty>
+                        <CommandGroup>
+                            {fornecedoresFiltrados.map((fornecedor) => {
+                                const fornecedorNome = fornecedor.nome || fornecedor.nome_empresa || 'Fornecedor';
+                                return (
+                                    <CommandItem
+                                        key={fornecedor.id}
+                                        value={`${fornecedorNome} ${fornecedor.cnpj || ''}`}
+                                        onSelect={() => {
+                                            onChange(String(fornecedor.id));
+                                            setOpen(false);
+                                        }}
+                                    >
+                                        <Check className="mr-2 h-4 w-4 opacity-0" />
+                                        <span className="truncate">{fornecedorNome}</span>
+                                        {fornecedor.cnpj ? <span className="ml-2 text-xs text-muted-foreground">{fornecedor.cnpj}</span> : null}
+                                    </CommandItem>
+                                );
+                            })}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+};
+
 const ESTOQUE_LOJA_FIELDS = Object.values(CAMPOS_ESTOQUE_LOJA).filter((field) => field !== 'estoque_cd');
+
+const parseFlexibleCharge = (rawValue, baseAmount) => {
+    const rawText = String(rawValue ?? '').trim();
+    if (!rawText) {
+        return {
+            rawText,
+            isPercent: false,
+            value: 0,
+            percent: 0,
+            amount: 0,
+            isValid: true,
+        };
+    }
+
+    const normalized = rawText
+        .replace(/\s+/g, '')
+        .replace('R$', '')
+        .replace(',', '.');
+
+    const isPercent = normalized.includes('%');
+    const numericText = normalized.replace('%', '');
+    const value = parseFloat(numericText);
+
+    if (!Number.isFinite(value) || value < 0) {
+        return {
+            rawText,
+            isPercent,
+            value: 0,
+            percent: 0,
+            amount: 0,
+            isValid: false,
+        };
+    }
+
+    if (isPercent) {
+        return {
+            rawText,
+            isPercent: true,
+            value,
+            percent: value,
+            amount: baseAmount > 0 ? (baseAmount * value) / 100 : 0,
+            isValid: true,
+        };
+    }
+
+    return {
+        rawText,
+        isPercent: false,
+        value,
+        percent: baseAmount > 0 ? (value / baseAmount) * 100 : 0,
+        amount: value,
+        isValid: true,
+    };
+};
+
+const formatCurrencyBRL = (value) =>
+    Number(value || 0).toLocaleString('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+
+const formatPercent = (value) => `${Number(value || 0).toFixed(2)}%`;
 
 // Estado inicial do formulário
 const INITIAL_FORM_DATA = {
@@ -126,6 +255,9 @@ const INITIAL_FORM_DATA = {
     // Preços
     preco_custo: '',
     preco_custo_tabela: '', // Preço fixo do fornecedor (tabela)
+    impostos_percentual: '', // % estimada de impostos para formação de preço
+    frete_custo: '', // % de frete para formação de preço
+    ipi_percentual: '', // % de IPI para formação de preço
     preco_custo_promocional: '', // Preço quando comprado em promoção
     promocao_inicio: '', // Data início da promoção
     promocao_fim: '', // Data fim da promoção
@@ -175,6 +307,7 @@ export default function ProdutoCadastroCompleto({
     const [uploadingImages, setUploadingImages] = useState(false);
     const [fotoUrlInput, setFotoUrlInput] = useState('');
     const [activeView, setActiveView] = useState('ficha');
+    const [showFornecedorModal, setShowFornecedorModal] = useState(false);
 
     // Multi-Tenant: Carrega lojas dinâmicas e configurações
     const { data: lojas = [] } = useLojas();
@@ -216,6 +349,9 @@ export default function ProdutoCadastroCompleto({
                 modelo_referencia: produto.modelo_referencia || '',
                 preco_custo: produto.preco_custo?.toString() || '',
                 preco_custo_tabela: produto.preco_custo_tabela?.toString() || produto.preco_custo?.toString() || '',
+                impostos_percentual: produto.impostos_percentual ? `${produto.impostos_percentual}%` : '',
+                frete_custo: produto.frete_custo ? `${produto.frete_custo}%` : '',
+                ipi_percentual: produto.ipi_percentual ? `${produto.ipi_percentual}%` : '',
                 preco_custo_promocional: '', // Ignora valor do banco
                 promocao_inicio: '',
                 promocao_fim: '',
@@ -339,10 +475,23 @@ export default function ProdutoCadastroCompleto({
         [fornecedores, formData.fornecedor_id]
     );
 
-    // Calcula markup sugerido com precedência: produto > fornecedor > regra da categoria
+    // Regra de formação: (custo + IPI + frete + montagem) x markup
+    // Precedência do markup: produto > fornecedor > regra da categoria
     const suggestedPrice = useMemo(() => {
         const custoAtivo = parseFloat(formData.preco_custo_tabela || formData.preco_custo || 0);
-        if (!(custoAtivo > 0) || !formData.categoria) return 0;
+        if (!(custoAtivo > 0)) return 0;
+
+        const impostosCalc = parseFlexibleCharge(formData.impostos_percentual, custoAtivo);
+        const freteCalc = parseFlexibleCharge(formData.frete_custo, custoAtivo);
+        const ipiCalc = parseFlexibleCharge(formData.ipi_percentual, custoAtivo);
+        const valorMontagem = parseFloat(formData.valor_montagem || 0);
+
+        const custoComAdicionais =
+            custoAtivo +
+            impostosCalc.amount +
+            freteCalc.amount +
+            ipiCalc.amount +
+            valorMontagem;
 
         const usaMarkupFornecedor = Boolean(formData.usar_markup_fornecedor) && Boolean(fornecedorSelecionado?.usar_markup_padrao);
         const multiplicadorFornecedor = fornecedorSelecionado?.markup_padrao_multiplicador;
@@ -352,7 +501,7 @@ export default function ProdutoCadastroCompleto({
         const percentualProduto = formData.markup_percentual;
 
         const precoViaMarkup = calculateFinalPriceFromMarkup(
-            custoAtivo,
+            custoComAdicionais,
             multiplicadorProduto || (usaMarkupFornecedor ? multiplicadorFornecedor : null),
             percentualProduto || (usaMarkupFornecedor ? percentualFornecedor : null)
         );
@@ -363,17 +512,48 @@ export default function ProdutoCadastroCompleto({
 
         const markupCategorias = settings?.markup_categorias || {};
         const markupCategoria = markupCategorias[formData.categoria] || markupCategorias.default || 45;
-        const precoSugerido = custoAtivo * (1 + markupCategoria / 100);
+        const precoSugerido = custoComAdicionais * (1 + markupCategoria / 100);
         return Math.round(precoSugerido * 100) / 100;
     }, [
         formData.preco_custo_tabela,
         formData.preco_custo,
+        formData.impostos_percentual,
+        formData.ipi_percentual,
+        formData.frete_custo,
+        formData.valor_montagem,
         formData.categoria,
         formData.markup_multiplicador,
         formData.markup_percentual,
         formData.usar_markup_fornecedor,
         fornecedorSelecionado,
         settings?.markup_categorias,
+    ]);
+
+    const pricingBreakdown = useMemo(() => {
+        const custoAtivo = parseFloat(formData.preco_custo_tabela || formData.preco_custo || 0);
+        const impostosCalc = parseFlexibleCharge(formData.impostos_percentual, custoAtivo);
+        const freteCalc = parseFlexibleCharge(formData.frete_custo, custoAtivo);
+        const ipiCalc = parseFlexibleCharge(formData.ipi_percentual, custoAtivo);
+        const valorMontagem = parseFloat(formData.valor_montagem || 0);
+
+        const custoComAdicionais =
+            custoAtivo + impostosCalc.amount + freteCalc.amount + ipiCalc.amount + valorMontagem;
+
+        return {
+            custoAtivo,
+            impostosCalc,
+            freteCalc,
+            ipiCalc,
+            valorMontagem,
+            custoComAdicionais,
+        };
+    }, [
+        formData.preco_custo_tabela,
+        formData.preco_custo,
+        formData.impostos_percentual,
+        formData.frete_custo,
+        formData.ipi_percentual,
+        formData.valor_montagem,
     ]);
 
     // Atualiza campo do formulário
@@ -513,6 +693,10 @@ export default function ProdutoCadastroCompleto({
         let largura = formData.largura ? parseFloat(formData.largura) : null;
         let altura = formData.altura ? parseFloat(formData.altura) : null;
         let profundidade = formData.profundidade ? parseFloat(formData.profundidade) : null;
+        const custoBase = parseFloat(formData.preco_custo_tabela) || precoCusto || 0;
+        const impostosCalc = parseFlexibleCharge(formData.impostos_percentual, custoBase);
+        const freteCalc = parseFlexibleCharge(formData.frete_custo, custoBase);
+        const ipiCalc = parseFlexibleCharge(formData.ipi_percentual, custoBase);
 
 
 
@@ -547,6 +731,9 @@ export default function ProdutoCadastroCompleto({
             profundidade_embalagem: formData.profundidade_embalagem ? parseFloat(formData.profundidade_embalagem) : null,
             // Preços de custo
             preco_custo_tabela: parseFloat(formData.preco_custo_tabela) || null,
+            impostos_percentual: formData.impostos_percentual ? impostosCalc.percent : null,
+            frete_custo: formData.frete_custo ? freteCalc.percent : null,
+            ipi_percentual: formData.ipi_percentual ? ipiCalc.percent : null,
             // Promoção removida da interface - limpando dados antigos
             preco_custo_promocional: null,
             promocao_inicio: null,
@@ -658,21 +845,24 @@ export default function ProdutoCadastroCompleto({
 
                                             <div>
                                                 <Label>Fornecedor</Label>
-                                                <Select
-                                                    value={formData.fornecedor_id?.toString() || ''}
-                                                    onValueChange={handleFornecedorChange}
-                                                >
-                                                    <SelectTrigger id="fornecedor_id">
-                                                        <SelectValue placeholder="Selecione o fornecedor" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {(fornecedores || []).map(f => (
-                                                            <SelectItem key={f.id} value={f.id.toString()}>
-                                                                {f.nome || f.nome_empresa}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
+                                                <div className="flex gap-2">
+                                                    <div className="flex-1">
+                                                        <FornecedorCombobox
+                                                            fornecedores={fornecedores || []}
+                                                            value={formData.fornecedor_id?.toString() || ''}
+                                                            onChange={handleFornecedorChange}
+                                                        />
+                                                    </div>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="icon"
+                                                        title="Cadastrar novo fornecedor"
+                                                        onClick={() => setShowFornecedorModal(true)}
+                                                    >
+                                                        <Plus className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
                                             </div>
 
                                             <div>
@@ -845,6 +1035,19 @@ export default function ProdutoCadastroCompleto({
                                                     />
                                                 </div>
                                             )}
+                                            {showFinancials && (
+                                                <div>
+                                                    <Label>Impostos (valor ou %)</Label>
+                                                    <Input
+                                                        id="impostos_percentual"
+                                                        type="text"
+                                                        value={formData.impostos_percentual}
+                                                        onChange={(e) => handleChange('impostos_percentual', e.target.value)}
+                                                        placeholder="Ex: 150 ou 12%"
+                                                    />
+                                                    <p className="text-xs text-muted-foreground mt-1">Sem % = valor fixo em R$. Com % = cálculo automático sobre o custo.</p>
+                                                </div>
+                                            )}
                                             <div>
                                                 <Label>Preço de Venda *</Label>
                                                 <Input
@@ -869,6 +1072,55 @@ export default function ProdutoCadastroCompleto({
                                                     </Button>
                                                 )}
                                             </div>
+
+                                            {showFinancials && (
+                                                <div>
+                                                    <Label>Frete (valor ou %)</Label>
+                                                    <Input
+                                                        id="frete_custo"
+                                                        type="text"
+                                                        value={formData.frete_custo}
+                                                        onChange={(e) => handleChange('frete_custo', e.target.value)}
+                                                        placeholder="Ex: 90 ou 5%"
+                                                    />
+                                                </div>
+                                            )}
+
+                                            {showFinancials && (
+                                                <div>
+                                                    <Label>IPI (valor ou %)</Label>
+                                                    <Input
+                                                        id="ipi_percentual"
+                                                        type="text"
+                                                        value={formData.ipi_percentual}
+                                                        onChange={(e) => handleChange('ipi_percentual', e.target.value)}
+                                                        placeholder="Ex: 50 ou 4%"
+                                                    />
+                                                </div>
+                                            )}
+
+                                            {showFinancials && (
+                                                <div className="md:col-span-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-1">
+                                                    <p className="text-xs font-semibold text-emerald-800">Resumo do cálculo</p>
+                                                    <p className="text-xs text-emerald-900">Custo base: {formatCurrencyBRL(pricingBreakdown.custoAtivo)}</p>
+                                                    <p className="text-xs text-emerald-900">
+                                                        Impostos: +{formatCurrencyBRL(pricingBreakdown.impostosCalc.amount)} ({formatPercent(pricingBreakdown.impostosCalc.percent)})
+                                                    </p>
+                                                    <p className="text-xs text-emerald-900">
+                                                        Frete: +{formatCurrencyBRL(pricingBreakdown.freteCalc.amount)} ({formatPercent(pricingBreakdown.freteCalc.percent)})
+                                                    </p>
+                                                    <p className="text-xs text-emerald-900">
+                                                        IPI: +{formatCurrencyBRL(pricingBreakdown.ipiCalc.amount)} ({formatPercent(pricingBreakdown.ipiCalc.percent)})
+                                                    </p>
+                                                    <p className="text-xs text-emerald-900">Montagem: +{formatCurrencyBRL(pricingBreakdown.valorMontagem)}</p>
+                                                    <p className="text-xs font-semibold text-emerald-900">
+                                                        Custo com adicionais: {formatCurrencyBRL(pricingBreakdown.custoComAdicionais)}
+                                                    </p>
+                                                    <p className="text-xs font-semibold text-emerald-900">
+                                                        Preço final sugerido: {suggestedPrice > 0 ? formatCurrencyBRL(suggestedPrice) : formatCurrencyBRL(0)}
+                                                    </p>
+                                                </div>
+                                            )}
 
                                             {showFinancials && (
                                                 <>
@@ -1134,6 +1386,25 @@ export default function ProdutoCadastroCompleto({
                                                     </Select>
                                                 </div>
                                                 <div>
+                                                    <Label>CST ICMS</Label>
+                                                    <Select
+                                                        value={formData.cst_icms || '_empty'}
+                                                        onValueChange={(v) => handleChange('cst_icms', v === '_empty' ? '' : v)}
+                                                    >
+                                                        <SelectTrigger><SelectValue placeholder="Padrão da org" /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="_empty">Padrão da org</SelectItem>
+                                                            <SelectItem value="00">00 - Tributada integralmente</SelectItem>
+                                                            <SelectItem value="10">10 - Tributada e com ST</SelectItem>
+                                                            <SelectItem value="20">20 - Redução de base</SelectItem>
+                                                            <SelectItem value="40">40 - Isenta</SelectItem>
+                                                            <SelectItem value="41">41 - Não tributada</SelectItem>
+                                                            <SelectItem value="60">60 - ICMS cobrado anteriormente por ST</SelectItem>
+                                                            <SelectItem value="90">90 - Outras</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div>
                                                     <Label>CST PIS</Label>
                                                     <Select
                                                         value={formData.cst_pis || '_empty'}
@@ -1365,6 +1636,16 @@ export default function ProdutoCadastroCompleto({
                     </div>
                 </DialogContent>
             </Dialog>
+            <FornecedorModal
+                open={showFornecedorModal}
+                onOpenChange={setShowFornecedorModal}
+                onSuccess={(novoFornecedor) => {
+                    setShowFornecedorModal(false);
+                    if (novoFornecedor?.id) {
+                        handleFornecedorChange(String(novoFornecedor.id));
+                    }
+                }}
+            />
         </>
     );
 }

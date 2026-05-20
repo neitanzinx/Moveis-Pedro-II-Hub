@@ -35,6 +35,10 @@ const categorias = [
   "Guarda-roupa",
   "Comoda",
   "Painel",
+  "Travesseiro",
+  "Almofada",
+  "Decoracao",
+  "Utensilios",
   "Outros"
 ];
 

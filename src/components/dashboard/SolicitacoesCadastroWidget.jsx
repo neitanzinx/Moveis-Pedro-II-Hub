@@ -143,6 +143,20 @@ export default function SolicitacoesCadastroWidget() {
                 fotos: []
             }] : []
         };
+        // Se produto já foi criado pelo vendedor no PDV, abrir para edição (não criar duplicado)
+        if (req.produto_gerado_id) {
+            const { data: existingProduct } = await supabase
+                .from('produtos')
+                .select('*')
+                .eq('id', req.produto_gerado_id)
+                .single();
+            if (existingProduct) {
+                setSelectedRequestForRegistration({ ...req, preData: existingProduct, isUpdate: true, parentId: req.produto_gerado_id });
+                setFullRegistrationModalOpen(true);
+                return;
+            }
+        }
+
         setSelectedRequestForRegistration({ ...req, preData: productPreData, isUpdate: false });
         setFullRegistrationModalOpen(true);
     };

@@ -71,6 +71,18 @@ export default function Vendas() {
     const [preferenciasTemp, setPreferenciasTemp] = useState({ dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
     const [modalTransferencia, setModalTransferencia] = useState(null); // { vendaId }
     const [modalLiberarEntrega, setModalLiberarEntrega] = useState(null); // { entregaId, pedido }
+    const [selectedVendaIds, setSelectedVendaIds] = useState([]);
+    const [isBulkRunning, setIsBulkRunning] = useState(false);
+    const [bulkTransferVendedorOpen, setBulkTransferVendedorOpen] = useState(false);
+    const [bulkTransferLojaOpen, setBulkTransferLojaOpen] = useState(false);
+    const [bulkPagamentoOpen, setBulkPagamentoOpen] = useState(false);
+    const [bulkVendedorId, setBulkVendedorId] = useState("");
+    const [bulkLoja, setBulkLoja] = useState("");
+    const [bulkPagamentoForm, setBulkPagamentoForm] = useState({
+        forma_pagamento: "PIX",
+        data_pagamento: new Date().toISOString().slice(0, 10),
+        observacao: ""
+    });
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -80,6 +92,8 @@ export default function Vendas() {
     const { user, filterData, can } = useAuth();
     const canCancelVendas = can('cancel_vendas');
     const canManagePayments = can('manage_financeiro') || can('manage_vendas');
+    const canManageVendas = can('manage_vendas');
+    const canUseBulkActions = user?.cargo === 'Administrador' || user?.cargo === 'Gerente Geral';
 
 
     const { data: vendas = [], isLoading } = useQuery({
@@ -159,7 +173,9 @@ export default function Vendas() {
 
     // Mutation para cancelar venda
     const cancelarVendaMutation = useMutation({
-        mutationFn: async (venda) => {
+        mutationFn: async (input) => {
+            const venda = input?.venda || input;
+            const silent = Boolean(input?.silent);
             if (!canCancelVendas) {
                 throw new Error('Sem permissão para cancelar vendas.');
             }
@@ -219,12 +235,9 @@ export default function Vendas() {
                 console.error('Erro ao cancelar assistências:');
             }
 
-            // 6. Retornar itens ao estoque (apenas se não for encomenda)
+            // 6. Retornar itens ao estoque
             if (venda.itens && venda.itens.length > 0) {
                 for (const item of venda.itens) {
-                    // Se for encomenda, não decrementou estoque na venda, logo não incrementa no cancelamento
-                    if (item.is_encomenda) continue;
-                    
                     if (item.produto_id) {
                         try {
                             const { data: produto } = await supabase
@@ -316,10 +329,11 @@ export default function Vendas() {
                 vendaId: venda.id,
                 lancamentosCancelados: lancamentosVenda.length,
                 entregasCanceladas: entregasVenda.length,
-                montagensCanceladas: montagensVenda.length
+                montagensCanceladas: montagensVenda.length,
+                silent
             };
         },
-        onSuccess: () => {
+        onSuccess: (result) => {
             queryClient.invalidateQueries({ queryKey: ['vendas'] });
             queryClient.invalidateQueries({ queryKey: ['lancamentos-venda'] });
             queryClient.invalidateQueries({ queryKey: ['entregas-venda'] });
@@ -329,74 +343,78 @@ export default function Vendas() {
             queryClient.invalidateQueries({ queryKey: ['solicitacoes_encomenda'] });
             queryClient.invalidateQueries({ queryKey: ['pedidos-compra-dashboard'] });
             queryClient.invalidateQueries({ queryKey: ['compras'] });
-            toast.success("Venda cancelada! Entregas, montagens, assistências, lançamentos e encomendas vinculadas também foram sinalizados.");
+            if (!result?.silent) {
+                toast.success("Venda cancelada! Entregas, montagens, assistências, lançamentos e encomendas vinculadas também foram sinalizados.");
+            }
         }
     });
 
+    const registrarPagamentoVenda = async ({ venda, valorRecebido, formaPagamento, dataPagamento, observacao }) => {
+        if (!venda?.id) throw new Error('Venda inválida para registrar pagamento.');
+        if (isVendaCancelada(venda)) throw new Error('Não é possível registrar pagamento em venda cancelada.');
+
+        const financeiroAtual = venda.financeiro || getVendaFinanceiro(venda, { entregas, lancamentos });
+        const saldoAtual = Math.max(toMoneyNumber(financeiroAtual.valorRestante), 0);
+        const totalVenda = Math.max(toMoneyNumber(financeiroAtual.total || venda.valor_total), 0);
+        const valorPagoAtual = Math.max(toMoneyNumber(financeiroAtual.valorPago || venda.valor_pago), 0);
+        const valorRecebidoNum = Math.max(toMoneyNumber(valorRecebido), 0);
+
+        if (valorRecebidoNum <= MONEY_EPSILON) {
+            throw new Error('Informe um valor de pagamento maior que zero.');
+        }
+
+        if (valorRecebidoNum > saldoAtual + MONEY_EPSILON) {
+            throw new Error(`O valor informado excede o saldo pendente de R$ ${saldoAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`);
+        }
+
+        const novoValorPago = Math.min(totalVenda, valorPagoAtual + valorRecebidoNum);
+        const novoValorRestante = Math.max(totalVenda - novoValorPago, 0);
+        const quitada = novoValorRestante <= MONEY_EPSILON;
+        const statusVenda = quitada ? 'Pago' : 'Pagamento Pendente';
+
+        await base44.entities.Venda.update(venda.id, {
+            valor_pago: novoValorPago,
+            valor_restante: novoValorRestante,
+            status: statusVenda,
+            pagamento_entrega_observacao: observacao || null,
+        });
+
+        await base44.entities.LancamentoFinanceiro.create({
+            descricao: `Pagamento na loja - Venda #${venda.numero_pedido}`,
+            valor: valorRecebidoNum,
+            tipo: 'receita',
+            data_lancamento: dataPagamento,
+            data_vencimento: dataPagamento,
+            pago: true,
+            forma_pagamento: formaPagamento,
+            status: 'Pago',
+            observacao: observacao || 'Pagamento antecipado registrado na listagem de vendas.',
+            venda_id: venda.id,
+            numero_pedido: venda.numero_pedido,
+        });
+
+        if (quitada) {
+            const pendentesVenda = (lancamentos || []).filter((l) =>
+                l.venda_id === venda.id &&
+                String(l.tipo || '').toLowerCase() === 'receita' &&
+                String(l.status || '').toLowerCase() === 'pendente'
+            );
+
+            for (const lancamento of pendentesVenda) {
+                await base44.entities.LancamentoFinanceiro.update(lancamento.id, {
+                    status: 'Pago',
+                    pago: true,
+                    data_lancamento_real: dataPagamento,
+                    observacao: `${lancamento.observacao || ''} [Quitado na loja antes da entrega]`.trim(),
+                });
+            }
+        }
+
+        return { valorRecebidoNum, novoValorRestante, quitada };
+    };
+
     const registrarPagamentoMutation = useMutation({
-        mutationFn: async ({ venda, valorRecebido, formaPagamento, dataPagamento, observacao }) => {
-            if (!venda?.id) throw new Error('Venda inválida para registrar pagamento.');
-            if (isVendaCancelada(venda)) throw new Error('Não é possível registrar pagamento em venda cancelada.');
-
-            const financeiroAtual = venda.financeiro || getVendaFinanceiro(venda, { entregas, lancamentos });
-            const saldoAtual = Math.max(toMoneyNumber(financeiroAtual.valorRestante), 0);
-            const totalVenda = Math.max(toMoneyNumber(financeiroAtual.total || venda.valor_total), 0);
-            const valorPagoAtual = Math.max(toMoneyNumber(financeiroAtual.valorPago || venda.valor_pago), 0);
-            const valorRecebidoNum = Math.max(toMoneyNumber(valorRecebido), 0);
-
-            if (valorRecebidoNum <= MONEY_EPSILON) {
-                throw new Error('Informe um valor de pagamento maior que zero.');
-            }
-
-            if (valorRecebidoNum > saldoAtual + MONEY_EPSILON) {
-                throw new Error(`O valor informado excede o saldo pendente de R$ ${saldoAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`);
-            }
-
-            const novoValorPago = Math.min(totalVenda, valorPagoAtual + valorRecebidoNum);
-            const novoValorRestante = Math.max(totalVenda - novoValorPago, 0);
-            const quitada = novoValorRestante <= MONEY_EPSILON;
-            const statusVenda = quitada ? 'Pago' : 'Pagamento Pendente';
-
-            await base44.entities.Venda.update(venda.id, {
-                valor_pago: novoValorPago,
-                valor_restante: novoValorRestante,
-                status: statusVenda,
-                pagamento_entrega_observacao: observacao || null,
-            });
-
-            await base44.entities.LancamentoFinanceiro.create({
-                descricao: `Pagamento na loja - Venda #${venda.numero_pedido}`,
-                valor: valorRecebidoNum,
-                tipo: 'receita',
-                data_lancamento: dataPagamento,
-                data_vencimento: dataPagamento,
-                pago: true,
-                forma_pagamento: formaPagamento,
-                status: 'Pago',
-                observacao: observacao || 'Pagamento antecipado registrado na listagem de vendas.',
-                venda_id: venda.id,
-                numero_pedido: venda.numero_pedido,
-            });
-
-            if (quitada) {
-                const pendentesVenda = (lancamentos || []).filter((l) =>
-                    l.venda_id === venda.id &&
-                    String(l.tipo || '').toLowerCase() === 'receita' &&
-                    String(l.status || '').toLowerCase() === 'pendente'
-                );
-
-                for (const lancamento of pendentesVenda) {
-                    await base44.entities.LancamentoFinanceiro.update(lancamento.id, {
-                        status: 'Pago',
-                        pago: true,
-                        data_lancamento_real: dataPagamento,
-                        observacao: `${lancamento.observacao || ''} [Quitado na loja antes da entrega]`.trim(),
-                    });
-                }
-            }
-
-            return { valorRecebidoNum, novoValorRestante, quitada };
-        },
+        mutationFn: registrarPagamentoVenda,
         onSuccess: ({ valorRecebidoNum, novoValorRestante, quitada }) => {
             queryClient.invalidateQueries({ queryKey: ['vendas'] });
             queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
@@ -566,6 +584,227 @@ export default function Vendas() {
         return true;
     });
 
+    const selectedVendas = filtered.filter((v) => selectedVendaIds.includes(v.id));
+    const selectedIdsSet = new Set(selectedVendaIds);
+    const showBulkSelectionColumn = canUseBulkActions && activeTab === 'vendas';
+    const allVisibleSelected = filtered.length > 0 && selectedVendaIds.length === filtered.length;
+    const someVisibleSelected = selectedVendaIds.length > 0 && !allVisibleSelected;
+    const tableColSpanVendas = showBulkSelectionColumn ? 12 : 11;
+    const vendedoresDisponiveis = users.filter((u) => u?.id);
+    const lojasDisponiveis = [...new Set(vendasPermitidas.map((v) => v.loja).filter(Boolean))];
+
+    React.useEffect(() => {
+        if (!showBulkSelectionColumn) {
+            setSelectedVendaIds((prev) => (prev.length ? [] : prev));
+            return;
+        }
+
+        const visibleIds = new Set(filtered.map((v) => v.id));
+        setSelectedVendaIds((prev) => {
+            const next = prev.filter((id) => visibleIds.has(id));
+            return next.length === prev.length ? prev : next;
+        });
+    }, [showBulkSelectionColumn, filtered]);
+
+    const handleToggleSelectVenda = (vendaId, checked) => {
+        setSelectedVendaIds((prev) => {
+            if (checked) {
+                return prev.includes(vendaId) ? prev : [...prev, vendaId];
+            }
+            return prev.filter((id) => id !== vendaId);
+        });
+    };
+
+    const handleSelectAllVendas = (checked) => {
+        setSelectedVendaIds(checked ? filtered.map((v) => v.id) : []);
+    };
+
+    const executarAcaoEmLote = async ({ itens, acao }) => {
+        if (!itens.length) {
+            toast.warning('Selecione ao menos uma venda para continuar.');
+            return;
+        }
+
+        setIsBulkRunning(true);
+        try {
+            const results = await Promise.allSettled(itens.map((venda) => acao(venda)));
+            const sucessos = [];
+            const falhas = [];
+
+            results.forEach((result, index) => {
+                const venda = itens[index];
+                if (result.status === 'fulfilled') {
+                    sucessos.push(venda.id);
+                } else {
+                    falhas.push({
+                        venda,
+                        motivo: result.reason?.message || 'Erro ao processar venda'
+                    });
+                }
+            });
+
+            if (sucessos.length > 0) {
+                queryClient.invalidateQueries({ queryKey: ['vendas'] });
+                queryClient.invalidateQueries({ queryKey: ['entregas'] });
+                queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
+            }
+
+            setSelectedVendaIds((prev) => prev.filter((id) => !sucessos.includes(id)));
+
+            if (falhas.length === 0) {
+                toast.success(`${sucessos.length} venda(s) processada(s) com sucesso.`);
+                return;
+            }
+
+            const resumoFalhas = falhas
+                .slice(0, 3)
+                .map((item) => `#${item.venda.numero_pedido}: ${item.motivo}`)
+                .join(' | ');
+
+            toast.warning(
+                `Lote concluído com falhas. Sucesso: ${sucessos.length}. Falha: ${falhas.length}. ${resumoFalhas}`
+            );
+        } finally {
+            setIsBulkRunning(false);
+        }
+    };
+
+    const handleBulkCancelar = async () => {
+        const elegiveis = selectedVendas.filter((v) => !isVendaCancelada(v));
+        if (!elegiveis.length) {
+            toast.warning('Nenhuma venda elegível para cancelamento.');
+            return;
+        }
+
+        const confirmed = await confirm({
+            title: 'Cancelar vendas em lote',
+            message: `Tem certeza que deseja cancelar ${elegiveis.length} venda(s)? Esta ação também cancelará entregas, montagens, lançamentos e assistências vinculadas.`,
+            confirmText: 'Cancelar vendas',
+            variant: 'destructive'
+        });
+        if (!confirmed) return;
+
+        await executarAcaoEmLote({
+            itens: elegiveis,
+            acao: (venda) => cancelarVendaMutation.mutateAsync({ venda, silent: true })
+        });
+    };
+
+    const handleBulkLiberarEntrega = async () => {
+        const elegiveis = selectedVendas.filter((venda) => {
+            const entregaAguardando = entregas.find((e) =>
+                e.numero_pedido === venda.numero_pedido && e.status === 'Aguardando Liberação'
+            );
+            const podeLiberar = user?.cargo === 'Administrador' || user?.cargo === 'Gerente Geral' || venda.responsavel_id === user?.id;
+            return Boolean(entregaAguardando && podeLiberar);
+        });
+
+        if (!elegiveis.length) {
+            toast.warning('Nenhuma venda selecionada está aguardando liberação.');
+            return;
+        }
+
+        const confirmed = await confirm({
+            title: 'Liberar entregas em lote',
+            message: `Deseja liberar ${elegiveis.length} entrega(s) para a logística?`,
+            confirmText: 'Liberar entregas'
+        });
+        if (!confirmed) return;
+
+        await executarAcaoEmLote({
+            itens: elegiveis,
+            acao: async (venda) => {
+                const entregaAguardando = entregas.find((e) =>
+                    e.numero_pedido === venda.numero_pedido && e.status === 'Aguardando Liberação'
+                );
+                if (!entregaAguardando) {
+                    throw new Error('Entrega não está aguardando liberação.');
+                }
+                await base44.entities.Entrega.update(entregaAguardando.id, {
+                    status: 'Pendente',
+                    data_agendada: null,
+                    turno: null,
+                    observacoes: 'Entrega liberada pelo vendedor/cliente.'
+                });
+            }
+        });
+    };
+
+    const handleBulkTransferirVendedor = async () => {
+        if (!bulkVendedorId) {
+            toast.error('Selecione o vendedor de destino.');
+            return;
+        }
+
+        const vendedorDestino = vendedoresDisponiveis.find((u) => String(u.id) === bulkVendedorId);
+        if (!vendedorDestino) {
+            toast.error('Vendedor selecionado não encontrado.');
+            return;
+        }
+
+        const elegiveis = selectedVendas.filter((v) => !isVendaCancelada(v));
+        await executarAcaoEmLote({
+            itens: elegiveis,
+            acao: (venda) => base44.entities.Venda.update(venda.id, {
+                responsavel_id: vendedorDestino.id,
+                responsavel_nome: vendedorDestino.full_name || vendedorDestino.email || venda.responsavel_nome
+            })
+        });
+
+        setBulkTransferVendedorOpen(false);
+        setBulkVendedorId("");
+    };
+
+    const handleBulkTransferirLoja = async () => {
+        if (!bulkLoja) {
+            toast.error('Selecione a loja de destino.');
+            return;
+        }
+
+        const elegiveis = selectedVendas.filter((v) => !isVendaCancelada(v));
+        await executarAcaoEmLote({
+            itens: elegiveis,
+            acao: (venda) => base44.entities.Venda.update(venda.id, { loja: bulkLoja })
+        });
+
+        setBulkTransferLojaOpen(false);
+        setBulkLoja("");
+    };
+
+    const handleBulkRegistrarPagamento = async () => {
+        const elegiveis = selectedVendas.filter((venda) => {
+            const financeiro = venda.financeiro || getVendaFinanceiro(venda, { entregas, lancamentos });
+            return !isVendaCancelada(venda) && toMoneyNumber(financeiro.valorRestante) > MONEY_EPSILON;
+        });
+
+        if (!elegiveis.length) {
+            toast.warning('Nenhuma venda com saldo pendente foi selecionada.');
+            return;
+        }
+
+        await executarAcaoEmLote({
+            itens: elegiveis,
+            acao: (venda) => {
+                const financeiro = venda.financeiro || getVendaFinanceiro(venda, { entregas, lancamentos });
+                const saldoRestante = Math.max(toMoneyNumber(financeiro.valorRestante), 0);
+                return registrarPagamentoVenda({
+                    venda,
+                    valorRecebido: saldoRestante,
+                    formaPagamento: bulkPagamentoForm.forma_pagamento,
+                    dataPagamento: bulkPagamentoForm.data_pagamento,
+                    observacao: bulkPagamentoForm.observacao || 'Pagamento em lote na tela de vendas.'
+                });
+            }
+        });
+
+        setBulkPagamentoOpen(false);
+        setBulkPagamentoForm({
+            forma_pagamento: 'PIX',
+            data_pagamento: new Date().toISOString().slice(0, 10),
+            observacao: ''
+        });
+    };
+
     return (
         <div className="max-w-7xl mx-auto space-y-6">
             <div className="flex justify-between items-center">
@@ -629,10 +868,56 @@ export default function Vendas() {
                         </Select>
                     </div>
 
+                    {showBulkSelectionColumn && selectedVendaIds.length > 0 && (
+                        <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-neutral-900 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-neutral-800">
+                            <div className="text-sm text-gray-700 dark:text-gray-300">
+                                <span className="font-semibold">{selectedVendaIds.length}</span> venda(s) selecionada(s)
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                {canCancelVendas && (
+                                    <Button size="sm" variant="destructive" onClick={handleBulkCancelar} disabled={isBulkRunning || cancelarVendaMutation.isPending}>
+                                        {isBulkRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <XCircle className="w-4 h-4 mr-2" />}
+                                        Cancelar em lote
+                                    </Button>
+                                )}
+                                {canManageVendas && (
+                                    <>
+                                        <Button size="sm" variant="outline" onClick={() => setBulkTransferVendedorOpen(true)} disabled={isBulkRunning}>
+                                            Transferir vendedor
+                                        </Button>
+                                        <Button size="sm" variant="outline" onClick={() => setBulkTransferLojaOpen(true)} disabled={isBulkRunning}>
+                                            Transferir loja
+                                        </Button>
+                                    </>
+                                )}
+                                {canManagePayments && (
+                                    <Button size="sm" variant="outline" onClick={() => setBulkPagamentoOpen(true)} disabled={isBulkRunning}>
+                                        Registrar pagamento
+                                    </Button>
+                                )}
+                                <Button size="sm" variant="outline" onClick={handleBulkLiberarEntrega} disabled={isBulkRunning}>
+                                    Liberar entrega
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => setSelectedVendaIds([])} disabled={isBulkRunning}>
+                                    Limpar seleção
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-sm border border-gray-100 dark:border-neutral-800 overflow-hidden">
                         <Table>
                             <TableHeader className="bg-gray-50 dark:bg-neutral-950">
                                 <TableRow>
+                                    {showBulkSelectionColumn && (
+                                        <TableHead className="w-[48px]">
+                                            <Checkbox
+                                                checked={allVisibleSelected ? true : (someVisibleSelected ? 'indeterminate' : false)}
+                                                onCheckedChange={(checked) => handleSelectAllVendas(checked === true)}
+                                                aria-label="Selecionar todas as vendas"
+                                            />
+                                        </TableHead>
+                                    )}
                                     <TableHead className="w-[100px]">Pedido</TableHead>
                                     <TableHead>Cliente</TableHead>
                                     <TableHead>Produtos</TableHead>
@@ -713,14 +998,14 @@ export default function Vendas() {
                             <TableBody>
                                 {isLoading ? (
                                     <TableRow>
-                                        <TableCell colSpan={11} className="text-center py-8 text-gray-500">
+                                        <TableCell colSpan={tableColSpanVendas} className="text-center py-8 text-gray-500">
                                             <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
                                             Carregando vendas...
                                         </TableCell>
                                     </TableRow>
                                 ) : filtered.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={11} className="text-center py-8 text-gray-500">
+                                        <TableCell colSpan={tableColSpanVendas} className="text-center py-8 text-gray-500">
                                             Nenhuma venda encontrada.
                                         </TableCell>
                                     </TableRow>
@@ -731,12 +1016,21 @@ export default function Vendas() {
                                         return (
                                         <TableRow
                                             key={venda.id}
-                                            className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                            className={`cursor-pointer hover:bg-muted/50 transition-colors ${selectedIdsSet.has(venda.id) ? 'bg-blue-50 dark:bg-blue-950/40' : ''}`}
                                             onClick={() => {
                                                 setSelectedVendaDetalhes(venda);
                                                 setIsDetalhesModalOpen(true);
                                             }}
                                         >
+                                            {showBulkSelectionColumn && (
+                                                <TableCell onClick={(e) => e.stopPropagation()}>
+                                                    <Checkbox
+                                                        checked={selectedIdsSet.has(venda.id)}
+                                                        onCheckedChange={(checked) => handleToggleSelectVenda(venda.id, checked === true)}
+                                                        aria-label={`Selecionar venda ${venda.numero_pedido}`}
+                                                    />
+                                                </TableCell>
+                                            )}
                                             <TableCell className="font-medium">#{venda.numero_pedido}</TableCell>
                                             <TableCell>
                                                 <div className="flex flex-col">
@@ -1373,6 +1667,128 @@ export default function Vendas() {
                             ) : (
                                 <><Unlock className="w-4 h-4 mr-2" />Confirmar e Liberar</>
                             )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={bulkTransferVendedorOpen} onOpenChange={(open) => !isBulkRunning && setBulkTransferVendedorOpen(open)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Transferir vendedor em lote</DialogTitle>
+                        <DialogDescription>
+                            Defina o vendedor de destino para as {selectedVendaIds.length} venda(s) selecionada(s).
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2 py-2">
+                        <Label>Vendedor destino</Label>
+                        <Select value={bulkVendedorId} onValueChange={setBulkVendedorId}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Selecione o vendedor" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {vendedoresDisponiveis.map((vendedor) => (
+                                    <SelectItem key={vendedor.id} value={String(vendedor.id)}>
+                                        {vendedor.full_name || vendedor.email}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setBulkTransferVendedorOpen(false)} disabled={isBulkRunning}>Cancelar</Button>
+                        <Button onClick={handleBulkTransferirVendedor} disabled={isBulkRunning || !bulkVendedorId}>
+                            {isBulkRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                            Confirmar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={bulkTransferLojaOpen} onOpenChange={(open) => !isBulkRunning && setBulkTransferLojaOpen(open)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Transferir loja em lote</DialogTitle>
+                        <DialogDescription>
+                            Defina a loja de destino para as {selectedVendaIds.length} venda(s) selecionada(s).
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2 py-2">
+                        <Label>Loja destino</Label>
+                        <Select value={bulkLoja} onValueChange={setBulkLoja}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Selecione a loja" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {lojasDisponiveis.map((loja) => (
+                                    <SelectItem key={loja} value={loja}>{loja}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setBulkTransferLojaOpen(false)} disabled={isBulkRunning}>Cancelar</Button>
+                        <Button onClick={handleBulkTransferirLoja} disabled={isBulkRunning || !bulkLoja}>
+                            {isBulkRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                            Confirmar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={bulkPagamentoOpen} onOpenChange={(open) => !isBulkRunning && setBulkPagamentoOpen(open)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Registrar pagamento em lote</DialogTitle>
+                        <DialogDescription>
+                            Será registrado o valor total pendente de cada venda selecionada.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label>Forma de pagamento</Label>
+                            <Select
+                                value={bulkPagamentoForm.forma_pagamento}
+                                onValueChange={(value) => setBulkPagamentoForm((prev) => ({ ...prev, forma_pagamento: value }))}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Selecione" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="Dinheiro">Dinheiro</SelectItem>
+                                    <SelectItem value="PIX">PIX</SelectItem>
+                                    <SelectItem value="Cartão de Débito">Cartão de Débito</SelectItem>
+                                    <SelectItem value="Cartão de Crédito">Cartão de Crédito</SelectItem>
+                                    <SelectItem value="Boleto">Boleto</SelectItem>
+                                    <SelectItem value="Transferência">Transferência</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Data do pagamento</Label>
+                            <Input
+                                type="date"
+                                value={bulkPagamentoForm.data_pagamento}
+                                onChange={(e) => setBulkPagamentoForm((prev) => ({ ...prev, data_pagamento: e.target.value }))}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Observação</Label>
+                            <Textarea
+                                rows={3}
+                                placeholder="Ex: Pagamento registrado em lote na loja."
+                                value={bulkPagamentoForm.observacao}
+                                onChange={(e) => setBulkPagamentoForm((prev) => ({ ...prev, observacao: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setBulkPagamentoOpen(false)} disabled={isBulkRunning}>Cancelar</Button>
+                        <Button onClick={handleBulkRegistrarPagamento} disabled={isBulkRunning} className="bg-emerald-600 hover:bg-emerald-700">
+                            {isBulkRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                            Confirmar pagamento
                         </Button>
                     </DialogFooter>
                 </DialogContent>

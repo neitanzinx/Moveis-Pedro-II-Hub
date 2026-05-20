@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Bell, Check, X, AlertCircle, Truck, Package } from "lucide-react";
@@ -6,10 +6,135 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { AMBIENTES } from "@/constants/productConstants";
+
+const CATEGORIAS_NOTIFICACAO_PRODUTO = [
+  'Sofá',
+  'Cama',
+  'Mesa',
+  'Cadeira',
+  'Armário',
+  'Estante',
+  'Rack',
+  'Poltrona',
+  'Escrivaninha',
+  'Criado-mudo',
+  'Buffet',
+  'Aparador',
+  'Banco',
+  'Colchão',
+  'Guarda-roupa',
+  'Cômoda',
+  'Painel',
+  'Sapateira',
+  'Cristaleira',
+  'Balcão',
+  'Cabeceira',
+  'Box',
+  'Penteadeira',
+  'Travesseiro',
+  'Almofada',
+  'Decorações',
+  'Utensílios',
+  'Outros',
+];
+
+const CATEGORIAS_NOTIFICACAO_KEY = 'notificacoes_categorias_ativas';
+const AMBIENTES_NOTIFICACAO_KEY = 'notificacoes_ambientes_ativos';
+
+const AMBIENTES_NOTIFICACAO_PRODUTO = Array.from(new Set([
+  ...(Array.isArray(AMBIENTES) ? AMBIENTES : []),
+  'Área Externa',
+]));
+
+const normalizeKey = (value = '') => String(value)
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .trim();
+
+const resolveConfiguredValue = (rawValue, options) => {
+  const normalizedRaw = normalizeKey(rawValue);
+  if (!normalizedRaw) return '';
+  return options.find((option) => normalizeKey(option) === normalizedRaw) || '';
+};
+
+const getCategoriaFromNotification = (n) => {
+  if (!n) return '';
+  return (
+    n.categoria_produto ||
+    n.categoria ||
+    n?.metadata?.categoria ||
+    n?.detalhes?.categoria ||
+    ''
+  );
+};
+
+const getAmbienteFromNotification = (n) => {
+  if (!n) return '';
+  return (
+    n.ambiente_produto ||
+    n.ambiente ||
+    n?.metadata?.ambiente ||
+    n?.detalhes?.ambiente ||
+    ''
+  );
+};
+
+const createDefaultCategoriasState = () => {
+  const defaults = {};
+  CATEGORIAS_NOTIFICACAO_PRODUTO.forEach((categoria) => {
+    defaults[categoria] = true;
+  });
+  return defaults;
+};
+
+const createDefaultAmbientesState = () => {
+  const defaults = {};
+  AMBIENTES_NOTIFICACAO_PRODUTO.forEach((ambiente) => {
+    defaults[ambiente] = true;
+  });
+  return defaults;
+};
 
 export default function NotificacoesPanel({ user }) {
   const [open, setOpen] = useState(false);
+  const [showCategoriaManager, setShowCategoriaManager] = useState(false);
+  const [categoriasAtivas, setCategoriasAtivas] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CATEGORIAS_NOTIFICACAO_KEY);
+      if (!raw) return createDefaultCategoriasState();
+      const parsed = JSON.parse(raw);
+      return {
+        ...createDefaultCategoriasState(),
+        ...(parsed || {}),
+      };
+    } catch {
+      return createDefaultCategoriasState();
+    }
+  });
+  const [ambientesAtivos, setAmbientesAtivos] = useState(() => {
+    try {
+      const raw = localStorage.getItem(AMBIENTES_NOTIFICACAO_KEY);
+      if (!raw) return createDefaultAmbientesState();
+      const parsed = JSON.parse(raw);
+      return {
+        ...createDefaultAmbientesState(),
+        ...(parsed || {}),
+      };
+    } catch {
+      return createDefaultAmbientesState();
+    }
+  });
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    localStorage.setItem(CATEGORIAS_NOTIFICACAO_KEY, JSON.stringify(categoriasAtivas));
+  }, [categoriasAtivas]);
+
+  useEffect(() => {
+    localStorage.setItem(AMBIENTES_NOTIFICACAO_KEY, JSON.stringify(ambientesAtivos));
+  }, [ambientesAtivos]);
 
   const { data: notificacoes = [] } = useQuery({
     queryKey: ['notificacoes', user?.email],
@@ -37,7 +162,31 @@ export default function NotificacoesPanel({ user }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notificacoes'] })
   });
 
-  const naoLidas = notificacoes.filter(n => !n.lida);
+  const notificacoesFiltradas = notificacoes.filter((n) => {
+    const categoria = resolveConfiguredValue(getCategoriaFromNotification(n), CATEGORIAS_NOTIFICACAO_PRODUTO);
+    const ambiente = resolveConfiguredValue(getAmbienteFromNotification(n), AMBIENTES_NOTIFICACAO_PRODUTO);
+
+    const categoriaAtiva = !categoria || categoriasAtivas[categoria] !== false;
+    const ambienteAtivo = !ambiente || ambientesAtivos[ambiente] !== false;
+
+    return categoriaAtiva && ambienteAtivo;
+  });
+
+  const naoLidas = notificacoesFiltradas.filter(n => !n.lida);
+
+  const toggleCategoria = (categoria) => {
+    setCategoriasAtivas((prev) => ({
+      ...prev,
+      [categoria]: prev[categoria] === false,
+    }));
+  };
+
+  const toggleAmbiente = (ambiente) => {
+    setAmbientesAtivos((prev) => ({
+      ...prev,
+      [ambiente]: prev[ambiente] === false,
+    }));
+  };
 
   const getIcon = (tipo) => {
     switch(tipo) {
@@ -74,18 +223,67 @@ export default function NotificacoesPanel({ user }) {
       <PopoverContent className="w-96 p-0" align="end">
         <div className="flex items-center justify-between p-4 border-b">
           <h3 className="font-bold text-sm">Notificações</h3>
-          {naoLidas.length > 0 && (
-            <Badge variant="outline">{naoLidas.length} novas</Badge>
-          )}
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 text-[11px]"
+              onClick={() => setShowCategoriaManager((prev) => !prev)}
+            >
+              Categorias
+            </Button>
+            {naoLidas.length > 0 && (
+              <Badge variant="outline">{naoLidas.length} novas</Badge>
+            )}
+          </div>
         </div>
+        {showCategoriaManager && (
+          <div className="border-b px-4 py-3">
+            <p className="text-[11px] text-gray-500 mb-2">Gerenciar categorias de produto nas notificações</p>
+            <div className="flex flex-wrap gap-2">
+              {CATEGORIAS_NOTIFICACAO_PRODUTO.map((categoria) => (
+                <button
+                  key={categoria}
+                  type="button"
+                  onClick={() => toggleCategoria(categoria)}
+                  className={`rounded-full border px-2 py-1 text-[10px] transition-colors ${
+                    categoriasAtivas[categoria] !== false
+                      ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                      : 'border-gray-300 bg-gray-100 text-gray-500'
+                  }`}
+                >
+                  {categoria}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-500 mt-3 mb-2">Gerenciar ambientes de produto nas notificações</p>
+            <div className="flex flex-wrap gap-2">
+              {AMBIENTES_NOTIFICACAO_PRODUTO.map((ambiente) => (
+                <button
+                  key={ambiente}
+                  type="button"
+                  onClick={() => toggleAmbiente(ambiente)}
+                  className={`rounded-full border px-2 py-1 text-[10px] transition-colors ${
+                    ambientesAtivos[ambiente] !== false
+                      ? 'border-sky-300 bg-sky-50 text-sky-800'
+                      : 'border-gray-300 bg-gray-100 text-gray-500'
+                  }`}
+                >
+                  {ambiente}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="max-h-[400px] overflow-y-auto">
-          {notificacoes.length === 0 ? (
+          {notificacoesFiltradas.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
               <Bell className="w-12 h-12 mx-auto mb-2 text-gray-300" />
               <p className="text-sm">Nenhuma notificação</p>
             </div>
           ) : (
-            notificacoes.map(notif => (
+            notificacoesFiltradas.map(notif => (
               <Card 
                 key={notif.id}
                 className={`m-2 p-3 border-l-4 ${getPrioridadeCor(notif.prioridade)} ${

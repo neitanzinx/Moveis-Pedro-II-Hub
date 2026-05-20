@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useDeferredValue, useMemo, useRef } from "react";
+import { normSearch } from "@/lib/utils";
 // Similar structure to VendaModal but for Orcamento
 import {
   Dialog,
@@ -309,8 +310,8 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
         produto.modelo_referencia
       ]
         .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
+        .map(normSearch)
+        .join(' ');
 
       return {
         ...produto,
@@ -321,10 +322,10 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
   }, [produtos, fornecedoresById]);
 
   const produtosFiltrados = useMemo(() => {
-    const termo = deferredSearchProduto.trim().toLowerCase();
-    if (!termo) return [];
+    const termoNorm = normSearch(deferredSearchProduto);
+    if (!termoNorm) return [];
 
-    const tokens = termo.split(/\s+/).filter(Boolean);
+    const tokens = termoNorm.split(/\s+/).filter(Boolean);
 
     return produtosPesquisa
       .filter((produto) => {

@@ -83,7 +83,7 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
     `${cliente.endereco}, ${cliente.numero || 's/n'}${cliente.complemento ? ` - ${cliente.complemento}` : ''}, ${cliente.bairro || ''}, ${cliente.cidade || ''} - ${cliente.estado || ''}` :
     'Endereço não cadastrado';
 
-  const prazoEntrega = venda.prazo_entrega === "Retirado na loja" ? "Retirada na loja" :
+  const prazoEntrega = venda.prazo_entrega === "Retirado na loja" ? "Mercadoria retirada na loja pelo cliente" :
     venda.prazo_entrega === "15 dias" ? "15 dias úteis" :
       venda.prazo_entrega === "45 dias" ? "45 dias úteis" :
         (venda.prazo_entrega || '-');
@@ -202,15 +202,6 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
       </div>
 
       ${venda.observacoes ? `<div style="margin-top:12px;background:#fff7ed;padding:10px 12px;border-radius:4px;font-size:10px;color:#9a3412;border-left:3px solid #f97316;"><strong>Observações:</strong> ${venda.observacoes}</div>` : ''}
-
-      <div style="margin-top:15px;background:#f0f9ff;padding:12px 15px;border-radius:6px;border:1px solid #bfdbfe;">
-        <div style="font-size:10px;font-weight:700;color:#1e40af;margin-bottom:6px;text-transform:uppercase;">📋 Observações:</div>
-        <ul style="margin:0;padding-left:18px;font-size:10px;color:#1e3a8a;line-height:1.8;">
-          <li><strong>Não fazemos entregas com hora marcada.</strong> Agradecemos a compreensão.</li>
-          <li><strong>Garantia é de 90 dias</strong> conforme lei nº 8078 de 11/09/1990.</li>
-          <li><strong>Não trocamos mercadoria.</strong></li>
-        </ul>
-      </div>
 
       <div class="assinaturas">
         <div class="assinatura-box">

@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { base44 } from "@/api/base44Client";
 
-export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntrega, onToggleMontagem, onVincularImagem, onEditProduto, onAtualizarEstoque, onAtualizarQuantidade }) {
+export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntrega, onToggleMontagem, onVincularImagem, onEditProduto, onAtualizarEstoque, onAtualizarQuantidade, onAtualizarProdutoId, onAtualizarItem }) {
   // Estado para o dialog de atualizar estoque
   const [atualizarEstoqueOpen, setAtualizarEstoqueOpen] = useState(false);
   const [itemParaEstoque, setItemParaEstoque] = useState(null);
@@ -134,6 +134,26 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
   const cancelarEdicaoQuantidade = () => {
     setEditingQuantidadeIndex(null);
     setEditingQuantidadeValue("");
+  };
+
+  const isValidProdutoId = (id) => {
+    if (!id || typeof id !== 'string') return false;
+    if (id.startsWith('SOL-')) return false;
+    // UUID v4: 36 chars, 4 hífens
+    return id.length === 36 && id.split('-').length === 5;
+  };
+
+  // Se o item tem ID provisório (SOL-...), cria um Produto real no banco e atualiza o carrinho
+  const resolverProdutoId = async (index, item) => {
+    if (isValidProdutoId(item.produto_id)) return item.produto_id;
+    const novoProduto = await base44.entities.Produto.create({
+      nome: item.produto_nome || 'Produto sem nome',
+      preco_venda: item.preco_unitario || 0,
+      requer_atencao: true,
+      quantidade_estoque: 0,
+    });
+    if (onAtualizarProdutoId) onAtualizarProdutoId(index, novoProduto.id);
+    return novoProduto.id;
   };
 
   if (itens.length === 0) {
@@ -333,7 +353,8 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                 <div className="flex flex-col gap-1">
                   <span className="text-xs text-gray-500 mb-1">Tipo de Entrega:</span>
                   <div className="flex gap-1 flex-wrap">
-                    <button
+                    <div className="flex items-center gap-1">
+                      <button
                       type="button"
                       onClick={() => onToggleEntrega(index, 'entrega')}
                       className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${item.tipo_entrega === 'entrega'
@@ -341,11 +362,33 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                         : 'bg-gray-50 text-gray-500 dark:bg-neutral-800 dark:text-gray-400 hover:bg-green-50'
                         }`}
                       title="Produto será entregue no endereço do cliente"
-                    >
-                      <Truck className="w-3 h-3" />
-                      Entrega
-                    </button>
-                    <button
+                      >
+                        <Truck className="w-3 h-3" />
+                        Entrega
+                        {item.tipo_entrega === 'entrega' && item.tipo_entrega !== item.tipo_entrega_padrao && (
+                          <span
+                            className="ml-2 px-2 py-0.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-400 rounded"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const produtoId = await resolverProdutoId(index, item);
+                                await base44.entities.Produto.update(produtoId, {
+                                  tipo_entrega_padrao: item.tipo_entrega,
+                                });
+                                if (onAtualizarItem) onAtualizarItem(index, { tipo_entrega_padrao: item.tipo_entrega });
+                                toast.success("Tipo de entrega salvo como padrão!");
+                              } catch (err) {
+                                toast.error("Erro ao salvar padrão: " + (err.message || err));
+                              }
+                            }}
+                          >
+                            Padrão
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
                       type="button"
                       onClick={() => onToggleEntrega(index, 'retira')}
                       className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${item.tipo_entrega === 'retira'
@@ -353,10 +396,31 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                         : 'bg-gray-50 text-gray-500 dark:bg-neutral-800 dark:text-gray-400 hover:bg-orange-50'
                         }`}
                       title="Cliente retira na loja (sem entrega ou montagem)"
-                    >
-                      <Store className="w-3 h-3" />
-                      Cliente Retira
-                    </button>
+                      >
+                        <Store className="w-3 h-3" />
+                        Cliente Retira
+                        {item.tipo_entrega === 'retira' && item.tipo_entrega !== item.tipo_entrega_padrao && (
+                          <span
+                            className="ml-2 px-2 py-0.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-400 rounded"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const produtoId = await resolverProdutoId(index, item);
+                                await base44.entities.Produto.update(produtoId, {
+                                  tipo_entrega_padrao: item.tipo_entrega,
+                                });
+                                if (onAtualizarItem) onAtualizarItem(index, { tipo_entrega_padrao: item.tipo_entrega });
+                                toast.success("Tipo de entrega salvo como padrão!");
+                              } catch (err) {
+                                toast.error("Erro ao salvar padrão: " + (err.message || err));
+                              }
+                            }}
+                          >
+                            Padrão
+                          </span>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -368,7 +432,8 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                 <div className="flex flex-col gap-1">
                   <span className="text-xs text-gray-500 mb-1">Tipo de Montagem:</span>
                   <div className="flex gap-1 flex-wrap">
-                    <button
+                    <div className="flex items-center gap-1">
+                      <button
                       type="button"
                       onClick={() => onToggleMontagem(index, 'montado')}
                       className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${item.tipo_montagem === 'montado'
@@ -376,11 +441,33 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                         : 'bg-gray-50 text-gray-500 dark:bg-neutral-800 dark:text-gray-400 hover:bg-green-50'
                         }`}
                       title="Produto vai montado (montagem interna, entrega com produto já montado)"
-                    >
-                      <Package className="w-3 h-3" />
-                      Entrega Montado
-                    </button>
-                    <button
+                      >
+                        <Package className="w-3 h-3" />
+                        Entrega Montado
+                        {item.tipo_montagem === 'montado' && item.tipo_montagem !== item.tipo_montagem_padrao && (
+                          <span
+                            className="ml-2 px-2 py-0.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-400 rounded"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const produtoId = await resolverProdutoId(index, item);
+                                await base44.entities.Produto.update(produtoId, {
+                                  tipo_montagem_padrao: item.tipo_montagem,
+                                });
+                                if (onAtualizarItem) onAtualizarItem(index, { tipo_montagem_padrao: item.tipo_montagem });
+                                toast.success("Tipo de montagem salvo como padrão!");
+                              } catch (err) {
+                                toast.error("Erro ao salvar padrão: " + (err.message || err));
+                              }
+                            }}
+                          >
+                            Padrão
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
                       type="button"
                       onClick={() => onToggleMontagem(index, 'montagem_cliente')}
                       className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${item.tipo_montagem === 'montagem_cliente'
@@ -388,11 +475,33 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                         : 'bg-gray-50 text-gray-500 dark:bg-neutral-800 dark:text-gray-400 hover:bg-blue-50'
                         }`}
                       title="Produto vai na caixa, montador externo monta no endereço do cliente"
-                    >
-                      <Wrench className="w-3 h-3" />
-                      Montagem no Local
-                    </button>
-                    <button
+                      >
+                        <Wrench className="w-3 h-3" />
+                        Montagem no Local
+                        {item.tipo_montagem === 'montagem_cliente' && item.tipo_montagem !== item.tipo_montagem_padrao && (
+                          <span
+                            className="ml-2 px-2 py-0.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-400 rounded"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const produtoId = await resolverProdutoId(index, item);
+                                await base44.entities.Produto.update(produtoId, {
+                                  tipo_montagem_padrao: item.tipo_montagem,
+                                });
+                                if (onAtualizarItem) onAtualizarItem(index, { tipo_montagem_padrao: item.tipo_montagem });
+                                toast.success("Tipo de montagem salvo como padrão!");
+                              } catch (err) {
+                                toast.error("Erro ao salvar padrão: " + (err.message || err));
+                              }
+                            }}
+                          >
+                            Padrão
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
                       type="button"
                       onClick={() => onToggleMontagem(index, 'sem_montagem')}
                       className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${item.tipo_montagem === 'sem_montagem'
@@ -400,10 +509,31 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                         : 'bg-gray-50 text-gray-500 dark:bg-neutral-800 dark:text-gray-400 hover:bg-rose-50'
                         }`}
                       title="Produto será entregue mas NÃO será montado pela empresa (vai na caixa)"
-                    >
-                      <Ban className="w-3 h-3" />
-                      Não requer montagem
-                    </button>
+                      >
+                        <Ban className="w-3 h-3" />
+                        Não requer montagem
+                        {item.tipo_montagem === 'sem_montagem' && item.tipo_montagem !== item.tipo_montagem_padrao && (
+                          <span
+                            className="ml-2 px-2 py-0.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-400 rounded"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const produtoId = await resolverProdutoId(index, item);
+                                await base44.entities.Produto.update(produtoId, {
+                                  tipo_montagem_padrao: item.tipo_montagem,
+                                });
+                                if (onAtualizarItem) onAtualizarItem(index, { tipo_montagem_padrao: item.tipo_montagem });
+                                toast.success("Tipo de montagem salvo como padrão!");
+                              } catch (err) {
+                                toast.error("Erro ao salvar padrão: " + (err.message || err));
+                              }
+                            }}
+                          >
+                            Padrão
+                          </span>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

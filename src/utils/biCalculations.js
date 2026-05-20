@@ -129,9 +129,11 @@ export function calcularKPIsEstoque(produtos, vendas) {
     // GMROI (Margem Bruta / Valor Estoque)
     const gmroi = valorEstoque > 0 ? margemBruta / valorEstoque : 0;
 
-    const produtosAbaixoMinimo = produtos.filter(p =>
-        (p.quantidade_estoque || 0) < (p.estoque_minimo || 0)
-    );
+    const produtosAbaixoMinimo = produtos.filter((p) => {
+        const quantidadeAtual = Number(p.quantidade_estoque || 0);
+        const estoqueMinimo = Number(p.estoque_minimo || 0);
+        return quantidadeAtual > 0 && estoqueMinimo > 0 && quantidadeAtual < estoqueMinimo;
+    });
 
     const porCategoria = produtos.reduce((acc, p) => {
         const cat = p.categoria || 'Sem Categoria';

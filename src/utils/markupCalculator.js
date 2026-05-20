@@ -22,6 +22,10 @@ export function getMarginTarget(category) {
         "Guarda-roupa": 0.33,
         Comoda: 0.28,
         Painel: 0.30,
+        Travesseiro: 0.25,
+        Almofada: 0.25,
+        Decoracao: 0.25,
+        Utensilios: 0.25,
         Outros: 0.25,
     };
     return defaults[category] ?? 0.25;

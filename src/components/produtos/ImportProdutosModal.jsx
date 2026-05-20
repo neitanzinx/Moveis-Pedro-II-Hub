@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { calcularPrecoFinalImportacao } from '@/utils/markupCalculator';
 import { base44 } from '@/api/base44Client';
@@ -33,6 +33,7 @@ import {
 import { toast } from 'sonner';
 import { getColorHex } from './FurnitureColorPicker';
 import { sugerirNCMsComIA, aplicarSugestoesNCM } from '@/services/ncmSuggestionService';
+import { detectProductKeywordSuggestion } from '@/lib/productKeywordDetector';
 
 // Template CSV - NOTA: Lojas são carregádas dinamicamente
 const CSV_TEMPLATE_HEADER = `FABRICANTE / FORNECEDOR,DESCRIÇÃO DO PRODUTO,MODELO / REFERÊNCIA,PREÇO DE CUSTO,LARGURA,ALTURA,PROFUNDIDADE,EXTRA,VARIAÇÃO DE CORES,MODELOS DE TECIDOS,ESTOQUE CD`;
@@ -150,6 +151,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
     const [currentlyProcessing, setCurrentlyProcessing] = useState([]); // Visualização mini-grade
     const [step, setStep] = useState(1); // 1: upload, 2: preview, 3: importing, 4: enriching NCM
     const cancelImportRef = React.useRef(false);
+    const [produtosExistentes, setProdutosExistentes] = useState(new Map());
 
     // Estados para enriquecimento de NCM via IA
     const [enrichingNCM, setEnrichingNCM] = useState(false);
@@ -163,6 +165,50 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
     // Multi-Tenant: Carrega lojas dinâmicas
     const { data: lojas = [] } = useLojas();
     const { organization } = useTenant();
+
+    const normalizeCodigo = useCallback((codigo) => String(codigo || '').trim().toLowerCase(), []);
+
+    // Pré-carrega SKUs/códigos já existentes para evitar consultas por item e pular duplicados
+    // Usa paginação para não perder itens quando a tabela tiver mais de 1000 registros.
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const carregarProdutosExistentes = async () => {
+            try {
+                const produtosMap = new Map();
+                const pageSize = 1000;
+                let from = 0;
+                let keepFetching = true;
+
+                while (keepFetching) {
+                    const { data: produtos, error } = await supabase
+                        .from('produtos')
+                        .select('codigo_barras')
+                        .eq('organization_id', organization?.id || '00000000-0000-0000-0000-000000000001')
+                        .range(from, from + pageSize - 1);
+
+                    if (error) throw error;
+
+                    (produtos || []).forEach((p) => {
+                        const chave = normalizeCodigo(p.codigo_barras);
+                        if (chave) produtosMap.set(chave, true);
+                    });
+
+                    if (!produtos || produtos.length < pageSize) {
+                        keepFetching = false;
+                    } else {
+                        from += pageSize;
+                    }
+                }
+
+                setProdutosExistentes(produtosMap);
+            } catch (error) {
+                console.error('[Import] Erro ao carregar produtos existentes:', error);
+            }
+        };
+
+        carregarProdutosExistentes();
+    }, [isOpen, organization?.id, normalizeCodigo]);
 
     // Gera mapeamento dinâmico de colunas baseado nas lojas cadastradas
     const COLUMN_MAPPING = useMemo(() => {
@@ -237,78 +283,6 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         }
 
         return sku;
-    };
-
-    // Detectar categoria e ambiente automaticamente baseado no nome do produto
-    const detectCategoryAndAmbiente = (nome) => {
-        const n = (nome || '').toLowerCase();
-
-        // Mapeamento de palavras-chave para categoria e ambiente
-        const rules = [
-            // QUARTO
-            { keywords: ['cama', 'bicama', 'beliche'], categoria: 'Cama', ambiente: 'Quarto' },
-            { keywords: ['colchão', 'colchao'], categoria: 'Colchão', ambiente: 'Quarto' },
-            { keywords: ['guarda-roupa', 'guarda roupa', 'roupeiro'], categoria: 'Guarda-roupa', ambiente: 'Quarto' },
-            { keywords: ['armário', 'armario'], categoria: 'Armário', ambiente: 'Quarto' },
-            { keywords: ['camiseiro'], categoria: 'Armário', ambiente: 'Quarto' },
-            { keywords: ['cômoda', 'comoda'], categoria: 'Cômoda', ambiente: 'Quarto' },
-            { keywords: ['criado-mudo', 'criado mudo', 'mesa de cabeceira'], categoria: 'Criado-mudo', ambiente: 'Quarto' },
-            { keywords: ['cabeceira'], categoria: 'Cabeceira', ambiente: 'Quarto' },
-            { keywords: ['penteadeira', 'mesa vestir'], categoria: 'Penteadeira', ambiente: 'Quarto' },
-            { keywords: ['sapateira'], categoria: 'Sapateira', ambiente: 'Quarto' },
-
-            // SALA DE ESTAR
-            { keywords: ['sofá', 'sofa'], categoria: 'Sofá', ambiente: 'Sala de Estar' },
-            { keywords: ['poltrona'], categoria: 'Poltrona', ambiente: 'Sala de Estar' },
-            { keywords: ['rack', 'home', 'painel tv', 'painel para tv'], categoria: 'Rack', ambiente: 'Sala de Estar' },
-            { keywords: ['painel'], categoria: 'Painel', ambiente: 'Sala de Estar' },
-            { keywords: ['estante'], categoria: 'Estante', ambiente: 'Sala de Estar' },
-            { keywords: ['puff', 'pufe'], categoria: 'Poltrona', ambiente: 'Sala de Estar' },
-
-            // SALA DE JANTAR
-            { keywords: ['mesa de jantar', 'mesa jantar'], categoria: 'Mesa', ambiente: 'Sala de Jantar' },
-            { keywords: ['buffet', 'aparador'], categoria: 'Buffet', ambiente: 'Sala de Jantar' },
-            { keywords: ['cristaleira'], categoria: 'Cristaleira', ambiente: 'Sala de Jantar' },
-            { keywords: ['cadeira'], categoria: 'Cadeira', ambiente: 'Sala de Jantar' },
-            { keywords: ['banco'], categoria: 'Banco', ambiente: 'Sala de Jantar' },
-
-            // COZINHA
-            { keywords: ['balcão', 'balcao', 'bancada cozinha'], categoria: 'Balcão', ambiente: 'Cozinha' },
-            { keywords: ['armário cozinha', 'armario cozinha', 'aéreo', 'aereo'], categoria: 'Armário', ambiente: 'Cozinha' },
-            { keywords: ['paneleiro'], categoria: 'Armário', ambiente: 'Cozinha' },
-            { keywords: ['fruteira'], categoria: 'Estante', ambiente: 'Cozinha' },
-            { keywords: ['cantinho do café', 'cantinho cafe', 'cantinho do cafe'], categoria: 'Estante', ambiente: 'Cozinha' },
-
-            // ESCRITÓRIO
-            { keywords: ['escrivaninha', 'escrevaninha'], categoria: 'Escrivaninha', ambiente: 'Escritório' },
-            { keywords: ['cadeira escritório', 'cadeira escritorio', 'cadeira office'], categoria: 'Cadeira', ambiente: 'Escritório' },
-            { keywords: ['estante livros', 'estante escritório'], categoria: 'Estante', ambiente: 'Escritório' },
-
-            // DIVERSOS (podem ser usados em vários ambientes)
-            { keywords: ['mesa lateral', 'mesa de canto', 'mesa centro', 'mesa apoio'], categoria: 'Mesa', ambiente: 'Diversos' },
-            { keywords: ['multiuso'], categoria: 'Estante', ambiente: 'Diversos' },
-            { keywords: ['expositor'], categoria: 'Estante', ambiente: 'Diversos' },
-            { keywords: ['cabideiro', 'cabide', 'manequim'], categoria: 'Outros', ambiente: 'Diversos' },
-            { keywords: ['mesa bar', 'mesa bistro', 'mesa bistrô'], categoria: 'Mesa', ambiente: 'Diversos' },
-            { keywords: ['mesa redonda', 'mesa quadrada', 'mesa retangular'], categoria: 'Mesa', ambiente: 'Sala de Jantar' },
-            { keywords: ['mesa infantil'], categoria: 'Mesa', ambiente: 'Quarto' },
-            { keywords: ['mesa dobrável', 'mesa dobravel'], categoria: 'Mesa', ambiente: 'Diversos' },
-
-            // Genéricos (ordem importa - checar por último)
-            { keywords: ['mesa'], categoria: 'Mesa', ambiente: 'Diversos' },
-            { keywords: ['bancada'], categoria: 'Balcão', ambiente: 'Diversos' },
-        ];
-
-        for (const rule of rules) {
-            for (const kw of rule.keywords) {
-                if (n.includes(kw)) {
-                    return { categoria: rule.categoria, ambiente: rule.ambiente };
-                }
-            }
-        }
-
-        // Fallback
-        return { categoria: 'Outros', ambiente: 'Diversos' };
     };
 
     // Normaliza nome da coluna
@@ -784,8 +758,10 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
         const total = groupedProducts.length;
         let imported = 0;
+        let skipped = 0;
         let failed = 0;
         const failedProducts = [];
+        const codigosProcessados = new Set(produtosExistentes.keys());
 
         // Processamento paralelo (workers) para acelerar múltiplas gravações
         // Limite conservador para evitar saturação de conexão durante importações massivas
@@ -820,13 +796,32 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
                     // Gera SKU único e DETERMINÍSTICO
                     const rawSku = product.codigo_barras || generateSKU(product.fornecedor_nome, product.modelo_referencia, product.cor, product.modelos_tecidos);
-                    const sku = String(rawSku || '').trim() || `SKU-${Date.now()}-${index}`;
+                    let sku = String(rawSku || '').trim() || `SKU-${Date.now()}-${index}`;
                     codigoBarrasFinal = sku;
+                    let skuNormalizado = normalizeCodigo(sku);
+
+                    // Para itens sem código explícito no CSV, evita colisão entre produtos diferentes
+                    // adicionando sufixo determinístico do nome apenas quando necessário.
+                    if (!product.codigo_barras && skuNormalizado && codigosProcessados.has(skuNormalizado)) {
+                        const nomeToken = buildVariationToken(product.nome, 'ITEM');
+                        sku = `${sku}-${nomeToken}`;
+                        skuNormalizado = normalizeCodigo(sku);
+                    }
+
+                    if (skuNormalizado && codigosProcessados.has(skuNormalizado)) {
+                        skipped++;
+                        setProgress(Math.round(((imported + skipped + failed) / total) * 100));
+                        continue;
+                    }
+
+                    if (skuNormalizado) {
+                        codigosProcessados.add(skuNormalizado);
+                    }
 
                     // Detecta categoria e ambiente automaticamente se não fornecidos
-                    const detected = detectCategoryAndAmbiente(product.nome);
-                    const categoria = product.categoria || detected.categoria;
-                    const ambiente = product.ambiente || detected.ambiente;
+                    const detected = detectProductKeywordSuggestion(product.nome, { returnDefault: true });
+                    const categoria = product.categoria || detected.categoriaSuggestion;
+                    const ambiente = product.ambiente || detected.ambienteSuggestion;
 
                     const produtoData = {
                         codigo_barras: sku,
@@ -852,20 +847,12 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                         impostos_percentual: sanitizeNumeric52(product.impostos_percentual, 0),
                         frete_custo: product.frete_custo || 0,
                         ipi_percentual: sanitizeNumeric52(product.ipi_percentual, 0),
-
                         markup_grupo1_prontos: sanitizeNumeric52(product.markup_grupo1_prontos, 0),
                         markup_grupo2_montagem: sanitizeNumeric52(product.markup_grupo2_montagem, 0),
                         markup_grupo3_lustre: sanitizeNumeric52(product.markup_grupo3_lustre, 0),
                         markup_aplicado: sanitizeNumeric52(product.markup_aplicado, 0),
-
                         desconto_max_vendedor: sanitizeNumeric52(product.desconto_max_vendedor, 5),
                         desconto_max_gerencial: sanitizeNumeric52(product.desconto_max_gerencial, 15),
-
-                        // Regra de negócio: estoque do CSV é ignorado na importação
-                        quantidade_estoque: 0,
-                        estoque_minimo: 0,
-                        estoque_ideal: 0,
-
                         requer_montagem: product.requer_montagem || false,
                         montagem_terceirizado: product.montagem_terceirizado || false,
 
@@ -878,45 +865,15 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                     };
 
                     let resultado;
-                    const { data: existente } = await withRetry(async () => {
-                        return await supabase
-                            .from('produtos')
-                            .select('id')
-                            .eq('codigo_barras', produtoData.codigo_barras)
-                            .maybeSingle();
-                    });
-
-                    if (existente && existente.id) {
-                        const updateData = { ...produtoData };
-                        delete updateData.codigo_barras;
-                        delete updateData.id;
-                        resultado = await withRetry(async () => base44.entities.Produto.update(existente.id, updateData));
-                    } else {
-                        try {
-                            resultado = await withRetry(async () => base44.entities.Produto.create(produtoData));
-                        } catch (createErr) {
-                            // Evita falha por condição de corrida quando o mesmo SKU é processado em paralelo
-                            if (createErr?.code === '23505' || String(createErr?.message || '').toLowerCase().includes('duplicate')) {
-                                const { data: duplicado } = await withRetry(async () => {
-                                    return await supabase
-                                        .from('produtos')
-                                        .select('id')
-                                        .eq('codigo_barras', produtoData.codigo_barras)
-                                        .maybeSingle();
-                                });
-
-                                if (duplicado?.id) {
-                                    const updateData = { ...produtoData };
-                                    delete updateData.codigo_barras;
-                                    delete updateData.id;
-                                    resultado = await withRetry(async () => base44.entities.Produto.update(duplicado.id, updateData));
-                                } else {
-                                    throw createErr;
-                                }
-                            } else {
-                                throw createErr;
-                            }
+                    try {
+                        resultado = await withRetry(async () => base44.entities.Produto.create(produtoData));
+                    } catch (createErr) {
+                        // Se outro processo criou o SKU entre o preload e o create, apenas marca como pulado
+                        if (createErr?.code === '23505' || String(createErr?.message || '').toLowerCase().includes('duplicate')) {
+                            skipped++;
+                            continue;
                         }
+                        throw createErr;
                     }
 
                     try {
@@ -956,7 +913,7 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                     failedProducts.push(product.nome);
                 }
 
-                setProgress(Math.round(((imported + failed) / total) * 100));
+                setProgress(Math.round(((imported + skipped + failed) / total) * 100));
 
                 // Pequeno delay para evitar sobrecarregar o Supabase e o navegador
                 await sleep(90);
@@ -972,20 +929,20 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         await Promise.all(workers);
 
         if (cancelImportRef.current) {
-            toast.warning(`Importação cancelada. ${imported} produtos processados de ${total}.`);
+            toast.warning(`Importação cancelada. ${imported} importados, ${skipped} pulados de ${total}.`);
         }
 
         setImporting(false);
 
         if (failed === 0) {
-            toast.success(`${imported} produto(s) processados com sucesso! (Smart Upsert ativado)`);
+            toast.success(`${imported} produto(s) importados e ${skipped} pulado(s) por já existirem.`);
             onSuccess?.();
             handleClose();
         } else {
             const errorMsg = failedProducts.length <= 3
                 ? failedProducts.join(', ')
                 : `${failedProducts.slice(0, 3).join(', ')} e mais ${failedProducts.length - 3} itens. Veja o console para detalhes.`;
-            toast.warning(`${imported} importados. Falharam ${failed}: ${errorMsg}`, { duration: 10000 });
+            toast.warning(`${imported} importados, ${skipped} pulados. Falharam ${failed}: ${errorMsg}`, { duration: 10000 });
         }
     };
 
@@ -1212,7 +1169,9 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                                             {product.cor && (
                                                                 <span className="flex items-center gap-1">
                                                                     Cor:
-                                                                    <div className="w-2 h-2 rounded-full border bg-white ml-0.5" style={{ backgroundColor: getColorHex(product.cor) || '#ccc' }} />
+                                                                    <div className="w-2 h-2 rounded-full border shadow-sm flex-shrink-0"
+                                                                        style={{ backgroundColor: getColorHex(product.cor) || '#ccc' }}
+                                                                    />
                                                                     <span className="font-medium text-gray-700">{product.cor}</span>
                                                                 </span>
                                                             )}
@@ -1364,8 +1323,6 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                         {currentlyProcessing.map((itemName, idx) => (
                                             <div
-
-
                                                 key={`${itemName}-${idx}`}
                                                 className="bg-gray-50 rounded-md border border-gray-100 p-3 flex items-center gap-3 animate-pulse shadow-sm"
                                             >

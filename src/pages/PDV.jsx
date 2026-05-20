@@ -462,7 +462,10 @@ export default function PDV() {
           desconto: parsed.desconto || 0,
           observacoes: parsed.observacoes || "",
           pagamentoEntrega: parsed.pagamentoEntrega || { ativo: false, valor: 0, forma: "" },
-          aguardandoLiberacao: parsed.aguardandoLiberacao || false
+          selectedVendedorId: parsed.selectedVendedorId || null,
+          aguardandoLiberacao: parsed.aguardandoLiberacao || false,
+          cupomAplicado: parsed.cupomAplicado || null,
+          tokenGerencial: parsed.tokenGerencial || null
         };
       }
     } catch (e) {
@@ -492,12 +495,13 @@ export default function PDV() {
   const [pagamentoEntrega, setPagamentoEntrega] = useState(initialState?.pagamentoEntrega || { ativo: false, valor: 0, forma: "" });
   const [preferenciasEntrega, setPreferenciasEntrega] = useState(initialState?.preferenciasEntrega || { dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
   const [aguardandoLiberacao, setAguardandoLiberacao] = useState(initialState?.aguardandoLiberacao || false);
+  const [selectedVendedorId, setSelectedVendedorId] = useState(initialState?.selectedVendedorId || user?.id || null);
   const [orcamentoOrigemId, setOrcamentoOrigemId] = useState(initialState?._orcamento_id || null);
   const [modalPreferenciasOpen, setModalPreferenciasOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [savingOrcamento, setSavingOrcamento] = useState(false);
-  const [cupomAplicado, setCupomAplicado] = useState(null);
-  const [tokenGerencial, setTokenGerencial] = useState(null);
+  const [cupomAplicado, setCupomAplicado] = useState(initialState?.cupomAplicado || null);
+  const [tokenGerencial, setTokenGerencial] = useState(initialState?.tokenGerencial || null);
   const [editingProdutoPDV, setEditingProdutoPDV] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
@@ -624,9 +628,9 @@ export default function PDV() {
   useEffect(() => {
     // Não salvar se estamos no meio do carregamento de um orçamento (race condition)
     if (isLoadingOrcamentoRef.current) return;
-    const state = { etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao };
+    const state = { etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao, selectedVendedorId, cupomAplicado, tokenGerencial };
     sessionStorage.setItem(PDV_STATE_KEY, JSON.stringify(state));
-  }, [etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao]);
+  }, [etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao, selectedVendedorId, cupomAplicado, tokenGerencial]);
 
   useEffect(() => {
     if (user && !initialState) {
@@ -636,6 +640,12 @@ export default function PDV() {
       setConfigVenda(prev => ({ ...prev, loja: defaultLoja }));
     }
   }, [user]);
+
+  useEffect(() => {
+    if (user?.id && !selectedVendedorId) {
+      setSelectedVendedorId(user.id);
+    }
+  }, [user, selectedVendedorId]);
 
   // --- REALTIME UPDATES: PRODUTOS ---
   useEffect(() => {
@@ -728,6 +738,22 @@ export default function PDV() {
     enabled: isOnline
   });
 
+  const { data: users = [] } = useQuery({
+    queryKey: ['users_list'],
+    queryFn: () => base44.entities.User.list(),
+    enabled: isOnline
+  });
+
+  const hasMasterAccess = String(user?.cargo || '').toLowerCase().includes('admin') || String(user?.cargo || '').toLowerCase().includes('master');
+  const vendedoresDisponiveis = (users || []).filter((u) => !!u?.id);
+  const vendedorSelecionado = vendedoresDisponiveis.find((u) => u.id === selectedVendedorId) || null;
+  const vendedorFinal = {
+    id: hasMasterAccess ? (vendedorSelecionado?.id || user?.id) : user?.id,
+    nome: hasMasterAccess
+      ? (vendedorSelecionado?.full_name || vendedorSelecionado?.email || user?.full_name || user?.email)
+      : (user?.full_name || user?.email)
+  };
+
   const montarAtualizacaoEstoqueProduto = (produto, quantidadeLocalAtualizada, lojaNome) => {
     const campoLoja = resolveStockField(lojaNome);
 
@@ -737,7 +763,7 @@ export default function PDV() {
 
     const produtoAtualizado = {
       ...produto,
-      [campoLoja]: Math.max(0, quantidadeLocalAtualizada || 0)
+      [campoLoja]: Number(quantidadeLocalAtualizada || 0)
     };
 
     return {
@@ -776,13 +802,13 @@ export default function PDV() {
 
         const itensVenda = dadosVenda.itens || [];
         for (const item of itensVenda) {
-          if (item.is_encomenda || !item.produto_id) continue;
+          if (!item.produto_id) continue;
 
           const produtoAtual = await base44.entities.Produto.getById(item.produto_id);
           if (!produtoAtual) continue;
 
           const campoLoja = resolveStockField(dadosVenda.loja);
-          const estoqueLocalAposVenda = Math.max(0, (produtoAtual[campoLoja] || 0) - (item.quantidade || 0));
+          const estoqueLocalAposVenda = (produtoAtual[campoLoja] || 0) - (item.quantidade || 0);
           const updates = montarAtualizacaoEstoqueProduto(produtoAtual, estoqueLocalAposVenda, dadosVenda.loja);
 
           await base44.entities.Produto.update(item.produto_id, updates);
@@ -861,16 +887,7 @@ export default function PDV() {
     }, produtos, fornecedores);
 
     setItens(prev => {
-      // For provisional products, we might want unique entries based on solicitacao_id to avoid merging different requests?
-      // Or just merge if same ID? 
-      // If it's the Generic Product ID, we must check if it's the SAME solicitation.
-
-      const exists = prev.findIndex(i => {
-        if (produto.is_solicitacao) {
-          return i.solicitacao_id === produto.solicitacao_id;
-        }
-        return i.produto_id === produto.id;
-      });
+      const exists = prev.findIndex(i => i.produto_id === produto.id);
 
       if (exists >= 0) {
         const newItens = [...prev];
@@ -974,7 +991,10 @@ export default function PDV() {
             entity_type: 'Produto',
             entity_id: editingProdutoPDV.id,
             entity_description: `Produto Atualizado via PDV (ID: ${editingProdutoPDV.id}) - ${updatedData.nome || editingProdutoPDV.nome}`,
-            changes: changes,
+            detalhes: {
+              changes,
+              source: 'PDV',
+            },
             timestamp: new Date().toISOString()
           });
         } catch (logErr) {
@@ -1003,8 +1023,21 @@ export default function PDV() {
       toast.success("Produto atualizado com sucesso!");
     } catch (error) {
       console.error("Error saving product from PDV:", error);
-      toast.error("Erro ao atualizar o produto: " + error.message);
+      const errorMessage = error?.message
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : JSON.stringify(error);
+      toast.error("Erro ao atualizar o produto: " + errorMessage);
     }
+  };
+
+  const handleAtualizarItem = (index, updates) => {
+    setItens(prev => prev.map((item, i) => i === index ? { ...item, ...updates } : item));
+  };
+
+  const handleAtualizarProdutoId = (index, newProdutoId) => {
+    setItens(prev => prev.map((item, i) => i === index ? { ...item, produto_id: newProdutoId } : item));
   };
 
   const handleAtualizarEstoque = async (index, novaQuantidade, estoqueAposVenda) => {
@@ -1434,8 +1467,8 @@ export default function PDV() {
       data_venda: configVenda.data,
       loja: configVenda.loja,
       loja_id: lojaId, // Adicionado campo vital para relatórios
-      responsavel_id: user.id,
-      responsavel_nome: user.full_name,
+      responsavel_id: vendedorFinal.id,
+      responsavel_nome: vendedorFinal.nome,
       cliente_id: clienteSelecionado.id,
       cliente_nome: clienteSelecionado.nome_completo,
       cliente_telefone: clienteSelecionado.telefone,
@@ -1463,7 +1496,7 @@ export default function PDV() {
       const salvou = saveOfflineSale(vendaData);
       if (salvou) {
         toast.warning("⚠️ Sem internet: Venda salva no dispositivo! Será sincronizada quando a conexão voltar.");
-        abrirNotaPedidoPDF({ ...vendaData }, clienteSelecionado, user.full_name);
+        abrirNotaPedidoPDF({ ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name);
         resetForm();
         carregarVendasPendentes();
       } else {
@@ -1481,14 +1514,14 @@ export default function PDV() {
       );
 
       atualizarProgressoPedido('Atualizando estoque...', 36);
-      const itensSemEncomenda = itens.filter(item => !item.is_encomenda);
+      const itensComProduto = itens.filter(item => !!item.produto_id);
       const atualizarEstoquePromise = medirDuracaoEtapa('atualizar estoque', () =>
-        Promise.all(itensSemEncomenda.map(async (item) => {
+        Promise.all(itensComProduto.map(async (item) => {
           const prod = produtos.find(p => p.id === item.produto_id);
           if (!prod) return null;
 
           const campoLoja = resolveStockField(configVenda.loja);
-          const estoqueLocalAposVenda = Math.max(0, (prod[campoLoja] || 0) - item.quantidade);
+          const estoqueLocalAposVenda = (prod[campoLoja] || 0) - item.quantidade;
           const updates = montarAtualizacaoEstoqueProduto(prod, estoqueLocalAposVenda, configVenda.loja);
 
           return base44.entities.Produto.update(prod.id, updates);
@@ -1536,7 +1569,7 @@ export default function PDV() {
           forma_pagamento_entrega: pagamentoEntrega.ativo ? formaPagamentoEntregaStr : null,
           preferencias_entrega: preferenciasEntrega,
           loja_id: lojaId,
-          vendedor_id: user.id
+          vendedor_id: vendedorFinal.id
         })
       );
 
@@ -1602,7 +1635,7 @@ export default function PDV() {
 
       // 4. IMPRESSÃO
       atualizarProgressoPedido('Preparando impressao...', 96);
-      preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, user.full_name);
+      preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name);
 
       toast.success("Venda finalizada com sucesso!");
 
@@ -1620,8 +1653,8 @@ export default function PDV() {
               numero_pedido: novoNumero,
               loja: configVenda.loja,
               loja_id: lojaId,
-              vendedor_id: user?.id || null,
-              vendedor_nome: user?.full_name || user?.email || null,
+              vendedor_id: vendedorFinal.id || null,
+              vendedor_nome: vendedorFinal.nome || null,
               status: 'pendente'
             })
           ));
@@ -1716,7 +1749,7 @@ export default function PDV() {
             let pdfBase64 = null;
             try {
               // Nota: vendaData ainda está acessível no closure
-              pdfBase64 = await gerarNotaPedidoBase64(vendaData, { ...clienteSelecionado }, user.full_name);
+              pdfBase64 = await gerarNotaPedidoBase64(vendaData, { ...clienteSelecionado }, vendedorFinal.nome || user.full_name);
 
               if (pdfBase64) {
                 console.log(`📄 PDF gerado com sucesso (${pdfBase64.length} bytes)`);
@@ -1799,6 +1832,7 @@ export default function PDV() {
     setConfigVenda(prev => ({ ...prev, data: new Date().toISOString().split('T')[0], prazo: "" }));
     setPreferenciasEntrega({ dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
     setAguardandoLiberacao(false);
+    setSelectedVendedorId(user?.id || null);
     setCupomAplicado(null);
     setOrcamentoOrigemId(null);
     setEtapa(1);
@@ -1929,6 +1963,8 @@ export default function PDV() {
                   onVincularImagem={handleVincularImagem}
                   onEditProduto={handleEditProdutoPDV}
                   onAtualizarEstoque={handleAtualizarEstoque}
+                  onAtualizarProdutoId={handleAtualizarProdutoId}
+                  onAtualizarItem={handleAtualizarItem}
                 />
               </div>
             </div>
@@ -1997,6 +2033,27 @@ export default function PDV() {
                     </div>
                   )}
                 </div>
+
+                {hasMasterAccess && isOnline && (
+                  <div className="mt-4">
+                    <Label className="text-xs mb-1.5 block font-medium">Vendedor da Venda</Label>
+                    <Select
+                      value={selectedVendedorId || user?.id || ''}
+                      onValueChange={setSelectedVendedorId}
+                    >
+                      <SelectTrigger className="h-10 text-sm">
+                        <SelectValue placeholder="Selecione o vendedor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {vendedoresDisponiveis.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name || u.email}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 {/* Badge informativo quando todos os itens são retirada */}
                 {todosRetiram && (

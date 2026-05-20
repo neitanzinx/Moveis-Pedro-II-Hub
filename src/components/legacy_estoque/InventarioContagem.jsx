@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { normSearch } from "@/lib/utils";
 import { base44, supabase } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -107,12 +108,11 @@ export default function InventarioContagem({ inventarioExistente, onVoltar, onSa
         }
 
         if (searchTerm.trim()) {
-            const term = searchTerm.toLowerCase();
-            result = result.filter(p =>
-                p.nome?.toLowerCase().includes(term) ||
-                p.codigo_barras?.toLowerCase().includes(term) ||
-                p.modelo_referencia?.toLowerCase().includes(term)
-            );
+            const terms = normSearch(searchTerm).split(/\s+/).filter(Boolean);
+            result = result.filter(p => {
+                const searchString = [p.nome, p.codigo_barras, p.modelo_referencia].filter(Boolean).map(normSearch).join(' ');
+                return terms.every(term => searchString.includes(term));
+            });
         }
 
         if (filtroContagem === "nao_contados") {

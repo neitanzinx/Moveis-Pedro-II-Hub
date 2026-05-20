@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { normSearch } from "@/lib/utils";
 import { base44, supabase } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
@@ -228,11 +229,11 @@ export default function EstoqueTab({ user }) {
     () => data?.pages.flatMap(page => page.data) || [],
     [data]
   );
-  const produtosExibidos = useMemo(() => {
-    let produtos = [...flatProdutos];
+  const { produtosExibidos, isFuzzy } = useMemo(() => {
+    let lista = [...flatProdutos];
 
     if (selectedFabricante !== 'todos') {
-      produtos = produtos.filter((produto) => {
+      lista = lista.filter((produto) => {
         const idFornecedor = String(produto.fornecedor_id || '');
         const fabricantePorId = idFornecedor ? fornecedoresById[idFornecedor] : '';
         const fabricante = (fabricantePorId || produto.fornecedor_nome || produto.marca || '').trim();
@@ -240,16 +241,39 @@ export default function EstoqueTab({ user }) {
       });
     }
 
+    // Quando há busca ativa, pontua os resultados do servidor por relevância
+    if (debouncedSearch) {
+      const termos = normSearch(debouncedSearch).split(/\s+/).filter(Boolean);
+      if (termos.length > 0) {
+        const scored = lista.map(p => {
+          const texto = [p.nome, p.modelo_referencia, p.categoria, p.codigo_barras, p.sku, p.fornecedor_nome, p.cor]
+            .filter(Boolean).map(normSearch).join(' ');
+          const matches = termos.filter(t => texto.includes(t)).length;
+          return { p, score: matches };
+        });
+        const exact = scored.filter(({ score }) => score === termos.length);
+        const partials = scored.filter(({ score }) => score > 0 && score < termos.length);
+        const fuzzy = exact.length === 0 && partials.length > 0;
+        if (fuzzy) {
+          return {
+            produtosExibidos: partials.sort((a, b) => b.score - a.score).map(({ p }) => p),
+            isFuzzy: true,
+          };
+        }
+        lista = exact.map(({ p }) => p);
+      }
+    }
+
     switch (selectedOrdenacao) {
       case 'quantidade':
-        produtos.sort((a, b) => {
+        lista.sort((a, b) => {
           const aQtd = a.quantidade_estoque || 0;
           const bQtd = b.quantidade_estoque || 0;
           return selectedDirecao === 'asc' ? aQtd - bQtd : bQtd - aQtd;
         });
         break;
       case 'preco':
-        produtos.sort((a, b) => {
+        lista.sort((a, b) => {
           const aPreco = a.preco_venda || 0;
           const bPreco = b.preco_venda || 0;
           return selectedDirecao === 'asc' ? aPreco - bPreco : bPreco - aPreco;
@@ -257,15 +281,15 @@ export default function EstoqueTab({ user }) {
         break;
       case 'alfabetica':
       default:
-        produtos.sort((a, b) => {
+        lista.sort((a, b) => {
           const comparacao = (a.nome || '').localeCompare((b.nome || ''), 'pt-BR', { sensitivity: 'base' });
           return selectedDirecao === 'asc' ? comparacao : comparacao * -1;
         });
         break;
     }
 
-    return produtos;
-  }, [flatProdutos, fornecedoresById, selectedFabricante, selectedOrdenacao, selectedDirecao]);
+    return { produtosExibidos: lista, isFuzzy: false };
+  }, [flatProdutos, fornecedoresById, debouncedSearch, selectedFabricante, selectedOrdenacao, selectedDirecao]);
   const totalCount = data?.pages[0]?.count || 0;
 
   const handleDelete = async (id) => {
@@ -453,7 +477,10 @@ export default function EstoqueTab({ user }) {
               </TableRow>
             ) : (
               produtosExibidos.map(produto => {
-                const isLowStock = produto.quantidade_estoque <= (produto.estoque_minimo || 0);
+                const quantidadeAtual = Number(produto.quantidade_estoque || 0);
+                const estoqueMinimo = Number(produto.estoque_minimo || 0);
+                const isOutOfStock = quantidadeAtual === 0;
+                const isLowStock = quantidadeAtual > 0 && estoqueMinimo > 0 && quantidadeAtual <= estoqueMinimo;
 
                 return (
                   <TableRow key={produto.id} className="hover:bg-gray-50 dark:hover:bg-neutral-800/50">
@@ -548,10 +575,12 @@ export default function EstoqueTab({ user }) {
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex flex-col items-center gap-1">
-                        <span className={`font-medium ${isLowStock ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
+                        <span className={`font-medium ${(isLowStock || isOutOfStock) ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
                           {produto.quantidade_estoque}
                         </span>
-                        {isLowStock && (
+                        {isOutOfStock ? (
+                          <Badge variant="destructive" className="h-4 px-1 text-[10px]">Zerado</Badge>
+                        ) : isLowStock && (
                           <Badge variant="destructive" className="h-4 px-1 text-[10px]">Baixo</Badge>
                         )}
                         <div className="text-[10px] text-gray-500 flex gap-1 flex-wrap justify-center max-w-[120px]">
@@ -626,7 +655,10 @@ export default function EstoqueTab({ user }) {
                 Carregando mais...
               </>
             ) : (
-              `Carregar mais (Visualizando ${produtosExibidos.length} de ${totalCount})`
+              <span className="flex items-center gap-2">
+                {`Carregar mais (Visualizando ${produtosExibidos.length} de ${totalCount})`}
+                {isFuzzy && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">resultado mais próximo</span>}
+              </span>
             )}
           </Button>
         </div>

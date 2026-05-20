@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { normSearch } from "@/lib/utils";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/hooks/useAuth";
@@ -131,22 +132,37 @@ export default function Produtos() {
   }, [fornecedoresList]);
 
   // Produtos com nome do fornecedor resolvido (ID-first) e filtros de busca/categoria/atenção
-  const produtos = useMemo(() => {
-    return (rawProdutos || []).map((p) => ({
+  const { produtos, isFuzzy } = useMemo(() => {
+    const mapped = (rawProdutos || []).map((p) => ({
       ...p,
       fornecedor_nome: String(fornecedoresById[String(p.fornecedor_id)] || p.fornecedor_nome || '').trim(),
     })).filter((p) => {
-      // Busca textual
-      if (debouncedSearch) {
-        const termos = debouncedSearch.toLowerCase().split(/\s+/).filter(Boolean);
-        const texto = [p.nome, p.modelo_referencia, p.categoria, p.ambiente, p.codigo_barras, p.sku, p.fornecedor_nome, p.cor]
-          .filter(Boolean).join(' ').toLowerCase();
-        if (!termos.every(t => texto.includes(t))) return false;
-      }
       if (selectedCategoria !== 'todas' && p.categoria !== selectedCategoria) return false;
       if (filtroAtencao && !p.requer_atencao) return false;
       return true;
     });
+
+    if (!debouncedSearch) return { produtos: mapped, isFuzzy: false };
+
+    const termos = normSearch(debouncedSearch).split(/\s+/).filter(Boolean);
+    if (termos.length === 0) return { produtos: mapped, isFuzzy: false };
+
+    const scored = mapped
+      .map(p => {
+        const texto = [p.nome, p.modelo_referencia, p.categoria, p.ambiente, p.codigo_barras, p.sku, p.fornecedor_nome, p.cor]
+          .filter(Boolean).map(normSearch).join(' ');
+        const matches = termos.filter(t => texto.includes(t)).length;
+        return { p, score: matches };
+      })
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    const exact = scored.filter(({ score }) => score === termos.length);
+    const fuzzy = exact.length === 0 && scored.length > 0;
+    return {
+      produtos: (fuzzy ? scored : exact).map(({ p }) => p),
+      isFuzzy: fuzzy,
+    };
   }, [rawProdutos, fornecedoresById, debouncedSearch, selectedCategoria, filtroAtencao]);
 
   // Lista de fabricantes para o dropdown — derivada dos mesmos produtos resolvidos
@@ -845,8 +861,9 @@ export default function Produtos() {
         {/* Pagination Controls */}
         {!isLoading && produtosOrdenados.length > 0 && (
           <div className="flex flex-col md:flex-row justify-between items-center mt-6 gap-4">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 flex items-center gap-2">
               Exibindo {Math.min((currentPage - 1) * itemsPerPage + 1, produtosOrdenados.length)} - {Math.min(currentPage * itemsPerPage, produtosOrdenados.length)} de {produtosOrdenados.length >= 100000 ? '+100k' : produtosOrdenados.length} produtos
+              {isFuzzy && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">resultado mais próximo</span>}
             </p>
 
             <div className="flex gap-2 items-center">

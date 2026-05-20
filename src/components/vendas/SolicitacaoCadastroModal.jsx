@@ -5,15 +5,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, AlertCircle } from "lucide-react";
-import { base44, supabase } from "@/api/base44Client";
+import { Loader2 } from "lucide-react";
+import { base44 } from "@/api/base44Client";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { CATEGORIAS, AMBIENTES, MATERIAIS } from "@/constants/productConstants";
 import FurnitureColorPicker from "@/components/produtos/FurnitureColorPicker";
+import { detectProductKeywordSuggestion } from "@/lib/productKeywordDetector";
 
 export default function SolicitacaoCadastroModal({ isOpen, onClose, onProdutoSolicitado, user, initialParentProduct = null }) {
     const [loading, setLoading] = useState(false);
+    const [dismissedSuggestionName, setDismissedSuggestionName] = useState('');
 
     // Effect to update internal state if prop changes
     React.useEffect(() => {
@@ -26,6 +28,7 @@ export default function SolicitacaoCadastroModal({ isOpen, onClose, onProdutoSol
             material: '',
             preco_sugerido: ''
         }));
+        setDismissedSuggestionName('');
     }, [isOpen]);
 
     const [formData, setFormData] = useState({
@@ -52,12 +55,59 @@ export default function SolicitacaoCadastroModal({ isOpen, onClose, onProdutoSol
     });
 
     const handleChange = (e) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value });
+        const { name, value } = e.target;
+        setFormData({ ...formData, [name]: value });
+
+        if (name === 'nome_produto') {
+            setDismissedSuggestionName('');
+        }
     };
 
     const handleSelectChange = (name, value) => {
         setFormData({ ...formData, [name]: value });
     }
+
+    const keywordSuggestion = React.useMemo(
+        () => detectProductKeywordSuggestion(formData.nome_produto, {
+            returnDefault: true,
+            defaultCategoria: 'Outros',
+        }),
+        [formData.nome_produto]
+    );
+
+    const normalizedSuggestionName = React.useMemo(
+        () => (formData.nome_produto || '').trim().toLowerCase(),
+        [formData.nome_produto]
+    );
+
+    const suggestedCategoria = keywordSuggestion.categoriaSuggestion;
+    const suggestedAmbiente = AMBIENTES.includes(keywordSuggestion.ambienteSuggestion)
+        ? keywordSuggestion.ambienteSuggestion
+        : null;
+
+    const canApplyCategoriaSuggestion = suggestedCategoria &&
+        CATEGORIAS.includes(suggestedCategoria) &&
+        suggestedCategoria !== formData.categoria;
+
+    const canApplyAmbienteSuggestion = suggestedAmbiente &&
+        suggestedAmbiente !== formData.ambiente;
+
+    const shouldShowSuggestion = normalizedSuggestionName &&
+        dismissedSuggestionName !== normalizedSuggestionName &&
+        (canApplyCategoriaSuggestion || canApplyAmbienteSuggestion);
+
+    const shouldShowCategoriaSuggestion = shouldShowSuggestion && canApplyCategoriaSuggestion;
+    const shouldShowAmbienteSuggestion = shouldShowSuggestion && canApplyAmbienteSuggestion;
+
+    const applyCategoriaSuggestion = () => {
+        if (!canApplyCategoriaSuggestion) return;
+        setFormData(prev => ({ ...prev, categoria: suggestedCategoria }));
+    };
+
+    const applyAmbienteSuggestion = () => {
+        if (!canApplyAmbienteSuggestion) return;
+        setFormData(prev => ({ ...prev, ambiente: suggestedAmbiente }));
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -68,73 +118,67 @@ export default function SolicitacaoCadastroModal({ isOpen, onClose, onProdutoSol
 
         setLoading(true);
         try {
-            // 1. Get the Generic Product ID
-            const { data: genericProd, error: prodError } = await supabase
-                .from('produtos')
-                .select('id, codigo_barras')
-                .eq('codigo_barras', 'PROD-GENERICO')
-                .maybeSingle();
-
-            if (prodError || !genericProd) {
-                throw new Error("Produto genérico não configurado no sistema. Contate o suporte.");
-            }
-
-            // 2. Format Correct Price and Dimensions
-            const preco = parseFloat(formData.preco_sugerido.replace(',', '.'));
-
-            // Format dimensions for display/string storage
+            // 1. Formatar preco e dimensoes
+            const preco = parseFloat(String(formData.preco_sugerido).replace(',', '.'));
             const medidasFormatted = [
                 formData.altura ? `A:${formData.altura}cm` : '',
                 formData.largura ? `L:${formData.largura}cm` : '',
                 formData.profundidade ? `P:${formData.profundidade}cm` : ''
             ].filter(Boolean).join(' x ');
 
-            // Pack extra info into remarks for database storage (since schema might not have these cols yet)
-            // But we will pass structured data to the cart for immediate use
-            const extraInfo = `
-Categoria: ${formData.categoria}
-Ambiente: ${formData.ambiente || '-'}
-Material: ${formData.material || '-'}
-Fornecedor: ${fornecedores.find(f => f.id.toString() === formData.fornecedor_id)?.nome_empresa || '-'}
-Dimensões: ${medidasFormatted}
-            `.trim();
-
-            const finalObservacoes = `${formData.observacoes || ''}\n\n--- Detalhes Técnicos ---\n${extraInfo}`.trim();
-
-            // 3. Create Solicitation Record
-            const solicitacao = await base44.entities.SolicitacaoCadastro.create({
-                vendedor_id: user?.id,
-                nome_produto: formData.nome_produto,
-                cor: formData.cor,
-                tecido: formData.tecido,
-                medidas: medidasFormatted, // Store simple string representation in legacy column
-                preco_sugerido: preco,
-                observacoes: finalObservacoes,
-                status: 'pendente',
-                produto_pai_id: null,
-                // New structured fields
+            // 2. Criar produto real na base (pendente revisao pelo gerente)
+            const novoProduto = await base44.entities.Produto.create({
+                codigo_barras: `SOL-${Date.now()}`,
+                nome: formData.nome_produto,
                 categoria: formData.categoria,
-                ambiente: formData.ambiente,
-                material: formData.material,
+                ambiente: formData.ambiente || null,
+                material: formData.material || null,
+                cor: formData.cor || null,
+                cor_hex: formData.cor_hex || null,
+                altura: formData.altura ? parseFloat(formData.altura) : null,
+                largura: formData.largura ? parseFloat(formData.largura) : null,
+                profundidade: formData.profundidade ? parseFloat(formData.profundidade) : null,
+                preco_venda: preco,
+                preco_custo: 0,
+                fornecedor_id: formData.fornecedor_id ? parseInt(formData.fornecedor_id) : null,
+                quantidade_estoque: 1,
+                ativo: true,
+                requer_atencao: true,
+                tipo_entrega_padrao: 'desmontado',
+                variacoes: [],
+                fotos: [],
+                is_parent: false,
+                parent_id: null,
+            });
+
+            // 3. Criar solicitacao para revisao dos gerentes (informacoes fiscais e cadastro completo)
+            await base44.entities.SolicitacaoCadastro.create({
+                vendedor_id: user?.id,
+                produto_gerado_id: novoProduto.id,
+                nome_produto: formData.nome_produto,
+                cor: formData.cor || null,
+                tecido: formData.tecido || null,
+                medidas: medidasFormatted,
+                preco_sugerido: preco,
+                observacoes: formData.observacoes || null,
+                status: 'pendente',
+                categoria: formData.categoria,
+                ambiente: formData.ambiente || null,
+                material: formData.material || null,
                 fornecedor_id: formData.fornecedor_id ? parseInt(formData.fornecedor_id) : null,
                 altura: formData.altura ? parseFloat(formData.altura) : null,
                 largura: formData.largura ? parseFloat(formData.largura) : null,
-                profundidade: formData.profundidade ? parseFloat(formData.profundidade) : null
+                profundidade: formData.profundidade ? parseFloat(formData.profundidade) : null,
             });
 
-            // 4. Construct "Fake" Product Object for Cart
-            const produtoProvisorio = {
-                id: genericProd.id,
-                nome: formData.nome_produto,
+            // 4. Enviar produto real ao carrinho (marcado para revisao)
+            const produtoParaCarrinho = {
+                ...novoProduto,
                 preco_venda: preco,
-                quantidade_estoque: 999,
-                ativo: true,
                 is_solicitacao: true,
-                solicitacao_id: solicitacao.id,
                 detalhes_solicitacao: {
                     cor: formData.cor,
                     tecido: formData.tecido,
-                    // Pass SPLIT dimensions for easy mapping later
                     altura: formData.altura,
                     largura: formData.largura,
                     profundidade: formData.profundidade,
@@ -144,16 +188,15 @@ Dimensões: ${medidasFormatted}
                     material: formData.material,
                     fornecedor_id: formData.fornecedor_id,
                     nome_original: formData.nome_produto,
-                    produto_pai_id: null
-                }
+                },
             };
 
-            toast.success("Solicitação enviada! Item adicionado ao carrinho.");
-            onProdutoSolicitado(produtoProvisorio);
+            toast.success("Produto cadastrado e enviado para revisao dos gerentes.");
+            onProdutoSolicitado(produtoParaCarrinho);
             onClose();
             setFormData({
                 nome_produto: '', categoria: '', ambiente: '', fornecedor_id: '',
-                cor: '', tecido: '', material: '',
+                cor: '', cor_hex: '', tecido: '', material: '',
                 altura: '', largura: '', profundidade: '',
                 preco_sugerido: '', observacoes: ''
             });
@@ -193,6 +236,27 @@ Dimensões: ${medidasFormatted}
                         </div>
                         <div className="space-y-2">
                             <Label>Categoria *</Label>
+                            {shouldShowCategoriaSuggestion && (
+                                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 flex items-center justify-between gap-2">
+                                    <span>Categoria sugerida: <strong>{suggestedCategoria}</strong></span>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={applyCategoriaSuggestion}
+                                            className="h-7 rounded border border-emerald-300 bg-white px-2 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100"
+                                        >
+                                            Aplicar
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setDismissedSuggestionName(normalizedSuggestionName)}
+                                            className="text-[11px] text-emerald-700 underline underline-offset-2 hover:text-emerald-600"
+                                        >
+                                            Ignorar
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                             <Select
                                 onValueChange={(v) => handleSelectChange('categoria', v)}
                                 value={formData.categoria}
@@ -213,6 +277,27 @@ Dimensões: ${medidasFormatted}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label>Ambiente</Label>
+                            {shouldShowAmbienteSuggestion && (
+                                <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900 flex items-center justify-between gap-2">
+                                    <span>Ambiente sugerido: <strong>{suggestedAmbiente}</strong></span>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={applyAmbienteSuggestion}
+                                            className="h-7 rounded border border-sky-300 bg-white px-2 text-[11px] font-medium text-sky-800 hover:bg-sky-100"
+                                        >
+                                            Aplicar
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setDismissedSuggestionName(normalizedSuggestionName)}
+                                            className="text-[11px] text-sky-700 underline underline-offset-2 hover:text-sky-600"
+                                        >
+                                            Ignorar
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                             <Select onValueChange={(v) => handleSelectChange('ambiente', v)} value={formData.ambiente}>
                                 <SelectTrigger>
                                     <SelectValue placeholder="Selecione" />

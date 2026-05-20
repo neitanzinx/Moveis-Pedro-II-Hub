@@ -229,7 +229,7 @@ export default function AprovacaoSemEstoque() {
                   )}
                   {s.observacoes_gerencial && (
                     <span className="text-xs text-gray-400 italic truncate max-w-32" title={s.observacoes_gerencial}>
-                      "{s.observacoes_gerencial}"
+                      &quot;{s.observacoes_gerencial}&quot;
                     </span>
                   )}
                 </div>

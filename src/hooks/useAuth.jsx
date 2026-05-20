@@ -72,11 +72,15 @@ export function AuthProvider({ children }) {
       }
     };
 
+    // Flag interna: se o usuário já foi autenticado, timeouts subsequentes
+    // (ex.: permissões, base44.auth.me em Strict Mode) NÃO devem gerar authError.
+    let userAlreadyResolved = false;
+
     const loadPermissionsForUser = async (targetUser) => {
       try {
         const rolePermissions = await withTimeout(
           base44.entities.RolePermission.list(),
-          5000,
+          10000,
           'RolePermission.list'
         );
         const roles = getUserRoles(targetUser);
@@ -95,14 +99,9 @@ export function AuthProvider({ children }) {
           });
         }
       } catch (e) {
-        if (isTimeoutError(e) && mounted) {
-          setAuthError({
-            code: 'permissions-timeout',
-            source: 'RolePermission.list',
-            message: 'A consulta de permissões excedeu o tempo limite. Verifique a conexão com o Supabase e tente novamente.'
-          });
-        }
-        console.log('[Auth] Usando permissões hardcoded (fallback)', e);
+        // Permissões são não-críticas: fallback hardcoded já cobre.
+        // NÃO setar authError aqui — o usuário já foi autenticado com sucesso.
+        console.warn('[Auth] Usando permissões hardcoded (fallback)', e);
       }
     };
 
@@ -147,7 +146,7 @@ export function AuthProvider({ children }) {
         // Verificar se ainda tem sessão Supabase ativa (com timeout)
         const { data: { session } } = await withTimeout(
           supabase.auth.getSession(),
-          4000,
+          8000,
           'supabase.auth.getSession'
         );
 
@@ -167,7 +166,7 @@ export function AuthProvider({ children }) {
               .select('*')
               .eq('id', session.user.id)
               .single(),
-            5000,
+            10000,
             'public_users.profile'
           );
           userProfile = profileResponse?.data || null;
@@ -246,6 +245,7 @@ export function AuthProvider({ children }) {
 
           if (employeeUser && mounted) {
             console.log('[Auth] ✅ Funcionário autenticado:', employeeUser.full_name, '- Cargos:', employeeUser.cargos?.join(', ') || employeeUser.cargo);
+            userAlreadyResolved = true;
             setAuthType('employee');
             setUser(employeeUser);
             setLoading(false);
@@ -263,7 +263,7 @@ export function AuthProvider({ children }) {
         console.log('[Auth] Verificando autenticação Supabase...');
         const supabaseUser = await withTimeout(
           base44.auth.me(),
-          5000,
+          10000,
           'base44.auth.me'
         );
 
@@ -283,7 +283,10 @@ export function AuthProvider({ children }) {
         }
       } catch (error) {
         console.error('[Auth] Erro durante initAuth:', error);
-        if (isTimeoutError(error) && mounted) {
+        // Só exibe tela de erro se o usuário ainda não foi resolvido com sucesso.
+        // Em React Strict Mode, o useEffect pode rodar duas vezes; a segunda
+        // invocação pode dar timeout enquanto a primeira já autenticou o user.
+        if (isTimeoutError(error) && mounted && !userAlreadyResolved) {
           setUser(null);
           setCargoPermissoes(null);
           setAuthType(null);

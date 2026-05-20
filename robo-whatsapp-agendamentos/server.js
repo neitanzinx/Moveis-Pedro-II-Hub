@@ -1831,7 +1831,7 @@ REGRAS CRÍTICAS:
 Retorne JSON apenas se encontrar com CERTEZA:
 {
   "nome": "nome completo do produto incluindo marca/modelo",
-  "categoria": "uma das opções: Sofá, Cama, Mesa, Cadeira, Armário, Estante, Rack, Poltrona, Escrivaninha, Criado-mudo, Buffet, Aparador, Banco, Outros",
+    "categoria": "uma das opções: Sofá, Cama, Mesa, Cadeira, Armário, Estante, Rack, Poltrona, Escrivaninha, Criado-mudo, Buffet, Aparador, Banco, Travesseiro, Almofada, Decorações, Utensílios, Outros",
   "material": "material principal real (Madeira, MDF, Metal, Vidro, Tecido, Couro, etc) ou null",
   "cor": "cor principal do produto ou null",
   "descricao": "descrição detalhada APENAS com informações que você ENCONTROU",

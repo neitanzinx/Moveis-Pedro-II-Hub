@@ -3,6 +3,21 @@ import { twMerge } from "tailwind-merge"
 
 export function cn(...inputs) {
   return twMerge(clsx(inputs))
+}
+
+/**
+ * Normaliza string para busca: remove acentos, colapsa separadores (/ - _ |) em espaço
+ * e converte para minúsculas. Permite busca accent-insensitive e separator-insensitive.
+ * Exemplo: normSearch("freijó / chumbo") === normSearch("freijo/chumbo") === "freijo chumbo"
+ */
+export function normSearch(str) {
+  return (str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[-/|_.]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 } 
 
 function normalizeComparableValue(value) {

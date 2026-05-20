@@ -55,6 +55,27 @@ export default function PainelPagamento({
   const [aplicandoToken, setAplicandoToken] = useState(false);
   const [erroToken, setErroToken] = useState("");
   const [descontoPercent, setDescontoPercent] = useState(0);
+  const [descontoValorDisplay, setDescontoValorDisplay] = useState("");
+
+  // Formatador de moeda: "1171" → "11,71"
+  const formatCurrencyMask = (raw) => {
+    const digits = String(raw || "").replace(/\D/g, "");
+    if (!digits) return "";
+    const padded = digits.padStart(3, "0");
+    const cents = padded.slice(-2);
+    const intPart = padded.slice(0, -2).replace(/^0+(?=\d)/, "") || "0";
+    const intFormatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return `${intFormatted},${cents}`;
+  };
+
+  const parseCurrencyToNumber = (formattedValue) => {
+    if (!formattedValue) return 0;
+    const normalized = String(formattedValue)
+      .replace(/\./g, "")
+      .replace(/,/g, ".")
+      .replace(/[^\d.-]/g, "");
+    return parseFloat(normalized) || 0;
+  };
 
 
   // Buscar configurações de taxa/acréscimo
@@ -205,6 +226,7 @@ export default function PainelPagamento({
       setTokenGerencial(token);
       setTokenCodigo("");
       setDescontoPercent(0); // Inicia em 0, gerente ajusta
+      setDescontoValorDisplay("");
       toast.success("Token autorizado! Ajuste o desconto desejado.");
 
     } catch (error) {
@@ -219,6 +241,7 @@ export default function PainelPagamento({
     setTokenGerencial(null);
     setDescontoPercent(0);
     setDesconto(0);
+    setDescontoValorDisplay("");
     setTokenCodigo("");
     setErroToken("");
   };
@@ -228,8 +251,10 @@ export default function PainelPagamento({
     if (tokenGerencial && descontoPercent > 0) {
       const valorDesconto = (valores.subtotal * descontoPercent) / 100;
       setDesconto(valorDesconto);
+      setDescontoValorDisplay(formatCurrencyMask(String(Math.round(valorDesconto * 100))));
     } else if (tokenGerencial && descontoPercent === 0) {
       setDesconto(0);
+      setDescontoValorDisplay("");
     }
   }, [descontoPercent, valores.subtotal, tokenGerencial]);
 
@@ -491,11 +516,19 @@ export default function PainelPagamento({
                         <div className="relative flex-[1.5]">
                           <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">R$</span>
                           <Input
-                            type="number"
-                            value={desconto > 0 ? desconto.toFixed(2) : ''}
+                            type="text"
+                            inputMode="numeric"
+                            value={descontoValorDisplay}
                             onChange={(e) => {
-                              let valR = parseFloat(e.target.value);
-                              if (isNaN(valR) || valR < 0) valR = 0;
+                              const formatted = formatCurrencyMask(e.target.value);
+                              setDescontoValorDisplay(formatted);
+                              
+                              const valR = parseCurrencyToNumber(formatted);
+                              if (isNaN(valR) || valR < 0) {
+                                setDesconto(0);
+                                setDescontoPercent(0);
+                                return;
+                              }
 
                               // Calcula a porcentagem equivalente
                               let newPercent = (valR / valores.subtotal) * 100;
@@ -506,13 +539,10 @@ export default function PainelPagamento({
                                 newPercent = maxPercent;
                                 valR = (valores.subtotal * maxPercent) / 100;
                                 toast.error(`Limite de <span>${maxPercent}%</span> atingido.`);
+                                setDescontoValorDisplay(formatCurrencyMask(String(Math.round(valR * 100))));
                               }
 
                               setDescontoPercent(newPercent);
-                              // Nota: o useEffect [descontoPercent] vai atualizar o 'desconto' novamente, 
-                              // mas para digitação suave, talvez precisemos de um estado local ou controle melhor.
-                              // Porém, como o useEffect depende do descontoPercent, atualizar ele deve ser suficiente
-                              // se não houver arredondamentos conflituosos loopando.
                               setDesconto(valR);
                             }}
                             className="h-8 text-xs pl-6"

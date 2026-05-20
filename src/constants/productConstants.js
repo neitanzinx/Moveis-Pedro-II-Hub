@@ -28,6 +28,10 @@ export const CATEGORIAS = [
     "Cabeceira",
     "Box",
     "Penteadeira",
+    "Travesseiro",
+    "Almofada",
+    "Decorações",
+    "Utensílios",
     "Outros"
 ];
 
@@ -295,6 +299,7 @@ export const CATEGORIAS_COM_TECIDO = [
     "Poltrona",
     "Cadeira",
     "Banco",
+    "Almofada",
     "Cabeceira",
     "Cama", // Se tiver cabeceira estofada
     "Penteadeira", // Algumas têm banco estofado

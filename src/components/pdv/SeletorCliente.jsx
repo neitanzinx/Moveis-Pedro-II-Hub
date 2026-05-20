@@ -1,16 +1,163 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { formatarCPF, formatarTelefone, formatarNome, formatarEndereco } from "@/utils/formatters";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { User, UserPlus, Search, X, Check, MapPin, Loader2, Truck, ChevronDown, ChevronUp, Edit } from "lucide-react";
+import { User, UserPlus, Search, X, Check, MapPin, Loader2, Truck, ChevronDown, ChevronUp, Edit, ChevronsUpDown } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/hooks/useAuth";
 import ClienteModal from "../clientes/ClienteModal";
 import { toast } from "sonner";
+
+const ESTADOS_BRASIL = [
+  { uf: "AC", nome: "Acre" },
+  { uf: "AL", nome: "Alagoas" },
+  { uf: "AP", nome: "Amapá" },
+  { uf: "AM", nome: "Amazonas" },
+  { uf: "BA", nome: "Bahia" },
+  { uf: "CE", nome: "Ceará" },
+  { uf: "DF", nome: "Distrito Federal" },
+  { uf: "ES", nome: "Espírito Santo" },
+  { uf: "GO", nome: "Goiás" },
+  { uf: "MA", nome: "Maranhão" },
+  { uf: "MT", nome: "Mato Grosso" },
+  { uf: "MS", nome: "Mato Grosso do Sul" },
+  { uf: "MG", nome: "Minas Gerais" },
+  { uf: "PA", nome: "Pará" },
+  { uf: "PB", nome: "Paraíba" },
+  { uf: "PR", nome: "Paraná" },
+  { uf: "PE", nome: "Pernambuco" },
+  { uf: "PI", nome: "Piauí" },
+  { uf: "RJ", nome: "Rio de Janeiro" },
+  { uf: "RN", nome: "Rio Grande do Norte" },
+  { uf: "RS", nome: "Rio Grande do Sul" },
+  { uf: "RO", nome: "Rondônia" },
+  { uf: "RR", nome: "Roraima" },
+  { uf: "SC", nome: "Santa Catarina" },
+  { uf: "SP", nome: "São Paulo" },
+  { uf: "SE", nome: "Sergipe" },
+  { uf: "TO", nome: "Tocantins" },
+];
+
+const EstadoCidadeFields = ({ estado, cidade, onChangeEstado, onChangeCidade, disabled }) => {
+  const [openCidade, setOpenCidade] = useState(false);
+  const [municipios, setMunicipios] = useState([]);
+  const [loadingMunicipios, setLoadingMunicipios] = useState(false);
+
+  useEffect(() => {
+    let cancelado = false;
+
+    const carregarMunicipios = async () => {
+      if (!estado) {
+        setMunicipios([]);
+        return;
+      }
+
+      setLoadingMunicipios(true);
+      try {
+        const response = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${estado}/municipios`);
+        if (!response.ok) throw new Error("Falha ao carregar municípios");
+        const data = await response.json();
+        const lista = data.map((item) => item.nome).sort((a, b) => a.localeCompare(b, "pt-BR"));
+        if (!cancelado) setMunicipios(lista);
+      } catch {
+        if (!cancelado) setMunicipios([]);
+      } finally {
+        if (!cancelado) setLoadingMunicipios(false);
+      }
+    };
+
+    carregarMunicipios();
+
+    return () => {
+      cancelado = true;
+    };
+  }, [estado]);
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+      <div>
+        <Label className="text-xs">Estado (UF)</Label>
+        <Select
+          value={estado}
+          onValueChange={(uf) => {
+            onChangeEstado(uf);
+            setOpenCidade(false);
+          }}
+          disabled={disabled}
+        >
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue placeholder="Selecione o estado" />
+          </SelectTrigger>
+          <SelectContent>
+            {ESTADOS_BRASIL.map((item) => (
+              <SelectItem key={item.uf} value={item.uf}>
+                {item.uf} - {item.nome}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label className="text-xs">Cidade</Label>
+        <Popover open={openCidade} onOpenChange={setOpenCidade}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              role="combobox"
+              aria-expanded={openCidade}
+              disabled={disabled || !estado}
+              className="w-full h-8 justify-between text-left text-xs font-normal"
+            >
+              <span className="truncate">
+                {cidade ? `${cidade}/${estado}` : (estado ? "Digite a cidade" : "Selecione o estado primeiro")}
+              </span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[320px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder={estado ? `Buscar cidade de ${estado}...` : "Selecione o estado"} />
+              <CommandList>
+                {!estado ? (
+                  <CommandEmpty>Selecione um estado primeiro.</CommandEmpty>
+                ) : loadingMunicipios ? (
+                  <CommandEmpty>Carregando cidades...</CommandEmpty>
+                ) : municipios.length === 0 ? (
+                  <CommandEmpty>Nenhuma cidade encontrada.</CommandEmpty>
+                ) : (
+                  <CommandGroup>
+                    {municipios.map((nomeCidade) => (
+                      <CommandItem
+                        key={`${estado}-${nomeCidade}`}
+                        value={nomeCidade}
+                        onSelect={() => {
+                          onChangeCidade(nomeCidade);
+                          setOpenCidade(false);
+                        }}
+                      >
+                        <Check className="mr-2 h-4 w-4 opacity-0" />
+                        {nomeCidade}/{estado}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      </div>
+    </div>
+  );
+};
 
 // Helper para exibir badge do tier baseado em coroas
 const getTierBadge = (cliente) => {
@@ -447,10 +594,15 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                     <Label className="text-xs">Ponto de Referência</Label>
                     <Input className="h-8 text-xs" value={novoCliente.ponto_referencia} onChange={e => setNovoCliente({ ...novoCliente, ponto_referencia: e.target.value })} placeholder="Próximo ao mercado..." />
                   </div>
-                  <div>
-                    <Label className="text-xs">Cidade/UF</Label>
-                    <Input className="h-8 text-xs" value={novoCliente.cidade ? `${novoCliente.cidade}/${novoCliente.estado}` : ''} readOnly />
-                  </div>
+                  <EstadoCidadeFields
+                    estado={novoCliente.estado}
+                    cidade={novoCliente.cidade}
+                    onChangeEstado={(uf) => {
+                      console.log('Estado selecionado:', uf);
+                      setNovoCliente({ ...novoCliente, estado: uf, cidade: "" });
+                    }}
+                    onChangeCidade={(nomeCidade) => setNovoCliente({ ...novoCliente, cidade: nomeCidade })}
+                  />
                 </div>
               </div>
 
@@ -540,10 +692,12 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
                       <Label className="text-xs">Ponto de Referência</Label>
                       <Input className="h-8 text-xs" value={novoCliente.endereco_entrega_ponto_referencia} onChange={e => setNovoCliente({ ...novoCliente, endereco_entrega_ponto_referencia: e.target.value })} placeholder="Próximo ao mercado..." />
                     </div>
-                    <div>
-                      <Label className="text-xs">Cidade/UF</Label>
-                      <Input className="h-8 text-xs" value={novoCliente.endereco_entrega_cidade ? `${novoCliente.endereco_entrega_cidade}/${novoCliente.endereco_entrega_estado}` : ''} readOnly />
-                    </div>
+                    <EstadoCidadeFields
+                      estado={novoCliente.endereco_entrega_estado}
+                      cidade={novoCliente.endereco_entrega_cidade}
+                      onChangeEstado={(uf) => setNovoCliente({ ...novoCliente, endereco_entrega_estado: uf, endereco_entrega_cidade: "" })}
+                      onChangeCidade={(nomeCidade) => setNovoCliente({ ...novoCliente, endereco_entrega_cidade: nomeCidade })}
+                    />
                   </div>
                 )}
               </div>
@@ -551,7 +705,19 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
               <div className="flex gap-2 pt-2 justify-end">
                 <Button variant="ghost" onClick={() => { setShowForm(false); resetNovoCliente(); }}>Voltar</Button>
                 <Button
-                  onClick={() => criarClienteMutation.mutate(novoCliente)}
+                  onClick={() => {
+                    if (!novoCliente.cidade || !novoCliente.estado) {
+                      toast.error("Preencha a cidade e o estado do cliente");
+                      return;
+                    }
+
+                    if (!novoCliente.usar_mesmo_endereco && (!novoCliente.endereco_entrega_cidade || !novoCliente.endereco_entrega_estado)) {
+                      toast.error("Preencha a cidade e o estado do endereço de entrega");
+                      return;
+                    }
+
+                    criarClienteMutation.mutate(novoCliente);
+                  }}
                   disabled={!novoCliente.nome_completo || !novoCliente.telefone || criarClienteMutation.isPending}
                   className="bg-green-600 hover:bg-green-700 text-white"
                 >

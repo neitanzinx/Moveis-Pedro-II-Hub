@@ -17,6 +17,84 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { toMultiplierFromPercent, toPercentFromMultiplier } from "@/utils/markupCalculator";
 
+const FORNECEDOR_CORE_FIELDS = [
+    "nome_empresa",
+    "cnpj",
+    "contato",
+    "nome",
+    "telefone",
+    "email",
+];
+
+const FORNECEDOR_OPTIONAL_FIELDS = [
+    "endereco",
+    "observacoes",
+    "outros_cnpjs",
+    "ativo",
+    "encomendas_habilitadas",
+    "usar_markup_padrao",
+    "markup_padrao_multiplicador",
+    "markup_padrao_percentual",
+];
+
+function pickFields(source, fields) {
+    return fields.reduce((acc, key) => {
+        if (source[key] !== undefined) acc[key] = source[key];
+        return acc;
+    }, {});
+}
+
+function hasMeaningfulValue(value) {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") return value.trim() !== "";
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
+}
+
+function pickOptionalMeaningfulFields(source, fields) {
+    return fields.reduce((acc, key) => {
+        const value = source[key];
+        if (hasMeaningfulValue(value)) acc[key] = value;
+        return acc;
+    }, {});
+}
+
+function toSupabaseMessage(error) {
+    if (!error) return "Erro desconhecido";
+    if (typeof error === "string") return error;
+    return error.message || error.details || error.hint || JSON.stringify(error);
+}
+
+function isSchemaColumnError(error) {
+    const message = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+    return (
+        error?.code === "42703" ||
+        message.includes("column") ||
+        message.includes("schema cache") ||
+        message.includes("could not find the") ||
+        message.includes("does not exist")
+    );
+}
+
+async function saveFornecedorWithFallback({ data, isUpdate = false, id = null }) {
+    const fullPayload = {
+        ...pickFields(data, FORNECEDOR_CORE_FIELDS),
+        ...pickOptionalMeaningfulFields(data, FORNECEDOR_OPTIONAL_FIELDS),
+    };
+
+    try {
+        if (isUpdate && id) return await base44.entities.Fornecedor.update(id, fullPayload);
+        return await base44.entities.Fornecedor.create(fullPayload);
+    } catch (error) {
+        if (!isSchemaColumnError(error)) throw error;
+
+        // Fallback para bases com migração parcial da tabela fornecedores.
+        const corePayload = pickFields(data, FORNECEDOR_CORE_FIELDS);
+        if (isUpdate && id) return await base44.entities.Fornecedor.update(id, corePayload);
+        return await base44.entities.Fornecedor.create(corePayload);
+    }
+}
+
 export default function FornecedorModal({
     open,
     onOpenChange,
@@ -64,7 +142,7 @@ export default function FornecedorModal({
     }, [fornecedor, open]);
 
     const createMutation = useMutation({
-        mutationFn: (data) => base44.entities.Fornecedor.create(data),
+        mutationFn: (data) => saveFornecedorWithFallback({ data, isUpdate: false }),
         onSuccess: (data) => {
             queryClient.invalidateQueries({ queryKey: ['fornecedores'] });
             toast.success("Fornecedor criado com sucesso!");
@@ -73,12 +151,12 @@ export default function FornecedorModal({
         },
         onError: (error) => {
             console.error("Erro ao criar fornecedor:", error);
-            toast.error("Erro ao criar fornecedor");
+            toast.error(`Erro ao criar fornecedor: ${toSupabaseMessage(error)}`);
         }
     });
 
     const updateMutation = useMutation({
-        mutationFn: ({ id, data }) => base44.entities.Fornecedor.update(id, data),
+        mutationFn: ({ id, data }) => saveFornecedorWithFallback({ id, data, isUpdate: true }),
         onSuccess: (data) => {
             queryClient.invalidateQueries({ queryKey: ['fornecedores'] });
             toast.success("Fornecedor atualizado com sucesso!");
@@ -87,7 +165,7 @@ export default function FornecedorModal({
         },
         onError: (error) => {
             console.error("Erro ao atualizar fornecedor:", error);
-            toast.error("Erro ao atualizar fornecedor");
+            toast.error(`Erro ao atualizar fornecedor: ${toSupabaseMessage(error)}`);
         }
     });
 

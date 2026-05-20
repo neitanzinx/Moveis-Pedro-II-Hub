@@ -19,7 +19,8 @@ import { useAuth } from "@/hooks/useAuth";
 const CATEGORIAS = [
     "Sofa", "Cama", "Mesa", "Cadeira", "Armario", "Estante", "Rack",
     "Poltrona", "Escrivaninha", "Criado-mudo", "Buffet", "Aparador",
-    "Banco", "Colchao", "Guarda-roupa", "Comoda", "Painel", "Outros"
+    "Banco", "Colchao", "Guarda-roupa", "Comoda", "Painel", "Travesseiro",
+    "Almofada", "Decoracao", "Utensilios", "Outros"
 ];
 
 const TAXA_PADRAO_IMPOSTO = 18; // 18% padrão se não configurado

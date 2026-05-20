@@ -14,8 +14,160 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Plus, Trash2, Search, Cake, MapPin, Truck, Calendar, Ban } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Loader2, Plus, Trash2, Search, Cake, MapPin, Truck, Calendar, Ban, Check, ChevronsUpDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+
+const ESTADOS_BRASIL = [
+  { uf: "AC", nome: "Acre" },
+  { uf: "AL", nome: "Alagoas" },
+  { uf: "AP", nome: "Amapá" },
+  { uf: "AM", nome: "Amazonas" },
+  { uf: "BA", nome: "Bahia" },
+  { uf: "CE", nome: "Ceará" },
+  { uf: "DF", nome: "Distrito Federal" },
+  { uf: "ES", nome: "Espírito Santo" },
+  { uf: "GO", nome: "Goiás" },
+  { uf: "MA", nome: "Maranhão" },
+  { uf: "MT", nome: "Mato Grosso" },
+  { uf: "MS", nome: "Mato Grosso do Sul" },
+  { uf: "MG", nome: "Minas Gerais" },
+  { uf: "PA", nome: "Pará" },
+  { uf: "PB", nome: "Paraíba" },
+  { uf: "PR", nome: "Paraná" },
+  { uf: "PE", nome: "Pernambuco" },
+  { uf: "PI", nome: "Piauí" },
+  { uf: "RJ", nome: "Rio de Janeiro" },
+  { uf: "RN", nome: "Rio Grande do Norte" },
+  { uf: "RS", nome: "Rio Grande do Sul" },
+  { uf: "RO", nome: "Rondônia" },
+  { uf: "RR", nome: "Roraima" },
+  { uf: "SC", nome: "Santa Catarina" },
+  { uf: "SP", nome: "São Paulo" },
+  { uf: "SE", nome: "Sergipe" },
+  { uf: "TO", nome: "Tocantins" },
+];
+
+const EstadoCidadeFields = ({ estado, cidade, onChangeEstado, onChangeCidade, disabled }) => {
+  const [openCidade, setOpenCidade] = useState(false);
+  const [municipios, setMunicipios] = useState([]);
+  const [loadingMunicipios, setLoadingMunicipios] = useState(false);
+
+  useEffect(() => {
+    let cancelado = false;
+
+    const carregarMunicipios = async () => {
+      if (!estado) {
+        setMunicipios([]);
+        return;
+      }
+
+      setLoadingMunicipios(true);
+      try {
+        const response = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${estado}/municipios`);
+        if (!response.ok) throw new Error("Falha ao carregar municípios");
+
+        const data = await response.json();
+        const lista = data.map((item) => item.nome).sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+        if (!cancelado) setMunicipios(lista);
+      } catch {
+        if (!cancelado) setMunicipios([]);
+      } finally {
+        if (!cancelado) setLoadingMunicipios(false);
+      }
+    };
+
+    carregarMunicipios();
+
+    return () => {
+      cancelado = true;
+    };
+  }, [estado]);
+
+  onChangeEstado = (uf) => {
+    console.log('Estado selecionado:', uf);
+    setValue("estado", uf);
+  };
+
+  return (
+    <div className="grid md:grid-cols-2 gap-4">
+      <div>
+        <Label>Estado (UF)</Label>
+        <Select
+          value={estado}
+          onValueChange={(uf) => {
+            onChangeEstado(uf);
+            onChangeCidade("");
+            setOpenCidade(false);
+          }}
+          disabled={disabled}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Selecione o estado" />
+          </SelectTrigger>
+          <SelectContent>
+            {ESTADOS_BRASIL.map((item) => (
+              <SelectItem key={item.uf} value={item.uf}>
+                {item.uf} - {item.nome}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label>Cidade</Label>
+        <Popover open={openCidade} onOpenChange={setOpenCidade}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              role="combobox"
+              aria-expanded={openCidade}
+              disabled={disabled || !estado}
+              className="w-full h-9 justify-between text-left font-normal"
+            >
+              <span className="truncate">{cidade ? `${cidade}/${estado}` : (estado ? "Digite a cidade" : "Selecione o estado primeiro")}</span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[320px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder={estado ? `Buscar cidade de ${estado}...` : "Selecione o estado"} />
+              <CommandList>
+                {!estado ? (
+                  <CommandEmpty>Selecione um estado primeiro.</CommandEmpty>
+                ) : loadingMunicipios ? (
+                  <CommandEmpty>Carregando cidades...</CommandEmpty>
+                ) : municipios.length === 0 ? (
+                  <CommandEmpty>Nenhuma cidade encontrada.</CommandEmpty>
+                ) : (
+                  <CommandGroup>
+                    {municipios.map((nomeCidade) => (
+                      <CommandItem
+                        key={`${estado}-${nomeCidade}`}
+                        value={nomeCidade}
+                        onSelect={() => {
+                          onChangeCidade(nomeCidade);
+                          setOpenCidade(false);
+                        }}
+                      >
+                        <Check className="mr-2 h-4 w-4 opacity-0" />
+                        {nomeCidade}/{estado}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      </div>
+    </div>
+  );
+};
 
 export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoading, clientes = [] }) {
   const [formData, setFormData] = useState({
@@ -283,6 +435,16 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
       return;
     }
 
+    if (!formData.cidade || !formData.estado) {
+      alert("Preencha a cidade e o estado do cliente");
+      return;
+    }
+
+    if (!formData.usar_mesmo_endereco && (!formData.endereco_entrega_cidade || !formData.endereco_entrega_estado)) {
+      alert("Preencha a cidade e o estado do endereço de entrega");
+      return;
+    }
+
     // Validação de duplicidade
     const cpfLimpo = formData.cpf?.replace(/\D/g, '') || '';
     const telefoneLimpo = formData.telefone?.replace(/\D/g, '') || '';
@@ -401,7 +563,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
           />
         </div>
 
-        <div className="grid md:grid-cols-3 gap-4">
+        <div className="grid md:grid-cols-2 gap-4">
           <div>
             <Label>Bairro</Label>
             <Input
@@ -410,23 +572,16 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
               disabled={disabled}
             />
           </div>
-          <div>
-            <Label>Cidade</Label>
-            <Input
-              value={getValue("cidade")}
-              onChange={(e) => setValue("cidade", formatarNome(e.target.value))}
-              disabled={disabled}
-            />
-          </div>
-          <div>
-            <Label>Estado (UF)</Label>
-            <Input
-              value={getValue("estado")}
-              onChange={(e) => setValue("estado", e.target.value.toUpperCase())}
-              maxLength={2}
-              disabled={disabled}
-            />
-          </div>
+          <EstadoCidadeFields
+            estado={getValue("estado")}
+            cidade={getValue("cidade")}
+            onChangeEstado={(uf) => {
+              console.log('Estado selecionado:', uf);
+              setValue("estado", uf);
+            }}
+            onChangeCidade={(nomeCidade) => setValue("cidade", nomeCidade)}
+            disabled={disabled}
+          />
         </div>
       </div>
     );

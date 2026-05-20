@@ -559,7 +559,7 @@ _Móveis Pedro II_`;
             return true;
         } catch (error) {
             if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-                await enqueueForLater('sendSaleConfirmation', [data], "Servidor inacessível: Comprovante de venda salvo para envio posterior.");
+                await enqueueForLater('sendSaleConfirmation', [data], "WhatsApp Desconectado ou Servidor inacessível: Comprovante de venda salvo para envio posterior.");
                 return true;
             }
             console.error("❌ Erro conexão bot:", error);

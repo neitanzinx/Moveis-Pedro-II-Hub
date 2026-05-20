@@ -702,7 +702,8 @@ _Móveis Pedro II - ${vendaData.loja}_`;
   const produtoSelecionadoObj = selectedProduto ? produtos.find(p => p.id === selectedProduto) : null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <>
+      <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle style={{ color: '#07593f' }}>
@@ -1177,11 +1178,11 @@ _Móveis Pedro II - ${vendaData.loja}_`;
           </DialogFooter>
         </form>
       </DialogContent>
-    </Dialog>
+      </Dialog>
 
-    {/* Modal de Aprovação Gerencial - aparece quando há itens sem estoque que requerem autorização */}
-    {aprovacaoModal && (
-      <Dialog open={!!aprovacaoModal} onOpenChange={() => setAprovacaoModal(null)}>
+      {/* Modal de Aprovação Gerencial - aparece quando há itens sem estoque que requerem autorização */}
+      {aprovacaoModal && (
+        <Dialog open={!!aprovacaoModal} onOpenChange={() => setAprovacaoModal(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="text-amber-700 flex items-center gap-2">
@@ -1232,7 +1233,8 @@ _Móveis Pedro II - ${vendaData.loja}_`;
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
-    )}
+        </Dialog>
+      )}
+    </>
   );
 }

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
+import { normSearch } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Package, Tag, Warehouse, Filter, Palette, Layers, Ruler, ImageIcon, Edit2, AlertTriangle, Clock } from "lucide-react";
+import { Search, Package, Tag, Warehouse, Filter, Palette, Layers, Ruler, ImageIcon, Edit2, AlertTriangle, Clock, Building2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
@@ -85,24 +86,22 @@ export default function BuscaProdutoAvancada(props) {
     setSelectedIndex(0);
   };
 
-  // Filtrar produtos
-  const produtosFiltrados = produtos.filter(p => {
-    if (!p.ativo) return false;
+  // Filtrar e pontuar produtos
+  const searchTokens = normSearch(searchTerm).split(/\s+/).filter(t => t.length > 0);
+  const scoredProdutos = searchTokens.length === 0 ? [] : produtos
+    .filter(p => p.ativo)
+    .map(p => {
+      const camposBusca = [p.nome, p.codigo_barras, p.categoria, p.material, p.cor, p.fornecedor_nome, p.modelo_referencia]
+        .filter(Boolean).map(normSearch).join(' ');
+      const matches = searchTokens.filter(token => camposBusca.includes(token)).length;
+      return { produto: p, score: matches };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score);
 
-    const searchTokens = searchTerm.toLowerCase().split(/\s+/).filter(t => t.length > 0);
-    if (searchTokens.length === 0) return false;
-
-    // Verifica se TODOS os tokens de busca estão presentes em ALGUM campo do produto
-    return searchTokens.every(token =>
-      p.nome?.toLowerCase().includes(token) ||
-      p.codigo_barras?.toLowerCase().includes(token) ||
-      p.categoria?.toLowerCase().includes(token) ||
-      p.material?.toLowerCase().includes(token) ||
-      p.cor?.toLowerCase().includes(token) ||
-      p.fornecedor_nome?.toLowerCase().includes(token) ||
-      p.modelo_referencia?.toLowerCase().includes(token)
-    );
-  });
+  const exactMatches = scoredProdutos.filter(({ score }) => score === searchTokens.length);
+  const isFuzzy = exactMatches.length === 0 && scoredProdutos.length > 0;
+  const produtosFiltrados = (isFuzzy ? scoredProdutos : exactMatches).map(s => s.produto);
 
   return (
     <div ref={searchRef} className="relative">
@@ -137,7 +136,7 @@ export default function BuscaProdutoAvancada(props) {
 
       {/* Dropdown de resultados */}
       {showResults && searchTerm && (
-        <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white dark:bg-neutral-900 border-2 border-green-600 rounded-lg shadow-2xl max-h-64 overflow-hidden">
+        <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white dark:bg-neutral-900 border-2 border-green-600 rounded-lg shadow-2xl overflow-hidden">
           {produtosFiltrados.length === 0 ? (
             <div className="p-6 text-center">
               <Package className="w-8 h-8 mx-auto mb-2 text-gray-300" />
@@ -156,8 +155,11 @@ export default function BuscaProdutoAvancada(props) {
             </div>
           ) : (
             <>
-              <div className="bg-gray-50 dark:bg-neutral-800 px-4 py-2 border-b border-gray-200 dark:border-neutral-700">
+              <div className="bg-gray-50 dark:bg-neutral-800 px-4 py-2 border-b border-gray-200 dark:border-neutral-700 flex items-center gap-2">
                 <p className="text-xs text-gray-500">{produtosFiltrados.length} produto(s) encontrado(s)</p>
+                {isFuzzy && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">resultado mais próximo</span>
+                )}
               </div>
               <div className="max-h-52 overflow-y-auto">
                 {produtosFiltrados.slice(0, 10).map((produto, index) => {
@@ -168,11 +170,17 @@ export default function BuscaProdutoAvancada(props) {
                   const bloqueado = tipoEstoque === 'pronta_entrega' && semEstoque;
 
                   return (
-                    <button
+                    <div
                       key={produto.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       onClick={() => handleSelectProduto(produto)}
-                      disabled={validating}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleSelectProduto(produto);
+                        }
+                      }}
                       className={`w-full text-left px-4 py-2.5 flex flex-col gap-1 border-b border-gray-100 dark:border-neutral-800 transition-colors ${isSelected ? 'bg-green-50 dark:bg-green-900/30' : 'hover:bg-gray-50 dark:hover:bg-neutral-800'
                         } ${validating ? 'opacity-60 cursor-wait' : ''}`}
                     >
@@ -232,11 +240,9 @@ export default function BuscaProdutoAvancada(props) {
                           }
                         </span>
                         {/* Fornecedor */}
-                        {produto.fornecedor_nome && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-neutral-600">
-                            {produto.fornecedor_nome}
-                          </span>
-                        )}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium flex items-center border border-purple-100 dark:border-purple-800" title="Fornecedor">
+                          <Building2 className="w-3 h-3 mr-1" /> {produto.fornecedor_nome || 'Forn: N/A'}
+                        </span>
                         {/* Categoria */}
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-700 text-gray-600 dark:text-gray-300">
                           {produto.categoria || 'Outros'}
@@ -278,12 +284,12 @@ export default function BuscaProdutoAvancada(props) {
                         )}
 
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
               {/* Footer with Request Button */}
-              <div className="p-2 border-t border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-900 border-none">
+              <div className="p-2 border-t border-gray-100 dark:border-neutral-800 bg-gray-50 dark:bg-neutral-900">
                 <Button
                   variant="ghost"
                   size="sm"

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useMemo } from "react";
+import { normSearch } from "@/lib/utils";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -69,9 +70,9 @@ export default function CargaInicialEstoque({ onVoltar }) {
         }
 
         if (searchTerm.trim()) {
-            const terms = searchTerm.toLowerCase().split(' ').filter(t => t.trim() !== '');
+            const terms = normSearch(searchTerm).split(/\s+/).filter(Boolean);
             result = result.filter(p => {
-                const searchString = `${p.nome || ''} ${p.codigo_barras || ''} ${p.modelo_referencia || ''}`.toLowerCase();
+                const searchString = [p.nome, p.codigo_barras, p.modelo_referencia].filter(Boolean).map(normSearch).join(' ');
                 return terms.every(term => searchString.includes(term));
             });
         }

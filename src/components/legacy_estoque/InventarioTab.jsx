@@ -10,10 +10,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { obterCampoEstoqueDaLoja } from "@/constants/productConstants";
 import InventarioContagem from "./InventarioContagem";
 import CargaInicialEstoque from "./CargaInicialEstoque";
+import LancamentoManualEstoque from "./LancamentoManualEstoque";
 
 export default function InventarioTab({ user }) {
   const [modoContagem, setModoContagem] = useState(false);
   const [modoCargaInicial, setModoCargaInicial] = useState(false);
+  const [modoLancamentoManual, setModoLancamentoManual] = useState(false);
   const [inventarioEditando, setInventarioEditando] = useState(null);
 
   const queryClient = useQueryClient();
@@ -142,6 +144,15 @@ export default function InventarioTab({ user }) {
     );
   }
 
+  if (modoLancamentoManual) {
+    return (
+      <LancamentoManualEstoque
+        onVoltar={() => setModoLancamentoManual(false)}
+        user={user}
+      />
+    );
+  }
+
   // --- Counting mode ---
   if (modoContagem) {
     return (
@@ -175,6 +186,15 @@ export default function InventarioTab({ user }) {
               📦 Carga Inicial de Estoque
             </Button>
             <Button
+              onClick={() => setModoLancamentoManual(true)}
+              variant="outline"
+              className="shadow border-2"
+              style={{ borderColor: '#f38a4c', color: '#c75f1a' }}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Lançamento Manual
+            </Button>
+            <Button
               onClick={() => {
                 setInventarioEditando(null);
                 setModoContagem(true);
@@ -194,6 +214,13 @@ export default function InventarioTab({ user }) {
           <strong>💡 Como funciona:</strong> Selecione a loja/CD, conte os produtos fisicamente
           digitando as quantidades. O sistema calcula divergências automaticamente.
           Após finalizar, um administrador ou gerente deve aprovar para ajustar o estoque.
+        </AlertDescription>
+      </Alert>
+
+      <Alert style={{ backgroundColor: '#fff7ed', borderColor: '#fdba74' }}>
+        <AlertDescription>
+          <strong>📝 Lançamento manual:</strong> use esta opção para ajustes rápidos em massa, sem bipagem.
+          Cada linha atualiza o estoque direto e fica registrada no histórico.
         </AlertDescription>
       </Alert>
 

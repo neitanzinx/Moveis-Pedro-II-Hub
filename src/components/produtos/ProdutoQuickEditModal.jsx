@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { base44 } from '@/api/base44Client';
+import { useQuery } from '@tanstack/react-query';
 import {
     Dialog,
     DialogContent,
@@ -12,6 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import {
     Package,
     Save,
@@ -23,17 +26,20 @@ import {
     ChevronDown,
     ChevronUp,
     ShieldCheck,
+    ChevronsUpDown,
 } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { CATEGORIAS, AMBIENTES } from '@/constants/productConstants';
 import { getProductTotalStock, resolveStockField } from '@/utils/stockUtils';
+import { detectProductKeywordSuggestion } from '@/lib/productKeywordDetector';
 
 const INITIAL_FORM_DATA = {
     nome: '',
     categoria: '',
     ambiente: '',
+    fornecedor_id: '',
     fornecedor_nome: '',
     modelo_referencia: '',
     descricao: '',
@@ -54,12 +60,72 @@ const INITIAL_FORM_DATA = {
     estoque_ideal: 0,
 };
 
+const FornecedorCombobox = ({ fornecedores = [], value, onChange, disabled }) => {
+    const [open, setOpen] = useState(false);
+    const fornecedorSelecionado = fornecedores.find((f) => String(f.id) === String(value));
+    const fornecedoresOrdenados = useMemo(
+        () => [...fornecedores].sort((a, b) => (a.nome_empresa || a.nome || '').localeCompare((b.nome_empresa || b.nome || ''), 'pt-BR')),
+        [fornecedores]
+    );
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    disabled={disabled}
+                    className="w-full justify-between"
+                >
+                    <span className="truncate">
+                        {fornecedorSelecionado ? (fornecedorSelecionado.nome || fornecedorSelecionado.nome_empresa || 'Fornecedor') : 'Selecione o fornecedor'}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[360px] p-0" align="start">
+                <Command>
+                    <CommandInput placeholder="Buscar fornecedor..." />
+                    <CommandList>
+                        <CommandEmpty>Nenhum fornecedor encontrado.</CommandEmpty>
+                        <CommandGroup>
+                            {fornecedoresOrdenados.map((fornecedor) => {
+                                const nome = fornecedor.nome || fornecedor.nome_empresa || 'Fornecedor';
+                                return (
+                                    <CommandItem
+                                        key={fornecedor.id}
+                                        value={`${nome} ${fornecedor.cnpj || ''}`}
+                                        onSelect={() => {
+                                            onChange(String(fornecedor.id), nome);
+                                            setOpen(false);
+                                        }}
+                                    >
+                                        <span className="truncate">{nome}</span>
+                                        {fornecedor.cnpj ? <span className="ml-2 text-xs text-muted-foreground">{fornecedor.cnpj}</span> : null}
+                                    </CommandItem>
+                                );
+                            })}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+};
+
 export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave, lojaAtual }) {
     const [formData, setFormData] = useState(INITIAL_FORM_DATA);
     const [saving, setSaving] = useState(false);
+    const [dismissedSuggestionName, setDismissedSuggestionName] = useState('');
 
     const { user, isGerente } = useAuth();
     const isGerencial = isGerente?.() || user?.cargo === 'Gerente Geral' || user?.cargo === 'Administrador';
+    const { data: fornecedores = [] } = useQuery({
+        queryKey: ['fornecedores'],
+        queryFn: () => base44.entities.Fornecedor.list('nome_empresa'),
+    });
     const campoLojaAtual = resolveStockField(lojaAtual || 'CD');
     const estoqueLojaAtual = Number(produto?.[campoLojaAtual] || 0);
     const nomeExibicaoLoja = lojaAtual || 'CD';
@@ -71,6 +137,7 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                 nome: produto.nome || '',
                 categoria: produto.categoria || '',
                 ambiente: produto.ambiente || '',
+                fornecedor_id: produto.fornecedor_id || '',
                 fornecedor_nome: produto.fornecedor_nome || '',
                 modelo_referencia: produto.modelo_referencia || '',
                 descricao: produto.descricao || '',
@@ -94,33 +161,98 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                 estoque_ideal: produto.estoque_ideal || 0,
                 estoque_loja_atual: estoqueLojaAtual,
             });
+            setDismissedSuggestionName('');
         } else {
             setFormData(INITIAL_FORM_DATA);
+            setDismissedSuggestionName('');
         }
     }, [produto, estoqueLojaAtual]);
+
+    const keywordSuggestion = useMemo(
+        () => detectProductKeywordSuggestion(formData.nome),
+        [formData.nome]
+    );
+
+    const normalizedSuggestionName = useMemo(
+        () => (formData.nome || '').trim().toLowerCase(),
+        [formData.nome]
+    );
+
+    const suggestedCategoria = keywordSuggestion.categoriaSuggestion;
+    const suggestedAmbiente = AMBIENTES.includes(keywordSuggestion.ambienteSuggestion)
+        ? keywordSuggestion.ambienteSuggestion
+        : null;
+
+    const canApplyCategoriaSuggestion = suggestedCategoria &&
+        CATEGORIAS.includes(suggestedCategoria) &&
+        suggestedCategoria !== formData.categoria;
+
+    const canApplyAmbienteSuggestion = suggestedAmbiente &&
+        suggestedAmbiente !== formData.ambiente;
+
+    const shouldShowSuggestion = keywordSuggestion.hasSuggestion &&
+        normalizedSuggestionName &&
+        dismissedSuggestionName !== normalizedSuggestionName &&
+        (canApplyCategoriaSuggestion || canApplyAmbienteSuggestion);
+
+    const applyCategoriaSuggestion = () => {
+        if (!canApplyCategoriaSuggestion) return;
+        setFormData(prev => ({ ...prev, categoria: suggestedCategoria }));
+    };
+
+    const applyAmbienteSuggestion = () => {
+        if (!canApplyAmbienteSuggestion) return;
+        setFormData(prev => ({ ...prev, ambiente: suggestedAmbiente }));
+    };
 
     const handleSave = async () => {
         setSaving(true);
         try {
-            const getVal = (v) => parseInt(v) || 0;
-            const estoqueLoja = getVal(formData.estoque_loja_atual);
-
-            const updatedData = {
-                ...formData,
-                [campoLojaAtual]: estoqueLoja,
+            const toNumberOrNull = (value) => {
+                if (value === '' || value === null || value === undefined) return null;
+                const parsed = Number(value);
+                return Number.isFinite(parsed) ? parsed : null;
             };
 
-            delete updatedData.estoque_loja_atual;
+            const updatedData = {
+                nome: formData.nome,
+                categoria: formData.categoria,
+                ambiente: formData.ambiente || null,
+                fornecedor_id: toNumberOrNull(formData.fornecedor_id),
+                fornecedor_nome: formData.fornecedor_nome || null,
+                modelo_referencia: formData.modelo_referencia || null,
+                descricao: formData.descricao || null,
+                material: formData.material || null,
+                largura: toNumberOrNull(formData.largura),
+                altura: toNumberOrNull(formData.altura),
+                profundidade: toNumberOrNull(formData.profundidade),
+                ncm: formData.ncm || null,
+                cest: formData.cest || null,
+                cfop: formData.cfop || null,
+                origem_mercadoria: formData.origem_mercadoria || '0',
+                preco_venda: toNumberOrNull(formData.preco_venda) ?? 0,
+                preco_custo: toNumberOrNull(formData.preco_custo) ?? 0,
+                markup_aplicado: toNumberOrNull(formData.markup_aplicado) ?? 0,
+                quantidade_estoque: toNumberOrNull(formData.quantidade_estoque) ?? 0,
+                estoque_cd: toNumberOrNull(formData.estoque_cd) ?? 0,
+                estoque_minimo: toNumberOrNull(formData.estoque_minimo) ?? 0,
+                estoque_ideal: toNumberOrNull(formData.estoque_ideal) ?? 0,
+                [campoLojaAtual]: toNumberOrNull(formData.estoque_loja_atual) ?? 0,
+            };
 
             // Recalcula o total agregado com base nos campos reais de estoque
             const produtoParaTotal = { ...produto, ...updatedData };
             updatedData.quantidade_estoque = getProductTotalStock(produtoParaTotal);
 
             await onSave(updatedData);
-            toast.success('Produto atualizado com sucesso!');
             onClose();
         } catch (error) {
-            toast.error('Erro ao salvar: ' + error.message);
+            const errorMessage = error?.message
+                ? error.message
+                : typeof error === 'string'
+                    ? error
+                    : JSON.stringify(error);
+            toast.error('Erro ao salvar: ' + errorMessage);
         } finally {
             setSaving(false);
         }
@@ -164,17 +296,24 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                                 <Label>Nome do Produto</Label>
                                 <Input
                                     value={formData.nome}
-                                    onChange={e => setFormData({ ...formData, nome: e.target.value })}
+                                    onChange={e => {
+                                        setFormData({ ...formData, nome: e.target.value });
+                                        if (dismissedSuggestionName) setDismissedSuggestionName('');
+                                    }}
                                     placeholder="Nome do produto"
                                 />
                             </div>
 
                             <div className="space-y-2">
                                 <Label>Fornecedor</Label>
-                                <Input
-                                    value={formData.fornecedor_nome}
-                                    onChange={e => setFormData({ ...formData, fornecedor_nome: e.target.value })}
-                                    placeholder="Nome do fornecedor"
+                                <FornecedorCombobox
+                                    fornecedores={fornecedores}
+                                    value={formData.fornecedor_id}
+                                    onChange={(fornecedorId, fornecedorNome) => setFormData({
+                                        ...formData,
+                                        fornecedor_id: fornecedorId,
+                                        fornecedor_nome: fornecedorNome,
+                                    })}
                                 />
                             </div>
 
@@ -189,6 +328,14 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
 
                             <div className="space-y-2">
                                 <Label>Categoria</Label>
+                                {shouldShowSuggestion && canApplyCategoriaSuggestion && (
+                                    <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 mb-2 flex items-center justify-between gap-2">
+                                        <span>Categoria sugerida: <strong>{suggestedCategoria}</strong></span>
+                                        <Button type="button" variant="outline" size="sm" className="h-7 border-emerald-300 text-emerald-800 hover:bg-emerald-100" onClick={applyCategoriaSuggestion}>
+                                            Aplicar
+                                        </Button>
+                                    </div>
+                                )}
                                 <Select
                                     value={formData.categoria}
                                     onValueChange={v => setFormData({ ...formData, categoria: v })}
@@ -206,6 +353,14 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
 
                             <div className="space-y-2">
                                 <Label>Ambiente</Label>
+                                {shouldShowSuggestion && canApplyAmbienteSuggestion && (
+                                    <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 mb-2 flex items-center justify-between gap-2">
+                                        <span>Ambiente sugerido: <strong>{suggestedAmbiente}</strong></span>
+                                        <Button type="button" variant="outline" size="sm" className="h-7 border-emerald-300 text-emerald-800 hover:bg-emerald-100" onClick={applyAmbienteSuggestion}>
+                                            Aplicar
+                                        </Button>
+                                    </div>
+                                )}
                                 <Select
                                     value={formData.ambiente}
                                     onValueChange={v => setFormData({ ...formData, ambiente: v })}
