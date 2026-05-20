@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { base44, supabase } from "@/api/base44Client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -13,31 +13,19 @@ import { toast } from "sonner";
 import { normSearch } from "@/lib/utils";
 import { calcularEstoqueTotal, obterCampoEstoqueDaLoja } from "@/constants/productConstants";
 import { useLojas } from "@/hooks/useLojas";
+import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
 
 const LOJA_CD = { id: "__cd__", nome: "Depósito / CD", ativa: true };
 
-function criarLinha() {
-  return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    produtoId: "",
-    produtoBusca: "",
-    quantidade: "",
-  };
-}
-
-function getProdutoLabel(produto) {
-  if (!produto) return "";
-  const detalhes = [produto.codigo_barras, produto.modelo_referencia].filter(Boolean).join(" • ");
-  return detalhes ? `${produto.nome} (${detalhes})` : produto.nome;
-}
-
 export default function LancamentoManualEstoque({ onVoltar, user }) {
   const queryClient = useQueryClient();
-  const [linhas, setLinhas] = useState([criarLinha()]);
-  const [filtrosProduto, setFiltrosProduto] = useState({});
+  const [linhas, setLinhas] = useState([]);
+  const [termoBusca, setTermoBusca] = useState("");
   const [tipoMovimento, setTipoMovimento] = useState("entrada");
   const [destinoId, setDestinoId] = useState("__cd__");
   const [isSaving, setIsSaving] = useState(false);
+  const [isCadastrarOpen, setIsCadastrarOpen] = useState(false);
+  const searchInputRef = useRef(null);
   const { data: lojas = [], isLoading: loadingLojas } = useLojas();
 
   const { data: produtos = [], isLoading: loadingProdutos } = useQuery({
@@ -60,33 +48,25 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
     [lojasComCd]
   );
 
-  useEffect(() => {
-    if (linhas.length === 0) {
-      setLinhas([criarLinha()]);
-    }
-  }, [linhas.length]);
-
   const atualizarLinha = (linhaId, patch) => {
     setLinhas((current) => current.map((linha) => (linha.id === linhaId ? { ...linha, ...patch } : linha)));
   };
 
-  const adicionarLinha = () => setLinhas((current) => [...current, criarLinha()]);
-
   const removerLinha = (linhaId) => {
-    setLinhas((current) => (current.length === 1 ? current : current.filter((linha) => linha.id !== linhaId)));
-    setFiltrosProduto((current) => {
-      const next = { ...current };
-      delete next[linhaId];
-      return next;
-    });
+    setLinhas((current) => current.filter((linha) => linha.id !== linhaId));
   };
 
-  const selecionarProduto = (linhaId, produto) => {
-    atualizarLinha(linhaId, {
+  const selecionarProduto = (produto) => {
+    const novaLinha = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       produtoId: produto.id,
-      produtoBusca: getProdutoLabel(produto),
-    });
-    setFiltrosProduto((current) => ({ ...current, [linhaId]: "" }));
+      nomeProduto: produto.nome,
+      produtoCodigo: [produto.codigo_barras, produto.modelo_referencia, produto.fornecedor_nome].filter(Boolean).join(" • "),
+      quantidade: "",
+    };
+    setLinhas((current) => [novaLinha, ...current]);
+    setTermoBusca("");
+    setTimeout(() => searchInputRef.current?.focus(), 50);
   };
 
   const filtrarProdutos = (termo) => {
@@ -122,6 +102,13 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
     return resultado.map((item) => item.produto).slice(0, 10);
   };
 
+  const produtosJaAdicionados = useMemo(() => new Set(linhas.map((l) => l.produtoId)), [linhas]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const sugestoes = useMemo(
+    () => (termoBusca.trim().length >= 2 ? filtrarProdutos(termoBusca).filter((p) => !produtosJaAdicionados.has(p.id)) : []),
+    [termoBusca, produtos, produtosJaAdicionados]
+  );
+
   const obterLoja = (lojaId) => lojaOptions.find((loja) => loja.id === lojaId) || lojaOptions[0] || LOJA_CD;
 
   const getProdutoResumoEstoque = (produto) => {
@@ -140,13 +127,11 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
     };
   };
 
-  const getProdutoSelecionado = (linha) => produtos.find((produto) => produto.id === linha.produtoId);
-
   const prepararResumo = () => linhas
     .map((linha, index) => ({
       index,
       linha,
-      produto: getProdutoSelecionado(linha),
+      produto: produtos.find((p) => p.id === linha.produtoId),
       loja: obterLoja(destinoId),
       quantidade: parseInt(linha.quantidade, 10),
     }))
@@ -167,68 +152,43 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
       }
 
       if (!Number.isInteger(item.quantidade) || item.quantidade <= 0) {
-        toast.error(`Informe uma quantidade válida na linha ${item.index + 1}.`);
+        toast.error(`Informe uma quantidade válida para "${item.linha.nomeProduto}".`);
         return;
       }
     }
 
     const confirmacao = resumo
-      .map((item) => `${item.produto.nome} • ${item.loja.nome} • ${item.linha.tipo === "entrada" ? "+" : "-"}${item.quantidade}`)
+      .map((item) => `${item.produto.nome} • ${item.loja.nome} • ${tipoMovimento === "entrada" ? "+" : "-"}${item.quantidade}`)
       .join("\n");
 
-    if (!confirm(`Confirmar o lançamento manual de ${resumo.length} linha(s)?\n\n${confirmacao}`)) {
+    if (!confirm(`Confirmar o lançamento manual de ${resumo.length} produto(s)?\n\n${confirmacao}`)) {
       return;
     }
 
     setIsSaving(true);
 
     try {
-      const produtosCache = new Map(produtos.map((produto) => [produto.id, { ...produto }]));
-
+      // Pré-validação: verificar se alguma saída ficaria negativa antes de gravar qualquer coisa
       for (const item of resumo) {
-        const produtoAtual = produtosCache.get(item.produto.id);
-        if (!produtoAtual) {
-          throw new Error(`Produto não encontrado: ${item.produto.nome}`);
+        if (tipoMovimento === "saida") {
+          const campoEstoque = obterCampoEstoqueDaLoja(item.loja.isCd ? null : item.loja);
+          const estoqueAtual = Number(item.produto[campoEstoque] || 0);
+          if (estoqueAtual - item.quantidade < 0) {
+            throw new Error(`Estoque insuficiente para ${item.produto.nome} em ${item.loja.nome}.`);
+          }
         }
-
-        const campoEstoque = obterCampoEstoqueDaLoja(item.loja.isCd ? null : item.loja);
-        const estoqueAntesLocal = Number(produtoAtual[campoEstoque] || 0);
-        const estoqueDepoisLocal = tipoMovimento === "entrada"
-          ? estoqueAntesLocal + item.quantidade
-          : estoqueAntesLocal - item.quantidade;
-
-        if (estoqueDepoisLocal < 0) {
-          throw new Error(`Estoque insuficiente para ${item.produto.nome} em ${item.loja.nome}.`);
-        }
-
-        produtosCache.set(item.produto.id, {
-          ...produtoAtual,
-          [campoEstoque]: estoqueDepoisLocal,
-        });
       }
 
       for (const item of resumo) {
-        const produtoAtual = produtosCache.get(item.produto.id);
-        if (!produtoAtual) {
-          throw new Error(`Produto não encontrado: ${item.produto.nome}`);
-        }
-
         const campoEstoque = obterCampoEstoqueDaLoja(item.loja.isCd ? null : item.loja);
-        const estoqueAntesLocal = Number(produtoAtual[campoEstoque] || 0);
-        const estoqueAntesTotal = Number(produtoAtual.quantidade_estoque || 0);
+        const estoqueAntesLocal = Number(item.produto[campoEstoque] || 0);
+        const estoqueAntesTotal = Number(item.produto.quantidade_estoque || 0);
         const delta = item.quantidade;
         const estoqueDepoisLocal = tipoMovimento === "entrada"
           ? estoqueAntesLocal + delta
           : estoqueAntesLocal - delta;
 
-        if (estoqueDepoisLocal < 0) {
-          throw new Error(`Estoque insuficiente para ${item.produto.nome} em ${item.loja.nome}.`);
-        }
-
-        const produtoAtualizado = {
-          ...produtoAtual,
-          [campoEstoque]: estoqueDepoisLocal,
-        };
+        const produtoAtualizado = { ...item.produto, [campoEstoque]: estoqueDepoisLocal };
         const estoqueDepoisTotal = calcularEstoqueTotal(produtoAtualizado, lojasComCd);
 
         await base44.entities.Produto.update(item.produto.id, {
@@ -269,23 +229,16 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
         } catch (auditErr) {
           console.warn("Falha ao registrar movimentação manual de estoque:", auditErr);
         }
-
-        produtosCache.set(item.produto.id, {
-          ...produtoAtual,
-          [campoEstoque]: estoqueDepoisLocal,
-          quantidade_estoque: estoqueDepoisTotal,
-        });
       }
 
-      queryClient.invalidateQueries({ queryKey: ["produtos"] });
       queryClient.invalidateQueries({ queryKey: ["produtos"] });
       queryClient.invalidateQueries({ queryKey: ["produtos-carga-inicial"] });
       queryClient.invalidateQueries({ queryKey: ["produtos-inventario"] });
       queryClient.invalidateQueries({ queryKey: ["movimentacoes-estoque"] });
 
-      setLinhas([criarLinha()]);
-      setFiltrosProduto({});
-      toast.success(`Lançamento salvo com sucesso em ${resumo.length} linha(s).`);
+      setLinhas([]);
+      setTermoBusca("");
+      toast.success(`Lançamento salvo com sucesso para ${resumo.length} produto(s).`);
     } catch (error) {
       toast.error(`Erro ao salvar: ${error.message}`);
     } finally {
@@ -294,6 +247,7 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
   };
 
   const totalLinhasValidas = linhas.filter((linha) => linha.produtoId && linha.quantidade !== "").length;
+  const totalQuantidades = linhas.reduce((sum, l) => sum + (parseInt(l.quantidade, 10) || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -307,7 +261,7 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
               Lançamento Manual de Estoque
             </h2>
             <p className="text-sm" style={{ color: "#8B8B8B" }}>
-              Adicione vários produtos e unidades em um único envio, sem bipagem.
+              Adicione vários produtos e quantidades em um único envio, sem bipagem.
             </p>
           </div>
         </div>
@@ -324,8 +278,7 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
 
       <Alert style={{ backgroundColor: "#f0fdf4", borderColor: "#86efac" }}>
         <AlertDescription>
-          <strong>Como funciona:</strong> selecione acima se é entrada ou saída e para qual unidade.
-          Depois preencha os produtos e quantidades nas linhas. Cada linha segue o mesmo destino.
+          <strong>Como funciona:</strong> defina o tipo e o destino, busque produtos e clique para adicioná-los à lista. Informe a quantidade de cada um e salve.
         </AlertDescription>
       </Alert>
 
@@ -335,27 +288,20 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
             <div className="lg:col-span-4 space-y-2">
               <Label>Tipo de lançamento</Label>
               <Select value={tipoMovimento} onValueChange={setTipoMovimento}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="entrada">Entrada</SelectItem>
                   <SelectItem value="saida">Saída</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-
             <div className="lg:col-span-8 space-y-2">
               <Label>Destino</Label>
               <Select value={destinoId} onValueChange={setDestinoId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione a unidade" />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Selecione a unidade" /></SelectTrigger>
                 <SelectContent>
                   {lojaOptions.map((loja) => (
-                    <SelectItem key={loja.id} value={loja.id}>
-                      {loja.nome}
-                    </SelectItem>
+                    <SelectItem key={loja.id} value={loja.id}>{loja.nome}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -369,10 +315,10 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="flex items-center gap-2 text-lg">
               <Warehouse className="w-5 h-5 text-green-700" />
-              Lançamentos
+              Produtos do lançamento
             </CardTitle>
             <Badge variant="secondary" className="rounded-full px-3 py-1">
-              {totalLinhasValidas} linha(s) pronta(s)
+              {linhas.length} produto(s)
             </Badge>
           </div>
         </CardHeader>
@@ -384,142 +330,164 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
               Carregando produtos e unidades...
             </div>
           ) : (
-            linhas.map((linha, index) => {
-              const termoProduto = filtrosProduto[linha.id] ?? linha.produtoBusca;
-              const sugestoes = termoProduto.trim().length >= 2 ? filtrarProdutos(termoProduto) : [];
-              const produtoSelecionado = getProdutoSelecionado(linha);
-              const resumoSelecionado = produtoSelecionado ? getProdutoResumoEstoque(produtoSelecionado) : null;
-
-              return (
-                <div key={linha.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-100 text-sm font-semibold text-green-700">
-                        {index + 1}
-                      </span>
-                      <span className="font-semibold text-sm text-gray-700">Linha {index + 1}</span>
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={() => removerLinha(linha.id)} disabled={linhas.length === 1}>
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Remover
-                    </Button>
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
-                    <div className="lg:col-span-9 space-y-2 relative">
-                      <Label>Produto</Label>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                        <Input
-                          className="pl-10"
-                          value={termoProduto}
-                          onChange={(e) => {
-                            atualizarLinha(linha.id, { produtoBusca: e.target.value, produtoId: "" });
-                            setFiltrosProduto((current) => ({ ...current, [linha.id]: e.target.value }));
-                          }}
-                          placeholder="Buscar por nome, código ou referência..."
-                        />
-                      </div>
-
-                      {sugestoes.length > 0 && (
-                        <div className="absolute z-20 mt-1 w-full rounded-xl border bg-white shadow-lg overflow-hidden">
-                          {sugestoes.map((produto, indexSugestao) => {
-                            const resumo = getProdutoResumoEstoque(produto);
-                            return (
-                            <button
-                              key={`${produto.id}-${indexSugestao}`}
-                              type="button"
-                              onClick={() => {
-                                selecionarProduto(linha.id, produto);
-                                setFiltrosProduto((current) => ({ ...current, [linha.id]: "" }));
-                              }}
-                              className="flex w-full items-center justify-between gap-3 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-green-50"
-                            >
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-medium text-gray-900">{produto.nome}</p>
-                                <p className="truncate text-xs text-gray-500">
-                                  {[produto.codigo_barras, produto.modelo_referencia, produto.fornecedor_nome].filter(Boolean).join(" • ") || "Sem código"}
-                                </p>
-                                <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-gray-600">
-                                  <span className="rounded-full bg-gray-100 px-2 py-0.5">
-                                    Estoque total: {resumo.total}
-                                  </span>
-                                  {resumo.itens.map((item) => (
-                                    <span key={`${produto.id}-${item.campo}`} className="rounded-full bg-gray-50 px-2 py-0.5 border border-gray-200">
-                                      {item.loja}: {item.quantidade}
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-                              <Badge variant="outline" className="shrink-0">
-                                Selecionar
-                              </Badge>
-                            </button>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {produtoSelecionado && resumoSelecionado && (
-                        <div className="rounded-xl border border-green-100 bg-green-50 px-3 py-2 text-sm text-green-900">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <strong>{produtoSelecionado.nome}</strong>
-                            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
-                              Estoque total: {resumoSelecionado.total}
-                            </Badge>
-                            <span className="text-green-700 text-xs">
-                              {produtoSelecionado.codigo_barras ? `COD ${produtoSelecionado.codigo_barras}` : "Produto selecionado"}
-                            </span>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-green-800">
-                            {resumoSelecionado.itens.map((item) => (
-                              <span key={`${produtoSelecionado.id}-${item.campo}`} className="rounded-full bg-white/80 px-2 py-1 border border-green-200">
-                                {item.loja}: {item.quantidade}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="lg:col-span-3 space-y-2">
-                      <Label>Quantidade</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        value={linha.quantidade}
-                        onChange={(e) => atualizarLinha(linha.id, { quantidade: e.target.value })}
-                        placeholder="0"
-                      />
-                    </div>
-                  </div>
-
+            <>
+              {/* Barra de busca única */}
+              <div className="space-y-2 relative">
+                <div className="flex items-center justify-between">
+                  <Label>Buscar e adicionar produto</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => setIsCadastrarOpen(true)}
+                  >
+                    <Plus className="w-3 h-3" />
+                    Cadastrar item
+                  </Button>
                 </div>
-              );
-            })
-          )}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Input
+                    ref={searchInputRef}
+                    className="pl-10"
+                    value={termoBusca}
+                    onChange={(e) => setTermoBusca(e.target.value)}
+                    placeholder="Buscar por nome, código ou referência..."
+                  />
+                </div>
+                {sugestoes.length > 0 && (
+                  <div className="absolute z-20 mt-1 w-full rounded-xl border bg-white shadow-lg overflow-hidden">
+                    {sugestoes.map((produto, idx) => {
+                      const resumo = getProdutoResumoEstoque(produto);
+                      return (
+                        <button
+                          key={`${produto.id}-${idx}`}
+                          type="button"
+                          onClick={() => selecionarProduto(produto)}
+                          className="flex w-full items-center justify-between gap-3 border-b border-gray-100 px-3 py-2 text-left last:border-b-0 hover:bg-green-50"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-gray-900">{produto.nome}</p>
+                            <p className="truncate text-xs text-gray-500">
+                              {[produto.codigo_barras, produto.modelo_referencia, produto.fornecedor_nome].filter(Boolean).join(" • ") || "Sem código"}
+                            </p>
+                            <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-gray-600">
+                              <span className="rounded-full bg-gray-100 px-2 py-0.5">Estoque total: {resumo.total}</span>
+                              {resumo.itens.map((item) => (
+                                <span key={`${produto.id}-${item.campo}`} className="rounded-full bg-gray-50 px-2 py-0.5 border border-gray-200">
+                                  {item.loja}: {item.quantidade}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <Badge variant="outline" className="shrink-0">Adicionar</Badge>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-2">
-            <div className="text-sm text-gray-500">
-              Use quantas linhas precisar; todas seguem o tipo e a unidade escolhidos no topo.
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={adicionarLinha}>
-                <Plus className="w-4 h-4 mr-2" />
-                Cadastrar Item
-              </Button>
-              <Button
-                onClick={handleSalvar}
-                disabled={isSaving || totalLinhasValidas === 0}
-                style={{ background: "linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)" }}
-              >
-                {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
-                Salvar lançamento
-              </Button>
-            </div>
-          </div>
+              {/* Lista de produtos adicionados (mais recente no topo) */}
+              {linhas.length === 0 ? (
+                <div className="py-10 text-center text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
+                  <Search className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Nenhum produto adicionado ainda.</p>
+                  <p className="text-xs mt-1">Use a busca acima para adicionar produtos à lista.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {linhas.map((linha) => {
+                    const produtoAtual = produtos.find((p) => p.id === linha.produtoId);
+                    const resumo = produtoAtual ? getProdutoResumoEstoque(produtoAtual) : null;
+                    return (
+                      <div key={linha.id} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-gray-900">{linha.nomeProduto}</p>
+                          {linha.produtoCodigo && (
+                            <p className="truncate text-xs text-gray-500">{linha.produtoCodigo}</p>
+                          )}
+                          {resumo && (
+                            <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-gray-500">
+                              <span className="rounded-full bg-gray-100 px-2 py-0.5">Estoque: {resumo.total}</span>
+                              {resumo.itens.map((item) => (
+                                <span key={item.campo} className="rounded-full bg-gray-50 px-2 py-0.5 border border-gray-200">
+                                  {item.loja}: {item.quantidade}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Input
+                            type="number"
+                            min="1"
+                            value={linha.quantidade}
+                            onChange={(e) => atualizarLinha(linha.id, { quantidade: e.target.value })}
+                            onBlur={(e) => {
+                              if (e.target.value && parseInt(e.target.value, 10) > 0) {
+                                searchInputRef.current?.focus();
+                              }
+                            }}
+                            placeholder="Qtd"
+                            className="w-20 text-center"
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-red-400 hover:text-red-600 hover:bg-red-50"
+                            onClick={() => removerLinha(linha.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Rodapé com total e botão salvar */}
+              {linhas.length > 0 && (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-gray-100">
+                  <div className="text-sm text-gray-600">
+                    <span>Total de unidades: </span>
+                    <span className="font-bold text-gray-900">{totalQuantidades}</span>
+                    <span className="text-gray-400 ml-2">em {linhas.length} produto(s)</span>
+                  </div>
+                  <Button
+                    onClick={handleSalvar}
+                    disabled={isSaving || totalLinhasValidas === 0}
+                    style={{ background: "linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)" }}
+                  >
+                    {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+                    Salvar lançamento
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
+
+      <ProdutoCadastroCompleto
+        isOpen={isCadastrarOpen}
+        onClose={() => setIsCadastrarOpen(false)}
+        produto={null}
+        onSave={async (data) => {
+          const novoProduto = await base44.entities.Produto.create(data);
+          queryClient.invalidateQueries({ queryKey: ["produtos"] });
+          setIsCadastrarOpen(false);
+          if (novoProduto?.id) {
+            selecionarProduto(novoProduto);
+            toast.success("Produto cadastrado e adicionado ao lançamento.");
+            return;
+          }
+
+          toast.success("Produto cadastrado! Você já pode buscá-lo na lista.");
+        }}
+      />
     </div>
   );
 }
