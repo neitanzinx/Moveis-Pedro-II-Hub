@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, CheckCircle2, Loader2, Plus, Search, Trash2, Warehouse } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2, Pencil, Plus, Search, Trash2, Warehouse } from "lucide-react";
 import { toast } from "sonner";
 import { normSearch } from "@/lib/utils";
 import { calcularEstoqueTotal, obterCampoEstoqueDaLoja } from "@/constants/productConstants";
@@ -25,6 +25,7 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
   const [destinoId, setDestinoId] = useState("__cd__");
   const [isSaving, setIsSaving] = useState(false);
   const [isCadastrarOpen, setIsCadastrarOpen] = useState(false);
+  const [produtoEmEdicao, setProdutoEmEdicao] = useState(null);
   const searchInputRef = useRef(null);
   const { data: lojas = [], isLoading: loadingLojas } = useLojas();
 
@@ -56,12 +57,20 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
     setLinhas((current) => current.filter((linha) => linha.id !== linhaId));
   };
 
+  const montarCodigoProduto = (produto) => [
+    produto?.codigo_barras,
+    produto?.modelo_referencia,
+    produto?.fornecedor_nome,
+  ]
+    .filter(Boolean)
+    .join(" • ");
+
   const selecionarProduto = (produto) => {
     const novaLinha = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       produtoId: produto.id,
       nomeProduto: produto.nome,
-      produtoCodigo: [produto.codigo_barras, produto.modelo_referencia, produto.fornecedor_nome].filter(Boolean).join(" • "),
+      produtoCodigo: montarCodigoProduto(produto),
       quantidade: "",
     };
     setLinhas((current) => [novaLinha, ...current]);
@@ -246,6 +255,31 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
     }
   };
 
+  const handleSalvarEdicaoProduto = async (data) => {
+    if (!produtoEmEdicao?.id) return;
+
+    try {
+      const produtoAtualizado = await base44.entities.Produto.update(produtoEmEdicao.id, data);
+
+      setLinhas((current) => current.map((linha) => {
+        if (linha.produtoId !== produtoEmEdicao.id) return linha;
+        return {
+          ...linha,
+          nomeProduto: produtoAtualizado?.nome || data?.nome || linha.nomeProduto,
+          produtoCodigo: montarCodigoProduto(produtoAtualizado || data || {}),
+        };
+      }));
+
+      queryClient.invalidateQueries({ queryKey: ["produtos"] });
+      queryClient.invalidateQueries({ queryKey: ["produtos-para-duplicata"] });
+
+      setProdutoEmEdicao(null);
+      toast.success("Produto atualizado com sucesso.");
+    } catch (error) {
+      toast.error(`Erro ao atualizar produto: ${error.message}`);
+    }
+  };
+
   const totalLinhasValidas = linhas.filter((linha) => linha.produtoId && linha.quantidade !== "").length;
   const totalQuantidades = linhas.reduce((sum, l) => sum + (parseInt(l.quantidade, 10) || 0), 0);
 
@@ -420,6 +454,22 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
                           )}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                            onClick={() => {
+                              if (produtoAtual) {
+                                setProdutoEmEdicao(produtoAtual);
+                              } else {
+                                toast.error("Produto não encontrado para edição.");
+                              }
+                            }}
+                            title="Editar cadastro do produto"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
                           <Input
                             type="number"
                             min="1"
@@ -487,6 +537,13 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
 
           toast.success("Produto cadastrado! Você já pode buscá-lo na lista.");
         }}
+      />
+
+      <ProdutoCadastroCompleto
+        isOpen={Boolean(produtoEmEdicao)}
+        onClose={() => setProdutoEmEdicao(null)}
+        produto={produtoEmEdicao}
+        onSave={handleSalvarEdicaoProduto}
       />
     </div>
   );
