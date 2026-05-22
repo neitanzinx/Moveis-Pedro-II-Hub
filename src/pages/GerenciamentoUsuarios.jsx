@@ -1,68 +1,18 @@
 import React, { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { CARGOS as CARGOS_PADRAO } from "@/config/cargos";
-import { ROLE_RULES } from "@/config/permissions";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, Shield, UserPlus, Search, Download } from "lucide-react";
-import { toast } from "sonner";
-import ListaUsuarios from "@/components/usuarios/ListaUsuarios";
-import GerenciamentoCargos from "@/components/usuarios/GerenciamentoCargos";
+import { Users, Shield, UserPlus } from "lucide-react";
+import UserManagementTab from "@/components/users/UserManagementTab";
+import GestaoCargos from "@/components/configuracoes/GestaoCargos";
 import ModalUsuario from "@/components/usuarios/ModalUsuario";
-import ModalCargo from "@/components/usuarios/ModalCargo";
 import { useAuth } from "@/hooks/useAuth";
 import { Navigate } from "react-router-dom";
 
-function buildCargoPadraoPayload(cargoConfig) {
-  return {
-    nome: cargoConfig.value,
-    permissoes: ROLE_RULES[cargoConfig.value]?.can || [],
-  };
-}
-
-function getMissingCargoColumn(error) {
-  const message = error?.message || "";
-  const match = message.match(/Could not find the '([^']+)' column of 'cargos'/i);
-  return match?.[1] || null;
-}
-
-async function createCargoWithSchemaFallback(payload, unsupportedColumns) {
-  let attempts = 0;
-  let lastError = null;
-
-  while (attempts < 10) {
-    const sanitizedPayload = Object.fromEntries(
-      Object.entries(payload).filter(([key]) => !unsupportedColumns.has(key))
-    );
-
-    try {
-      return await base44.entities.Cargo.create(sanitizedPayload);
-    } catch (error) {
-      lastError = error;
-      const missingColumn = getMissingCargoColumn(error);
-      if (!missingColumn) throw error;
-
-      const hasColumnInPayload = Object.prototype.hasOwnProperty.call(sanitizedPayload, missingColumn);
-      if (!hasColumnInPayload) throw error;
-
-      unsupportedColumns.add(missingColumn);
-      attempts += 1;
-    }
-  }
-
-  throw lastError;
-}
-
 export default function GerenciamentoUsuarios() {
-  const { loading, can } = useAuth();
-  const [busca, setBusca] = useState("");
-  const [modalUsuario, setModalUsuario] = useState(false);
-  const [modalCargo, setModalCargo] = useState(false);
-  const [usuarioSelecionado, setUsuarioSelecionado] = useState(null);
-  const [cargoSelecionado, setCargoSelecionado] = useState(null);
+  const { loading, can, currentUser } = useAuth();
+  const [novoUsuarioOpen, setNovoUsuarioOpen] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: usuarios = [], isLoading: loadingUsuarios } = useQuery({
@@ -70,67 +20,11 @@ export default function GerenciamentoUsuarios() {
     queryFn: () => base44.entities.User.list()
   });
 
-  const { data: cargos = [], isLoading: loadingCargos } = useQuery({
-    queryKey: ['cargos'],
-    queryFn: () => base44.entities.Cargo.list()
-  });
-
-  const { data: caminhoes = [] } = useQuery({
-    queryKey: ['caminhoes'],
-    queryFn: () => base44.entities.Caminhao.list()
-  });
-
-  const importarCargosPadraoMutation = useMutation({
-    mutationFn: async () => {
-      const nomesExistentes = new Set(cargos.map((cargo) => cargo.nome));
-      const unsupportedColumns = new Set();
-      const cargosParaCriar = CARGOS_PADRAO
-        .filter((cargoPadrao) => !nomesExistentes.has(cargoPadrao.value))
-        .map(buildCargoPadraoPayload);
-
-      if (cargosParaCriar.length === 0) {
-        return { created: 0 };
-      }
-
-      for (const cargoPadrao of cargosParaCriar) {
-        await createCargoWithSchemaFallback(cargoPadrao, unsupportedColumns);
-      }
-
-      return { created: cargosParaCriar.length };
-    },
-    onSuccess: ({ created }) => {
-      queryClient.invalidateQueries({ queryKey: ['cargos'] });
-      if (created === 0) {
-        toast.info('Os cargos padrão já estão cadastrados.');
-        return;
-      }
-      toast.success(`${created} cargo${created > 1 ? 's' : ''} padrão importado${created > 1 ? 's' : ''}.`);
-    },
-    onError: (error) => {
-      toast.error('Erro ao importar cargos padrão: ' + (error.message || 'Erro desconhecido'));
-    }
-  });
-
-  const usuariosFiltrados = usuarios.filter(u => 
-    u.full_name?.toLowerCase().includes(busca.toLowerCase()) ||
-    u.email?.toLowerCase().includes(busca.toLowerCase())
-  );
-
-  const abrirModalUsuario = (usuario = null) => {
-    setUsuarioSelecionado(usuario);
-    setModalUsuario(true);
-  };
-
-  const abrirModalCargo = (cargo = null) => {
-    setCargoSelecionado(cargo);
-    setModalCargo(true);
-  };
-
   if (!loading && !can('manage_user_access')) {
     return <Navigate to="/admin" replace />;
   }
 
-  if (loadingUsuarios || loadingCargos) {
+  if (loadingUsuarios) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600" />
@@ -160,87 +54,40 @@ export default function GerenciamentoUsuarios() {
           </TabsTrigger>
           <TabsTrigger value="cargos" className="gap-2">
             <Shield className="w-4 h-4" />
-            Cargos ({cargos.length})
+            Cargos e Permissões
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="usuarios" className="space-y-4">
-          <Card className="p-4">
-            <div className="flex gap-3">
-              <div className="flex-1 relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <Input
-                  placeholder="Buscar usuários por nome ou email..."
-                  value={busca}
-                  onChange={(e) => setBusca(e.target.value)}
-                  className="pl-9"
-                />
-              </div>
-              <Button onClick={() => abrirModalUsuario()} className="bg-green-600 hover:bg-green-700">
-                <UserPlus className="w-4 h-4 mr-2" />
-                Adicionar Usuário
-              </Button>
-            </div>
-          </Card>
-
-          <ListaUsuarios
-            usuarios={usuariosFiltrados}
-            cargos={cargos}
-            caminhoes={caminhoes}
-            onEditar={abrirModalUsuario}
+          <div className="flex justify-end">
+            <Button
+              onClick={() => setNovoUsuarioOpen(true)}
+              style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
+            >
+              <UserPlus className="w-4 h-4 mr-2" />
+              Novo Usuário
+            </Button>
+          </div>
+          <UserManagementTab
+            users={usuarios}
+            isLoading={loadingUsuarios}
+            currentUser={currentUser}
           />
         </TabsContent>
 
-        <TabsContent value="cargos" className="space-y-4">
-          <Card className="p-4">
-            <div className="flex justify-between items-center">
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Configure cargos e permissões por categoria
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => importarCargosPadraoMutation.mutate()}
-                  disabled={importarCargosPadraoMutation.isPending}
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  {importarCargosPadraoMutation.isPending ? 'Importando...' : 'Inserir Padrão'}
-                </Button>
-                <Button onClick={() => abrirModalCargo()} className="bg-green-600 hover:bg-green-700">
-                  <Shield className="w-4 h-4 mr-2" />
-                  Criar Cargo
-                </Button>
-              </div>
-            </div>
-          </Card>
-
-          <GerenciamentoCargos
-            cargos={cargos}
-            onEditar={abrirModalCargo}
-            onImportarPadrao={() => importarCargosPadraoMutation.mutate()}
-            importandoPadrao={importarCargosPadraoMutation.isPending}
-          />
+        <TabsContent value="cargos">
+          <GestaoCargos />
         </TabsContent>
       </Tabs>
 
-      {modalUsuario && (
+      {novoUsuarioOpen && (
         <ModalUsuario
-          usuario={usuarioSelecionado}
-          cargos={cargos}
-          caminhoes={caminhoes}
+          usuario={null}
+          cargos={[]}
+          caminhoes={[]}
           onClose={() => {
-            setModalUsuario(false);
-            setUsuarioSelecionado(null);
-          }}
-        />
-      )}
-
-      {modalCargo && (
-        <ModalCargo
-          cargo={cargoSelecionado}
-          onClose={() => {
-            setModalCargo(false);
-            setCargoSelecionado(null);
+            setNovoUsuarioOpen(false);
+            queryClient.invalidateQueries({ queryKey: ['usuarios'] });
           }}
         />
       )}

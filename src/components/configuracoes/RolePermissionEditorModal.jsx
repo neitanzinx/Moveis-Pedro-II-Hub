@@ -1,96 +1,177 @@
-import React, { useState, useMemo, createElement } from "react";
+import React, { useState, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, Shield, Info } from "lucide-react";
-import { MENU_ITEMS, ROLE_RULES } from "@/config/permissions";
-import { getCargoConfig } from "@/config/cargos";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, Shield, Search, ChevronDown, ChevronRight, Check, X } from "lucide-react";
+import { ROLE_RULES, SCOPES, PERMISSION_CATALOG, PERMISSION_CATEGORIES } from "@/config/permissions";
+
+const SCOPE_OPTIONS = [
+    { value: SCOPES.ALL,   label: 'Todos os dados (toda a empresa)' },
+    { value: SCOPES.STORE, label: 'Dados da loja do usuário' },
+    { value: SCOPES.OWN,   label: 'Apenas dados próprios' },
+];
 
 /**
- * Editor Visual de Permissoes por Cargo
- * Exibe mini-preview do sidebar com toggle de permissoes
+ * Editor visual de permissões por cargo.
+ * - Cargos estáticos: mostra permissões do ROLE_RULES como base (verde),
+ *   permite adicionar extras (azul) ou remover do base (vermelho).
+ * - Cargos personalizados: lista limpa; cada item marcado = permissão concedida.
+ * Props: cargo, cargoLabel, cargoColor, currentPermissions, currentDenied,
+ *        currentScope, isCustomCargo, onSave({permissions, deniedPermissions, scope}),
+ *        onClose, isSaving
  */
-export default function RolePermissionEditorModal({ cargo, currentPermissions = [], onSave, onClose, isSaving = false }) {
-    const safeCargo = cargo || 'Vendedor';
-    const cargoConfig = getCargoConfig(safeCargo);
-    const roleRules = ROLE_RULES[safeCargo] || ROLE_RULES['Vendedor'];
+export default function RolePermissionEditorModal({
+    cargo,
+    cargoLabel,
+    cargoColor,
+    currentPermissions = [],
+    currentDenied      = [],
+    currentScope,
+    isCustomCargo      = false,
+    onSave,
+    onClose,
+    isSaving           = false,
+}) {
+    const isAdmin    = cargo === 'Administrador';
+    const roleRules  = ROLE_RULES[cargo] || null;
+    // Base permissions from ROLE_RULES (for static cargos). Wildcard (*) means all.
+    const basePerms  = roleRules?.can?.includes('*') ? [] : (roleRules?.can || []);
 
-    // Se for admin, nao pode editar (tem acesso total)
-    const isAdmin = safeCargo === 'Administrador';
+    const [scope,              setScope]              = useState(currentScope || ROLE_RULES[cargo]?.scope || SCOPES.OWN);
+    // added: permissions explicitly added (extra beyond base, or full list for custom cargo)
+    const [added,              setAdded]              = useState(currentPermissions);
+    // denied: permissions explicitly removed from base (only relevant for static cargos)
+    const [denied,             setDenied]             = useState(currentDenied);
+    const [search,             setSearch]             = useState('');
+    const [expandedCategories, setExpandedCategories] = useState({});
 
-    // Estado das permissoes - inicia com as atuais ou do ROLE_RULES
-    const initialPermissions = currentPermissions.length > 0
-        ? currentPermissions
-        : (roleRules.can.includes('*') ? [] : roleRules.can);
+    // Derive display state for every permission in the catalog
+    const permState = useMemo(() => {
+        const states = {};
+        PERMISSION_CATALOG.forEach(({ code }) => {
+            const inBase    = basePerms.includes(code);
+            const inAdded   = added.includes(code);
+            const inDenied  = denied.includes(code);
 
-    const [permissions, setPermissions] = useState(initialPermissions);
+            let active = false;
+            let source = 'none'; // 'role' | 'added' | 'denied' | 'none'
 
-    // Agrupa menu items por secao
-    const menuBySection = useMemo(() => {
-        const sections = {};
-        MENU_ITEMS.forEach(item => {
-            if (item.permission === '*' || item.permission === 'admin_only') return;
-            const section = item.section || 'Outros';
-            if (!sections[section]) sections[section] = [];
-            sections[section].push(item);
+            if (isCustomCargo) {
+                // Custom cargo: no implicit base — added list IS the full permission set
+                active = inAdded;
+                source = inAdded ? 'added' : 'none';
+            } else if (inDenied) {
+                active = false;
+                source = 'denied';
+            } else if (inBase) {
+                active = true;
+                source = inAdded ? 'added' : 'role';
+            } else if (inAdded) {
+                active = true;
+                source = 'added';
+            }
+
+            states[code] = { active, source, inBase };
         });
-        return sections;
-    }, []);
+        return states;
+    }, [added, denied, basePerms, isCustomCargo]);
 
-    // Toggle uma permissao
-    const togglePermission = (permission) => {
-        if (isAdmin) return; // Admin nao pode ser editado
+    const togglePerm = (code) => {
+        if (isAdmin) return;
+        const state = permState[code];
+        if (!state) return;
 
-        if (permissions.includes(permission)) {
-            setPermissions(prev => prev.filter(p => p !== permission));
+        if (isCustomCargo) {
+            // Simple toggle on the added set
+            setAdded(prev => prev.includes(code) ? prev.filter(p => p !== code) : [...prev, code]);
+        } else if (state.inBase) {
+            if (state.source === 'denied') {
+                // Restore: remove from denied
+                setDenied(prev => prev.filter(p => p !== code));
+            } else {
+                // Deny: add to denied, remove from added (in case it was there)
+                setDenied(prev => [...prev, code]);
+                setAdded(prev => prev.filter(p => p !== code));
+            }
         } else {
-            setPermissions(prev => [...prev, permission]);
+            if (state.source === 'added') {
+                // Remove extra
+                setAdded(prev => prev.filter(p => p !== code));
+            } else {
+                // Add extra, ensure not in denied
+                setAdded(prev => [...prev, code]);
+                setDenied(prev => prev.filter(p => p !== code));
+            }
         }
     };
 
     const handleSave = () => {
-        onSave(permissions);
+        onSave({
+            // For static cargos: only store extras that are not already in base
+            permissions:        isCustomCargo ? added : added.filter(p => !basePerms.includes(p)),
+            deniedPermissions:  isCustomCargo ? []   : denied,
+            scope,
+        });
     };
 
-    const getItemStyle = (permission) => {
-        const isActive = isAdmin || permissions.includes(permission);
+    // Group catalog by category, applying search filter
+    const catalogByCategory = useMemo(() => {
+        const q = search.toLowerCase().trim();
+        const result = {};
+        PERMISSION_CATALOG.forEach(item => {
+            if (
+                q &&
+                !item.label.toLowerCase().includes(q) &&
+                !item.code.toLowerCase().includes(q) &&
+                !item.description.toLowerCase().includes(q)
+            ) return;
+            if (!result[item.category]) result[item.category] = [];
+            result[item.category].push(item);
+        });
+        return result;
+    }, [search]);
 
-        if (isActive) {
-            return {
-                backgroundColor: '#d1fae5',
-                borderColor: '#10b981',
-                opacity: 1
-            };
-        }
-        return {
-            backgroundColor: '#f3f4f6',
-            borderColor: '#e5e7eb',
-            opacity: 0.4
-        };
+    const toggleCategory = (cat) =>
+        setExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
+
+    // Default: all categories expanded
+    const isCategoryExpanded = (cat) => expandedCategories[cat] !== false;
+
+    const getPermStyle = (code) => {
+        const s = permState[code];
+        if (!s || s.source === 'none') return { bg: 'bg-gray-50', border: 'border-gray-200', opacity: 'opacity-50' };
+        if (s.source === 'denied')     return { bg: 'bg-red-50',   border: 'border-red-300',  opacity: '' };
+        if (s.source === 'added')      return { bg: 'bg-blue-50',  border: 'border-blue-300', opacity: '' };
+        if (s.active)                  return { bg: 'bg-green-50', border: 'border-green-300', opacity: '' };
+        return { bg: 'bg-gray-50', border: 'border-gray-200', opacity: 'opacity-50' };
     };
+
+    const activeCount = Object.values(permState).filter(s => s.active).length;
+    const customCount = added.length + denied.length;
 
     if (!cargo) return null;
 
     return (
         <Dialog open onOpenChange={onClose}>
-            <DialogContent className="max-w-2xl max-h-[90vh]">
-                <DialogHeader>
+            <DialogContent className="max-w-3xl max-h-[92vh] flex flex-col gap-3">
+                <DialogHeader className="flex-shrink-0">
                     <DialogTitle className="flex items-center gap-2">
                         <div
                             className="w-8 h-8 rounded-lg flex items-center justify-center"
-                            style={{ backgroundColor: cargoConfig?.bgColor || '#f3f4f6' }}
+                            style={{ backgroundColor: `${cargoColor || '#07593f'}25` }}
                         >
-                            {cargoConfig?.icon && createElement(cargoConfig.icon, {
-                                className: "w-4 h-4",
-                                style: { color: cargoConfig?.color }
-                            })}
+                            <Shield className="w-4 h-4" style={{ color: cargoColor || '#07593f' }} />
                         </div>
-                        Permissoes do Cargo: {cargo}
+                        Permissões: {cargoLabel || cargo}
                     </DialogTitle>
                     <DialogDescription>
-                        Clique nos itens para permitir ou negar acesso para todos os usuarios deste cargo.
+                        {isAdmin
+                            ? 'Administrador possui acesso irrestrito ao sistema e não pode ser editado.'
+                            : 'Verde = do cargo, Azul = adicionado, Vermelho = removido. Clique para alternar.'}
                     </DialogDescription>
                 </DialogHeader>
 
@@ -98,82 +179,153 @@ export default function RolePermissionEditorModal({ cargo, currentPermissions = 
                     <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
                         <div className="flex items-center gap-2 text-amber-700">
                             <Shield className="w-5 h-5" />
-                            <span className="font-medium">Administrador tem acesso total</span>
+                            <span className="font-medium">
+                                Administrador tem acesso total ao sistema e não pode ser editado.
+                            </span>
                         </div>
-                        <p className="text-sm text-amber-600 mt-1">
-                            O cargo de Administrador nao pode ser editado pois possui acesso irrestrito ao sistema.
-                        </p>
                     </div>
                 ) : (
                     <>
-                        {/* Legenda */}
-                        <div className="flex gap-4 text-xs text-gray-600 p-2 bg-gray-50 rounded-lg">
-                            <div className="flex items-center gap-1">
-                                <div className="w-4 h-4 rounded bg-green-100 border border-green-500" />
-                                <span>Permitido</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                                <div className="w-4 h-4 rounded bg-gray-100 border border-gray-300 opacity-40" />
-                                <span>Negado</span>
-                            </div>
+                        {/* Scope selector */}
+                        <div className="flex-shrink-0">
+                            <Label className="text-sm font-medium">Escopo de dados</Label>
+                            <Select value={scope} onValueChange={setScope}>
+                                <SelectTrigger className="mt-1">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {SCOPE_OPTIONS.map(opt => (
+                                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
 
-                        {/* Mini Sidebar Preview */}
-                        <Card className="border-2" style={{ borderColor: cargoConfig?.color || '#07593f' }}>
-                            <CardContent className="p-0">
-                                <div className="p-3 border-b" style={{ backgroundColor: cargoConfig?.color || '#07593f' }}>
-                                    <p className="text-white text-sm font-medium">Pre-visualizacao do Menu</p>
+                        {/* Legend + search + counters */}
+                        <div className="flex-shrink-0 space-y-2">
+                            <div className="flex items-center gap-3 flex-wrap">
+                                <div className="flex gap-3 text-xs text-gray-600">
+                                    <span className="flex items-center gap-1">
+                                        <span className="w-3 h-3 rounded bg-green-100 border border-green-400 inline-block" />
+                                        Do cargo
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                        <span className="w-3 h-3 rounded bg-blue-100 border border-blue-400 inline-block" />
+                                        Adicionado
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                        <span className="w-3 h-3 rounded bg-red-100 border border-red-400 inline-block" />
+                                        Removido
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                        <span className="w-3 h-3 rounded bg-gray-100 border border-gray-300 inline-block opacity-50" />
+                                        Sem acesso
+                                    </span>
                                 </div>
-                                <ScrollArea className="h-[350px]">
-                                    <div className="p-2 space-y-4">
-                                        {Object.entries(menuBySection).map(([section, items]) => (
-                                            <div key={section}>
-                                                <p className="text-xs font-semibold text-gray-400 uppercase mb-2 px-2">{section}</p>
-                                                <div className="space-y-1">
-                                                    {items.map(item => {
-                                                        const isActive = permissions.includes(item.permission);
-                                                        const style = getItemStyle(item.permission);
+                                <div className="flex-1 min-w-40 relative">
+                                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                                    <Input
+                                        value={search}
+                                        onChange={e => setSearch(e.target.value)}
+                                        placeholder="Filtrar permissões..."
+                                        className="pl-7 h-8 text-sm"
+                                    />
+                                </div>
+                            </div>
+                            <p className="text-xs text-gray-500">
+                                {activeCount} ativa(s) &nbsp;|&nbsp; {customCount} customização(ões)
+                            </p>
+                        </div>
 
+                        {/* Permissions grouped by category */}
+                        <ScrollArea className="flex-1 min-h-0">
+                            <div className="space-y-3 pr-2">
+                                {Object.entries(catalogByCategory).map(([category, items]) => {
+                                    const catConfig   = PERMISSION_CATEGORIES.find(c => c.key === category);
+                                    const expanded    = isCategoryExpanded(category);
+                                    const activeInCat = items.filter(i => permState[i.code]?.active).length;
+
+                                    return (
+                                        <div key={category} className="border rounded-lg overflow-hidden">
+                                            <button
+                                                type="button"
+                                                className="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors"
+                                                onClick={() => toggleCategory(category)}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    {expanded
+                                                        ? <ChevronDown  className="w-4 h-4 text-gray-500" />
+                                                        : <ChevronRight className="w-4 h-4 text-gray-500" />
+                                                    }
+                                                    <span
+                                                        className="font-medium text-sm"
+                                                        style={{ color: catConfig?.color || '#374151' }}
+                                                    >
+                                                        {catConfig?.label || category}
+                                                    </span>
+                                                </div>
+                                                <Badge
+                                                    className="text-xs"
+                                                    style={{
+                                                        backgroundColor: `${catConfig?.color || '#6b7280'}20`,
+                                                        color:           catConfig?.color || '#6b7280',
+                                                    }}
+                                                >
+                                                    {activeInCat}/{items.length}
+                                                </Badge>
+                                            </button>
+
+                                            {expanded && (
+                                                <div className="p-2 grid sm:grid-cols-2 gap-1">
+                                                    {items.map(item => {
+                                                        const style = getPermStyle(item.code);
+                                                        const state = permState[item.code];
                                                         return (
                                                             <button
-                                                                key={item.url}
-                                                                onClick={() => togglePermission(item.permission)}
-                                                                className="w-full flex items-center gap-3 p-2 rounded-lg border transition-all hover:scale-[1.02]"
-                                                                style={{
-                                                                    ...style,
-                                                                    cursor: 'pointer'
-                                                                }}
+                                                                key={item.code}
+                                                                type="button"
+                                                                onClick={() => togglePerm(item.code)}
+                                                                className={`w-full text-left p-2 rounded-lg border transition-all hover:scale-[1.01] ${style.bg} ${style.border} ${style.opacity}`}
                                                             >
-                                                                {createElement(item.icon, {
-                                                                    className: "w-4 h-4 flex-shrink-0",
-                                                                    style: { opacity: isActive ? 1 : 0.4 }
-                                                                })}
-                                                                <span
-                                                                    className="flex-1 text-left text-sm"
-                                                                    style={{ opacity: isActive ? 1 : 0.5 }}
-                                                                >
-                                                                    {item.title}
-                                                                </span>
+                                                                <div className="flex items-start gap-2">
+                                                                    <div className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                                                                        state?.source === 'denied' ? 'bg-red-200'  :
+                                                                        state?.active              ? 'bg-green-200' :
+                                                                        'bg-gray-200'
+                                                                    }`}>
+                                                                        {state?.source === 'denied'              && <X     className="w-3 h-3 text-red-600"   />}
+                                                                        {state?.active && state?.source !== 'denied' && <Check className="w-3 h-3 text-green-600" />}
+                                                                    </div>
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className="text-xs font-medium leading-tight">{item.label}</p>
+                                                                        <p className="text-xs text-gray-500 leading-tight">{item.description}</p>
+                                                                    </div>
+                                                                    {state?.source === 'added' && (
+                                                                        <Badge className="bg-blue-100 text-blue-700 text-xs px-1 flex-shrink-0">+</Badge>
+                                                                    )}
+                                                                    {state?.source === 'denied' && (
+                                                                        <Badge className="bg-red-100 text-red-700 text-xs px-1 flex-shrink-0">-</Badge>
+                                                                    )}
+                                                                </div>
                                                             </button>
                                                         );
                                                     })}
                                                 </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </ScrollArea>
-                            </CardContent>
-                        </Card>
-
-                        {/* Info */}
-                        <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 p-2 rounded-lg">
-                            <Info className="w-4 h-4" />
-                            <span>{permissions.length} permissao(oes) ativas</span>
-                        </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                                {Object.keys(catalogByCategory).length === 0 && (
+                                    <p className="text-center text-gray-400 py-8 text-sm">
+                                        Nenhuma permissão encontrada para este filtro.
+                                    </p>
+                                )}
+                            </div>
+                        </ScrollArea>
                     </>
                 )}
 
-                <DialogFooter>
+                <DialogFooter className="flex-shrink-0">
                     <Button variant="outline" onClick={onClose}>
                         {isAdmin ? 'Fechar' : 'Cancelar'}
                     </Button>
@@ -181,10 +333,12 @@ export default function RolePermissionEditorModal({ cargo, currentPermissions = 
                         <Button
                             onClick={handleSave}
                             disabled={isSaving}
-                            style={{ background: `linear-gradient(135deg, ${cargoConfig?.color || '#07593f'} 0%, ${cargoConfig?.color || '#07593f'}dd 100%)` }}
+                            style={{
+                                background: `linear-gradient(135deg, ${cargoColor || '#07593f'} 0%, ${cargoColor || '#07593f'}cc 100%)`,
+                            }}
                         >
-                            {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                            Salvar Permissoes
+                            {isSaving && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+                            Salvar Permissões
                         </Button>
                     )}
                 </DialogFooter>
@@ -192,3 +346,5 @@ export default function RolePermissionEditorModal({ cargo, currentPermissions = 
         </Dialog>
     );
 }
+
+

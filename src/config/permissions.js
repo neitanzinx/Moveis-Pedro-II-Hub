@@ -169,6 +169,128 @@ export function getHighestScope(scopes = []) {
   }, SCOPES.OWN);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Catálogo centralizado de permissões — fonte de verdade para os editores visuais
+// Cada entrada define: code (chave usada no can()), label, category, description
+// ─────────────────────────────────────────────────────────────────────────────
+export const PERMISSION_CATALOG = [
+  // Dashboard
+  { code: 'view_dashboard',         label: 'Ver Dashboard Pessoal',              category: 'Dashboard',   description: 'Painel principal com métricas do próprio usuário' },
+  { code: 'view_dashboard_gerente', label: 'Ver Visão Operacional (Gerente)',     category: 'Dashboard',   description: 'Painel operacional com métricas da loja ou empresa' },
+
+  // Vendas
+  { code: 'create_vendas',  label: 'Criar Vendas / PDV',     category: 'Vendas', description: 'Registrar novas vendas e usar o PDV' },
+  { code: 'view_vendas',    label: 'Ver Vendas',             category: 'Vendas', description: 'Visualizar lista de vendas' },
+  { code: 'manage_vendas',  label: 'Gerenciar Vendas',       category: 'Vendas', description: 'Editar e gerenciar vendas existentes' },
+  { code: 'cancel_vendas',  label: 'Cancelar Vendas',        category: 'Vendas', description: 'Cancelar vendas e pedidos' },
+
+  // Orçamentos
+  { code: 'view_orcamentos',   label: 'Ver Orçamentos',    category: 'Orçamentos', description: 'Visualizar orçamentos' },
+  { code: 'create_orcamentos', label: 'Criar Orçamentos',  category: 'Orçamentos', description: 'Criar novos orçamentos para clientes' },
+
+  // Clientes
+  { code: 'view_clientes',    label: 'Ver Clientes',          category: 'Clientes', description: 'Visualizar cadastro de clientes' },
+  { code: 'create_clientes',  label: 'Cadastrar Clientes',    category: 'Clientes', description: 'Cadastrar novos clientes no sistema' },
+  { code: 'manage_clientes',  label: 'Gerenciar Clientes',    category: 'Clientes', description: 'Editar e gerenciar dados dos clientes' },
+
+  // Produtos
+  { code: 'view_produtos',                label: 'Ver Produtos',                       category: 'Produtos', description: 'Visualizar catálogo de produtos' },
+  { code: 'manage_produtos',              label: 'Gerenciar Produtos',                 category: 'Produtos', description: 'Editar e gerenciar produtos' },
+  { code: 'manage_solicitacoes_cadastro', label: 'Aprovar Solicitações de Cadastro',   category: 'Produtos', description: 'Gerenciar e aprovar solicitações de cadastro de produtos' },
+  { code: 'view_catalogo',                label: 'Ver Catálogo WhatsApp',              category: 'Produtos', description: 'Acessar catálogo para compartilhamento via WhatsApp' },
+
+  // Estoque
+  { code: 'view_estoque',    label: 'Ver Estoque',          category: 'Estoque', description: 'Visualizar níveis de estoque' },
+  { code: 'manage_estoque',  label: 'Gerenciar Estoque',    category: 'Estoque', description: 'Gerenciar movimentações de estoque' },
+
+  // Compras
+  { code: 'view_compras',               label: 'Ver Compras',                    category: 'Compras', description: 'Visualizar setor de compras e ordens de compra' },
+  { code: 'create_oc',                  label: 'Criar Ordem de Compra',          category: 'Compras', description: 'Criar novas ordens de compra' },
+  { code: 'manage_compras',             label: 'Gerenciar Compras',              category: 'Compras', description: 'Gerenciar todo o processo de compras' },
+  { code: 'manage_cost_prices',         label: 'Gerenciar Preços de Custo',      category: 'Compras', description: 'Visualizar e editar preços de custo dos produtos' },
+  { code: 'send_oc',                    label: 'Enviar OC ao Fornecedor',        category: 'Compras', description: 'Transmitir ordens de compra aos fornecedores' },
+  { code: 'receive_oc',                 label: 'Receber Mercadoria (OC)',         category: 'Compras', description: 'Registrar recebimento de mercadorias de OC' },
+  { code: 'approve_oc',                 label: 'Aprovar Ordem de Compra',        category: 'Compras', description: 'Aprovar ordens de compra' },
+  { code: 'approve_payment_oc',         label: 'Aprovar Pagamento de OC',        category: 'Compras', description: 'Autorizar pagamentos de ordens de compra' },
+  { code: 'manage_bulk_price_adjustment', label: 'Ajuste de Preços em Massa',    category: 'Compras', description: 'Realizar ajustes de preços em lote' },
+  { code: 'view_fornecedores',          label: 'Ver Fornecedores',               category: 'Compras', description: 'Visualizar cadastro de fornecedores' },
+
+  // Logística
+  { code: 'view_entregas',    label: 'Ver Entregas',          category: 'Logística', description: 'Visualizar entregas agendadas' },
+  { code: 'manage_entregas',  label: 'Gerenciar Entregas',    category: 'Logística', description: 'Gerenciar, confirmar e roteirizar entregas' },
+
+  // Montagem
+  { code: 'view_montagem',    label: 'Ver Montagem',          category: 'Montagem', description: 'Visualizar agendamentos de montagem' },
+  { code: 'manage_montagem',  label: 'Gerenciar Montagem',    category: 'Montagem', description: 'Gerenciar e agendar montagens' },
+
+  // Assistência Técnica
+  { code: 'view_assistencia',    label: 'Ver Assistência Técnica',       category: 'Assistência', description: 'Visualizar chamados de assistência técnica' },
+  { code: 'manage_assistencia',  label: 'Gerenciar Assistência Técnica', category: 'Assistência', description: 'Gerenciar chamados de assistência técnica' },
+
+  // Devoluções
+  { code: 'view_devolucoes',    label: 'Ver Devoluções',       category: 'Devoluções', description: 'Visualizar devoluções registradas' },
+  { code: 'approve_devolucoes', label: 'Aprovar Devoluções',   category: 'Devoluções', description: 'Aprovar ou rejeitar devoluções de clientes' },
+
+  // Financeiro
+  { code: 'view_financeiro',    label: 'Ver Financeiro',        category: 'Financeiro', description: 'Visualizar dados financeiros e lançamentos' },
+  { code: 'manage_financeiro',  label: 'Gerenciar Financeiro',  category: 'Financeiro', description: 'Gerenciar lançamentos e contas financeiras' },
+
+  // Relatórios
+  { code: 'view_relatorios',             label: 'Ver Relatórios e Análises',    category: 'Relatórios', description: 'Acessar relatórios e central analítica' },
+  { code: 'view_cliente_access_analytics', label: 'Ver Acessos do Portal',      category: 'Relatórios', description: 'Analytics de acesso do portal de clientes' },
+
+  // Marketing
+  { code: 'view_marketing', label: 'Ver Marketing', category: 'Marketing', description: 'Acessar ferramentas de marketing e campanhas' },
+
+  // RH
+  { code: 'view_rh',    label: 'Ver RH',          category: 'RH', description: 'Visualizar dados de recursos humanos' },
+  { code: 'manage_rh',  label: 'Gerenciar RH',    category: 'RH', description: 'Gerenciar folha de pagamento e colaboradores' },
+
+  // NF-e
+  { code: 'view_nfe',                     label: 'Ver NF-e',                          category: 'NF-e', description: 'Visualizar notas fiscais emitidas' },
+  { code: 'solicitar_nfe',                label: 'Solicitar Emissão de NF-e',         category: 'NF-e', description: 'Solicitar emissão de notas fiscais' },
+  { code: 'aprovar_nfe',                  label: 'Aprovar NF-e',                      category: 'NF-e', description: 'Aprovar solicitações de notas fiscais' },
+  { code: 'emitir_nfe',                   label: 'Emitir NF-e (SEFAZ)',               category: 'NF-e', description: 'Transmitir notas fiscais à SEFAZ' },
+  { code: 'cancelar_nfe',                 label: 'Cancelar NF-e',                     category: 'NF-e', description: 'Cancelar notas fiscais emitidas' },
+  { code: 'corrigir_nfe',                 label: 'Corrigir NF-e (CC-e)',              category: 'NF-e', description: 'Emitir carta de correção de NF-e' },
+  { code: 'solicitar_cancelamento_nfe',   label: 'Solicitar Cancelamento de NF-e',    category: 'NF-e', description: 'Solicitar cancelamento de nota fiscal' },
+  { code: 'aprovar_cancelamento_nfe',     label: 'Aprovar Cancelamento de NF-e',      category: 'NF-e', description: 'Aprovar cancelamentos de notas fiscais' },
+  { code: 'solicitar_cce_nfe',            label: 'Solicitar CC-e',                    category: 'NF-e', description: 'Solicitar carta de correção de NF-e' },
+  { code: 'aprovar_cce_nfe',              label: 'Aprovar CC-e',                      category: 'NF-e', description: 'Aprovar cartas de correção de NF-e' },
+  { code: 'solicitar_inutilizacao_nfe',   label: 'Solicitar Inutilização de NF-e',    category: 'NF-e', description: 'Solicitar inutilização de numeração de NF-e' },
+  { code: 'aprovar_inutilizacao_nfe',     label: 'Aprovar Inutilização de NF-e',      category: 'NF-e', description: 'Aprovar inutilização de numeração de NF-e' },
+
+  // Mobile
+  { code: 'view_mobile_entregador', label: 'App Entregador',  category: 'Mobile', description: 'Acesso ao aplicativo móvel de entregas' },
+  { code: 'view_mobile_montador',   label: 'App Montador',    category: 'Mobile', description: 'Acesso ao aplicativo móvel de montagens' },
+
+  // Administração
+  { code: 'manage_user_access',      label: 'Gerenciar Usuários e Permissões', category: 'Administração', description: 'Gerenciar usuários, cargos e permissões do sistema' },
+  { code: 'view_saas_operator_panel', label: 'Painel Operador SaaS',           category: 'Administração', description: 'Acesso ao painel de operação da plataforma SaaS' },
+];
+
+// Categorias para agrupamento visual dos editores de permissão
+export const PERMISSION_CATEGORIES = [
+  { key: 'Dashboard',     label: 'Dashboard',            color: '#07593f' },
+  { key: 'Vendas',        label: 'Vendas',               color: '#3b82f6' },
+  { key: 'Orçamentos',    label: 'Orçamentos',           color: '#06b6d4' },
+  { key: 'Clientes',      label: 'Clientes',             color: '#8b5cf6' },
+  { key: 'Produtos',      label: 'Produtos',             color: '#f59e0b' },
+  { key: 'Estoque',       label: 'Estoque',              color: '#10b981' },
+  { key: 'Compras',       label: 'Compras',              color: '#f97316' },
+  { key: 'Logística',     label: 'Logística',            color: '#0ea5e9' },
+  { key: 'Montagem',      label: 'Montagem',             color: '#d97706' },
+  { key: 'Assistência',   label: 'Assistência Técnica',  color: '#ef4444' },
+  { key: 'Devoluções',    label: 'Devoluções',           color: '#dc2626' },
+  { key: 'Financeiro',    label: 'Financeiro',           color: '#8b5cf6' },
+  { key: 'Relatórios',    label: 'Relatórios',           color: '#0284c7' },
+  { key: 'Marketing',     label: 'Marketing',            color: '#ec4899' },
+  { key: 'RH',            label: 'Recursos Humanos',     color: '#db2777' },
+  { key: 'NF-e',          label: 'NF-e Fiscal',          color: '#64748b' },
+  { key: 'Mobile',        label: 'Aplicativos Mobile',   color: '#22c55e' },
+  { key: 'Administração', label: 'Administração',        color: '#dc2626' },
+];
+
 // Menu Lateral Configurado
 // ATENÇÃO: Links em PascalCase para bater com o nome dos arquivos (Limitação da plataforma)
 // NOTA: A propriedade 'module' indica qual feature flag controla a visibilidade do item

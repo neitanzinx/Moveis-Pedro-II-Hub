@@ -87,7 +87,7 @@ export default function UserManagementTab({ users = [], isLoading, currentUser }
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] });
+      queryClient.invalidateQueries({ queryKey: ['usuarios'] });
       queryClient.invalidateQueries({ queryKey: ['montadores'] });
       setEditModalOpen(false);
       setSelectedUser(null);
@@ -106,7 +106,7 @@ export default function UserManagementTab({ users = [], isLoading, currentUser }
       await base44.entities.User.delete(userId);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] });
+      queryClient.invalidateQueries({ queryKey: ['usuarios'] });
       toast.success("Usuário deletado");
     },
     onError: () => toast.error("Erro ao deletar usuário")
@@ -117,7 +117,7 @@ export default function UserManagementTab({ users = [], isLoading, currentUser }
       await base44.entities.User.update(userId, { custom_permissions: customPermissions });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['users'] });
+      queryClient.invalidateQueries({ queryKey: ['usuarios'] });
       setIsPermissionModalOpen(false);
       setPermissionUser(null);
       toast.success("Permissoes atualizadas!");

@@ -1,298 +1,326 @@
-import React, { useState, useMemo, createElement } from "react";
+import React, { useState, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, Plus, Minus, Shield, Info } from "lucide-react";
-import { MENU_ITEMS, ROLE_RULES, getPermissionStates } from "@/config/permissions";
-import { getCargoConfig } from "@/config/cargos";
+import { Loader2, Shield, Search, ChevronDown, ChevronRight, Check, X, Plus, Minus } from "lucide-react";
+import { ROLE_RULES, PERMISSION_CATALOG, PERMISSION_CATEGORIES, getUserRoles } from "@/config/permissions";
 
 /**
- * Editor Visual de Permissoes
- * Exibe mini-preview do sidebar com toggle de permissoes
+ * Editor visual de permissões por usuário (sobrepõe o cargo).
+ * Suporta múltiplos cargos: calcula base como union de ROLE_RULES dos cargos do usuário.
+ * Mantém a API onSave({ inherit, allowed, denied }) inalterada.
  */
 export default function PermissionEditorModal({ user, onSave, onClose, isSaving = false }) {
-    const cargo = user?.cargo || 'Vendedor';
-    const cargoConfig = getCargoConfig(cargo);
+    // Multi-cargo support: getUserRoles retorna array de cargos do usuário
+    const roles       = getUserRoles(user);
+    const primaryRole = roles[0] || 'Vendedor';
 
     // Estado inicial das custom_permissions
     const initialCustom = user?.custom_permissions || { inherit: true, allowed: [], denied: [] };
 
     const [inherit, setInherit] = useState(initialCustom.inherit !== false);
     const [allowed, setAllowed] = useState(initialCustom.allowed || []);
-    const [denied, setDenied] = useState(initialCustom.denied || []);
+    const [denied,  setDenied]  = useState(initialCustom.denied  || []);
+    const [search,             setSearch]             = useState('');
+    const [expandedCategories, setExpandedCategories] = useState({});
 
-    // Agrupa menu items por secao
-    const menuBySection = useMemo(() => {
-        const sections = {};
-        MENU_ITEMS.forEach(item => {
-            if (item.permission === '*' || item.permission === 'admin_only') return;
-            const section = item.section || 'Outros';
-            if (!sections[section]) sections[section] = [];
-            sections[section].push(item);
+    // Union of base permissions from all user roles
+    const roleBasePerms = useMemo(() => {
+        const perms = new Set();
+        roles.forEach(role => {
+            const rule = ROLE_RULES[role];
+            if (!rule) return;
+            if (rule.can.includes('*')) {
+                PERMISSION_CATALOG.forEach(({ code }) => perms.add(code));
+            } else {
+                rule.can.forEach(p => perms.add(p));
+            }
         });
-        return sections;
-    }, []);
+        return perms;
+    }, [roles]);
 
-    // Calcula estado de cada permissao
-    const permissionStates = useMemo(() => {
-        const roleRules = ROLE_RULES[cargo] || ROLE_RULES['Vendedor'];
+    // Compute display state for every catalog permission
+    const permState = useMemo(() => {
         const states = {};
-
-        MENU_ITEMS.forEach(item => {
-            if (item.permission === '*' || item.permission === 'admin_only') return;
-
-            const perm = item.permission;
-            const fromRole = roleRules.can.includes('*') || roleRules.can.includes(perm);
-            const inAllowed = allowed.includes(perm);
-            const inDenied = denied.includes(perm);
+        PERMISSION_CATALOG.forEach(({ code }) => {
+            const fromRole  = roleBasePerms.has(code);
+            const inAllowed = allowed.includes(code);
+            const inDenied  = denied.includes(code);
 
             let active = false;
-            let source = 'role';
+            let source = 'none';
 
             if (!inherit) {
                 active = inAllowed;
                 source = inAllowed ? 'custom_allowed' : 'none';
-            } else {
-                if (inDenied) {
-                    active = false;
-                    source = 'custom_denied';
-                } else if (inAllowed) {
-                    active = true;
-                    source = 'custom_allowed';
-                } else {
-                    active = fromRole;
-                    source = 'role';
-                }
+            } else if (inDenied) {
+                active = false;
+                source = 'custom_denied';
+            } else if (inAllowed) {
+                active = true;
+                source = 'custom_allowed';
+            } else if (fromRole) {
+                active = true;
+                source = 'role';
             }
 
-            states[perm] = { active, source, fromRole };
+            states[code] = { active, source, fromRole };
         });
-
         return states;
-    }, [cargo, inherit, allowed, denied]);
+    }, [roleBasePerms, inherit, allowed, denied]);
 
-    // Toggle uma permissao
-    const togglePermission = (permission) => {
-        const state = permissionStates[permission];
+    const togglePerm = (code) => {
+        const state = permState[code];
         if (!state) return;
 
         if (inherit) {
-            // Modo heranca
             if (state.fromRole) {
-                // Permissao vem do cargo - toggle adiciona ao denied
                 if (state.source === 'custom_denied') {
-                    // Ja esta no denied, remove
-                    setDenied(prev => prev.filter(p => p !== permission));
+                    setDenied(prev => prev.filter(p => p !== code));
                 } else {
-                    // Adiciona ao denied
-                    setDenied(prev => [...prev, permission]);
-                    setAllowed(prev => prev.filter(p => p !== permission));
+                    setDenied(prev  => [...prev, code]);
+                    setAllowed(prev => prev.filter(p => p !== code));
                 }
             } else {
-                // Permissao NAO vem do cargo - toggle adiciona ao allowed
                 if (state.source === 'custom_allowed') {
-                    // Ja esta no allowed, remove
-                    setAllowed(prev => prev.filter(p => p !== permission));
+                    setAllowed(prev => prev.filter(p => p !== code));
                 } else {
-                    // Adiciona ao allowed
-                    setAllowed(prev => [...prev, permission]);
-                    setDenied(prev => prev.filter(p => p !== permission));
+                    setAllowed(prev => [...prev, code]);
+                    setDenied(prev  => prev.filter(p => p !== code));
                 }
             }
         } else {
-            // Modo sem heranca - apenas allowed importa
-            if (allowed.includes(permission)) {
-                setAllowed(prev => prev.filter(p => p !== permission));
+            if (allowed.includes(code)) {
+                setAllowed(prev => prev.filter(p => p !== code));
             } else {
-                setAllowed(prev => [...prev, permission]);
+                setAllowed(prev => [...prev, code]);
             }
         }
     };
 
     const handleSave = () => {
-        const customPermissions = {
+        onSave({
             inherit,
-            allowed: allowed.filter(a => a),
-            denied: inherit ? denied.filter(d => d) : []
-        };
-        onSave(customPermissions);
+            allowed: allowed.filter(Boolean),
+            denied:  inherit ? denied.filter(Boolean) : [],
+        });
     };
 
-    const getItemStyle = (state) => {
-        if (!state) return {};
+    // Group catalog by category with search filter
+    const catalogByCategory = useMemo(() => {
+        const q = search.toLowerCase().trim();
+        const result = {};
+        PERMISSION_CATALOG.forEach(item => {
+            if (
+                q &&
+                !item.label.toLowerCase().includes(q) &&
+                !item.code.toLowerCase().includes(q) &&
+                !item.description.toLowerCase().includes(q)
+            ) return;
+            if (!result[item.category]) result[item.category] = [];
+            result[item.category].push(item);
+        });
+        return result;
+    }, [search]);
 
-        if (state.active) {
-            if (state.source === 'custom_allowed') {
-                return {
-                    backgroundColor: '#dbeafe',
-                    borderColor: '#3b82f6',
-                    opacity: 1
-                };
-            }
-            return {
-                backgroundColor: '#d1fae5',
-                borderColor: '#10b981',
-                opacity: 1
-            };
-        } else {
-            if (state.source === 'custom_denied') {
-                return {
-                    backgroundColor: '#fee2e2',
-                    borderColor: '#ef4444',
-                    opacity: 0.7,
-                    textDecoration: 'line-through'
-                };
-            }
-            return {
-                backgroundColor: '#f3f4f6',
-                borderColor: '#e5e7eb',
-                opacity: 0.4
-            };
-        }
+    const toggleCategory = (cat) =>
+        setExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
+
+    const isCategoryExpanded = (cat) => expandedCategories[cat] !== false;
+
+    const getPermStyle = (code) => {
+        const s = permState[code];
+        if (!s || s.source === 'none')   return { bg: 'bg-gray-50', border: 'border-gray-200', opacity: 'opacity-50' };
+        if (s.source === 'custom_denied') return { bg: 'bg-red-50',  border: 'border-red-300',  opacity: '' };
+        if (s.source === 'custom_allowed') return { bg: 'bg-blue-50', border: 'border-blue-300', opacity: '' };
+        if (s.active)                      return { bg: 'bg-green-50', border: 'border-green-300', opacity: '' };
+        return { bg: 'bg-gray-50', border: 'border-gray-200', opacity: 'opacity-50' };
     };
 
-    const getBadge = (state) => {
-        if (!state) return null;
-
-        if (state.source === 'custom_allowed') {
-            return <Badge className="bg-blue-100 text-blue-700 text-xs px-1"><Plus className="w-3 h-3" /></Badge>;
-        }
-        if (state.source === 'custom_denied') {
-            return <Badge className="bg-red-100 text-red-700 text-xs px-1"><Minus className="w-3 h-3" /></Badge>;
-        }
-        return null;
-    };
-
-    const countCustom = allowed.length + denied.length;
+    const activeCount = Object.values(permState).filter(s => s.active).length;
+    const customCount = allowed.length + denied.length;
 
     if (!user) return null;
 
     return (
         <Dialog open onOpenChange={onClose}>
-            <DialogContent className="max-w-2xl max-h-[90vh]">
-                <DialogHeader>
+            <DialogContent className="max-w-3xl max-h-[92vh] flex flex-col gap-3">
+                <DialogHeader className="flex-shrink-0">
                     <DialogTitle className="flex items-center gap-2">
                         <Shield className="w-5 h-5" style={{ color: '#07593f' }} />
-                        Permissoes de {user.full_name}
+                        Permissões de {user.full_name}
                     </DialogTitle>
                     <DialogDescription>
-                        Clique nos itens para permitir ou negar acesso. Cargo atual: <strong>{cargo}</strong>
+                        Cargo(s): <strong>{roles.join(', ') || 'Nenhum'}</strong>.
+                        Clique nas permissões para personalizar o acesso individual.
                     </DialogDescription>
                 </DialogHeader>
 
-                {/* Legenda */}
-                <div className="flex gap-4 text-xs text-gray-600 p-2 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-1">
-                        <div className="w-4 h-4 rounded bg-green-100 border border-green-500" />
-                        <span>Do cargo</span>
+                <div className="flex-shrink-0 space-y-3">
+                    {/* Legend */}
+                    <div className="flex gap-3 text-xs text-gray-600 flex-wrap">
+                        <span className="flex items-center gap-1">
+                            <span className="w-3 h-3 rounded bg-green-100 border border-green-400 inline-block" />
+                            Do cargo
+                        </span>
+                        <span className="flex items-center gap-1">
+                            <span className="w-3 h-3 rounded bg-blue-100 border border-blue-400 inline-block" />
+                            Adicionado
+                        </span>
+                        <span className="flex items-center gap-1">
+                            <span className="w-3 h-3 rounded bg-red-100 border border-red-400 inline-block" />
+                            Removido
+                        </span>
+                        <span className="flex items-center gap-1">
+                            <span className="w-3 h-3 rounded bg-gray-100 border border-gray-300 inline-block opacity-50" />
+                            Sem acesso
+                        </span>
                     </div>
-                    <div className="flex items-center gap-1">
-                        <div className="w-4 h-4 rounded bg-blue-100 border border-blue-500" />
-                        <span>Adicionado</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                        <div className="w-4 h-4 rounded bg-red-100 border border-red-500 opacity-70" />
-                        <span>Removido</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                        <div className="w-4 h-4 rounded bg-gray-100 border border-gray-300 opacity-40" />
-                        <span>Sem acesso</span>
-                    </div>
-                </div>
 
-                {/* Checkbox heranca */}
-                <div className="flex items-center gap-3 p-3 rounded-lg border" style={{ backgroundColor: inherit ? '#f0fdf4' : '#fef3c7' }}>
-                    <Checkbox
-                        checked={inherit}
-                        onCheckedChange={setInherit}
-                        id="inherit"
-                    />
-                    <div>
-                        <Label htmlFor="inherit" className="cursor-pointer font-medium">
-                            Herdar permissoes do cargo ({cargo})
-                        </Label>
-                        <p className="text-xs text-gray-500">
-                            {inherit
-                                ? "Customizacoes adicionam ou removem permissoes do cargo base"
-                                : "Usuario tera APENAS as permissoes marcadas manualmente"}
-                        </p>
-                    </div>
-                </div>
-
-                {/* Mini Sidebar Preview */}
-                <Card className="border-2" style={{ borderColor: '#07593f' }}>
-                    <CardContent className="p-0">
-                        <div className="p-3 border-b" style={{ backgroundColor: '#07593f' }}>
-                            <p className="text-white text-sm font-medium">Pre-visualizacao do Menu</p>
+                    {/* Inherit toggle */}
+                    <div
+                        className="flex items-center gap-3 p-3 rounded-lg border"
+                        style={{ backgroundColor: inherit ? '#f0fdf4' : '#fef3c7' }}
+                    >
+                        <Checkbox checked={inherit} onCheckedChange={setInherit} id="inherit-user" />
+                        <div>
+                            <Label htmlFor="inherit-user" className="cursor-pointer font-medium">
+                                Herdar permissões do cargo ({primaryRole})
+                            </Label>
+                            <p className="text-xs text-gray-500">
+                                {inherit
+                                    ? 'Customizações adicionam ou removem permissões do cargo base'
+                                    : 'Usuário terá APENAS as permissões marcadas manualmente'}
+                            </p>
                         </div>
-                        <ScrollArea className="h-[300px]">
-                            <div className="p-2 space-y-4">
-                                {Object.entries(menuBySection).map(([section, items]) => (
-                                    <div key={section}>
-                                        <p className="text-xs font-semibold text-gray-400 uppercase mb-2 px-2">{section}</p>
-                                        <div className="space-y-1">
-                                            {items.map(item => {
-                                                const state = permissionStates[item.permission];
-                                                const style = getItemStyle(state);
+                    </div>
 
+                    {!inherit && (
+                        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                            Modo manual: apenas permissões marcadas abaixo serão concedidas.
+                        </div>
+                    )}
+
+                    {/* Search */}
+                    <div className="flex items-center gap-3">
+                        <div className="flex-1 relative">
+                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" />
+                            <Input
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                                placeholder="Filtrar permissões..."
+                                className="pl-7 h-8 text-sm"
+                            />
+                        </div>
+                        <span className="text-xs text-gray-500 whitespace-nowrap">
+                            {activeCount} ativa(s){customCount > 0 ? ` · ${customCount} customiz.` : ''}
+                        </span>
+                    </div>
+                </div>
+
+                {/* Permissions by category */}
+                <ScrollArea className="flex-1 min-h-0">
+                    <div className="space-y-3 pr-2">
+                        {Object.entries(catalogByCategory).map(([category, items]) => {
+                            const catConfig   = PERMISSION_CATEGORIES.find(c => c.key === category);
+                            const expanded    = isCategoryExpanded(category);
+                            const activeInCat = items.filter(i => permState[i.code]?.active).length;
+
+                            return (
+                                <div key={category} className="border rounded-lg overflow-hidden">
+                                    <button
+                                        type="button"
+                                        className="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors"
+                                        onClick={() => toggleCategory(category)}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            {expanded
+                                                ? <ChevronDown  className="w-4 h-4 text-gray-500" />
+                                                : <ChevronRight className="w-4 h-4 text-gray-500" />
+                                            }
+                                            <span
+                                                className="font-medium text-sm"
+                                                style={{ color: catConfig?.color || '#374151' }}
+                                            >
+                                                {catConfig?.label || category}
+                                            </span>
+                                        </div>
+                                        <Badge
+                                            className="text-xs"
+                                            style={{
+                                                backgroundColor: `${catConfig?.color || '#6b7280'}20`,
+                                                color:           catConfig?.color || '#6b7280',
+                                            }}
+                                        >
+                                            {activeInCat}/{items.length}
+                                        </Badge>
+                                    </button>
+
+                                    {expanded && (
+                                        <div className="p-2 grid sm:grid-cols-2 gap-1">
+                                            {items.map(item => {
+                                                const style = getPermStyle(item.code);
+                                                const state = permState[item.code];
                                                 return (
                                                     <button
-                                                        key={item.url}
-                                                        onClick={() => togglePermission(item.permission)}
-                                                        className="w-full flex items-center gap-3 p-2 rounded-lg border transition-all hover:scale-[1.02]"
-                                                        style={{
-                                                            ...style,
-                                                            cursor: 'pointer'
-                                                        }}
+                                                        key={item.code}
+                                                        type="button"
+                                                        onClick={() => togglePerm(item.code)}
+                                                        className={`w-full text-left p-2 rounded-lg border transition-all hover:scale-[1.01] ${style.bg} ${style.border} ${style.opacity}`}
                                                     >
-                                                        {createElement(item.icon, {
-                                                            className: "w-4 h-4 flex-shrink-0",
-                                                            style: { opacity: state?.active ? 1 : 0.4 }
-                                                        })}
-                                                        <span
-                                                            className="flex-1 text-left text-sm"
-                                                            style={{
-                                                                opacity: state?.active ? 1 : 0.5,
-                                                                textDecoration: style.textDecoration
-                                                            }}
-                                                        >
-                                                            {item.title}
-                                                        </span>
-                                                        {getBadge(state)}
+                                                        <div className="flex items-start gap-2">
+                                                            <div className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                                                                state?.source === 'custom_denied'  ? 'bg-red-200'   :
+                                                                state?.active                      ? 'bg-green-200' :
+                                                                'bg-gray-200'
+                                                            }`}>
+                                                                {state?.source === 'custom_denied'              && <X     className="w-3 h-3 text-red-600"   />}
+                                                                {state?.active && state?.source !== 'custom_denied' && <Check className="w-3 h-3 text-green-600" />}
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <p className="text-xs font-medium leading-tight">{item.label}</p>
+                                                                <p className="text-xs text-gray-500 leading-tight">{item.description}</p>
+                                                            </div>
+                                                            {state?.source === 'custom_allowed' && (
+                                                                <Badge className="bg-blue-100 text-blue-700 text-xs px-1 flex-shrink-0">
+                                                                    <Plus className="w-2 h-2" />
+                                                                </Badge>
+                                                            )}
+                                                            {state?.source === 'custom_denied' && (
+                                                                <Badge className="bg-red-100 text-red-700 text-xs px-1 flex-shrink-0">
+                                                                    <Minus className="w-2 h-2" />
+                                                                </Badge>
+                                                            )}
+                                                        </div>
                                                     </button>
                                                 );
                                             })}
                                         </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </ScrollArea>
-                    </CardContent>
-                </Card>
-
-                {/* Info */}
-                {countCustom > 0 && (
-                    <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-50 p-2 rounded-lg">
-                        <Info className="w-4 h-4" />
-                        <span>{countCustom} permissao(oes) customizada(s)</span>
+                                    )}
+                                </div>
+                            );
+                        })}
+                        {Object.keys(catalogByCategory).length === 0 && (
+                            <p className="text-center text-gray-400 py-8 text-sm">
+                                Nenhuma permissão encontrada para este filtro.
+                            </p>
+                        )}
                     </div>
-                )}
+                </ScrollArea>
 
-                <DialogFooter>
-                    <Button variant="outline" onClick={onClose}>
-                        Cancelar
-                    </Button>
+                <DialogFooter className="flex-shrink-0">
+                    <Button variant="outline" onClick={onClose}>Cancelar</Button>
                     <Button
                         onClick={handleSave}
                         disabled={isSaving}
                         style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
                     >
-                        {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                        Salvar Permissoes
+                        {isSaving && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+                        Salvar Permissões
                     </Button>
                 </DialogFooter>
             </DialogContent>

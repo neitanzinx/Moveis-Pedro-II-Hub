@@ -38,9 +38,20 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const getMergedRolePermissions = (roles = [], dbPermissions = []) => {
-    const hardcodedPermissions = roles.flatMap((role) => ROLE_RULES[role]?.can || []);
-    return Array.from(new Set([...(dbPermissions || []), ...hardcodedPermissions]));
+  const getMergedRolePermissions = (roles = [], rawRolePermissions = []) => {
+    const allPermissions = new Set();
+    for (const role of roles) {
+      const dbRow = rawRolePermissions.find(r => r.cargo === role);
+      // Base: hardcoded ROLE_RULES (fallback when no DB row exists)
+      (ROLE_RULES[role]?.can || []).forEach(p => allPermissions.add(p));
+      if (dbRow) {
+        // Explicitly added permissions (extras beyond ROLE_RULES)
+        (dbRow.permissions || []).forEach(p => allPermissions.add(p));
+        // Explicitly denied permissions (removed from ROLE_RULES)
+        (dbRow.denied_permissions || []).forEach(p => allPermissions.delete(p));
+      }
+    }
+    return Array.from(allPermissions);
   };
 
   useEffect(() => {
@@ -84,18 +95,19 @@ export function AuthProvider({ children }) {
           'RolePermission.list'
         );
         const roles = getUserRoles(targetUser);
-        const permissionsFromDb = Array.from(new Set(
-          rolePermissions
-            .filter(c => roles.includes(c.cargo))
-            .flatMap(c => Array.isArray(c.permissions) ? c.permissions : [])
-        ));
-        const permissions = getMergedRolePermissions(roles, permissionsFromDb);
+        // Filter DB rows matching the user's roles
+        const userRoleRows = rolePermissions.filter(c => roles.includes(c.cargo));
+        const permissions = getMergedRolePermissions(roles, userRoleRows);
 
         if (permissions.length > 0 && mounted) {
-          const roleScopes = roles.map(role => ROLE_RULES[role]?.scope).filter(Boolean);
+          // Scope: prefer DB scope (supports custom cargos), fallback to ROLE_RULES
+          const scopePerRole = roles.map(role => {
+            const dbRow = userRoleRows.find(r => r.cargo === role);
+            return dbRow?.scope || ROLE_RULES[role]?.scope || SCOPES.OWN;
+          });
           setCargoPermissoes({
             can: permissions,
-            scope: getHighestScope(roleScopes)
+            scope: getHighestScope(scopePerRole)
           });
         }
       } catch (e) {
