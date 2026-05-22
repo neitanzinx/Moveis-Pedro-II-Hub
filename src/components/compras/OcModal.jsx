@@ -47,7 +47,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTenant } from '@/contexts/TenantContext';
 import { buildProductDisplayName } from '@/utils/productReference';
 import FornecedorModal from '@/components/cadastros/FornecedorModal';
-import ProdutoModal from '@/components/produtos/ProdutoModal';
+import ProdutoCadastroCompleto from '@/components/produtos/ProdutoCadastroCompleto';
 import { gerarTextoPedidoOperacional } from '@/utils/orderFormatUtils';
 import { calculateFinalPriceFromMarkup, toMultiplierFromPercent, toPercentFromMultiplier } from '@/utils/markupCalculator';
 
@@ -2481,7 +2481,7 @@ export default function OcModal({
         }}
       />
 
-      <ProdutoModal
+      <ProdutoCadastroCompleto
         isOpen={novoProdutoModalOpen}
         onClose={() => setNovoProdutoModalOpen(false)}
         onSave={handleSalvarNovoProduto}

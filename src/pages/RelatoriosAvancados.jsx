@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-import ProdutoModal from "@/components/produtos/ProdutoModal";
+import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
 import RelatorioMontadores from "@/components/relatorios/RelatorioMontadores";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -2414,7 +2414,7 @@ export default function RelatoriosAvancados() {
         </Tabs>
 
         {/* Modal de Detalhes do Produto */}
-        <ProdutoModal
+        <ProdutoCadastroCompleto
           isOpen={produtoModalOpen}
           onClose={() => {
             setProdutoModalOpen(false);

@@ -23,6 +23,12 @@ export default function BuscaProdutoAvancada(props) {
   const searchRef = useRef(null);
   const { validarProduto } = useEstoqueValidacao();
 
+  const hasMeaningfulValue = (value) => {
+    if (value === null || value === undefined) return false;
+    const normalized = String(value).trim().toLowerCase();
+    return normalized !== '' && !['n/a', 'na', '-', 'null', 'undefined', '?'].includes(normalized);
+  };
+
   // Fechar resultados ao clicar fora
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -207,8 +213,9 @@ export default function BuscaProdutoAvancada(props) {
                       {/* Linha de detalhes: Variações + Categoria + Estoque */}
                       <div className="flex items-center flex-wrap gap-1.5 w-full">
                         {/* Cor */}
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-50 border border-gray-200 text-gray-700 font-medium flex items-center gap-1.5" title="Cor">
-                          {produto.cor ? (() => {
+                        {hasMeaningfulValue(produto.cor) && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-50 border border-gray-200 text-gray-700 font-medium flex items-center gap-1.5" title="Cor">
+                            {(() => {
                             const colors = produto.cor.split('/').map(c => c.trim());
                             const isDual = colors.length > 1;
                             const hex1 = getColorHex(colors[0]);
@@ -223,26 +230,34 @@ export default function BuscaProdutoAvancada(props) {
                                 {produto.cor}
                               </>
                             );
-                          })() : <span className="text-gray-400">Cor: N/A</span>}
-                        </span>
+                          })()}
+                          </span>
+                        )}
 
                         {/* Material/Tecido */}
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium flex items-center" title="Material">
-                          <Layers className="w-3 h-3 mr-1" /> {produto.material || 'Mat: N/A'}
-                        </span>
+                        {hasMeaningfulValue(produto.material) && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium flex items-center" title="Material">
+                            <Layers className="w-3 h-3 mr-1" /> {produto.material}
+                          </span>
+                        )}
 
                         {/* Dimensões - Montadas a partir dos campos separados */}
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium flex items-center" title="Dimensões">
-                          <Ruler className="w-3 h-3 mr-1" />
-                          {(produto.largura || produto.altura || produto.profundidade)
-                            ? `${produto.largura || '?'}x${produto.altura || '?'}${produto.profundidade ? `x${produto.profundidade}` : ''} cm`
-                            : 'Dim: N/A'
-                          }
-                        </span>
+                        {(hasMeaningfulValue(produto.largura) || hasMeaningfulValue(produto.altura) || hasMeaningfulValue(produto.profundidade)) && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium flex items-center" title="Dimensões">
+                            <Ruler className="w-3 h-3 mr-1" />
+                            {[
+                              hasMeaningfulValue(produto.largura) ? `L:${produto.largura}` : null,
+                              hasMeaningfulValue(produto.altura) ? `A:${produto.altura}` : null,
+                              hasMeaningfulValue(produto.profundidade) ? `P:${produto.profundidade}` : null,
+                            ].filter(Boolean).join(' ')} cm
+                          </span>
+                        )}
                         {/* Fornecedor */}
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium flex items-center border border-purple-100 dark:border-purple-800" title="Fornecedor">
-                          <Building2 className="w-3 h-3 mr-1" /> {produto.fornecedor_nome || 'Forn: N/A'}
-                        </span>
+                        {hasMeaningfulValue(produto.fornecedor_nome) && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium flex items-center border border-purple-100 dark:border-purple-800" title="Fornecedor">
+                            <Building2 className="w-3 h-3 mr-1" /> {produto.fornecedor_nome}
+                          </span>
+                        )}
                         {/* Categoria */}
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-700 text-gray-600 dark:text-gray-300">
                           {produto.categoria || 'Outros'}

@@ -13,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import ProdutoModal from '@/components/produtos/ProdutoModal';
+import ProdutoCadastroCompleto from '@/components/produtos/ProdutoCadastroCompleto';
 import { getColorHex } from '@/components/produtos/FurnitureColorPicker';
 import { toast } from 'sonner';
 
@@ -692,8 +692,8 @@ export default function BipagemTab() {
                 </Card>
             </div>
 
-            {/* ─── ProdutoModal for creating new products ── */}
-            <ProdutoModal
+            {/* ─── Cadastro completo para novos produtos ── */}
+            <ProdutoCadastroCompleto
                 isOpen={showProdutoModal}
                 onClose={() => setShowProdutoModal(false)}
                 onSave={handleCreateProduct}
@@ -702,7 +702,7 @@ export default function BipagemTab() {
                     nome: apiData.nome || '',
                     codigo_barras: pendingGtin || '',
                     ncm: apiData.ncm || '',
-                    foto_url: apiData.foto_url || '',
+                    fotos: apiData.foto_url ? [apiData.foto_url] : [],
                 } : {
                     codigo_barras: pendingGtin || '',
                 }}

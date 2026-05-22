@@ -16,7 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/useAuth";
 import SolicitacoesCadastroWidget from "@/components/dashboard/SolicitacoesCadastroWidget";
 import ControleMontadoresWidget from "@/components/dashboard/ControleMontadoresWidget";
-import ProdutoModal from "@/components/produtos/ProdutoModal";
+import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
 import AcoesVendedoresWidget from "@/components/dashboard/AcoesVendedoresWidget";
 import { toast } from "sonner";
 import { formatarMoeda } from "@/utils/formatters";
@@ -3185,7 +3185,7 @@ export default function DashboardGerente() {
                 )
             }
             {/* Modal de Detalhes do Produto */}
-            <ProdutoModal
+            <ProdutoCadastroCompleto
                 isOpen={produtoModalOpen}
                 onClose={() => {
                     setProdutoModalOpen(false);

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
 import { useTenant, useLojas } from '@/contexts/TenantContext';
-import { useAuth } from '@/hooks/useAuth';
 import {
     Dialog,
     DialogContent,
@@ -312,8 +311,7 @@ export default function ProdutoCadastroCompleto({
     // Multi-Tenant: Carrega lojas dinâmicas e configurações
     const { data: lojas = [] } = useLojas();
     const { settings, organization } = useTenant();
-    const { user } = useAuth();
-    const showFinancials = user?.cargo === 'Administrador';
+    const showFinancials = !readOnly;
 
     // Busca dados necessários
     const { data: fornecedores } = useQuery({
@@ -746,7 +744,7 @@ export default function ProdutoCadastroCompleto({
             preco_final_sugerido: suggestedPrice > 0 ? suggestedPrice : null,
             preco_final_manual: formData.preco_final_manual ? parseFloat(formData.preco_final_manual) : null,
             usar_markup_fornecedor: Boolean(formData.usar_markup_fornecedor),
-            preco_venda: parseFloat(formData.preco_final_manual) || precoVenda,
+            preco_venda: precoVenda,
             valor_montagem: formData.valor_montagem ? parseFloat(formData.valor_montagem) : null,
             quantidade_estoque: estoqueTotal,
             estoque_cd: estoqueCd,

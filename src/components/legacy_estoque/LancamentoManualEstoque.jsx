@@ -65,6 +65,46 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
     .filter(Boolean)
     .join(" • ");
 
+  const hasMeaningfulValue = (value) => {
+    if (value === null || value === undefined) return false;
+    const normalized = String(value).trim().toLowerCase();
+    return normalized !== "" && !["n/a", "na", "-", "null", "undefined", "?"].includes(normalized);
+  };
+
+  const montarDetalhesProduto = (produto) => {
+    if (!produto) return [];
+
+    const detalhes = [];
+
+    if (hasMeaningfulValue(produto.cor)) {
+      detalhes.push({ chave: "cor", texto: `Cor: ${produto.cor}` });
+    }
+
+    if (hasMeaningfulValue(produto.tamanho)) {
+      detalhes.push({ chave: "tamanho", texto: `Tam: ${produto.tamanho}` });
+    }
+
+    if (hasMeaningfulValue(produto.material)) {
+      detalhes.push({ chave: "material", texto: `Material: ${produto.material}` });
+    }
+
+    const largura = hasMeaningfulValue(produto.largura) ? produto.largura : null;
+    const altura = hasMeaningfulValue(produto.altura) ? produto.altura : null;
+    const profundidade = hasMeaningfulValue(produto.profundidade) ? produto.profundidade : null;
+
+    const dimensoes = [
+      largura ? `L:${largura}` : null,
+      altura ? `A:${altura}` : null,
+      profundidade ? `P:${profundidade}` : null,
+    ].filter(Boolean);
+
+    if (dimensoes.length > 0) {
+      detalhes.push({ chave: "dimensoes", texto: `${dimensoes.join(" ")} cm` });
+    }
+
+    return detalhes;
+  };
+
   const selecionarProduto = (produto) => {
     const novaLinha = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -394,6 +434,7 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
                   <div className="absolute z-20 mt-1 w-full rounded-xl border bg-white shadow-lg overflow-hidden">
                     {sugestoes.map((produto, idx) => {
                       const resumo = getProdutoResumoEstoque(produto);
+                      const detalhesProduto = montarDetalhesProduto(produto);
                       return (
                         <button
                           key={`${produto.id}-${idx}`}
@@ -406,6 +447,15 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
                             <p className="truncate text-xs text-gray-500">
                               {[produto.codigo_barras, produto.modelo_referencia, produto.fornecedor_nome].filter(Boolean).join(" • ") || "Sem código"}
                             </p>
+                            {detalhesProduto.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-gray-600">
+                                {detalhesProduto.map((detalhe) => (
+                                  <span key={`${produto.id}-${detalhe.chave}`} className="rounded-full bg-blue-50 px-2 py-0.5 border border-blue-100 text-blue-700">
+                                    {detalhe.texto}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                             <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-gray-600">
                               <span className="rounded-full bg-gray-100 px-2 py-0.5">Estoque total: {resumo.total}</span>
                               {resumo.itens.map((item) => (
@@ -435,12 +485,22 @@ export default function LancamentoManualEstoque({ onVoltar, user }) {
                   {linhas.map((linha) => {
                     const produtoAtual = produtos.find((p) => p.id === linha.produtoId);
                     const resumo = produtoAtual ? getProdutoResumoEstoque(produtoAtual) : null;
+                    const detalhesProduto = produtoAtual ? montarDetalhesProduto(produtoAtual) : [];
                     return (
                       <div key={linha.id} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-gray-900">{linha.nomeProduto}</p>
                           {linha.produtoCodigo && (
                             <p className="truncate text-xs text-gray-500">{linha.produtoCodigo}</p>
+                          )}
+                          {detalhesProduto.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-gray-600">
+                              {detalhesProduto.map((detalhe) => (
+                                <span key={`${linha.id}-${detalhe.chave}`} className="rounded-full bg-blue-50 px-2 py-0.5 border border-blue-100 text-blue-700">
+                                  {detalhe.texto}
+                                </span>
+                              ))}
+                            </div>
                           )}
                           {resumo && (
                             <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-gray-500">
