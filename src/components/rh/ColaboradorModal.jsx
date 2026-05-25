@@ -1,9 +1,7 @@
-import React, { createElement, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
-import { CARGOS, getCargoConfig } from "@/config/cargos";
-import { useLojas } from "@/hooks/useLojas";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,7 +85,6 @@ export default function ColaboradorModal({
     const navigate = useNavigate();
     const { can } = useAuth();
     const canManageAccess = can("manage_user_access");
-    const { data: lojasReal = [] } = useLojas();
     const isEditing = !!colaborador && !colaborador.isAcessoRapido;
 
     const [formData, setFormData] = useState({
@@ -107,8 +104,6 @@ export default function ColaboradorModal({
         estado: colaborador?.estado || "",
         // Profissional
         descricao_cargo: colaborador?.descricao_cargo || "",
-        roles_sistema: colaborador?.roles_sistema && Array.isArray(colaborador.roles_sistema) ? colaborador.roles_sistema : [],
-        loja: colaborador?.loja || "",
         status: colaborador?.status || "Ativo",
         tipo_contrato: colaborador?.tipo_contrato || "CLT",
         data_admissao: colaborador?.data_admissao || "",
@@ -152,31 +147,17 @@ export default function ColaboradorModal({
     });
 
     const [saving, setSaving] = useState(false);
-    const usaPinMontagem = formData.roles_sistema && formData.roles_sistema.includes("Montador");
+    const usaPinMontagem =
+        !!formData.pin_montagem ||
+        formData.descricao_cargo?.toLowerCase().includes("montador");
 
     const totals = useMemo(() => gerarResumoEstimado(formData), [formData]);
 
     const createMutation = useMutation({
         mutationFn: async (data) => {
             const colaboradorData = { ...data };
-            delete colaboradorData.loja;
-            colaboradorData.pin_montagem = data.roles_sistema?.includes("Montador") ? data.pin_montagem : null;
-            const createdColab = await base44.entities.Colaborador.create(colaboradorData);
-            if (data.user_id && data.roles_sistema && data.roles_sistema.length > 0) {
-                try {
-                    const primaryRole = data.roles_sistema[0];
-                    const cargoConfig = getCargoConfig(primaryRole);
-                    await base44.entities.User.update(data.user_id, {
-                        roles: data.roles_sistema,
-                        full_name: data.nome_completo,
-                        loja: cargoConfig?.requiresStore ? data.loja : null,
-                        is_vendedor: data.roles_sistema.includes("Vendedor"),
-                    });
-                } catch (syncError) {
-                    console.error("Erro ao sincronizar com public_users:", syncError);
-                }
-            }
-            return createdColab;
+            colaboradorData.pin_montagem = data.pin_montagem || null;
+            return base44.entities.Colaborador.create(colaboradorData);
         },
         onSuccess: (createdData) => {
             queryClient.invalidateQueries(["colaboradores"]);
@@ -196,24 +177,8 @@ export default function ColaboradorModal({
     const updateMutation = useMutation({
         mutationFn: async ({ id, data }) => {
             const colaboradorData = { ...data };
-            delete colaboradorData.loja;
-            colaboradorData.pin_montagem = data.roles_sistema?.includes("Montador") ? data.pin_montagem : null;
-            const updatedColab = await base44.entities.Colaborador.update(id, colaboradorData);
-            if (data.user_id && data.roles_sistema && data.roles_sistema.length > 0) {
-                try {
-                    const primaryRole = data.roles_sistema[0];
-                    const cargoConfig = getCargoConfig(primaryRole);
-                    await base44.entities.User.update(data.user_id, {
-                        roles: data.roles_sistema,
-                        full_name: data.nome_completo,
-                        loja: cargoConfig?.requiresStore ? data.loja : null,
-                        is_vendedor: data.roles_sistema.includes("Vendedor"),
-                    });
-                } catch (syncError) {
-                    console.error("Erro ao sincronizar com public_users:", syncError);
-                }
-            }
-            return updatedColab;
+            colaboradorData.pin_montagem = data.pin_montagem || null;
+            return base44.entities.Colaborador.update(id, colaboradorData);
         },
         onSuccess: () => {
             queryClient.invalidateQueries(["colaboradores"]);
@@ -226,26 +191,10 @@ export default function ColaboradorModal({
         },
     });
 
-    const { data: todosColaboradores = [] } = useQuery({
-        queryKey: ["colaboradores_lista_completa"],
-        queryFn: () => base44.entities.Colaborador.list(),
-        staleTime: 5000,
-    });
-
     const linkedUser = useMemo(
         () => usuarios.find((u) => u.id === formData.user_id),
         [formData.user_id, usuarios]
     );
-
-    const usuariosDisponiveis = useMemo(() => {
-        const userIdsEmUso = new Set(
-            todosColaboradores
-                .filter((c) => c.id !== colaborador?.id)
-                .map((c) => c.user_id)
-                .filter(Boolean)
-        );
-        return usuarios.filter((u) => !userIdsEmUso.has(u.id));
-    }, [usuarios, todosColaboradores, colaborador]);
 
     const handleChange = (field, value) => {
         setFormData((prev) => ({ ...prev, [field]: value }));
@@ -276,19 +225,9 @@ export default function ColaboradorModal({
         if (e) e.preventDefault();
         setSaving(true);
         try {
-            const suggestedUser =
-                !formData.user_id && formData.email
-                    ? usuariosDisponiveis.find(
-                          (user) =>
-                              user.email?.toLowerCase() === formData.email.toLowerCase()
-                      )
-                    : null;
-
             const payload = {
                 ...formData,
-                user_id: canManageAccess
-                    ? formData.user_id || suggestedUser?.id || ""
-                    : colaborador?.user_id || "",
+                user_id: colaborador?.user_id || formData.user_id || "",
             };
 
             if (isEditing) {
@@ -503,64 +442,7 @@ export default function ColaboradorModal({
                             />
                         </div>
 
-                        <SectionTitle>Papéis do Sistema (Permissões)</SectionTitle>
-                        <p className="text-xs text-gray-600 mb-3">Selecione um ou mais papéis para definir quais permissões o colaborador terá no sistema.</p>
-                        <div className="grid grid-cols-2 gap-4">
-                            {CARGOS.filter((c) => c?.value).map((c) => {
-                                const isSelected = formData.roles_sistema?.includes(c.value);
-                                return (
-                                    <Card key={c.value} className={`cursor-pointer border-2 transition-all ${isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                                        <CardContent className="p-3">
-                                            <label className="flex items-start gap-3 cursor-pointer">
-                                                <Checkbox
-                                                    checked={isSelected}
-                                                    onCheckedChange={(checked) => {
-                                                        const newRoles = checked
-                                                            ? [...(formData.roles_sistema || []), c.value]
-                                                            : (formData.roles_sistema || []).filter(r => r !== c.value);
-                                                        handleChange("roles_sistema", newRoles);
-                                                    }}
-                                                    className="mt-0.5"
-                                                />
-                                                <div className="flex-1">
-                                                    <div className="flex items-center gap-2">
-                                                        {createElement(c.icon, {
-                                                            className: "w-4 h-4",
-                                                            style: { color: c.color },
-                                                        })}
-                                                        <span className="font-medium text-sm">{c.label}</span>
-                                                    </div>
-                                                    <p className="text-xs text-gray-600 mt-1">{c.description}</p>
-                                                </div>
-                                            </label>
-                                        </CardContent>
-                                    </Card>
-                                );
-                            })}
-                        </div>
-
                         <div className="grid grid-cols-2 gap-4 mt-5">
-                            {formData.roles_sistema?.some(r => getCargoConfig(r)?.requiresStore) && (
-                                <div>
-                                    <Label>Loja</Label>
-                                    <Select
-                                        value={formData.loja}
-                                        onValueChange={(v) => handleChange("loja", v)}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Selecione a loja" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {lojasReal.filter((l) => l?.nome).map((l) => (
-                                                <SelectItem key={l.id} value={l.nome}>
-                                                    {l.nome}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            )}
-
                             <div>
                                 <Label>Status</Label>
                                 <Select

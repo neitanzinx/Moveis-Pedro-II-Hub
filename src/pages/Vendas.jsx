@@ -28,7 +28,27 @@ import { getVendaFinanceiro, getVendaResumoLogistico, isStatusCancelado, isVenda
 import { buildProductDisplayName } from "@/utils/productReference";
 import { MONEY_EPSILON, toMoneyNumber } from "@/utils/deliveryPayment";
 
+const STATUS_ENTREGA_OPTIONS = [
+    'Aguardando Liberação',
+    'Pendente',
+    'Agendada',
+    'Em Rota',
+    'Entregue',
+    'Retirado'
+];
+
 export default function Vendas() {
+    const formatarValorMonetarioInput = (value) => {
+        const digitsOnly = String(value ?? "").replace(/\D/g, "");
+        if (!digitsOnly) return "";
+
+        const valorNumerico = Number(digitsOnly) / 100;
+        return valorNumerico.toLocaleString('pt-BR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        });
+    };
+
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [activeTab, setActiveTab] = useState("vendas");
@@ -71,11 +91,14 @@ export default function Vendas() {
     const [preferenciasTemp, setPreferenciasTemp] = useState({ dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
     const [modalTransferencia, setModalTransferencia] = useState(null); // { vendaId }
     const [modalLiberarEntrega, setModalLiberarEntrega] = useState(null); // { entregaId, pedido }
+    const [modalStatusEntregaVenda, setModalStatusEntregaVenda] = useState(null); // { venda, entrega }
+    const [statusEntregaForm, setStatusEntregaForm] = useState({ status: 'Pendente', observacoes: '' });
     const [selectedVendaIds, setSelectedVendaIds] = useState([]);
     const [isBulkRunning, setIsBulkRunning] = useState(false);
     const [bulkTransferVendedorOpen, setBulkTransferVendedorOpen] = useState(false);
     const [bulkTransferLojaOpen, setBulkTransferLojaOpen] = useState(false);
     const [bulkPagamentoOpen, setBulkPagamentoOpen] = useState(false);
+    const [bulkStatusEntregaOpen, setBulkStatusEntregaOpen] = useState(false);
     const [bulkVendedorId, setBulkVendedorId] = useState("");
     const [bulkLoja, setBulkLoja] = useState("");
     const [bulkPagamentoForm, setBulkPagamentoForm] = useState({
@@ -83,6 +106,7 @@ export default function Vendas() {
         data_pagamento: new Date().toISOString().slice(0, 10),
         observacao: ""
     });
+    const [bulkStatusEntregaForm, setBulkStatusEntregaForm] = useState({ status: 'Pendente', observacoes: '' });
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -93,7 +117,8 @@ export default function Vendas() {
     const canCancelVendas = can('cancel_vendas');
     const canManagePayments = can('manage_financeiro') || can('manage_vendas');
     const canManageVendas = can('manage_vendas');
-    const canUseBulkActions = user?.cargo === 'Administrador' || user?.cargo === 'Gerente Geral';
+    const canManageDeliveryStatus = can('manage_entregas') || canManageVendas;
+    const canUseBulkActions = user?.cargo === 'Administrador' || user?.cargo === 'Gerente Geral' || canManageDeliveryStatus;
 
 
     const { data: vendas = [], isLoading } = useQuery({
@@ -372,12 +397,26 @@ export default function Vendas() {
         const quitada = novoValorRestante <= MONEY_EPSILON;
         const statusVenda = quitada ? 'Pago' : 'Pagamento Pendente';
 
-        await base44.entities.Venda.update(venda.id, {
+        const vendaUpdatePayload = {
             valor_pago: novoValorPago,
             valor_restante: novoValorRestante,
             status: statusVenda,
             pagamento_entrega_observacao: observacao || null,
-        });
+        };
+
+        try {
+            await base44.entities.Venda.update(venda.id, vendaUpdatePayload);
+        } catch (error) {
+            const mensagem = String(error?.message || '').toLowerCase();
+            const colunaAusente = mensagem.includes('pagamento_entrega_observacao') && mensagem.includes('schema cache');
+
+            if (!colunaAusente) {
+                throw error;
+            }
+
+            const { pagamento_entrega_observacao, ...fallbackPayload } = vendaUpdatePayload;
+            await base44.entities.Venda.update(venda.id, fallbackPayload);
+        }
 
         await base44.entities.LancamentoFinanceiro.create({
             descricao: `Pagamento na loja - Venda #${venda.numero_pedido}`,
@@ -442,7 +481,7 @@ export default function Vendas() {
         const saldoAtual = Math.max(toMoneyNumber(financeiro.valorRestante), 0);
 
         setPagamentoForm({
-            valor: saldoAtual > 0 ? saldoAtual.toFixed(2) : "",
+            valor: saldoAtual > 0 ? formatarValorMonetarioInput(saldoAtual.toFixed(2)) : "",
             forma_pagamento: venda.forma_pagamento_entrega || venda.forma_pagamento || "PIX",
             data_pagamento: new Date().toISOString().slice(0, 10),
             observacao: ""
@@ -617,6 +656,60 @@ export default function Vendas() {
 
     const handleSelectAllVendas = (checked) => {
         setSelectedVendaIds(checked ? filtered.map((v) => v.id) : []);
+    };
+
+    const isEntregaFinalizadaStatus = (status) => {
+        const normalized = String(status || '').toLowerCase();
+        return normalized === 'entregue' || normalized === 'retirado';
+    };
+
+    const getEntregaAlvoVenda = (venda) => {
+        const entregasVenda = (entregas || []).filter((e) =>
+            e.numero_pedido === venda.numero_pedido && !isStatusCancelado(e.status)
+        );
+
+        if (!entregasVenda.length) return null;
+
+        const naoFinalizada = entregasVenda.find((e) => !isEntregaFinalizadaStatus(e.status));
+        return naoFinalizada || entregasVenda[0];
+    };
+
+    const atualizarStatusEntrega = async ({ entrega, status, observacoes }) => {
+        if (!entrega?.id) {
+            throw new Error('Entrega não encontrada para este pedido.');
+        }
+
+        const novoStatus = String(status || '').trim();
+        if (!novoStatus) {
+            throw new Error('Selecione um status de entrega válido.');
+        }
+
+        const payload = {
+            status: novoStatus,
+            observacoes: observacoes?.trim() || null,
+        };
+
+        if (novoStatus === 'Entregue' || novoStatus === 'Retirado') {
+            payload.data_realizada = new Date().toISOString().slice(0, 10);
+        } else if (entrega?.data_realizada) {
+            payload.data_realizada = null;
+        }
+
+        await base44.entities.Entrega.update(entrega.id, payload);
+    };
+
+    const abrirModalStatusEntrega = (venda) => {
+        const entrega = getEntregaAlvoVenda(venda);
+        if (!entrega) {
+            toast.warning('Este pedido não possui entrega elegível para atualização de status.');
+            return;
+        }
+
+        setStatusEntregaForm({
+            status: entrega.status || 'Pendente',
+            observacoes: entrega.observacoes || ''
+        });
+        setModalStatusEntregaVenda({ venda, entrega });
     };
 
     const executarAcaoEmLote = async ({ itens, acao }) => {
@@ -805,6 +898,63 @@ export default function Vendas() {
         });
     };
 
+    const handleConfirmarStatusEntrega = async () => {
+        if (!modalStatusEntregaVenda) return;
+
+        try {
+            await atualizarStatusEntrega({
+                entrega: modalStatusEntregaVenda.entrega,
+                status: statusEntregaForm.status,
+                observacoes: statusEntregaForm.observacoes,
+            });
+
+            queryClient.invalidateQueries({ queryKey: ['entregas'] });
+            queryClient.invalidateQueries({ queryKey: ['vendas'] });
+            toast.success('Status da entrega atualizado com sucesso.');
+
+            setModalStatusEntregaVenda(null);
+            setStatusEntregaForm({ status: 'Pendente', observacoes: '' });
+        } catch (error) {
+            toast.error(error?.message || 'Não foi possível atualizar o status da entrega.');
+        }
+    };
+
+    const handleBulkAtualizarStatusEntrega = async () => {
+        const novoStatus = String(bulkStatusEntregaForm.status || '').trim();
+        if (!novoStatus) {
+            toast.error('Selecione o novo status da entrega.');
+            return;
+        }
+
+        const elegiveis = selectedVendas.filter((venda) => Boolean(getEntregaAlvoVenda(venda)));
+        if (!elegiveis.length) {
+            toast.warning('Nenhuma venda selecionada possui entrega elegível para atualização.');
+            return;
+        }
+
+        const confirmed = await confirm({
+            title: 'Alterar status de entrega em lote',
+            message: `Deseja atualizar o status de ${elegiveis.length} entrega(s) para "${novoStatus}"?`,
+            confirmText: 'Atualizar status'
+        });
+        if (!confirmed) return;
+
+        await executarAcaoEmLote({
+            itens: elegiveis,
+            acao: async (venda) => {
+                const entrega = getEntregaAlvoVenda(venda);
+                await atualizarStatusEntrega({
+                    entrega,
+                    status: novoStatus,
+                    observacoes: bulkStatusEntregaForm.observacoes,
+                });
+            }
+        });
+
+        setBulkStatusEntregaOpen(false);
+        setBulkStatusEntregaForm({ status: 'Pendente', observacoes: '' });
+    };
+
     return (
         <div className="max-w-7xl mx-auto space-y-6">
             <div className="flex justify-between items-center">
@@ -893,6 +1043,11 @@ export default function Vendas() {
                                 {canManagePayments && (
                                     <Button size="sm" variant="outline" onClick={() => setBulkPagamentoOpen(true)} disabled={isBulkRunning}>
                                         Registrar pagamento
+                                    </Button>
+                                )}
+                                {canManageDeliveryStatus && (
+                                    <Button size="sm" variant="outline" onClick={() => setBulkStatusEntregaOpen(true)} disabled={isBulkRunning}>
+                                        Status da entrega
                                     </Button>
                                 )}
                                 <Button size="sm" variant="outline" onClick={handleBulkLiberarEntrega} disabled={isBulkRunning}>
@@ -1192,6 +1347,20 @@ export default function Vendas() {
                                                         return null;
                                                     })()}
 
+                                                    {canManageDeliveryStatus && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                abrirModalStatusEntrega(venda);
+                                                            }}
+                                                            title="Alterar Status da Entrega"
+                                                        >
+                                                            <Truck className="w-4 h-4 text-sky-600" />
+                                                        </Button>
+                                                    )}
+
                                                     {/* Botão de Liberar Entrega (Vendedor libera se estiver aguardando) */}
                                                     {(() => {
                                                         const entregaAguardando = (entregas || []).find(e =>
@@ -1450,11 +1619,13 @@ export default function Vendas() {
                         <div className="space-y-2">
                             <Label>Valor recebido</Label>
                             <Input
-                                type="number"
-                                step="0.01"
-                                min="0"
+                                type="text"
+                                inputMode="numeric"
                                 value={pagamentoForm.valor}
-                                onChange={(e) => setPagamentoForm((prev) => ({ ...prev, valor: e.target.value }))}
+                                onChange={(e) => setPagamentoForm((prev) => ({
+                                    ...prev,
+                                    valor: formatarValorMonetarioInput(e.target.value)
+                                }))}
                                 placeholder="0,00"
                             />
                         </div>
@@ -1543,6 +1714,56 @@ export default function Vendas() {
                             className="bg-red-600 hover:bg-red-700"
                         >
                             {reagendarMutation.isPending ? <Loader2 className="animate-spin" /> : "Confirmar Reagendamento"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!modalStatusEntregaVenda} onOpenChange={(open) => !open && setModalStatusEntregaVenda(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-sky-700">
+                            <Truck className="w-5 h-5" />
+                            Atualizar Status da Entrega
+                        </DialogTitle>
+                        <DialogDescription>
+                            Pedido #{modalStatusEntregaVenda?.venda?.numero_pedido}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label>Novo status</Label>
+                            <Select
+                                value={statusEntregaForm.status}
+                                onValueChange={(value) => setStatusEntregaForm((prev) => ({ ...prev, status: value }))}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Selecione" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {STATUS_ENTREGA_OPTIONS.map((status) => (
+                                        <SelectItem key={status} value={status}>{status}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Observações</Label>
+                            <Textarea
+                                rows={3}
+                                placeholder="Ex: Cliente confirmou recebimento no local."
+                                value={statusEntregaForm.observacoes}
+                                onChange={(e) => setStatusEntregaForm((prev) => ({ ...prev, observacoes: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setModalStatusEntregaVenda(null)}>Cancelar</Button>
+                        <Button onClick={handleConfirmarStatusEntrega} className="bg-sky-600 hover:bg-sky-700">
+                            Confirmar status
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -1789,6 +2010,54 @@ export default function Vendas() {
                         <Button onClick={handleBulkRegistrarPagamento} disabled={isBulkRunning} className="bg-emerald-600 hover:bg-emerald-700">
                             {isBulkRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                             Confirmar pagamento
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={bulkStatusEntregaOpen} onOpenChange={(open) => !isBulkRunning && setBulkStatusEntregaOpen(open)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Alterar status de entrega em lote</DialogTitle>
+                        <DialogDescription>
+                            Atualize o status das entregas vinculadas às {selectedVendaIds.length} venda(s) selecionada(s).
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label>Novo status</Label>
+                            <Select
+                                value={bulkStatusEntregaForm.status}
+                                onValueChange={(value) => setBulkStatusEntregaForm((prev) => ({ ...prev, status: value }))}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Selecione" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {STATUS_ENTREGA_OPTIONS.map((status) => (
+                                        <SelectItem key={status} value={status}>{status}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Observações</Label>
+                            <Textarea
+                                rows={3}
+                                placeholder="Ex: Atualização operacional em lote."
+                                value={bulkStatusEntregaForm.observacoes}
+                                onChange={(e) => setBulkStatusEntregaForm((prev) => ({ ...prev, observacoes: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setBulkStatusEntregaOpen(false)} disabled={isBulkRunning}>Cancelar</Button>
+                        <Button onClick={handleBulkAtualizarStatusEntrega} disabled={isBulkRunning} className="bg-sky-600 hover:bg-sky-700">
+                            {isBulkRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                            Confirmar status
                         </Button>
                     </DialogFooter>
                 </DialogContent>

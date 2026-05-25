@@ -134,6 +134,8 @@ CREATE TABLE vendas (
     valor_pago numeric(10,2),
     valor_restante numeric(10,2),
     pagamento_na_entrega boolean DEFAULT false,
+    pagamento_entrega_confirmado boolean DEFAULT false,
+    pagamento_entrega_observacao text,
     prazo_entrega date,
     responsavel_nome text,
     cliente_nome text,
