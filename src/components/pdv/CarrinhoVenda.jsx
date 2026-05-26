@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Trash2, Package, Wrench, Truck, Store, AlertTriangle, Ban, ImageIcon, ImagePlus, Upload, Loader2, Check, Edit2, PackagePlus } from "lucide-react";
+import { Trash2, Package, Wrench, Truck, Store, AlertTriangle, Ban, ImageIcon, ImagePlus, Upload, Loader2, Check, Edit2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { base44 } from "@/api/base44Client";
 
@@ -176,6 +178,7 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
         const selecaoIncompleta = !item.tipo_entrega ||
           (item.tipo_entrega === 'entrega' && requerMontagem(item) && !item.tipo_montagem);
         const bloqueadoEstoque = item.bloqueado_estoque === true;
+        const estoqueZerado = item.estoque_loja_atual !== null && item.estoque_loja_atual !== undefined && Number(item.estoque_loja_atual) <= 0;
 
         return (
           <div
@@ -281,11 +284,6 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                         Novo
                       </Badge>
                     )}
-                    {item.is_encomenda && (
-                      <Badge variant="outline" className="text-xs px-1 py-0 h-4 bg-orange-50 text-orange-600 border-orange-200 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-800">
-                        Encomenda
-                      </Badge>
-                    )}
                   </div>
                   <div className="flex items-center gap-2 text-xs text-gray-500">
                     {(!item.preco_unitario || item.preco_unitario <= 0) ? (
@@ -309,17 +307,59 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                       </div>
                     )}
                   </div>
-                  {bloqueadoEstoque && !item.is_encomenda && (
-                    <div className="mt-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-3 text-[11px] font-semibold border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 hover:border-amber-500 dark:border-amber-600 dark:text-amber-400 dark:bg-amber-900/20 dark:hover:bg-amber-900/40 gap-1.5"
-                        onClick={() => onAtualizarItem && onAtualizarItem(index, { is_encomenda: true })}
+                  {Array.isArray(item.origens_estoque_disponiveis) && item.origens_estoque_disponiveis.length > 0 && (
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400">Retirada do estoque</span>
+                      <Select
+                        value={item.origem_estoque_campo || ''}
+                        onValueChange={(novoCampo) => {
+                          const origemSelecionada = item.origens_estoque_disponiveis.find((origem) => origem.campo === novoCampo);
+                          if (!origemSelecionada || origemSelecionada.quantidade <= 0) return;
+
+                          if (onAtualizarItem) {
+                            onAtualizarItem(index, {
+                              origem_estoque_campo: origemSelecionada.campo,
+                              origem_estoque_nome: origemSelecionada.nome,
+                              is_encomenda: false
+                            });
+                          }
+                        }}
                       >
-                        <PackagePlus className="w-3.5 h-3.5" />
-                        Encomenda deste item
-                      </Button>
+                        <SelectTrigger className="h-6 w-[170px] px-2 text-xs bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700">
+                          <SelectValue placeholder="Selecionar local" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {item.origens_estoque_disponiveis.map((origem) => (
+                            <SelectItem
+                              key={origem.campo}
+                              value={origem.campo}
+                              disabled={origem.quantidade <= 0 && origem.campo !== item.origem_estoque_campo}
+                            >
+                              {origem.nome} ({origem.quantidade} un)
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  {estoqueZerado && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <Checkbox
+                        id={`encomenda-item-${index}`}
+                        checked={item.is_encomenda === true}
+                        onCheckedChange={(checked) => onAtualizarItem && onAtualizarItem(index, { is_encomenda: checked === true })}
+                      />
+                      <label
+                        htmlFor={`encomenda-item-${index}`}
+                        className="text-xs font-medium text-amber-700 dark:text-amber-400 cursor-pointer select-none"
+                      >
+                        Encomenda
+                      </label>
+                      {!item.is_encomenda && (
+                        <span className="text-[11px] text-red-500">
+                          Marque para liberar o avanço
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

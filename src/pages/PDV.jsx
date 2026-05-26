@@ -504,6 +504,10 @@ export default function PDV() {
   const [tokenGerencial, setTokenGerencial] = useState(initialState?.tokenGerencial || null);
   const [editingProdutoPDV, setEditingProdutoPDV] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [origemRetiradaModalOpen, setOrigemRetiradaModalOpen] = useState(false);
+  const [produtoPendenteOrigem, setProdutoPendenteOrigem] = useState(null);
+  const [opcoesOrigemPendente, setOpcoesOrigemPendente] = useState([]);
+  const [origemSelecionadaCampo, setOrigemSelecionadaCampo] = useState("");
 
   // Flag para bloquear o auto-save enquanto dados do orçamento estão sendo carregados
   const isLoadingOrcamentoRef = useRef(false);
@@ -772,6 +776,55 @@ export default function PDV() {
     };
   };
 
+  const montarAtualizacaoEstoqueProdutoPorCampo = (produto, quantidadeLocalAtualizada, campoEstoque) => {
+    if (!campoEstoque) {
+      throw new Error('Nao foi possivel determinar a origem de estoque do item.');
+    }
+
+    const produtoAtualizado = {
+      ...produto,
+      [campoEstoque]: Number(quantidadeLocalAtualizada || 0)
+    };
+
+    return {
+      [campoEstoque]: produtoAtualizado[campoEstoque],
+      quantidade_estoque: getProductTotalStock(produtoAtualizado)
+    };
+  };
+
+  const getOrigensDisponiveisProduto = (produto, options = {}) => {
+    const includeZero = options?.includeZero === true;
+    if (!produto) return [];
+
+    const opcoesPorCampo = new Map();
+
+    for (const loja of (lojas || [])) {
+      if (!loja?.nome) continue;
+      const campoLoja = resolveStockField(loja.nome);
+      if (!campoLoja) continue;
+      if (!opcoesPorCampo.has(campoLoja)) {
+        opcoesPorCampo.set(campoLoja, loja.nome);
+      }
+    }
+
+    if (!opcoesPorCampo.has('estoque_cd')) {
+      opcoesPorCampo.set('estoque_cd', 'CD');
+    }
+
+    return Array.from(opcoesPorCampo.entries())
+      .map(([campo, nome]) => ({
+        campo,
+        nome,
+        quantidade: Number(produto?.[campo] || 0)
+      }))
+      .filter((opcao) => includeZero || opcao.quantidade > 0)
+      .sort((a, b) => {
+        if (a.campo === 'estoque_cd' && b.campo !== 'estoque_cd') return -1;
+        if (b.campo === 'estoque_cd' && a.campo !== 'estoque_cd') return 1;
+        return a.nome.localeCompare(b.nome, 'pt-BR');
+      });
+  };
+
   const criarVendaMutation = useMutation({
     mutationFn: (data) => base44.entities.Venda.create(data)
   });
@@ -807,9 +860,9 @@ export default function PDV() {
           const produtoAtual = await base44.entities.Produto.getById(item.produto_id);
           if (!produtoAtual) continue;
 
-          const campoLoja = resolveStockField(dadosVenda.loja);
-          const estoqueLocalAposVenda = (produtoAtual[campoLoja] || 0) - (item.quantidade || 0);
-          const updates = montarAtualizacaoEstoqueProduto(produtoAtual, estoqueLocalAposVenda, dadosVenda.loja);
+          const campoOrigem = item?.origem_estoque_campo || resolveStockField(dadosVenda.loja);
+          const estoqueLocalAposVenda = (produtoAtual[campoOrigem] || 0) - (item.quantidade || 0);
+          const updates = montarAtualizacaoEstoqueProdutoPorCampo(produtoAtual, estoqueLocalAposVenda, campoOrigem);
 
           await base44.entities.Produto.update(item.produto_id, updates);
         }
@@ -868,18 +921,7 @@ export default function PDV() {
     if (sucessos > 0) toast.success(`${sucessos} vendas sincronizadas com sucesso!`);
   };
 
-  // MODIFIED: Accepts ID (string) OR Full Product Object (provisional)
-  const handleSelectProduto = (produtoOrId) => {
-    let produto = null;
-
-    if (typeof produtoOrId === 'string' || typeof produtoOrId === 'number') {
-      produto = produtos.find(p => p.id === produtoOrId);
-    } else if (typeof produtoOrId === 'object') {
-      produto = produtoOrId; // Provisional product passed directly
-    }
-
-    if (!produto) return;
-
+  const adicionarProdutoAoCarrinho = (produto, origemEstoque = null) => {
     const fornecedorResolvido = resolverFornecedorDoItem({
       produto_id: produto.id,
       fornecedor_id: produto.fornecedor_id,
@@ -895,6 +937,10 @@ export default function PDV() {
         newItens[exists].subtotal = newItens[exists].quantidade * newItens[exists].preco_unitario;
         newItens[exists].fornecedor_id = newItens[exists].fornecedor_id || fornecedorResolvido.fornecedor_id;
         newItens[exists].fornecedor_nome = newItens[exists].fornecedor_nome || fornecedorResolvido.fornecedor_nome;
+        if (origemEstoque?.campo && !newItens[exists].origem_estoque_campo) {
+          newItens[exists].origem_estoque_campo = origemEstoque.campo;
+          newItens[exists].origem_estoque_nome = origemEstoque.nome;
+        }
         return newItens;
       }
 
@@ -919,10 +965,67 @@ export default function PDV() {
         detalhes_solicitacao: produto.detalhes_solicitacao,
         // Encomenda flag
         is_encomenda: produto.is_encomenda || false,
+        origem_estoque_campo: origemEstoque?.campo || null,
+        origem_estoque_nome: origemEstoque?.nome || null,
         fornecedor_id: fornecedorResolvido.fornecedor_id,
         fornecedor_nome: fornecedorResolvido.fornecedor_nome
       }];
     });
+  };
+
+  // MODIFIED: Accepts ID (string) OR Full Product Object (provisional)
+  const handleSelectProduto = (produtoOrId) => {
+    let produto = null;
+
+    if (typeof produtoOrId === 'string' || typeof produtoOrId === 'number') {
+      produto = produtos.find(p => p.id === produtoOrId);
+    } else if (typeof produtoOrId === 'object') {
+      produto = produtoOrId; // Provisional product passed directly
+    }
+
+    if (!produto) return;
+
+    const itemExistente = itens.find((item) => item.produto_id === produto.id);
+    if (itemExistente?.origem_estoque_campo) {
+      adicionarProdutoAoCarrinho(produto, {
+        campo: itemExistente.origem_estoque_campo,
+        nome: itemExistente.origem_estoque_nome || configVenda.loja
+      });
+      return;
+    }
+
+    const opcoesOrigem = getOrigensDisponiveisProduto(produto);
+    const opcaoCd = opcoesOrigem.find((opcao) => opcao.campo === 'estoque_cd');
+
+    if (opcoesOrigem.length > 1) {
+      setProdutoPendenteOrigem(produto);
+      setOpcoesOrigemPendente(opcoesOrigem);
+      setOrigemSelecionadaCampo(opcaoCd?.campo || opcoesOrigem[0]?.campo || "");
+      setOrigemRetiradaModalOpen(true);
+      return;
+    }
+
+    const origemAutomatica = opcoesOrigem[0] || null;
+    adicionarProdutoAoCarrinho(produto, origemAutomatica);
+  };
+
+  const confirmarOrigemRetiradaItem = () => {
+    if (!produtoPendenteOrigem) return;
+
+    const origemSelecionada = opcoesOrigemPendente.find((opcao) => opcao.campo === origemSelecionadaCampo) || null;
+    adicionarProdutoAoCarrinho(produtoPendenteOrigem, origemSelecionada);
+
+    setOrigemRetiradaModalOpen(false);
+    setProdutoPendenteOrigem(null);
+    setOpcoesOrigemPendente([]);
+    setOrigemSelecionadaCampo("");
+  };
+
+  const cancelarOrigemRetiradaItem = () => {
+    setOrigemRetiradaModalOpen(false);
+    setProdutoPendenteOrigem(null);
+    setOpcoesOrigemPendente([]);
+    setOrigemSelecionadaCampo("");
   };
 
   const handleVincularImagem = async (index, imageUrl) => {
@@ -1050,7 +1153,8 @@ export default function PDV() {
         throw new Error('Produto nao encontrado para atualizar o estoque.');
       }
 
-      const updates = montarAtualizacaoEstoqueProduto(produtoAtual, estoqueAposVenda, configVenda.loja);
+      const campoOrigem = item?.origem_estoque_campo || resolveStockField(configVenda.loja);
+      const updates = montarAtualizacaoEstoqueProdutoPorCampo(produtoAtual, estoqueAposVenda, campoOrigem);
 
       await base44.entities.Produto.update(produtoId, updates);
 
@@ -1209,11 +1313,18 @@ export default function PDV() {
     return produtos.find((produto) => produto.id === item.produto_id) || null;
   };
 
-  const getEstoqueLojaProduto = (produto) => {
-    if (!produto || !configVenda.loja) return null;
-    const campoLoja = resolveStockField(configVenda.loja);
-    if (!campoLoja) return null;
-    return Number(produto[campoLoja] || 0);
+  const getEstoqueOrigemItem = (produto, item) => {
+    if (!produto) return null;
+
+    const campoOrigem = item?.origem_estoque_campo;
+    if (campoOrigem) {
+      return Number(produto?.[campoOrigem] || 0);
+    }
+
+    const total = Number(produto?.quantidade_estoque ?? getProductTotalStock(produto));
+    const reservado = Number(produto?.quantidade_reservada || 0);
+    if (!Number.isFinite(total)) return null;
+    return total - reservado;
   };
 
   const itemBloqueadoPorEstoque = (item) => {
@@ -1222,10 +1333,10 @@ export default function PDV() {
     const produtoAtual = getProdutoDoItemCarrinho(item);
     if (!produtoAtual) return false;
 
-    const estoqueLojaAtual = getEstoqueLojaProduto(produtoAtual);
-    if (estoqueLojaAtual === null) return false;
+    const estoqueOrigemAtual = getEstoqueOrigemItem(produtoAtual, item);
+    if (estoqueOrigemAtual === null) return false;
 
-    return estoqueLojaAtual <= 0;
+    return estoqueOrigemAtual <= 0;
   };
 
   const itensBloqueadosPorEstoque = itens.filter(itemBloqueadoPorEstoque);
@@ -1520,9 +1631,9 @@ export default function PDV() {
           const prod = produtos.find(p => p.id === item.produto_id);
           if (!prod) return null;
 
-          const campoLoja = resolveStockField(configVenda.loja);
-          const estoqueLocalAposVenda = (prod[campoLoja] || 0) - item.quantidade;
-          const updates = montarAtualizacaoEstoqueProduto(prod, estoqueLocalAposVenda, configVenda.loja);
+          const campoOrigem = item?.origem_estoque_campo || resolveStockField(configVenda.loja);
+          const estoqueLocalAposVenda = (prod[campoOrigem] || 0) - item.quantidade;
+          const updates = montarAtualizacaoEstoqueProdutoPorCampo(prod, estoqueLocalAposVenda, campoOrigem);
 
           return base44.entities.Produto.update(prod.id, updates);
         }))
@@ -1948,10 +2059,19 @@ export default function PDV() {
                 <CarrinhoVenda
                   itens={itens.map((item) => {
                     const produtoAtual = getProdutoDoItemCarrinho(item);
-                    const estoqueLojaAtual = getEstoqueLojaProduto(produtoAtual);
+                    const estoqueOrigemAtual = getEstoqueOrigemItem(produtoAtual, item);
+                    const opcoesOrigemItem = getOrigensDisponiveisProduto(produtoAtual, { includeZero: true });
+                    if (item?.origem_estoque_campo && !opcoesOrigemItem.some((origem) => origem.campo === item.origem_estoque_campo)) {
+                      opcoesOrigemItem.push({
+                        campo: item.origem_estoque_campo,
+                        nome: item.origem_estoque_nome || item.origem_estoque_campo,
+                        quantidade: Number(produtoAtual?.[item.origem_estoque_campo] || 0)
+                      });
+                    }
                     return {
                       ...item,
-                      estoque_loja_atual: estoqueLojaAtual,
+                      estoque_loja_atual: estoqueOrigemAtual,
+                      origens_estoque_disponiveis: opcoesOrigemItem,
                       bloqueado_estoque: itemBloqueadoPorEstoque(item)
                     };
                   })}
@@ -2257,6 +2377,47 @@ export default function PDV() {
           onSave={handleSaveEditProdutoPDV}
         />
       )}
+
+      <Dialog
+        open={origemRetiradaModalOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            cancelarOrigemRetiradaItem();
+            return;
+          }
+          setOrigemRetiradaModalOpen(true);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Origem da retirada</DialogTitle>
+            <DialogDescription>
+              Este produto possui estoque em mais de um local. Selecione de onde sera retirado.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <Label htmlFor="origem-retirada-item">Origem do estoque</Label>
+            <Select value={origemSelecionadaCampo} onValueChange={setOrigemSelecionadaCampo}>
+              <SelectTrigger id="origem-retirada-item">
+                <SelectValue placeholder="Selecione a origem" />
+              </SelectTrigger>
+              <SelectContent>
+                {opcoesOrigemPendente.map((opcao) => (
+                  <SelectItem key={opcao.campo} value={opcao.campo}>
+                    {opcao.nome} ({opcao.quantidade} un)
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={cancelarOrigemRetiradaItem}>Cancelar</Button>
+            <Button onClick={confirmarOrigemRetiradaItem} disabled={!origemSelecionadaCampo}>Confirmar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
