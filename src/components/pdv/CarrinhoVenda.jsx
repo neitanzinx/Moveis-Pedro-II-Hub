@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Trash2, Package, Wrench, Truck, Store, AlertTriangle, Ban, ImageIcon, ImagePlus, Upload, Loader2, Check, Edit2 } from "lucide-react";
+import { Trash2, Package, Wrench, Truck, Store, AlertTriangle, Ban, ImageIcon, ImagePlus, Upload, Loader2, Check, Edit2, PackagePlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -309,11 +309,17 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                       </div>
                     )}
                   </div>
-                  {bloqueadoEstoque && (
+                  {bloqueadoEstoque && !item.is_encomenda && (
                     <div className="mt-2">
-                      <Badge variant="destructive" className="text-[11px] h-5">
-                        Estoque zerado na loja. Gerente deve ajustar no Estoque para continuar.
-                      </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-3 text-[11px] font-semibold border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 hover:border-amber-500 dark:border-amber-600 dark:text-amber-400 dark:bg-amber-900/20 dark:hover:bg-amber-900/40 gap-1.5"
+                        onClick={() => onAtualizarItem && onAtualizarItem(index, { is_encomenda: true })}
+                      >
+                        <PackagePlus className="w-3.5 h-3.5" />
+                        Encomenda deste item
+                      </Button>
                     </div>
                   )}
                 </div>

@@ -256,6 +256,19 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
     });
   };
 
+  const formatarValorPagamentoInput = (valor) => {
+    return Number(valor || 0).toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
+
+  const parseValorPagamentoInput = (inputValue) => {
+    const apenasDigitos = String(inputValue || '').replace(/\D/g, '');
+    if (!apenasDigitos) return 0;
+    return parseInt(apenasDigitos, 10) / 100;
+  };
+
   const adicionarPagamento = () => {
     if (novoPagamento.valor <= 0) {
       toast.warning("Informe um valor válido");
@@ -1004,12 +1017,17 @@ _Móveis Pedro II - ${vendaData.loja}_`;
                     <div>
                       <Label>Valor (R$)</Label>
                       <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        max={formData.valor_total}
-                        value={novoPagamento.valor}
-                        onChange={(e) => setNovoPagamento({ ...novoPagamento, valor: parseFloat(e.target.value) || 0 })}
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0,00"
+                        value={formatarValorPagamentoInput(novoPagamento.valor)}
+                        onChange={(e) => {
+                          const valorDigitado = parseValorPagamentoInput(e.target.value);
+                          setNovoPagamento({
+                            ...novoPagamento,
+                            valor: Math.min(valorDigitado, formData.valor_total || 0),
+                          });
+                        }}
                       />
                     </div>
                     {novoPagamento.forma_pagamento === 'Crédito' && (
