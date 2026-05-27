@@ -1,4 +1,5 @@
 import { supabase, base44 } from "@/api/base44Client";
+import { validatePaymentSplit } from "@/services/paymentOrchestrator";
 
 export const MONEY_EPSILON = 0.01;
 
@@ -58,7 +59,7 @@ async function updateVendaSafely(vendaId, vendaUpdates) {
     }
 }
 
-async function syncReceitaLancamentos(vendaId, paymentDateIso, pagamentoQuitado) {
+async function syncReceitaLancamentos(vendaId, paymentDateIso, pagamentoQuitado, formaPagamento) {
     if (!vendaId || !pagamentoQuitado) return;
 
     const { data: lancamentosVenda, error } = await supabase
@@ -75,14 +76,15 @@ async function syncReceitaLancamentos(vendaId, paymentDateIso, pagamentoQuitado)
             status: "Pago",
             pago: true,
             data_lancamento_real: paymentDateIso.split("T")[0],
+            forma_pagamento: formaPagamento,
         });
     }
 }
 
-async function maybeCreateCardFee(entrega, valorRecebido, paymentDateIso) {
+async function maybeCreateCardFee(entrega, valorRecebido, paymentDateIso, formaPagamento) {
     if (!entrega?.venda_id || valorRecebido <= MONEY_EPSILON) return;
 
-    const formaPag = entrega.forma_pagamento_entrega || entrega.forma_pagamento || "";
+    const formaPag = String(formaPagamento || entrega.forma_pagamento_entrega || entrega.forma_pagamento || "").trim();
     const formaNormalizada = formaPag.toLowerCase();
     const isCartao = formaNormalizada.includes("cartão") || formaNormalizada.includes("crédito") || formaNormalizada.includes("débito");
 
@@ -127,6 +129,8 @@ export async function applyDeliveryPayment({
     entrega,
     pagamentoStatus,
     valorRecebido,
+    formaPagamento,
+    pagamentos,
     motivoPendente,
     comprovanteUrl = null,
     paymentDateIso = new Date().toISOString(),
@@ -135,11 +139,31 @@ export async function applyDeliveryPayment({
         throw new Error("Entrega inválida para registrar pagamento.");
     }
 
-    const valorRecebidoNum = Math.max(toMoneyNumber(valorRecebido), 0);
     const pagamentoInformado = pagamentoStatus === "pago";
+    const pagamentosInformados = Array.isArray(pagamentos) ? pagamentos : [];
+    const rawPayments = pagamentosInformados.length > 0
+        ? pagamentosInformados
+        : pagamentoInformado
+            ? [{ forma_pagamento: formaPagamento, valor: valorRecebido, parcelas: 1 }]
+            : [];
 
-    if (pagamentoInformado && valorRecebidoNum <= MONEY_EPSILON) {
-        throw new Error("Informe um valor recebido maior que zero.");
+    if (pagamentoInformado) {
+        const totalAlvo = Math.max(
+            toMoneyNumber(entrega?.valor_a_receber),
+            rawPayments.reduce((sum, payment) => sum + toMoneyNumber(payment?.valor), 0)
+        );
+        const initialValidation = validatePaymentSplit({
+            total: totalAlvo,
+            payments: rawPayments.map((payment) => ({
+                ...payment,
+                valor: toMoneyNumber(payment?.valor),
+                parcelas: Number(payment?.parcelas || 1),
+            })),
+        });
+
+        if (!initialValidation.ok) {
+            throw new Error(initialValidation.errors[0] || "Não foi possível validar os pagamentos informados.");
+        }
     }
 
     const entregaUpdates = {
@@ -154,11 +178,16 @@ export async function applyDeliveryPayment({
 
     let vendaUpdates = null;
     let pagamentoQuitado = false;
+    let valorRecebidoNum = Math.max(toMoneyNumber(valorRecebido), 0);
+    let formaPagamentoFinal = String(
+        formaPagamento || entrega?.forma_pagamento_entrega || entrega?.forma_pagamento || ""
+    ).trim();
+    let pagamentosNormalizados = [];
 
     if (entrega.venda_id) {
         const { data: vendaAtual, error: vendaError } = await supabase
             .from("vendas")
-            .select("valor_total, valor_pago, valor_restante")
+            .select("valor_total, valor_pago, valor_restante, pagamentos")
             .eq("id", entrega.venda_id)
             .single();
 
@@ -175,9 +204,37 @@ export async function applyDeliveryPayment({
         }
 
         if (pagamentoInformado) {
+            const paymentsForSale = pagamentosInformados.length > 0
+                ? pagamentosInformados
+                : [{ forma_pagamento: formaPagamentoFinal, valor: valorRecebido, parcelas: 1 }];
+
+            const paymentValidation = validatePaymentSplit({
+                total: valorRestanteBase,
+                payments: paymentsForSale.map((payment) => ({
+                    ...payment,
+                    valor: toMoneyNumber(payment?.valor),
+                    parcelas: Number(payment?.parcelas || 1),
+                })),
+            });
+
+            if (!paymentValidation.ok) {
+                throw new Error(paymentValidation.errors[0] || "Não foi possível validar os pagamentos informados.");
+            }
+
+            pagamentosNormalizados = paymentValidation.pagamentos;
+            valorRecebidoNum = paymentValidation.totalPago;
+            formaPagamentoFinal = pagamentosNormalizados.length === 1
+                ? pagamentosNormalizados[0].forma_pagamento
+                : "Múltiplos";
+
+            if (valorRecebidoNum <= MONEY_EPSILON) {
+                throw new Error("Informe um valor recebido maior que zero.");
+            }
+
             const novoValorRestante = Math.max(valorRestanteBase - valorRecebidoNum, 0);
             const novoValorPago = Math.min(valorTotal, valorPagoAtual + valorRecebidoNum);
             pagamentoQuitado = novoValorRestante <= MONEY_EPSILON;
+            const pagamentosExistentes = Array.isArray(vendaAtual?.pagamentos) ? vendaAtual.pagamentos : [];
 
             const observacaoPagamento = pagamentoQuitado
                 ? null
@@ -185,12 +242,15 @@ export async function applyDeliveryPayment({
 
             entregaUpdates.pagamento_confirmado = pagamentoQuitado;
             entregaUpdates.pagamento_pendente_motivo = observacaoPagamento;
+            entregaUpdates.forma_pagamento_entrega = formaPagamentoFinal;
 
             vendaUpdates = {
                 pagamento_entrega_confirmado: pagamentoQuitado,
                 pagamento_entrega_observacao: observacaoPagamento,
                 valor_pago: novoValorPago,
                 valor_restante: novoValorRestante,
+                forma_pagamento: formaPagamentoFinal,
+                pagamentos: [...pagamentosExistentes, ...pagamentosNormalizados],
                 status: pagamentoQuitado ? "Pago" : "Pagamento Pendente",
                 status_pagamento: pagamentoQuitado ? "PAGO" : "PENDENTE",
                 data_pagamento: paymentDateIso,
@@ -217,13 +277,16 @@ export async function applyDeliveryPayment({
     }
 
     if (pagamentoInformado) {
-        await syncReceitaLancamentos(entrega.venda_id, paymentDateIso, pagamentoQuitado);
-        await maybeCreateCardFee(entrega, valorRecebidoNum, paymentDateIso);
+        await syncReceitaLancamentos(entrega.venda_id, paymentDateIso, pagamentoQuitado, formaPagamentoFinal);
+        for (const pagamento of pagamentosNormalizados) {
+            await maybeCreateCardFee(entrega, toMoneyNumber(pagamento.valor), paymentDateIso, pagamento.forma_pagamento);
+        }
     }
 
     return {
         pagamentoQuitado,
         valorRecebido: valorRecebidoNum,
+        pagamentos: pagamentosNormalizados,
         entregaUpdates,
         vendaUpdates,
     };

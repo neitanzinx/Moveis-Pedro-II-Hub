@@ -19,9 +19,16 @@ import { whatsappService } from "@/services/whatsappService";
 import { toast } from "sonner";
 import { applyDeliveryPayment, formatMoney, needsDeliveryPaymentConfirmation, toMoneyNumber, MONEY_EPSILON } from "@/utils/deliveryPayment";
 import { isStatusCancelado } from "@/utils/vendaStatus";
+import { isInstallmentPaymentMethod, validatePaymentSplit } from "@/services/paymentOrchestrator";
 
 const ENTREGADOR_SESSION_KEY = 'entregador_rota_state';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 horas
+const PAYMENT_METHOD_OPTIONS = ['Dinheiro', 'PIX', 'Cartão de Débito', 'Cartão de Crédito', 'Boleto', 'Transferência'];
+const createEmptyPaymentItem = (defaults = {}) => ({
+    forma_pagamento: defaults.forma_pagamento || '',
+    valor: defaults.valor || '',
+    parcelas: defaults.parcelas || 1,
+});
 
 function lerSessaoSalva() {
     try {
@@ -122,7 +129,8 @@ export default function Entregador() {
     // Estado para modal de confirmação de pagamento simplificado
     const [modalConfirmaPagamento, setModalConfirmaPagamento] = useState(null);
     const [pagamentoStatus, setPagamentoStatus] = useState('pago'); // 'pago' | 'pendente'
-    const [valorRecebido, setValorRecebido] = useState("");
+    const [pagamentosConfirmacao, setPagamentosConfirmacao] = useState([]);
+    const [novoPagamentoConfirmacao, setNovoPagamentoConfirmacao] = useState(createEmptyPaymentItem());
     const [motivoPendente, setMotivoPendente] = useState("");
 
     // Estado para checklist de carregamento
@@ -308,26 +316,64 @@ export default function Entregador() {
 
     const abrirModalConfirmacaoPagamento = (entrega, contexto = 'manual') => {
         const valorInicial = toMoneyNumber(entrega?.valor_a_receber);
+        const formaPadrao = String(entrega?.forma_pagamento_entrega || entrega?.forma_pagamento || '').trim();
         setModalConfirmaPagamento({ ...entrega, contexto });
         setPagamentoStatus('pago');
-        setValorRecebido(valorInicial > 0 ? valorInicial.toFixed(2) : '');
+        setPagamentosConfirmacao([]);
+        setNovoPagamentoConfirmacao(createEmptyPaymentItem({
+            forma_pagamento: formaPadrao,
+            valor: valorInicial > 0 ? valorInicial.toFixed(2) : '',
+        }));
         setMotivoPendente("");
     };
 
     const fecharModalConfirmacaoPagamento = () => {
         setModalConfirmaPagamento(null);
         setPagamentoStatus('pago');
-        setValorRecebido("");
+        setPagamentosConfirmacao([]);
+        setNovoPagamentoConfirmacao(createEmptyPaymentItem());
         setMotivoPendente("");
+    };
+
+    const totalPagamentoConfirmacao = pagamentosConfirmacao.reduce((sum, pagamento) => sum + toMoneyNumber(pagamento.valor), 0);
+    const saldoPagamentoConfirmacao = Math.max(toMoneyNumber(modalConfirmaPagamento?.valor_a_receber) - totalPagamentoConfirmacao, 0);
+
+    const adicionarPagamentoConfirmacao = () => {
+        const totalAlvo = Math.max(toMoneyNumber(modalConfirmaPagamento?.valor_a_receber), 0);
+        const validation = validatePaymentSplit({
+            total: totalAlvo,
+            payments: [
+                ...pagamentosConfirmacao,
+                {
+                    ...novoPagamentoConfirmacao,
+                    valor: toMoneyNumber(novoPagamentoConfirmacao.valor),
+                    parcelas: Number(novoPagamentoConfirmacao.parcelas || 1),
+                },
+            ],
+        });
+
+        if (!validation.ok) {
+            toast.error(validation.errors[0] || 'Não foi possível adicionar essa forma de pagamento.');
+            return;
+        }
+
+        setPagamentosConfirmacao(validation.pagamentos);
+        const saldoRestanteAtualizado = Math.max(totalAlvo - validation.totalPago, 0);
+        setNovoPagamentoConfirmacao(createEmptyPaymentItem({
+            forma_pagamento: novoPagamentoConfirmacao.forma_pagamento || String(modalConfirmaPagamento?.forma_pagamento_entrega || modalConfirmaPagamento?.forma_pagamento || ''),
+            valor: saldoRestanteAtualizado > 0 ? saldoRestanteAtualizado.toFixed(2) : '',
+        }));
+    };
+
+    const removerPagamentoConfirmacao = (index) => {
+        setPagamentosConfirmacao((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
     };
 
     const confirmarPagamentoNoModal = async () => {
         if (!modalConfirmaPagamento) return;
 
-        const valorRecebidoNumerico = toMoneyNumber(valorRecebido);
-
-        if (pagamentoStatus === 'pago' && valorRecebidoNumerico <= MONEY_EPSILON) {
-            toast.error('Informe um valor recebido maior que zero.');
+        if (pagamentoStatus === 'pago' && !pagamentosConfirmacao.length) {
+            toast.error('Adicione pelo menos uma forma de pagamento.');
             return;
         }
 
@@ -338,9 +384,14 @@ export default function Entregador() {
 
         const contexto = modalConfirmaPagamento.contexto || 'manual';
         const entrega = { ...modalConfirmaPagamento };
+        const formaPagamentoResumo = pagamentosConfirmacao.length === 1
+            ? pagamentosConfirmacao[0].forma_pagamento
+            : 'Múltiplos';
         const pagamentoPayload = {
             pagamentoStatus,
-            valorRecebido: valorRecebidoNumerico,
+            pagamentos: pagamentosConfirmacao,
+            valorRecebido: totalPagamentoConfirmacao,
+            formaPagamento: formaPagamentoResumo,
             motivoPendente: motivoPendente.trim(),
         };
 
@@ -1853,14 +1904,29 @@ export default function Entregador() {
                         </DialogTitle>
                     </DialogHeader>
                     <div className="py-4">
+                        {(() => {
+                            const pagamentosComprovante = modalComprovante?.pagamentoPayload?.pagamentos || [];
+                            const valorRecebidoComprovante = pagamentosComprovante.length > 0
+                                ? pagamentosComprovante.reduce((sum, pagamento) => sum + toMoneyNumber(pagamento.valor), 0)
+                                : toMoneyNumber(modalComprovante?.pagamentoPayload?.valorRecebido || modalComprovante?.valor_a_receber || 0);
+
+                            return (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
                             <p className="text-sm font-medium text-amber-800">
-                                💰 Valor recebido: R$ {(modalComprovante?.valor_a_receber || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                Valor recebido: R$ {valorRecebidoComprovante.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </p>
-                            {modalComprovante?.forma_pagamento && (
-                                <p className="text-xs text-amber-600">Forma: {modalComprovante.forma_pagamento}</p>
-                            )}
+                            {pagamentosComprovante.length > 0 ? (
+                                pagamentosComprovante.map((pagamento, index) => (
+                                    <p key={`${pagamento.forma_pagamento}-${index}`} className="text-xs text-amber-600">
+                                        {pagamento.forma_pagamento}{pagamento.parcelas > 1 ? ` (${pagamento.parcelas}x)` : ''}: R$ {formatMoney(pagamento.valor)}
+                                    </p>
+                                ))
+                            ) : modalComprovante?.pagamentoPayload?.formaPagamento ? (
+                                <p className="text-xs text-amber-600">Forma: {modalComprovante.pagamentoPayload.formaPagamento}</p>
+                            ) : null}
                         </div>
+                            );
+                        })()}
                         <CameraCapture
                             titulo="Foto do Comprovante"
                             onCapture={salvarComprovante}
@@ -2203,19 +2269,89 @@ export default function Entregador() {
                             </div>
 
                             {pagamentoStatus === 'pago' && (
-                                <div className="space-y-2">
-                                    <p className="text-sm font-medium text-gray-700">Valor recebido</p>
-                                    <Input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={valorRecebido}
-                                        onChange={(e) => setValorRecebido(e.target.value)}
-                                        placeholder="0,00"
-                                    />
+                                <div className="space-y-3">
+                                    <div className="rounded-lg border p-3 space-y-3">
+                                        <div className="space-y-2">
+                                            <p className="text-sm font-medium text-gray-700">Forma de pagamento</p>
+                                            <Select
+                                                value={novoPagamentoConfirmacao.forma_pagamento}
+                                                onValueChange={(value) => setNovoPagamentoConfirmacao((prev) => ({ ...prev, forma_pagamento: value, parcelas: 1 }))}
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Selecione a forma" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {PAYMENT_METHOD_OPTIONS.map((forma) => (
+                                                        <SelectItem key={forma} value={forma}>
+                                                            {forma}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <p className="text-sm font-medium text-gray-700">Valor recebido</p>
+                                            <Input
+                                                type="number"
+                                                min="0"
+                                                step="0.01"
+                                                value={novoPagamentoConfirmacao.valor}
+                                                onChange={(e) => setNovoPagamentoConfirmacao((prev) => ({ ...prev, valor: e.target.value }))}
+                                                placeholder="0,00"
+                                            />
+                                        </div>
+
+                                        {isInstallmentPaymentMethod(novoPagamentoConfirmacao.forma_pagamento) && (
+                                            <div className="space-y-2">
+                                                <p className="text-sm font-medium text-gray-700">Parcelas</p>
+                                                <Select
+                                                    value={String(novoPagamentoConfirmacao.parcelas || 1)}
+                                                    onValueChange={(value) => setNovoPagamentoConfirmacao((prev) => ({ ...prev, parcelas: Number(value) }))}
+                                                >
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="1x" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {Array.from({ length: 12 }).map((_, index) => (
+                                                            <SelectItem key={index + 1} value={String(index + 1)}>{index + 1}x</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        )}
+
+                                        <Button type="button" className="w-full" onClick={adicionarPagamentoConfirmacao}>
+                                            Adicionar forma
+                                        </Button>
+                                    </div>
+
+                                    <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground flex items-center justify-between gap-3">
+                                        <span>Total informado: <strong>R$ {formatMoney(totalPagamentoConfirmacao)}</strong></span>
+                                        <span>Saldo restante: <strong>R$ {formatMoney(saldoPagamentoConfirmacao)}</strong></span>
+                                    </div>
+
                                     <p className="text-xs text-gray-500">
                                         Informe o valor efetivamente recebido. Se houver saldo restante, o pedido continua pendente.
                                     </p>
+
+                                    <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                                        {pagamentosConfirmacao.length === 0 ? (
+                                            <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground text-center">
+                                                Nenhuma forma adicionada ainda.
+                                            </div>
+                                        ) : pagamentosConfirmacao.map((pagamento, index) => (
+                                            <div key={`${pagamento.forma_pagamento}-${index}`} className="flex items-center justify-between rounded-md border px-3 py-2 gap-3">
+                                                <div>
+                                                    <p className="text-sm font-medium">{pagamento.forma_pagamento}{pagamento.parcelas > 1 ? ` (${pagamento.parcelas}x)` : ''}</p>
+                                                    <p className="text-xs text-muted-foreground">R$ {formatMoney(pagamento.valor)}</p>
+                                                </div>
+                                                <Button type="button" variant="ghost" size="sm" onClick={() => removerPagamentoConfirmacao(index)}>
+                                                    Remover
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
 
@@ -2249,7 +2385,7 @@ export default function Entregador() {
                             <Button
                                 className={`w-full ${pagamentoStatus === 'pago' ? 'bg-green-600 hover:bg-green-700' : 'bg-orange-600 hover:bg-orange-700'}`}
                                 onClick={confirmarPagamentoNoModal}
-                                disabled={enviando || (pagamentoStatus === 'pendente' && !motivoPendente.trim())}
+                                disabled={enviando || (pagamentoStatus === 'pendente' && !motivoPendente.trim()) || (pagamentoStatus === 'pago' && !pagamentosConfirmacao.length)}
                             >
                                 {pagamentoStatus === 'pago' ? (
                                     <><Check className="w-4 h-4 mr-1" /> Confirmar e anexar comprovante</>

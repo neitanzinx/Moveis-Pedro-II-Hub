@@ -27,6 +27,7 @@ import { VendaDetalhesModal } from "@/components/vendas/VendaDetalhesModal";
 import { getVendaFinanceiro, getVendaResumoLogistico, isStatusCancelado, isVendaCancelada } from "@/utils/vendaStatus";
 import { buildProductDisplayName } from "@/utils/productReference";
 import { MONEY_EPSILON, toMoneyNumber } from "@/utils/deliveryPayment";
+import { isInstallmentPaymentMethod, validatePaymentSplit } from "@/services/paymentOrchestrator";
 
 const STATUS_ENTREGA_OPTIONS = [
     'Aguardando Liberação',
@@ -36,6 +37,21 @@ const STATUS_ENTREGA_OPTIONS = [
     'Entregue',
     'Retirado'
 ];
+
+const SALES_PAYMENT_OPTIONS = [
+    'Dinheiro',
+    'PIX',
+    'Cartão de Débito',
+    'Cartão de Crédito',
+    'Boleto',
+    'Transferência'
+];
+
+const createEmptyPagamentoItem = (defaults = {}) => ({
+    forma_pagamento: defaults.forma_pagamento || '',
+    valor: defaults.valor || '',
+    parcelas: defaults.parcelas || 1,
+});
 
 export default function Vendas() {
     const formatarValorMonetarioInput = (value) => {
@@ -59,11 +75,11 @@ export default function Vendas() {
     const [isDetalhesModalOpen, setIsDetalhesModalOpen] = useState(false);
     const [modalPagamentoVenda, setModalPagamentoVenda] = useState(null);
     const [pagamentoForm, setPagamentoForm] = useState({
-        valor: "",
-        forma_pagamento: "PIX",
+        pagamentos: [],
         data_pagamento: new Date().toISOString().slice(0, 10),
         observacao: ""
     });
+    const [novoPagamentoItem, setNovoPagamentoItem] = useState(createEmptyPagamentoItem({ forma_pagamento: 'PIX' }));
 
     const liberarEntregaMutation = useMutation({
         mutationFn: (id) => base44.entities.Entrega.update(id, {
@@ -382,25 +398,47 @@ export default function Vendas() {
         const saldoAtual = Math.max(toMoneyNumber(financeiroAtual.valorRestante), 0);
         const totalVenda = Math.max(toMoneyNumber(financeiroAtual.total || venda.valor_total), 0);
         const valorPagoAtual = Math.max(toMoneyNumber(financeiroAtual.valorPago || venda.valor_pago), 0);
-        const valorRecebidoNum = Math.max(toMoneyNumber(valorRecebido), 0);
+
+        const rawPayments = Array.isArray(valorRecebido)
+            ? valorRecebido
+            : [{ forma_pagamento: formaPagamento, valor: valorRecebido, parcelas: 1 }];
+
+        const paymentValidation = validatePaymentSplit({
+            total: saldoAtual,
+            payments: rawPayments.map((payment) => ({
+                ...payment,
+                valor: toMoneyNumber(payment?.valor),
+                parcelas: Number(payment?.parcelas || 1),
+            })),
+        });
+
+        if (!paymentValidation.ok) {
+            throw new Error(paymentValidation.errors[0] || 'Não foi possível validar os pagamentos informados.');
+        }
+
+        const novosPagamentos = paymentValidation.pagamentos;
+        const valorRecebidoNum = paymentValidation.totalPago;
 
         if (valorRecebidoNum <= MONEY_EPSILON) {
             throw new Error('Informe um valor de pagamento maior que zero.');
-        }
-
-        if (valorRecebidoNum > saldoAtual + MONEY_EPSILON) {
-            throw new Error(`O valor informado excede o saldo pendente de R$ ${saldoAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`);
         }
 
         const novoValorPago = Math.min(totalVenda, valorPagoAtual + valorRecebidoNum);
         const novoValorRestante = Math.max(totalVenda - novoValorPago, 0);
         const quitada = novoValorRestante <= MONEY_EPSILON;
         const statusVenda = quitada ? 'Pago' : 'Pagamento Pendente';
+        const pagamentosExistentes = Array.isArray(venda.pagamentos) ? venda.pagamentos : [];
+        const pagamentosAtualizados = [...pagamentosExistentes, ...novosPagamentos];
+        const formaPagamentoResumo = pagamentosAtualizados.length === 1
+            ? pagamentosAtualizados[0].forma_pagamento
+            : 'Múltiplos';
 
         const vendaUpdatePayload = {
             valor_pago: novoValorPago,
             valor_restante: novoValorRestante,
             status: statusVenda,
+            forma_pagamento: formaPagamentoResumo,
+            pagamentos: pagamentosAtualizados,
             pagamento_entrega_observacao: observacao || null,
         };
 
@@ -418,19 +456,22 @@ export default function Vendas() {
             await base44.entities.Venda.update(venda.id, fallbackPayload);
         }
 
-        await base44.entities.LancamentoFinanceiro.create({
-            descricao: `Pagamento na loja - Venda #${venda.numero_pedido}`,
-            valor: valorRecebidoNum,
-            tipo: 'receita',
-            data_lancamento: dataPagamento,
-            data_vencimento: dataPagamento,
-            pago: true,
-            forma_pagamento: formaPagamento,
-            status: 'Pago',
-            observacao: observacao || 'Pagamento antecipado registrado na listagem de vendas.',
-            venda_id: venda.id,
-            numero_pedido: venda.numero_pedido,
-        });
+        for (const pagamento of novosPagamentos) {
+            const descricaoParcelas = pagamento.parcelas > 1 ? ` (${pagamento.parcelas}x)` : '';
+            await base44.entities.LancamentoFinanceiro.create({
+                descricao: `Pagamento na loja - Venda #${venda.numero_pedido} - ${pagamento.forma_pagamento}${descricaoParcelas}`,
+                valor: pagamento.valor,
+                tipo: 'receita',
+                data_lancamento: dataPagamento,
+                data_vencimento: dataPagamento,
+                pago: true,
+                forma_pagamento: pagamento.forma_pagamento,
+                status: 'Pago',
+                observacao: observacao || 'Pagamento antecipado registrado na listagem de vendas.',
+                venda_id: venda.id,
+                numero_pedido: venda.numero_pedido,
+            });
+        }
 
         if (quitada) {
             const pendentesVenda = (lancamentos || []).filter((l) =>
@@ -465,11 +506,11 @@ export default function Vendas() {
             );
             setModalPagamentoVenda(null);
             setPagamentoForm({
-                valor: "",
-                forma_pagamento: "PIX",
+                pagamentos: [],
                 data_pagamento: new Date().toISOString().slice(0, 10),
                 observacao: ""
             });
+            setNovoPagamentoItem(createEmptyPagamentoItem({ forma_pagamento: 'PIX' }));
         },
         onError: (error) => {
             toast.error(error?.message || 'Não foi possível registrar o pagamento.');
@@ -479,23 +520,79 @@ export default function Vendas() {
     const abrirModalPagamento = (venda) => {
         const financeiro = venda.financeiro || getVendaFinanceiro(venda, { entregas, lancamentos });
         const saldoAtual = Math.max(toMoneyNumber(financeiro.valorRestante), 0);
+        const formaPagamentoPadrao = venda.forma_pagamento_entrega || venda.forma_pagamento || 'PIX';
 
         setPagamentoForm({
-            valor: saldoAtual > 0 ? formatarValorMonetarioInput(saldoAtual.toFixed(2)) : "",
-            forma_pagamento: venda.forma_pagamento_entrega || venda.forma_pagamento || "PIX",
+            pagamentos: [],
             data_pagamento: new Date().toISOString().slice(0, 10),
             observacao: ""
         });
+        setNovoPagamentoItem(createEmptyPagamentoItem({
+            forma_pagamento: formaPagamentoPadrao,
+            valor: saldoAtual > 0 ? formatarValorMonetarioInput(saldoAtual.toFixed(2)) : '',
+        }));
         setModalPagamentoVenda(venda);
+    };
+
+    const saldoModalPagamento = modalPagamentoVenda
+        ? Math.max(
+            toMoneyNumber((modalPagamentoVenda.financeiro || getVendaFinanceiro(modalPagamentoVenda, { entregas, lancamentos })).valorRestante),
+            0
+        )
+        : 0;
+
+    const totalPagamentoInformado = pagamentoForm.pagamentos.reduce((total, pagamento) => total + toMoneyNumber(pagamento.valor), 0);
+    const saldoAposSplit = Math.max(saldoModalPagamento - totalPagamentoInformado, 0);
+
+    const adicionarPagamentoAoModal = () => {
+        const pagamentosCandidatos = [
+            ...pagamentoForm.pagamentos,
+            {
+                ...novoPagamentoItem,
+                valor: toMoneyNumber(novoPagamentoItem.valor),
+                parcelas: Number(novoPagamentoItem.parcelas || 1),
+            }
+        ];
+
+        const validation = validatePaymentSplit({
+            total: saldoModalPagamento,
+            payments: pagamentosCandidatos,
+        });
+
+        if (!validation.ok) {
+            toast.error(validation.errors[0] || 'Não foi possível adicionar essa forma de pagamento.');
+            return;
+        }
+
+        setPagamentoForm((prev) => ({
+            ...prev,
+            pagamentos: validation.pagamentos,
+        }));
+        const saldoRestanteAtualizado = Math.max(saldoModalPagamento - validation.totalPago, 0);
+        setNovoPagamentoItem(createEmptyPagamentoItem({
+            forma_pagamento: novoPagamentoItem.forma_pagamento || 'PIX',
+            valor: saldoRestanteAtualizado > 0 ? formatarValorMonetarioInput(saldoRestanteAtualizado.toFixed(2)) : '',
+        }));
+    };
+
+    const removerPagamentoDoModal = (index) => {
+        setPagamentoForm((prev) => ({
+            ...prev,
+            pagamentos: prev.pagamentos.filter((_, itemIndex) => itemIndex !== index),
+        }));
     };
 
     const confirmarPagamentoAntecipado = () => {
         if (!modalPagamentoVenda) return;
 
+        if (!pagamentoForm.pagamentos.length) {
+            toast.error('Adicione pelo menos uma forma de pagamento.');
+            return;
+        }
+
         registrarPagamentoMutation.mutate({
             venda: modalPagamentoVenda,
-            valorRecebido: pagamentoForm.valor,
-            formaPagamento: pagamentoForm.forma_pagamento,
+            valorRecebido: pagamentoForm.pagamentos,
             dataPagamento: pagamentoForm.data_pagamento,
             observacao: pagamentoForm.observacao,
         });
@@ -1613,41 +1710,89 @@ export default function Vendas() {
                     </DialogHeader>
                     <div className="space-y-4 py-2">
                         <div className="rounded-lg border bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                            Saldo atual: <strong>R$ {toMoneyNumber(modalPagamentoVenda?.financeiro?.valorRestante).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                            Saldo atual: <strong>R$ {saldoModalPagamento.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                         </div>
 
-                        <div className="space-y-2">
-                            <Label>Valor recebido</Label>
-                            <Input
-                                type="text"
-                                inputMode="numeric"
-                                value={pagamentoForm.valor}
-                                onChange={(e) => setPagamentoForm((prev) => ({
-                                    ...prev,
-                                    valor: formatarValorMonetarioInput(e.target.value)
-                                }))}
-                                placeholder="0,00"
-                            />
-                        </div>
+                        <div className="rounded-lg border p-3 space-y-3">
+                            <div className="grid gap-3 sm:grid-cols-[1.4fr,1fr,auto] items-end">
+                                <div className="space-y-2">
+                                    <Label>Forma de pagamento</Label>
+                                    <Select
+                                        value={novoPagamentoItem.forma_pagamento}
+                                        onValueChange={(value) => setNovoPagamentoItem((prev) => ({ ...prev, forma_pagamento: value, parcelas: 1 }))}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Selecione" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {SALES_PAYMENT_OPTIONS.map((forma) => (
+                                                <SelectItem key={forma} value={forma}>{forma}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
 
-                        <div className="space-y-2">
-                            <Label>Forma de pagamento</Label>
-                            <Select
-                                value={pagamentoForm.forma_pagamento}
-                                onValueChange={(value) => setPagamentoForm((prev) => ({ ...prev, forma_pagamento: value }))}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Selecione" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="Dinheiro">Dinheiro</SelectItem>
-                                    <SelectItem value="PIX">PIX</SelectItem>
-                                    <SelectItem value="Cartão de Débito">Cartão de Débito</SelectItem>
-                                    <SelectItem value="Cartão de Crédito">Cartão de Crédito</SelectItem>
-                                    <SelectItem value="Boleto">Boleto</SelectItem>
-                                    <SelectItem value="Transferência">Transferência</SelectItem>
-                                </SelectContent>
-                            </Select>
+                                <div className="space-y-2">
+                                    <Label>Valor</Label>
+                                    <Input
+                                        type="text"
+                                        inputMode="numeric"
+                                        value={novoPagamentoItem.valor}
+                                        onChange={(e) => setNovoPagamentoItem((prev) => ({
+                                            ...prev,
+                                            valor: formatarValorMonetarioInput(e.target.value)
+                                        }))}
+                                        placeholder="0,00"
+                                    />
+                                </div>
+
+                                <Button type="button" onClick={adicionarPagamentoAoModal}>
+                                    <Plus className="w-4 h-4 mr-2" />
+                                    Adicionar
+                                </Button>
+                            </div>
+
+                            {isInstallmentPaymentMethod(novoPagamentoItem.forma_pagamento) && (
+                                <div className="space-y-2">
+                                    <Label>Parcelas</Label>
+                                    <Select
+                                        value={String(novoPagamentoItem.parcelas || 1)}
+                                        onValueChange={(value) => setNovoPagamentoItem((prev) => ({ ...prev, parcelas: Number(value) }))}
+                                    >
+                                        <SelectTrigger className="sm:max-w-[180px]">
+                                            <SelectValue placeholder="1x" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Array.from({ length: 12 }).map((_, index) => (
+                                                <SelectItem key={index + 1} value={String(index + 1)}>{index + 1}x</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
+
+                            <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground flex items-center justify-between gap-3">
+                                <span>Total informado: <strong>R$ {totalPagamentoInformado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                                <span>Restante no modal: <strong>R$ {saldoAposSplit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                            </div>
+
+                            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                {pagamentoForm.pagamentos.length === 0 ? (
+                                    <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground text-center">
+                                        Nenhuma forma adicionada ainda.
+                                    </div>
+                                ) : pagamentoForm.pagamentos.map((pagamento, index) => (
+                                    <div key={`${pagamento.forma_pagamento}-${index}`} className="flex items-center justify-between rounded-md border px-3 py-2 gap-3">
+                                        <div>
+                                            <p className="text-sm font-medium">{pagamento.forma_pagamento}{pagamento.parcelas > 1 ? ` (${pagamento.parcelas}x)` : ''}</p>
+                                            <p className="text-xs text-muted-foreground">R$ {toMoneyNumber(pagamento.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                        </div>
+                                        <Button type="button" variant="ghost" size="sm" onClick={() => removerPagamentoDoModal(index)}>
+                                            Remover
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
 
                         <div className="space-y-2">
