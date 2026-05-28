@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -502,6 +502,7 @@ export default function PDV() {
   const [savingOrcamento, setSavingOrcamento] = useState(false);
   const [cupomAplicado, setCupomAplicado] = useState(initialState?.cupomAplicado || null);
   const [tokenGerencial, setTokenGerencial] = useState(initialState?.tokenGerencial || null);
+  const [descontoMargemPercent, setDescontoMargemPercent] = useState(initialState?.descontoMargemPercent || 0);
   const [editingProdutoPDV, setEditingProdutoPDV] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [origemRetiradaModalOpen, setOrigemRetiradaModalOpen] = useState(false);
@@ -632,9 +633,9 @@ export default function PDV() {
   useEffect(() => {
     // Não salvar se estamos no meio do carregamento de um orçamento (race condition)
     if (isLoadingOrcamentoRef.current) return;
-    const state = { etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao, selectedVendedorId, cupomAplicado, tokenGerencial };
+    const state = { etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao, selectedVendedorId, cupomAplicado, tokenGerencial, descontoMargemPercent };
     sessionStorage.setItem(PDV_STATE_KEY, JSON.stringify(state));
-  }, [etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao, selectedVendedorId, cupomAplicado, tokenGerencial]);
+  }, [etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao, selectedVendedorId, cupomAplicado, tokenGerencial, descontoMargemPercent]);
 
   useEffect(() => {
     if (user && !initialState) {
@@ -829,6 +830,12 @@ export default function PDV() {
     mutationFn: (data) => base44.entities.Venda.create(data)
   });
 
+  // Margem negociável da loja ativa
+  const margemNegociavel = useMemo(() => {
+    const lojaObj = (lojas || []).find(l => l.nome === configVenda.loja);
+    return parseFloat(lojaObj?.margem_negociavel || 0);
+  }, [lojas, configVenda.loja]);
+
   const criarOrcamentoMutation = useMutation({
     mutationFn: (data) => base44.entities.Orcamento.create(data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orcamentos'] })
@@ -937,6 +944,10 @@ export default function PDV() {
         newItens[exists].subtotal = newItens[exists].quantidade * newItens[exists].preco_unitario;
         newItens[exists].fornecedor_id = newItens[exists].fornecedor_id || fornecedorResolvido.fornecedor_id;
         newItens[exists].fornecedor_nome = newItens[exists].fornecedor_nome || fornecedorResolvido.fornecedor_nome;
+        newItens[exists].cor = newItens[exists].cor || produto.cor || '';
+        newItens[exists].tecido = newItens[exists].tecido || produto.tecido || produto.material || '';
+        newItens[exists].tamanho = newItens[exists].tamanho || produto.tamanho || '';
+        newItens[exists].fabricante = newItens[exists].fabricante || produto.fabricante || produto.marca || fornecedorResolvido.fornecedor_nome || '';
         if (origemEstoque?.campo && !newItens[exists].origem_estoque_campo) {
           newItens[exists].origem_estoque_campo = origemEstoque.campo;
           newItens[exists].origem_estoque_nome = origemEstoque.nome;
@@ -968,7 +979,11 @@ export default function PDV() {
         origem_estoque_campo: origemEstoque?.campo || null,
         origem_estoque_nome: origemEstoque?.nome || null,
         fornecedor_id: fornecedorResolvido.fornecedor_id,
-        fornecedor_nome: fornecedorResolvido.fornecedor_nome
+        fornecedor_nome: fornecedorResolvido.fornecedor_nome,
+        cor: produto.cor || '',
+        tecido: produto.tecido || produto.material || '',
+        tamanho: produto.tamanho || '',
+        fabricante: produto.fabricante || produto.marca || fornecedorResolvido.fornecedor_nome || ''
       }];
     });
   };
@@ -1109,10 +1124,17 @@ export default function PDV() {
       setItens(prevItens =>
         prevItens.map(item => {
           if (item.produto_id === editingProdutoPDV.id) {
+            const precoEditado = Number(updatedData.preco_venda);
+            const precoUnitarioAtualizado = Number.isFinite(precoEditado)
+              ? precoEditado
+              : Number(item.preco_unitario || 0);
+            const quantidadeItem = Number(item.quantidade || 0);
+
             return {
               ...item,
               produto_nome: buildProductDisplayName(updatedData.nome || item.produto_nome, updatedData.modelo_referencia),
-              preco_unitario: updatedData.preco_venda || item.preco_unitario
+              preco_unitario: precoUnitarioAtualizado,
+              subtotal: quantidadeItem * precoUnitarioAtualizado
             };
           }
           return item;
@@ -1597,6 +1619,18 @@ export default function PDV() {
       observacoes: observacoes,
       cupom_codigo: cupomAplicado?.codigo || null,
       cupom_desconto: cupomAplicado ? desconto : 0,
+      desconto_percentual: desconto > 0 && subtotal > 0
+        ? parseFloat(((desconto / subtotal) * 100).toFixed(2))
+        : null,
+      desconto_origem: cupomAplicado
+        ? 'cupom'
+        : tokenGerencial
+          ? 'token'
+          : desconto > 0 && descontoMargemPercent > 0
+            ? 'margem_negociavel'
+            : desconto !== 0
+              ? 'arredondamento'
+              : null,
       triagem_realizada: todosRetiram,
       data_triagem: todosRetiram ? new Date().toISOString() : null,
       orcamento_origem_id: orcamentoOrigemId || null
@@ -1946,6 +1980,7 @@ export default function PDV() {
     setSelectedVendedorId(user?.id || null);
     setCupomAplicado(null);
     setOrcamentoOrigemId(null);
+    setDescontoMargemPercent(0);
     setEtapa(1);
     sessionStorage.removeItem(PDV_STATE_KEY);
   };
@@ -2328,6 +2363,8 @@ export default function PDV() {
                 prazo={configVenda.prazo}
                 tokenGerencial={tokenGerencial}
                 setTokenGerencial={setTokenGerencial}
+                margemNegociavel={margemNegociavel}
+                onDescontoMargemChange={(percent) => setDescontoMargemPercent(percent)}
               />
             </div>
           )}

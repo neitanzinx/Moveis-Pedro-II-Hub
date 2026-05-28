@@ -336,7 +336,7 @@ export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
                 <Input
                   id="endereco_entrega_complemento"
                   value={enderecoEntrega.complemento}
-                  onChange={(e) => updateEnderecoField("complemento", formatarEndereco(e.target.value))}
+                  onChange={(e) => updateEnderecoField("complemento", e.target.value)}
                   className="bg-white dark:bg-neutral-900 border-blue-200 dark:border-blue-800/50 mt-1"
                   placeholder="Casa 06, bloco A, apto 101..."
                 />
@@ -348,7 +348,7 @@ export default function ModalDetalhesEntrega({ entrega, venda, onClose }) {
               <Input
                 id="endereco_entrega_ponto_referencia"
                 value={enderecoEntrega.ponto_referencia}
-                onChange={(e) => updateEnderecoField("ponto_referencia", formatarEndereco(e.target.value))}
+                onChange={(e) => updateEnderecoField("ponto_referencia", e.target.value)}
                 className="bg-white dark:bg-neutral-900 border-blue-200 dark:border-blue-800/50 mt-1"
                 placeholder="Próximo ao mercado, portão de grade vinho..."
               />

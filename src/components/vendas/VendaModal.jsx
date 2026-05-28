@@ -28,6 +28,54 @@ import { buildProductDisplayName } from "@/utils/productReference";
 const formasPagamento = ["Dinheiro", "Crédito", "Débito", "Pix", "AFESP", "Multicrédito"];
 const statusVenda = ["Pagamento Pendente", "Pago", "Pago & Retirado"];
 
+const possuiValorValidoPDF = (valor) => {
+  if (valor === null || typeof valor === 'undefined') return false;
+  const texto = String(valor).trim();
+  if (!texto) return false;
+  const normalizado = texto.toLowerCase();
+  return !['-', 'null', 'undefined', 'n/a', 'na'].includes(normalizado);
+};
+
+const primeiroValorValidoPDF = (...valores) => {
+  const encontrado = valores.find(possuiValorValidoPDF);
+  return possuiValorValidoPDF(encontrado) ? String(encontrado).trim() : '-';
+};
+
+const tamanhoItemPDF = (item = {}) => {
+  const tamanhoDireto = primeiroValorValidoPDF(
+    item.tamanho,
+    item.detalhes_solicitacao?.tamanho,
+    item.produto?.tamanho
+  );
+
+  if (tamanhoDireto !== '-') return tamanhoDireto;
+
+  const medidas = [
+    item.largura ?? item.produto?.largura,
+    item.altura ?? item.produto?.altura,
+    item.profundidade ?? item.produto?.profundidade
+  ]
+    .filter((valor) => possuiValorValidoPDF(valor))
+    .map((valor) => String(valor).trim());
+
+  return medidas.length > 0 ? medidas.join(' x ') : '-';
+};
+
+const detalhesItemPDF = (item = {}) => ({
+  cor: primeiroValorValidoPDF(item.cor, item.detalhes_solicitacao?.cor, item.produto?.cor),
+  tecido: primeiroValorValidoPDF(item.tecido, item.detalhes_solicitacao?.tecido, item.produto?.tecido),
+  tamanho: tamanhoItemPDF(item),
+  fabricante: primeiroValorValidoPDF(
+    item.fabricante,
+    item.fabricante_nome,
+    item.marca,
+    item.fornecedor_nome,
+    item.detalhes_solicitacao?.fabricante,
+    item.produto?.fabricante,
+    item.produto?.fornecedor_nome
+  )
+});
+
 export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, produtos, isLoading, userLoja, proximoNumero }) {
   const { organization, settings } = useTenant();
   const [formData, setFormData] = useState({
@@ -235,6 +283,11 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
       produto_nome: produtoNomeComCor,
       produto_cor: produto.cor || '',
       produto_categoria: produto.categoria || "Geral",
+      cor: produto.cor || '',
+      tecido: produto.tecido || produto.material || '',
+      tamanho: produto.tamanho || '',
+      fabricante: produto.fabricante || produto.marca || produto.fornecedor_nome || '',
+      fornecedor_nome: produto.fornecedor_nome || '',
       quantidade: quantidade,
       preco_unitario: produto.preco_venda,
       subtotal: subtotal
@@ -328,9 +381,15 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
 
     let itensHTML = '';
     vendaData.itens.forEach(item => {
+      const detalhes = detalhesItemPDF(item);
       itensHTML += `
         <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #E5E0D8;">${item.produto_nome}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #E5E0D8;">
+            <div style="font-weight: 600; color: #2C2C2C;">${item.produto_nome}</div>
+            <div style="margin-top: 4px; font-size: 11px; color: #8B8B8B; line-height: 1.45;">
+              Cor: ${detalhes.cor} | Tecido: ${detalhes.tecido} | Tamanho: ${detalhes.tamanho} | Fabricante: ${detalhes.fabricante}
+            </div>
+          </td>
           <td style="padding: 12px; border-bottom: 1px solid #E5E0D8; text-align: center;">${item.quantidade}</td>
           <td style="padding: 12px; border-bottom: 1px solid #E5E0D8; text-align: right;">R$ ${item.preco_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
           <td style="padding: 12px; border-bottom: 1px solid #E5E0D8; text-align: right; font-weight: bold;">R$ ${item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useSearchParams } from "react-router-dom";
-import { Building2, DollarSign, Truck, FileText, Users, Shield, AlertCircle, Image, Store, Percent, Calculator, Package, UserCheck, ClipboardList, ChevronRight, CreditCard, Sparkles, Bot, MessageCircle, Key } from "lucide-react";
+import { Building2, DollarSign, Truck, FileText, Users, Shield, AlertCircle, Image, Store, Calculator, Package, UserCheck, ClipboardList, ChevronRight, CreditCard, Sparkles, Bot, MessageCircle, TrendingDown } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import ConfiguracaoComissoes from "../components/configuracoes/ConfiguracaoComissoes";
 import ConfiguracaoFrota from "../components/configuracoes/ConfiguracaoFrota";
@@ -34,7 +34,7 @@ const MENU_CONFIG = {
     label: "Financeiro",
     icon: DollarSign,
     items: [
-      { id: "comissoes", label: "Comissões", icon: Percent },
+      { id: "comissoes", label: "Líq. do Vendedor", icon: TrendingDown },
       { id: "taxas", label: "Taxas", icon: Calculator },
       { id: "precos", label: "Precificação", icon: Package },
       { id: "markup", label: "Markup Automático", icon: Sparkles },

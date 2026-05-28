@@ -5,12 +5,13 @@ import { useTenant } from "@/contexts/TenantContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, BarChart3, DollarSign, FileSpreadsheet, PieChart } from "lucide-react";
+import { AlertTriangle, BarChart3, DollarSign, FileSpreadsheet, PieChart, TrendingDown } from "lucide-react";
 
 const DashboardBI = lazy(() => import("./DashboardBI.jsx"));
 const ExportacaoContabil = lazy(() => import("./ExportacaoContabil.jsx"));
 const RelatoriosAvancados = lazy(() => import("./RelatoriosAvancados.jsx"));
 const RelatorioComissoes = lazy(() => import("./RelatorioComissoes.jsx"));
+const RelatorioDescontos = lazy(() => import("./RelatorioDescontos.jsx"));
 
 const TAB_CONFIG = [
   {
@@ -37,6 +38,14 @@ const TAB_CONFIG = [
     permission: "view_relatorios",
     icon: DollarSign,
     component: RelatorioComissoes,
+  },
+  {
+    id: "descontos",
+    title: "Descontos",
+    description: "Relatório de descontos concedidos por vendedor, período e origem.",
+    permission: "view_relatorios",
+    icon: TrendingDown,
+    component: RelatorioDescontos,
   },
   {
     id: "exportacao",

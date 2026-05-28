@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, AlertTriangle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck, ClipboardList, Info, CalendarX, Settings, ArrowRightLeft, Unlock } from "lucide-react";
+import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, AlertTriangle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck, ClipboardList, Info, CalendarX, Settings, ArrowRightLeft, Unlock, ArrowUpDown, ArrowUp, ArrowDown, Percent } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { abrirNotaPedidoPDF } from "../components/vendas/NotaPedidoPDF";
 import { useAuth } from "@/hooks/useAuth";
+import { useLojas } from "@/hooks/useLojas";
 import { useConfirm } from "@/hooks/useConfirm";
 import ArquivoTab from "../components/vendas/ArquivoTab";
 import EmitirNFeModal from "../components/vendas/EmitirNFeModal";
@@ -53,6 +54,13 @@ const createEmptyPagamentoItem = (defaults = {}) => ({
     parcelas: defaults.parcelas || 1,
 });
 
+const SORT_DEFAULT_DIRECTIONS = {
+    cliente: 'asc',
+    pedido: 'asc',
+    data: 'desc',
+    total: 'desc',
+};
+
 export default function Vendas() {
     const formatarValorMonetarioInput = (value) => {
         const digitsOnly = String(value ?? "").replace(/\D/g, "");
@@ -67,6 +75,7 @@ export default function Vendas() {
 
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
+    const [sortConfig, setSortConfig] = useState({ key: 'data', direction: 'desc' });
     const [activeTab, setActiveTab] = useState("vendas");
     const [nfeModalOpen, setNfeModalOpen] = useState(false);
     const [vendaParaNfe, setVendaParaNfe] = useState(null);
@@ -129,7 +138,7 @@ export default function Vendas() {
     const confirm = useConfirm();
 
     // Hook de Autenticação e Controle de Acesso
-    const { user, filterData, can } = useAuth();
+    const { user, filterData, can, getUserLoja } = useAuth();
     const canCancelVendas = can('cancel_vendas');
     const canManagePayments = can('manage_financeiro') || can('manage_vendas');
     const canManageVendas = can('manage_vendas');
@@ -211,6 +220,8 @@ export default function Vendas() {
         queryKey: ['users_list'],
         queryFn: () => base44.entities.User.list()
     });
+
+    const { data: lojasAtivas = [] } = useLojas();
 
     // Mutation para cancelar venda
     const cancelarVendaMutation = useMutation({
@@ -720,14 +731,76 @@ export default function Vendas() {
         return true;
     });
 
-    const selectedVendas = filtered.filter((v) => selectedVendaIds.includes(v.id));
+    const getSortValue = React.useCallback((venda, sortKey) => {
+        switch (sortKey) {
+            case 'cliente':
+                return String(venda.cliente_nome || '').trim().toLocaleLowerCase('pt-BR');
+            case 'pedido': {
+                const numeroPedido = String(venda.numero_pedido || '').trim();
+                const parsedPedido = Number(numeroPedido.replace(/\D/g, ''));
+                return Number.isNaN(parsedPedido) ? numeroPedido.toLocaleLowerCase('pt-BR') : parsedPedido;
+            }
+            case 'data':
+                return new Date(venda.data_venda || 0).getTime();
+            case 'total':
+                return toMoneyNumber(venda.valor_total);
+            default:
+                return '';
+        }
+    }, []);
+
+    const sortVendas = React.useCallback((lista) => {
+        const directionMultiplier = sortConfig.direction === 'asc' ? 1 : -1;
+
+        return [...lista].sort((vendaA, vendaB) => {
+            const valorA = getSortValue(vendaA, sortConfig.key);
+            const valorB = getSortValue(vendaB, sortConfig.key);
+
+            if (typeof valorA === 'string' && typeof valorB === 'string') {
+                return valorA.localeCompare(valorB, 'pt-BR', { sensitivity: 'base', numeric: true }) * directionMultiplier;
+            }
+
+            if (valorA < valorB) return -1 * directionMultiplier;
+            if (valorA > valorB) return 1 * directionMultiplier;
+
+            return 0;
+        });
+    }, [getSortValue, sortConfig.direction, sortConfig.key]);
+
+    const sortedFiltered = React.useMemo(() => sortVendas(filtered), [filtered, sortVendas]);
+    const sortedFilteredCancelados = React.useMemo(() => sortVendas(filteredCancelados), [filteredCancelados, sortVendas]);
+
+    const selectedVendas = sortedFiltered.filter((v) => selectedVendaIds.includes(v.id));
     const selectedIdsSet = new Set(selectedVendaIds);
     const showBulkSelectionColumn = canUseBulkActions && activeTab === 'vendas';
-    const allVisibleSelected = filtered.length > 0 && selectedVendaIds.length === filtered.length;
+    const allVisibleSelected = sortedFiltered.length > 0 && selectedVendaIds.length === sortedFiltered.length;
     const someVisibleSelected = selectedVendaIds.length > 0 && !allVisibleSelected;
     const tableColSpanVendas = showBulkSelectionColumn ? 12 : 11;
     const vendedoresDisponiveis = users.filter((u) => u?.id);
-    const lojasDisponiveis = [...new Set(vendasPermitidas.map((v) => v.loja).filter(Boolean))];
+    const lojasDisponiveis = React.useMemo(() => {
+        const normalizarNomeLoja = (value) => String(value || '').trim();
+
+        const lojasCadastradas = lojasAtivas
+            .map((loja) => normalizarNomeLoja(loja?.nome))
+            .filter(Boolean);
+
+        const lojasFallback = vendas
+            .map((venda) => normalizarNomeLoja(venda?.loja))
+            .filter(Boolean);
+
+        const lojaAtuacaoAtual = normalizarNomeLoja(getUserLoja?.()).toLowerCase();
+        const base = lojasCadastradas.length ? lojasCadastradas : lojasFallback;
+
+        return base
+            .filter((nome, index, arr) => arr.findIndex((item) => item.toLowerCase() === nome.toLowerCase()) === index)
+            .filter((nome) => nome.toLowerCase() !== lojaAtuacaoAtual);
+    }, [getUserLoja, lojasAtivas, vendas]);
+
+    React.useEffect(() => {
+        if (bulkLoja && !lojasDisponiveis.some((loja) => loja === bulkLoja)) {
+            setBulkLoja("");
+        }
+    }, [bulkLoja, lojasDisponiveis]);
 
     React.useEffect(() => {
         if (!showBulkSelectionColumn) {
@@ -735,12 +808,12 @@ export default function Vendas() {
             return;
         }
 
-        const visibleIds = new Set(filtered.map((v) => v.id));
+        const visibleIds = new Set(sortedFiltered.map((v) => v.id));
         setSelectedVendaIds((prev) => {
             const next = prev.filter((id) => visibleIds.has(id));
             return next.length === prev.length ? prev : next;
         });
-    }, [showBulkSelectionColumn, filtered]);
+    }, [showBulkSelectionColumn, sortedFiltered]);
 
     const handleToggleSelectVenda = (vendaId, checked) => {
         setSelectedVendaIds((prev) => {
@@ -752,7 +825,43 @@ export default function Vendas() {
     };
 
     const handleSelectAllVendas = (checked) => {
-        setSelectedVendaIds(checked ? filtered.map((v) => v.id) : []);
+        setSelectedVendaIds(checked ? sortedFiltered.map((v) => v.id) : []);
+    };
+
+    const handleSortChange = (key) => {
+        setSortConfig((prev) => {
+            if (prev.key === key) {
+                return {
+                    key,
+                    direction: prev.direction === 'asc' ? 'desc' : 'asc',
+                };
+            }
+
+            return {
+                key,
+                direction: SORT_DEFAULT_DIRECTIONS[key] || 'asc',
+            };
+        });
+    };
+
+    const renderSortableHeader = (label, key, className = '') => {
+        const isActive = sortConfig.key === key;
+        const Icon = !isActive ? ArrowUpDown : (sortConfig.direction === 'asc' ? ArrowUp : ArrowDown);
+
+        return (
+            <TableHead className={className}>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto px-0 font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
+                    onClick={() => handleSortChange(key)}
+                >
+                    <span>{label}</span>
+                    <Icon className={`ml-2 h-4 w-4 ${isActive ? 'text-foreground' : 'text-muted-foreground/70'}`} />
+                </Button>
+            </TableHead>
+        );
     };
 
     const isEntregaFinalizadaStatus = (status) => {
@@ -1063,10 +1172,15 @@ export default function Vendas() {
                 {/* Só mostra botão se puder criar vendas */}
                 {can('create_vendas') && (
                     <Button
-                        onClick={() => navigate('/PDV')}
-                        className="bg-green-700 hover:bg-green-800 text-white font-medium"
+                        onClick={() => navigate('/admin/PDV')}
+                        className="group w-10 hover:w-44 focus-visible:w-44 overflow-hidden border border-green-200 bg-green-100 text-green-800 hover:bg-green-200 shadow-none transition-all duration-300"
+                        title="Aplicar desconto"
+                        aria-label="Aplicar desconto"
                     >
-                        <Plus className="w-4 h-4 mr-2" /> Nova Venda (PDV)
+                        <Percent className="h-4 w-4 shrink-0" />
+                        <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-300 group-hover:max-w-[120px] group-hover:opacity-100 group-focus-visible:max-w-[120px] group-focus-visible:opacity-100">
+                            Aplicar desconto
+                        </span>
                     </Button>
                 )}
             </div>
@@ -1170,13 +1284,13 @@ export default function Vendas() {
                                             />
                                         </TableHead>
                                     )}
-                                    <TableHead className="w-[100px]">Pedido</TableHead>
-                                    <TableHead>Cliente</TableHead>
+                                    {renderSortableHeader('Pedido', 'pedido', 'w-[100px]')}
+                                    {renderSortableHeader('Cliente', 'cliente')}
+                                    {renderSortableHeader('Data', 'data')}
+                                    {renderSortableHeader('Total', 'total')}
                                     <TableHead>Produtos</TableHead>
-                                    <TableHead>Data</TableHead>
                                     <TableHead>Loja</TableHead>
                                     <TableHead>Vendedor</TableHead>
-                                    <TableHead>Total</TableHead>
                                     <TableHead>Situação</TableHead>
 
                                     <TableHead>
@@ -1255,14 +1369,14 @@ export default function Vendas() {
                                             Carregando vendas...
                                         </TableCell>
                                     </TableRow>
-                                ) : filtered.length === 0 ? (
+                                ) : sortedFiltered.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={tableColSpanVendas} className="text-center py-8 text-gray-500">
                                             Nenhuma venda encontrada.
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    filtered.map(venda => {
+                                    sortedFiltered.map(venda => {
                                         const financeiro = venda.financeiro;
 
                                         return (
@@ -1290,6 +1404,12 @@ export default function Vendas() {
                                                     <span className="text-xs text-gray-500">{formatarTelefone(venda.cliente_telefone)}</span>
                                                 </div>
                                             </TableCell>
+                                            <TableCell className="text-sm text-gray-600 dark:text-gray-400">
+                                                {new Date(venda.data_venda).toLocaleDateString('pt-BR')}
+                                            </TableCell>
+                                            <TableCell className="font-bold text-gray-900 dark:text-white">
+                                                R$ {venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </TableCell>
                                             <TableCell>
                                                 <div className="max-w-[200px]">
                                                     {(venda.itens || []).slice(0, 2).map((item, idx) => (
@@ -1301,9 +1421,6 @@ export default function Vendas() {
                                                         <span className="text-[10px] text-gray-400">+{(venda.itens || []).length - 2} mais...</span>
                                                     )}
                                                 </div>
-                                            </TableCell>
-                                            <TableCell className="text-sm text-gray-600 dark:text-gray-400">
-                                                {new Date(venda.data_venda).toLocaleDateString('pt-BR')}
                                             </TableCell>
                                             <TableCell>
                                                 <Badge variant="outline" className="font-normal text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-neutral-800">
@@ -1331,9 +1448,6 @@ export default function Vendas() {
                                                         return user?.full_name || user?.email || '-';
                                                     })()}
                                                 </span>
-                                            </TableCell>
-                                            <TableCell className="font-bold text-gray-900 dark:text-white">
-                                                R$ {venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </TableCell>
                                             <TableCell>
                                                 <StatusBadge status={financeiro.displayStatus} />
@@ -1564,13 +1678,13 @@ export default function Vendas() {
                         <Table>
                             <TableHeader className="bg-gray-50 dark:bg-neutral-950">
                                 <TableRow>
-                                    <TableHead className="w-[100px]">Pedido</TableHead>
-                                    <TableHead>Cliente</TableHead>
+                                    {renderSortableHeader('Pedido', 'pedido', 'w-[100px]')}
+                                    {renderSortableHeader('Cliente', 'cliente')}
+                                    {renderSortableHeader('Data', 'data')}
+                                    {renderSortableHeader('Total', 'total')}
                                     <TableHead>Produtos</TableHead>
-                                    <TableHead>Data</TableHead>
                                     <TableHead>Loja</TableHead>
                                     <TableHead>Vendedor</TableHead>
-                                    <TableHead>Total</TableHead>
                                     <TableHead>Situação</TableHead>
                                     <TableHead className="text-right">Ações</TableHead>
                                 </TableRow>
@@ -1583,7 +1697,7 @@ export default function Vendas() {
                                             Carregando...
                                         </TableCell>
                                     </TableRow>
-                                ) : filteredCancelados.length === 0 ? (
+                                ) : sortedFilteredCancelados.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={9} className="text-center py-12 text-gray-500">
                                             <XCircle className="w-10 h-10 mx-auto mb-3 opacity-20" />
@@ -1592,7 +1706,7 @@ export default function Vendas() {
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    filteredCancelados.map(venda => (
+                                    sortedFilteredCancelados.map(venda => (
                                         <TableRow
                                             key={venda.id}
                                             className="cursor-pointer hover:bg-muted/50 transition-colors opacity-75"
@@ -1608,6 +1722,12 @@ export default function Vendas() {
                                                     <span className="text-xs text-gray-500">{formatarTelefone(venda.cliente_telefone)}</span>
                                                 </div>
                                             </TableCell>
+                                            <TableCell className="text-sm text-gray-600 dark:text-gray-400">
+                                                {new Date(venda.data_venda).toLocaleDateString('pt-BR')}
+                                            </TableCell>
+                                            <TableCell className="font-bold text-gray-900 dark:text-white">
+                                                R$ {venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </TableCell>
                                             <TableCell>
                                                 <div className="max-w-[200px]">
                                                     {(venda.itens || []).slice(0, 2).map((item, idx) => (
@@ -1619,9 +1739,6 @@ export default function Vendas() {
                                                         <span className="text-[10px] text-gray-400">+{(venda.itens || []).length - 2} mais...</span>
                                                     )}
                                                 </div>
-                                            </TableCell>
-                                            <TableCell className="text-sm text-gray-600 dark:text-gray-400">
-                                                {new Date(venda.data_venda).toLocaleDateString('pt-BR')}
                                             </TableCell>
                                             <TableCell>
                                                 <Badge variant="outline" className="font-normal text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-neutral-800">
@@ -1640,9 +1757,6 @@ export default function Vendas() {
                                                         return u?.full_name || u?.email || '-';
                                                     })()}
                                                 </span>
-                                            </TableCell>
-                                            <TableCell className="font-bold text-gray-900 dark:text-white">
-                                                R$ {venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </TableCell>
                                             <TableCell>
                                                 <Badge className="bg-red-100 text-red-800 border-red-200 border px-2 py-0.5 text-[10px] uppercase tracking-wider">
@@ -2091,6 +2205,11 @@ export default function Vendas() {
                                 ))}
                             </SelectContent>
                         </Select>
+                        {lojasDisponiveis.length === 0 && (
+                            <p className="text-xs text-gray-500">
+                                Nenhuma loja de destino disponivel para seu contexto atual.
+                            </p>
+                        )}
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setBulkTransferLojaOpen(false)} disabled={isBulkRunning}>Cancelar</Button>

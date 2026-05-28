@@ -8,15 +8,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
-import SolicitacaoCadastroModal from "./SolicitacaoCadastroModal";
+import { base44 } from "@/api/base44Client";
+import { useQueryClient } from "@tanstack/react-query";
+import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
 
 export default function BuscaProdutoAvancada(props) {
   const { produtos, onSelectProduto, onEditProduto, fornecedores = [] } = props;
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [showResults, setShowResults] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [solicitationParentProduct, setSolicitationParentProduct] = useState(null);
+  const [isSavingProduto, setIsSavingProduto] = useState(false);
   const searchRef = useRef(null);
 
   const hasMeaningfulValue = (value) => {
@@ -123,12 +126,11 @@ export default function BuscaProdutoAvancada(props) {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  setSolicitationParentProduct(null);
                   setIsModalOpen(true);
                 }}
                 className="w-full border-green-200 text-green-700 hover:bg-green-50"
               >
-                <Plus className="w-4 h-4 mr-2" /> Solicitar Cadastro
+                <Plus className="w-4 h-4 mr-2" /> Cadastrar item
               </Button>
             </div>
           ) : (
@@ -237,25 +239,48 @@ export default function BuscaProdutoAvancada(props) {
                   variant="ghost"
                   size="sm"
                   onClick={() => {
-                    setSolicitationParentProduct(null);
                     setIsModalOpen(true);
                   }}
                   className="w-full text-xs text-gray-500 hover:text-green-700 h-8 font-normal"
                 >
-                  <Plus className="w-3 h-3 mr-2" /> Não encontrou? Solicitar Cadastro
+                  <Plus className="w-3 h-3 mr-2" /> Não encontrou? Cadastrar item
                 </Button>
               </div>
             </>
           )}
         </div>
       )}
-      {/* Modal de Solicitação */}
-      <SolicitacaoCadastroModal
+      <ProdutoCadastroCompleto
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        onProdutoSolicitado={handleSelectProduto}
-        user={props.user}
-        initialParentProduct={solicitationParentProduct}
+        produto={null}
+        isLoading={isSavingProduto}
+        onSave={async (data) => {
+          if (isSavingProduto) return;
+
+          setIsSavingProduto(true);
+          try {
+            const novoProduto = await base44.entities.Produto.create({
+              ...data,
+              requer_atencao: true,
+              motivo_atencao: data?.motivo_atencao || "Cadastro iniciado no PDV por vendedor",
+            });
+            await queryClient.invalidateQueries({ queryKey: ['produtos'] });
+            setIsModalOpen(false);
+
+            if (novoProduto?.id) {
+              handleSelectProduto(novoProduto);
+              toast.success("Produto cadastrado e adicionado ao carrinho.");
+              return;
+            }
+
+            toast.success("Produto cadastrado! Voce ja pode busca-lo na lista.");
+          } catch (error) {
+            toast.error(`Erro ao cadastrar produto: ${error.message}`);
+          } finally {
+            setIsSavingProduto(false);
+          }
+        }}
       />
     </div>
   );

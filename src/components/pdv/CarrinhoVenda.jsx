@@ -171,6 +171,10 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
   }
 
   const requerMontagem = (item) => item.tipo_entrega_padrao !== 'nao_requer_montagem';
+  const toNumber = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
 
   return (
     <div className="flex-1 overflow-y-auto pr-2 space-y-2">
@@ -179,6 +183,19 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
           (item.tipo_entrega === 'entrega' && requerMontagem(item) && !item.tipo_montagem);
         const bloqueadoEstoque = item.bloqueado_estoque === true;
         const estoqueZerado = item.estoque_loja_atual !== null && item.estoque_loja_atual !== undefined && Number(item.estoque_loja_atual) <= 0;
+        const quantidadeVenda = Math.max(1, Number(item.quantidade) || 1);
+        const origemSelecionada = Array.isArray(item.origens_estoque_disponiveis)
+          ? item.origens_estoque_disponiveis.find((origem) => origem.campo === item.origem_estoque_campo)
+          : null;
+        const estoqueAtual = toNumber(
+          origemSelecionada?.quantidade
+          ?? item.estoque_loja_atual
+          ?? item.quantidade_estoque
+        );
+        const estoqueAposVenda = estoqueAtual !== null
+          ? estoqueAtual - quantidadeVenda
+          : null;
+        const semEstoqueProjetado = estoqueAposVenda !== null && estoqueAposVenda < 0;
 
         return (
           <div
@@ -307,6 +324,19 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                       </div>
                     )}
                   </div>
+
+                  {estoqueAtual !== null && (
+                    <div className="mt-1 flex items-center gap-2 text-[11px]">
+                      <span className="text-gray-500 dark:text-gray-400">
+                        Estoque atual: <strong className="text-gray-700 dark:text-gray-200">{estoqueAtual} un</strong>
+                      </span>
+                      <span className="text-gray-300">|</span>
+                      <span className={semEstoqueProjetado ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-emerald-700 dark:text-emerald-400'}>
+                        Após venda: {estoqueAposVenda} un
+                      </span>
+                    </div>
+                  )}
+
                   {Array.isArray(item.origens_estoque_disponiveis) && item.origens_estoque_disponiveis.length > 0 && (
                     <div className="mt-1 flex items-center gap-2">
                       <span className="text-[11px] text-gray-500 dark:text-gray-400">Retirada do estoque</span>

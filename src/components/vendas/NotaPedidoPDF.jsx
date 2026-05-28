@@ -54,6 +54,53 @@ const getLogoSrc = () => {
 
 const limparNomeProduto = (nome) => stripInternalProductPrefixes(nome) || '-';
 
+const possuiValorValido = (valor) => {
+  if (valor === null || typeof valor === 'undefined') return false;
+  const texto = String(valor).trim();
+  if (!texto) return false;
+  const normalizado = texto.toLowerCase();
+  return !['-', 'null', 'undefined', 'n/a', 'na'].includes(normalizado);
+};
+
+const obterPrimeiroValorValido = (...valores) => {
+  const encontrado = valores.find(possuiValorValido);
+  return possuiValorValido(encontrado) ? String(encontrado).trim() : '-';
+};
+
+const obterTamanhoItem = (item = {}) => {
+  const tamanhoDireto = obterPrimeiroValorValido(
+    item.tamanho,
+    item.detalhes_solicitacao?.tamanho,
+    item.produto?.tamanho
+  );
+
+  if (tamanhoDireto !== '-') return tamanhoDireto;
+
+  const largura = item.largura ?? item.produto?.largura;
+  const altura = item.altura ?? item.produto?.altura;
+  const profundidade = item.profundidade ?? item.produto?.profundidade;
+  const medidas = [largura, altura, profundidade]
+    .filter((valor) => possuiValorValido(valor))
+    .map((valor) => String(valor).trim());
+
+  return medidas.length > 0 ? medidas.join(' x ') : '-';
+};
+
+const obterDetalhesItemPDF = (item = {}) => ({
+  cor: obterPrimeiroValorValido(item.cor, item.detalhes_solicitacao?.cor, item.produto?.cor),
+  tecido: obterPrimeiroValorValido(item.tecido, item.detalhes_solicitacao?.tecido, item.produto?.tecido),
+  tamanho: obterTamanhoItem(item),
+  fabricante: obterPrimeiroValorValido(
+    item.fabricante,
+    item.fabricante_nome,
+    item.marca,
+    item.fornecedor_nome,
+    item.detalhes_solicitacao?.fabricante,
+    item.produto?.fabricante,
+    item.produto?.fornecedor_nome
+  )
+});
+
 // Cache a logo em base64 para uso offline (chamado uma vez quando online)
 if (typeof window !== 'undefined') {
   try {
@@ -90,14 +137,23 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
 
   const nomeVendedor = vendedor || venda.responsavel_nome || '-';
 
-  const itensHTML = venda.itens.map(item => `
+  const itensHTML = venda.itens.map(item => {
+    const detalhes = obterDetalhesItemPDF(item);
+
+    return `
     <tr>
-      <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5;">${limparNomeProduto(item.produto_nome)}</td>
+      <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5;">
+        <div style="font-weight: 600; color: #1f2937;">${limparNomeProduto(item.produto_nome)}</div>
+        <div style="margin-top: 3px; font-size: 9px; color: #6b7280; line-height: 1.45;">
+          Cor: ${detalhes.cor} | Tecido: ${detalhes.tecido} | Tamanho: ${detalhes.tamanho} | Fabricante: ${detalhes.fabricante}
+        </div>
+      </td>
       <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: center;">${item.quantidade}</td>
       <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: right;">R$ ${item.preco_unitario?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
       <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: right; font-weight: 600;">R$ ${item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   const pagamentosHTML = venda.pagamentos?.length > 0 ? venda.pagamentos.map(pag =>
     `${pag.forma_pagamento}${pag.parcelas > 1 ? ` (${pag.parcelas}x)` : ''}: R$ ${pag.valor?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
@@ -233,9 +289,18 @@ export function gerarNotaInternaHTML(venda, cliente, vendedor) {
     `${cliente.endereco}, ${cliente.numero || 's/n'}${cliente.complemento ? ` - ${cliente.complemento}` : ''}, ${cliente.bairro || ''}, ${cliente.cidade || ''} - ${cliente.estado || ''}` :
     'SEM ENDEREÇO';
 
-  const itensHTML = venda.itens.map(item =>
-    `<tr><td style="padding:5px;border-bottom:1px solid #ddd;">${item.produto_nome}</td><td style="padding:5px;border-bottom:1px solid #ddd;text-align:center;">${item.quantidade}</td></tr>`
-  ).join('');
+  const itensHTML = venda.itens.map(item => {
+    const detalhes = obterDetalhesItemPDF(item);
+    return `<tr>
+      <td style="padding:5px;border-bottom:1px solid #ddd;">
+        <div style="font-weight:600;">${limparNomeProduto(item.produto_nome)}</div>
+        <div style="margin-top:2px;font-size:10px;color:#6b7280;line-height:1.4;">
+          Cor: ${detalhes.cor} | Tecido: ${detalhes.tecido} | Tamanho: ${detalhes.tamanho} | Fabricante: ${detalhes.fabricante}
+        </div>
+      </td>
+      <td style="padding:5px;border-bottom:1px solid #ddd;text-align:center;">${item.quantidade}</td>
+    </tr>`;
+  }).join('');
 
   return `
     <!DOCTYPE html>

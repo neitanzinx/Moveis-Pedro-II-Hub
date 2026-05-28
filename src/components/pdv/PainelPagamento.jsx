@@ -40,7 +40,9 @@ export default function PainelPagamento({
   itensCount,
   prazo,
   tokenGerencial,
-  setTokenGerencial
+  setTokenGerencial,
+  margemNegociavel = 0,
+  onDescontoMargemChange
 }) {
   const [novoPagamento, setNovoPagamento] = useState({ forma: "", valor: "", parcelas: 1 });
   const [cupomCodigo, setCupomCodigo] = useState("");
@@ -56,6 +58,11 @@ export default function PainelPagamento({
   const [erroToken, setErroToken] = useState("");
   const [descontoPercent, setDescontoPercent] = useState(0);
   const [descontoValorDisplay, setDescontoValorDisplay] = useState("");
+
+  // Estado para Margem Negociável
+  const [descontoMargemPercent, setDescontoMargemPercent] = useState(0);
+  const [descontoMargemValorDisplay, setDescontoMargemValorDisplay] = useState("");
+  const [tipoDescontoMargem, setTipoDescontoMargem] = useState('percentual'); // 'percentual' | 'valor'
 
   // Formatador de moeda: "1171" → "11,71"
   const formatCurrencyMask = (raw) => {
@@ -171,6 +178,10 @@ export default function PainelPagamento({
       setDesconto(valorDesconto);
       setCupomAplicado(cupom);
       setCupomCodigo("");
+      // Limpa desconto de margem (mutuamente exclusivos)
+      setDescontoMargemPercent(0);
+      setDescontoMargemValorDisplay("");
+      if (onDescontoMargemChange) onDescontoMargemChange(0);
 
     } catch (error) {
       console.error("Erro ao validar cupom:", error);
@@ -227,6 +238,10 @@ export default function PainelPagamento({
       setTokenCodigo("");
       setDescontoPercent(0); // Inicia em 0, gerente ajusta
       setDescontoValorDisplay("");
+      // Limpa desconto de margem (mutuamente exclusivos)
+      setDescontoMargemPercent(0);
+      setDescontoMargemValorDisplay("");
+      if (onDescontoMargemChange) onDescontoMargemChange(0);
       toast.success("Token autorizado! Ajuste o desconto desejado.");
 
     } catch (error) {
@@ -246,6 +261,34 @@ export default function PainelPagamento({
     setErroToken("");
   };
 
+  // ---- Margem Negociável ----
+  const handleAplicarDescontoMargem = (percent, valorR) => {
+    if (percent > margemNegociavel) {
+      toast.error(`Limite de ${margemNegociavel}% atingido.`);
+      return;
+    }
+    setDesconto(valorR);
+    if (onDescontoMargemChange) onDescontoMargemChange(percent);
+    if (cupomAplicado) handleRemoverCupom();
+    if (tokenGerencial) handleRemoverToken();
+  };
+
+  const handleRemoverDescontoMargem = () => {
+    setDescontoMargemPercent(0);
+    setDescontoMargemValorDisplay("");
+    setDesconto(0);
+    if (onDescontoMargemChange) onDescontoMargemChange(0);
+  };
+
+  // Sincronizar desconto de margem quando o subtotal muda
+  useEffect(() => {
+    if (descontoMargemPercent > 0 && !cupomAplicado && !tokenGerencial) {
+      const valorDesconto = (valores.subtotal * descontoMargemPercent) / 100;
+      setDesconto(valorDesconto);
+      setDescontoMargemValorDisplay(formatCurrencyMask(String(Math.round(valorDesconto * 100))));
+    }
+  }, [valores.subtotal, descontoMargemPercent]);
+
   // Atualizar desconto quando slider muda
   useEffect(() => {
     if (tokenGerencial && descontoPercent > 0) {
@@ -259,7 +302,8 @@ export default function PainelPagamento({
   }, [descontoPercent, valores.subtotal, tokenGerencial]);
 
   // Arredondamento logica
-  const isArredondamento = !cupomAplicado && !tokenGerencial && desconto !== 0;
+  const isDescontoMargem = !cupomAplicado && !tokenGerencial && desconto > 0 && descontoMargemPercent > 0;
+  const isArredondamento = !cupomAplicado && !tokenGerencial && !isDescontoMargem && desconto !== 0;
 
   const handleArredondar = () => {
     if (valores.subtotal <= 0) return;
@@ -277,6 +321,7 @@ export default function PainelPagamento({
       setDesconto(diff);
       if (cupomAplicado) handleRemoverCupom();
       if (tokenGerencial) handleRemoverToken();
+      if (descontoMargemPercent > 0) handleRemoverDescontoMargem();
       toast.success(`Total ajustado para R$ ${arredondado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
     }
   };
@@ -606,6 +651,121 @@ export default function PainelPagamento({
                 </div>
               )}
             </div>
+
+            {/* Margem Negociável — só aparece se a loja tiver margem configurada */}
+            {margemNegociavel > 0 && (
+              <div className={`p-3 rounded-lg border transition-all ${isDescontoMargem
+                ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+                : 'bg-green-50/60 dark:bg-green-950/20 border-green-100 dark:border-green-900/40'}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-green-700 dark:text-green-400 flex items-center gap-1">
+                    <Percent className="w-3 h-3" /> Desconto Negociável
+                    <span className="ml-1 px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400">
+                      máx {margemNegociavel}%
+                    </span>
+                  </p>
+                  {isDescontoMargem && (
+                    <button
+                      onClick={handleRemoverDescontoMargem}
+                      className="p-1 hover:bg-green-200 dark:hover:bg-green-800 rounded text-green-600 transition-colors"
+                      title="Remover desconto"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex gap-1 mb-2">
+                  <button
+                    className={`flex-1 h-7 text-xs rounded font-medium transition-colors ${tipoDescontoMargem === 'percentual'
+                      ? 'bg-green-600 text-white'
+                      : 'bg-white dark:bg-neutral-800 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-400'}`}
+                    onClick={() => setTipoDescontoMargem('percentual')}
+                  >
+                    %
+                  </button>
+                  <button
+                    className={`flex-1 h-7 text-xs rounded font-medium transition-colors ${tipoDescontoMargem === 'valor'
+                      ? 'bg-green-600 text-white'
+                      : 'bg-white dark:bg-neutral-800 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-400'}`}
+                    onClick={() => setTipoDescontoMargem('valor')}
+                  >
+                    R$
+                  </button>
+                </div>
+
+                {tipoDescontoMargem === 'percentual' ? (
+                  <div className="space-y-2">
+                    <div className="flex gap-2 items-center">
+                      <div className="relative flex-1">
+                        <Input
+                          type="number"
+                          value={descontoMargemPercent}
+                          onChange={(e) => {
+                            let val = parseFloat(e.target.value);
+                            if (isNaN(val) || val < 0) val = 0;
+                            if (val > margemNegociavel) val = margemNegociavel;
+                            setDescontoMargemPercent(val);
+                            const valorR = (valores.subtotal * val) / 100;
+                            setDescontoMargemValorDisplay(formatCurrencyMask(String(Math.round(valorR * 100))));
+                            handleAplicarDescontoMargem(val, valorR);
+                          }}
+                          className="h-8 text-xs pr-6 border-green-200 dark:border-green-700"
+                          placeholder="0"
+                          min={0}
+                          max={margemNegociavel}
+                          step={0.1}
+                        />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
+                      </div>
+                      <span className="text-xs text-green-700 dark:text-green-400 font-medium min-w-[56px] text-right">
+                        {descontoMargemPercent > 0
+                          ? `- R$ ${((valores.subtotal * descontoMargemPercent) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                          : ''}
+                      </span>
+                    </div>
+                    <Slider
+                      value={[descontoMargemPercent]}
+                      onValueChange={([v]) => {
+                        setDescontoMargemPercent(v);
+                        const valorR = (valores.subtotal * v) / 100;
+                        setDescontoMargemValorDisplay(formatCurrencyMask(String(Math.round(valorR * 100))));
+                        handleAplicarDescontoMargem(v, valorR);
+                      }}
+                      max={margemNegociavel}
+                      step={0.1}
+                      className="w-full"
+                    />
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">R$</span>
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      value={descontoMargemValorDisplay}
+                      onChange={(e) => {
+                        const formatted = formatCurrencyMask(e.target.value);
+                        setDescontoMargemValorDisplay(formatted);
+                        let valR = parseCurrencyToNumber(formatted);
+                        if (isNaN(valR) || valR < 0) valR = 0;
+                        let percent = valores.subtotal > 0 ? (valR / valores.subtotal) * 100 : 0;
+                        if (percent > margemNegociavel) {
+                          percent = margemNegociavel;
+                          valR = (valores.subtotal * margemNegociavel) / 100;
+                          toast.error(`Limite de ${margemNegociavel}% atingido.`);
+                          setDescontoMargemValorDisplay(formatCurrencyMask(String(Math.round(valR * 100))));
+                        }
+                        setDescontoMargemPercent(percent);
+                        handleAplicarDescontoMargem(percent, valR);
+                      }}
+                      className="h-8 text-xs pl-7 border-green-200 dark:border-green-700"
+                      placeholder="0,00"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
 
           </div>
         </div>

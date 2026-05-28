@@ -86,11 +86,6 @@ const EstadoCidadeFields = ({ estado, cidade, onChangeEstado, onChangeCidade, di
     };
   }, [estado]);
 
-  onChangeEstado = (uf) => {
-    console.log('Estado selecionado:', uf);
-    setValue("estado", uf);
-  };
-
   return (
     <div className="grid md:grid-cols-2 gap-4">
       <div>
@@ -505,7 +500,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
               <Input
                 value={getValue(isEntrega ? "cep" : "cep")}
                 onChange={(e) => setValue(isEntrega ? "cep" : "cep", e.target.value)}
-                onBlur={(e) => !disabled && handleBuscaCEP()}
+                onBlur={() => !disabled && handleBuscaCEP()}
                 placeholder="00000-000"
                 disabled={disabled}
               />
@@ -523,7 +518,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
             <Label>Rua/Logradouro</Label>
             <Input
               value={getValue(isEntrega ? "rua" : "endereco")}
-              onChange={(e) => setValue(isEntrega ? "rua" : "endereco", formatarNome(e.target.value))}
+              onChange={(e) => setValue(isEntrega ? "rua" : "endereco", e.target.value)}
               disabled={disabled}
             />
           </div>
@@ -543,7 +538,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
             <Label>Complemento</Label>
             <Input
               value={getValue("complemento")}
-              onChange={(e) => setValue("complemento", formatarNome(e.target.value))}
+              onChange={(e) => setValue("complemento", e.target.value)}
               placeholder="Apt 101, Bloco A..."
               disabled={disabled}
             />
@@ -557,7 +552,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
           </Label>
           <Input
             value={getValue("ponto_referencia")}
-            onChange={(e) => setValue("ponto_referencia", formatarNome(e.target.value))}
+            onChange={(e) => setValue("ponto_referencia", e.target.value)}
             placeholder="Próximo ao mercado, em frente à farmácia..."
             disabled={disabled}
           />
@@ -568,7 +563,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
             <Label>Bairro</Label>
             <Input
               value={getValue("bairro")}
-              onChange={(e) => setValue("bairro", formatarNome(e.target.value))}
+              onChange={(e) => setValue("bairro", e.target.value)}
               disabled={disabled}
             />
           </div>

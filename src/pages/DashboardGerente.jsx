@@ -78,6 +78,54 @@ import {
     Legend
 } from 'recharts';
 
+// Sub-componente para linha de margem negociável por loja
+function MargemLojaRow({ loja, salvando, onSave }) {
+    const [valor, setValor] = useState(loja.margem_negociavel ?? 0);
+    const valorSalvo = loja.margem_negociavel ?? 0;
+    const alterado = parseFloat(valor) !== parseFloat(valorSalvo);
+
+    return (
+        <div className="flex items-center gap-3 p-3 bg-white dark:bg-neutral-800 rounded-lg border border-green-100 dark:border-green-900/40">
+            <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm text-gray-800 dark:text-gray-100 truncate">{loja.nome}</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                    {parseFloat(valorSalvo) === 0
+                        ? 'Desconto livre desabilitado'
+                        : `Desconto livre de até ${valorSalvo}%`}
+                </p>
+            </div>
+            <div className="flex items-center gap-2">
+                <div className="relative w-28">
+                    <Input
+                        type="number"
+                        value={valor}
+                        onChange={e => {
+                            let v = parseFloat(e.target.value);
+                            if (isNaN(v) || v < 0) v = 0;
+                            if (v > 100) v = 100;
+                            setValor(v);
+                        }}
+                        className="h-9 text-sm pr-7"
+                        min={0}
+                        max={100}
+                        step={0.5}
+                        placeholder="0"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
+                </div>
+                <Button
+                    size="sm"
+                    className="h-9 bg-green-600 hover:bg-green-700 text-white"
+                    onClick={() => onSave(parseFloat(valor) || 0)}
+                    disabled={salvando || !alterado}
+                >
+                    {salvando ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                </Button>
+            </div>
+        </div>
+    );
+}
+
 export default function DashboardGerente() {
     const { user, isGerente, filterData } = useAuth();
     const queryClient = useQueryClient();
@@ -108,6 +156,9 @@ export default function DashboardGerente() {
     const [selectedPriceRequest, setSelectedPriceRequest] = useState(null);
     const [newPrice, setNewPrice] = useState('');
 
+    // Estado para margem negociável por loja
+    const [margemSalvando, setMargemSalvando] = useState({});
+
     // Estados para dashboard tabs e pesquisa
     const [abaDashboard, setAbaDashboard] = useState('visao-geral');
     const [tipoComparativo, setTipoComparativo] = useState('mes'); // 'mes' ou 'ano'
@@ -136,6 +187,17 @@ export default function DashboardGerente() {
         queryFn: () => base44.entities.User.list(),
         enabled: !!user
     });
+
+    const { data: lojasData = [] } = useQuery({
+        queryKey: ['lojas-ativas'],
+        queryFn: () => base44.entities.Loja.list('nome'),
+        enabled: !!user
+    });
+
+    // Lojas que o gerente pode gerenciar
+    const lojasGerenciadas = isGerenteGeral
+        ? lojasData
+        : lojasData.filter(l => l.nome === user?.loja || l.id === user?.loja_id);
 
     const { data: vendas = [], isLoading: loadingVendas, refetch: refetchVendas } = useQuery({
         queryKey: ['vendas-gerente'],
@@ -3031,6 +3093,51 @@ export default function DashboardGerente() {
                         </div>
                     )}
                 </CardContent>
+                </Card>
+
+                {/* Margem Negociável por Loja */}
+                <Card className="border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-lg flex items-center gap-2">
+                            <Percent className="w-5 h-5 text-green-600" />
+                            Margem Negociável por Loja
+                        </CardTitle>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                            Defina a % máxima de desconto que os vendedores podem aplicar livremente no PDV, sem precisar de token.
+                        </p>
+                    </CardHeader>
+                    <CardContent>
+                        {lojasGerenciadas.length === 0 ? (
+                            <div className="text-center py-6 text-gray-500">
+                                <Store className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                                <p className="text-sm">Nenhuma loja encontrada</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {lojasGerenciadas.map(loja => (
+                                    <MargemLojaRow
+                                        key={loja.id}
+                                        loja={loja}
+                                        salvando={!!margemSalvando[loja.id]}
+                                        onSave={async (novaMargemPercent) => {
+                                            setMargemSalvando(prev => ({ ...prev, [loja.id]: true }));
+                                            try {
+                                                await base44.entities.Loja.update(loja.id, { margem_negociavel: novaMargemPercent });
+                                                queryClient.invalidateQueries({ queryKey: ['lojas-ativas'] });
+                                                queryClient.invalidateQueries({ queryKey: ['lojas'] });
+                                                toast.success(`Margem negociável de ${loja.nome} atualizada para ${novaMargemPercent}%`);
+                                            } catch (err) {
+                                                console.error('Erro ao salvar margem:', err);
+                                                toast.error('Erro ao salvar margem negociável');
+                                            } finally {
+                                                setMargemSalvando(prev => ({ ...prev, [loja.id]: false }));
+                                            }
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </CardContent>
                 </Card>
 
                 {/* Solicitações de Cadastro e Aprovação de Preços */}

@@ -60,6 +60,7 @@ import { calculateFinalPriceFromMarkup, toMultiplierFromPercent, toPercentFromMu
 import FornecedorModal from '@/components/cadastros/FornecedorModal';
 import FurnitureColorPicker, { getColorHex } from './FurnitureColorPicker';
 import ProdutoHistoricoTab from './ProdutoHistoricoTab';
+import { detectProductKeywordSuggestion } from '@/lib/productKeywordDetector';
 
 const VIEW_OPTIONS = [
     { id: 'ficha', name: 'Ficha do Produto', icon: Package },
@@ -307,6 +308,7 @@ export default function ProdutoCadastroCompleto({
     const [fotoUrlInput, setFotoUrlInput] = useState('');
     const [activeView, setActiveView] = useState('ficha');
     const [showFornecedorModal, setShowFornecedorModal] = useState(false);
+    const [dismissedSuggestionName, setDismissedSuggestionName] = useState('');
 
     // Multi-Tenant: Carrega lojas dinâmicas e configurações
     const { data: lojas = [] } = useLojas();
@@ -337,6 +339,48 @@ export default function ProdutoCadastroCompleto({
         });
         return Array.from(setCores).sort((a, b) => a.localeCompare(b, 'pt-BR'));
     }, [produtosExistentes]);
+
+    const keywordSuggestion = useMemo(
+        () => detectProductKeywordSuggestion(formData.nome, {
+            returnDefault: true,
+            defaultCategoria: 'Outros',
+        }),
+        [formData.nome]
+    );
+
+    const normalizedSuggestionName = useMemo(
+        () => (formData.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase(),
+        [formData.nome]
+    );
+
+    const suggestedCategoria = keywordSuggestion.categoriaSuggestion;
+    const suggestedAmbiente = AMBIENTES.includes(keywordSuggestion.ambienteSuggestion)
+        ? keywordSuggestion.ambienteSuggestion
+        : null;
+
+    const canApplyCategoriaSuggestion = suggestedCategoria
+        && CATEGORIAS.includes(suggestedCategoria)
+        && suggestedCategoria !== formData.categoria;
+
+    const canApplyAmbienteSuggestion = suggestedAmbiente
+        && suggestedAmbiente !== formData.ambiente;
+
+    const shouldShowSuggestion = normalizedSuggestionName
+        && dismissedSuggestionName !== normalizedSuggestionName
+        && (canApplyCategoriaSuggestion || canApplyAmbienteSuggestion);
+
+    const shouldShowCategoriaSuggestion = shouldShowSuggestion && canApplyCategoriaSuggestion;
+    const shouldShowAmbienteSuggestion = shouldShowSuggestion && canApplyAmbienteSuggestion;
+
+    const applyCategoriaSuggestion = () => {
+        if (!canApplyCategoriaSuggestion) return;
+        handleChange('categoria', suggestedCategoria);
+    };
+
+    const applyAmbienteSuggestion = () => {
+        if (!canApplyAmbienteSuggestion) return;
+        handleChange('ambiente', suggestedAmbiente);
+    };
 
     // Inicializa com produto existente (modo edição)
     useEffect(() => {
@@ -387,11 +431,13 @@ export default function ProdutoCadastroCompleto({
             setErrors({});
             setDuplicatas([]);
             setActiveView('ficha');
+            setDismissedSuggestionName('');
         } else if (!produto && isOpen) {
             setFormData(INITIAL_FORM_DATA);
             setErrors({});
             setDuplicatas([]);
             setActiveView('ficha');
+            setDismissedSuggestionName('');
         }
     }, [produto, isOpen]);
 
@@ -557,6 +603,9 @@ export default function ProdutoCadastroCompleto({
     // Atualiza campo do formulário
     const handleChange = (field, value) => {
         setFormData(prev => ({ ...prev, [field]: value }));
+        if (field === 'nome') {
+            setDismissedSuggestionName('');
+        }
         if (errors[field]) {
             setErrors(prev => ({ ...prev, [field]: null }));
         }
@@ -865,6 +914,27 @@ export default function ProdutoCadastroCompleto({
 
                                             <div>
                                                 <Label>Categoria *</Label>
+                                                {shouldShowCategoriaSuggestion && (
+                                                    <div className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 flex items-center justify-between gap-2">
+                                                        <span>Categoria sugerida: <strong>{suggestedCategoria}</strong></span>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={applyCategoriaSuggestion}
+                                                                className="h-7 rounded border border-emerald-300 bg-white px-2 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100"
+                                                            >
+                                                                Aplicar
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setDismissedSuggestionName(normalizedSuggestionName)}
+                                                                className="text-[11px] text-emerald-700 underline underline-offset-2 hover:text-emerald-600"
+                                                            >
+                                                                Ignorar
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 <Select
                                                     value={formData.categoria}
                                                     onValueChange={(value) => handleChange('categoria', value)}
@@ -881,15 +951,48 @@ export default function ProdutoCadastroCompleto({
                                             </div>
 
                                             <div>
-                                                <Label>Ambiente</Label>
+                                                <div className="flex items-center justify-between">
+                                                    <Label>Ambiente</Label>
+                                                    {!!formData.ambiente && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleChange('ambiente', '')}
+                                                            className="text-[11px] text-gray-500 underline underline-offset-2 hover:text-gray-700"
+                                                        >
+                                                            Limpar
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                {shouldShowAmbienteSuggestion && (
+                                                    <div className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 flex items-center justify-between gap-2">
+                                                        <span>Ambiente sugerido: <strong>{suggestedAmbiente}</strong></span>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={applyAmbienteSuggestion}
+                                                                className="h-7 rounded border border-emerald-300 bg-white px-2 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100"
+                                                            >
+                                                                Aplicar
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setDismissedSuggestionName(normalizedSuggestionName)}
+                                                                className="text-[11px] text-emerald-700 underline underline-offset-2 hover:text-emerald-600"
+                                                            >
+                                                                Ignorar
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 <Select
-                                                    value={formData.ambiente}
-                                                    onValueChange={(value) => handleChange('ambiente', value)}
+                                                    value={formData.ambiente || '_empty'}
+                                                    onValueChange={(value) => handleChange('ambiente', value === '_empty' ? '' : value)}
                                                 >
                                                     <SelectTrigger id="ambiente">
                                                         <SelectValue placeholder="Selecione o ambiente" />
                                                     </SelectTrigger>
                                                     <SelectContent>
+                                                        <SelectItem value="_empty">Deixar em branco</SelectItem>
                                                         {AMBIENTES.map(amb => (
                                                             <SelectItem key={amb} value={amb}>{amb}</SelectItem>
                                                         ))}

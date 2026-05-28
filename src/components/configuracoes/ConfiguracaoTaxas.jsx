@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, Percent, DollarSign, CreditCard, Save, AlertCircle, Banknote, Smartphone, FileText } from "lucide-react";
+import { Loader2, Percent, DollarSign, CreditCard, Save, AlertCircle, Banknote, Smartphone, FileText, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
 
 // Cores fixas por forma de pagamento (case-insensitive matching)
@@ -80,7 +80,8 @@ export default function ConfiguracaoTaxas() {
                 valor: taxa.valor,
                 ativa: taxa.ativa,
                 acrescimo: taxa.acrescimo || 0,
-                acrescimo_tipo: taxa.acrescimo_tipo || 'porcentagem'
+                acrescimo_tipo: taxa.acrescimo_tipo || 'porcentagem',
+                desconto_vendedor: taxa.desconto_vendedor ?? 0,
             }
         });
     };
@@ -96,7 +97,8 @@ export default function ConfiguracaoTaxas() {
                 valor: parseFloat(dados.valor),
                 ativa: dados.ativa,
                 acrescimo: parseFloat(dados.acrescimo) || 0,
-                acrescimo_tipo: dados.acrescimo_tipo || 'porcentagem'
+                acrescimo_tipo: dados.acrescimo_tipo || 'porcentagem',
+                desconto_vendedor: parseFloat(dados.desconto_vendedor) || 0,
             }
         });
 
@@ -149,14 +151,18 @@ export default function ConfiguracaoTaxas() {
                     <p className="text-gray-500 mb-2">
                         Configure as taxas de cada forma de pagamento.
                     </p>
-                    <div className="flex gap-4 mb-6 text-xs">
+                    <div className="flex flex-wrap gap-3 mb-6 text-xs">
                         <div className="flex items-center gap-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100">
                             <DollarSign className="w-3.5 h-3.5 text-red-600" />
-                            <span className="text-red-700"><strong>Taxa:</strong> Custo interno (descontado no financeiro)</span>
+                            <span className="text-red-700"><strong>Taxa da Loja:</strong> Custo da loja por transação (lançado no financeiro)</span>
                         </div>
                         <div className="flex items-center gap-2 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100">
                             <Percent className="w-3.5 h-3.5 text-blue-600" />
-                            <span className="text-blue-700"><strong>Acréscimo:</strong> Valor cobrado do cliente no PDV</span>
+                            <span className="text-blue-700"><strong>Acréscimo ao Cliente:</strong> Valor extra cobrado do cliente no PDV</span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-orange-50 px-3 py-1.5 rounded-lg border border-orange-100">
+                            <TrendingDown className="w-3.5 h-3.5 text-orange-600" />
+                            <span className="text-orange-700"><strong>Liq. Vendedor:</strong> Desconto na base de cálculo da comissão do vendedor</span>
                         </div>
                     </div>
 
@@ -251,6 +257,27 @@ export default function ConfiguracaoTaxas() {
                                                     </div>
                                                 </div>
 
+                                                {/* Desconto Líquido Vendedor */}
+                                                <div className="bg-orange-50/50 p-2 rounded-lg border border-orange-100">
+                                                    <Label className="text-[10px] font-bold uppercase text-orange-600 flex items-center gap-1">
+                                                        <TrendingDown className="w-3 h-3" /> Desc. Líquido Vendedor
+                                                    </Label>
+                                                    <div className="flex gap-2 mt-1 items-center">
+                                                        <div className="w-20">
+                                                            <Input
+                                                                type="number"
+                                                                step="0.01"
+                                                                min="0"
+                                                                max="100"
+                                                                className="h-8 text-xs bg-white"
+                                                                value={dados.desconto_vendedor ?? 0}
+                                                                onChange={(e) => handleChange(taxa.id, 'desconto_vendedor', e.target.value)}
+                                                            />
+                                                        </div>
+                                                        <span className="text-xs text-orange-600 font-bold">%</span>
+                                                    </div>
+                                                </div>
+
                                                 <div className="flex items-center justify-between pt-1">
                                                     <div className="flex items-center gap-2">
                                                         <Switch
@@ -291,6 +318,14 @@ export default function ConfiguracaoTaxas() {
                                                                     : `+R$ ${parseFloat(dados.acrescimo || 0).toFixed(2)}`}
                                                             </span>
                                                         </div>
+                                                        <div className="h-8 w-px bg-gray-200" />
+                                                        {/* Desconto Vendedor */}
+                                                        <div className="text-center">
+                                                            <p className="text-[10px] uppercase text-orange-500 font-medium">Liq. Vendedor</p>
+                                                            <span className="font-bold text-lg text-orange-600">
+                                                                -{dados.desconto_vendedor ?? 0}%
+                                                            </span>
+                                                        </div>
                                                     </div>
                                                     <div className="flex items-center gap-2">
                                                         {!dados.ativa && (
@@ -314,8 +349,7 @@ export default function ConfiguracaoTaxas() {
             <Alert className="bg-blue-50 border-blue-200">
                 <AlertCircle className="w-4 h-4 text-blue-600" />
                 <AlertDescription className="text-blue-800 text-sm">
-                    <strong>Como funciona:</strong> Quando uma venda é finalizada, o sistema automaticamente calcula e lança as taxas no financeiro,
-                    mostrando o valor bruto, as deduções (taxas e descontos) e o valor líquido.
+                    <strong>Como funciona:</strong> Quando uma venda é finalizada, o sistema lança a <strong>Taxa da Loja</strong> no financeiro. O <strong>Acréscimo ao Cliente</strong> é aplicado no PDV ao valor cobrado. O <strong>Liq. Vendedor</strong> é configurado na aba Comissões e define a base de cálculo da comissão manual.
                 </AlertDescription>
             </Alert>
         </div>
