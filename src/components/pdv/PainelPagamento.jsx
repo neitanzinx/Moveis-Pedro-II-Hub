@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +20,9 @@ import {
   normalizePaymentMethod,
   normalizePaymentItem,
 } from "@/services/paymentOrchestrator";
+
+// Formas base + subtypes do Link — não devem aparecer como opções extras
+const BASE_OPTIONS_SET = new Set([...PAYMENT_METHOD_OPTIONS, ...LINK_PAYMENT_SUBTYPES]);
 
 export default function PainelPagamento({
   valores,
@@ -93,6 +96,20 @@ export default function PainelPagamento({
     queryKey: ['configuracao_taxas'],
     queryFn: () => base44.entities.ConfiguracaoTaxa.list()
   });
+
+  // Formas customizadas criadas pela loja (não presentes na lista base do PDV)
+  const customPaymentOptions = useMemo(() =>
+    configTaxas
+      .filter(t => t.ativa && !BASE_OPTIONS_SET.has(t.forma_pagamento))
+      .map(t => t.forma_pagamento)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    [configTaxas]
+  );
+
+  const allPaymentOptions = useMemo(() =>
+    [...PAYMENT_METHOD_OPTIONS, ...customPaymentOptions],
+    [customPaymentOptions]
+  );
 
   const normalizeKey = (value = "") =>
     String(value)
@@ -801,7 +818,7 @@ export default function PainelPagamento({
                       <SelectValue placeholder="Selecione" />
                     </SelectTrigger>
                     <SelectContent>
-                      {PAYMENT_METHOD_OPTIONS.map(f => {
+                      {allPaymentOptions.map(f => {
                         const acr = getAcrescimo(f);
                         return (
                           <SelectItem key={f} value={f}>

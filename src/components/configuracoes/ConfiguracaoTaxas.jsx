@@ -9,8 +9,15 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, Percent, DollarSign, CreditCard, Save, AlertCircle, Banknote, Smartphone, FileText, TrendingDown } from "lucide-react";
+import { Loader2, Percent, DollarSign, CreditCard, Save, AlertCircle, Banknote, Smartphone, FileText, TrendingDown, Plus, Link } from "lucide-react";
 import { toast } from "sonner";
+
+// Formas do sistema (nunca removíveis, sempre presentes na lista base do PDV)
+const FORMAS_SISTEMA = new Set([
+    "AFESP", "Boleto", "Crediário", "Crédito 1x", "Crédito Parcelado",
+    "Débito", "Dinheiro", "Financiamento", "Link - Crédito", "Link - Débito",
+    "Link - Pix", "Multicrédito", "Pix", "Transferência",
+]);
 
 // Cores fixas por forma de pagamento (case-insensitive matching)
 const CORES_PAGAMENTO = {
@@ -52,6 +59,8 @@ const getIcone = (forma) => {
 export default function ConfiguracaoTaxas() {
     const queryClient = useQueryClient();
     const [editando, setEditando] = useState({});
+    const [novaFormaAberta, setNovaFormaAberta] = useState(false);
+    const [novaFormaData, setNovaFormaData] = useState({ forma_pagamento: "", descricao: "" });
 
     const { data: taxas = [], isLoading } = useQuery({
         queryKey: ['configuracao_taxas'],
@@ -71,6 +80,35 @@ export default function ConfiguracaoTaxas() {
         },
         onError: (err) => toast.error("Erro ao atualizar: " + err.message)
     });
+
+    const createMutation = useMutation({
+        mutationFn: (data) => base44.entities.ConfiguracaoTaxa.create(data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['configuracao_taxas'] });
+            toast.success("Forma de pagamento criada!");
+            setNovaFormaAberta(false);
+            setNovaFormaData({ forma_pagamento: "", descricao: "" });
+        },
+        onError: (err) => toast.error("Erro ao criar: " + err.message)
+    });
+
+    const handleCreateNovaForma = () => {
+        const nome = novaFormaData.forma_pagamento.trim();
+        if (!nome) { toast.error("Informe o nome da forma de pagamento."); return; }
+        if (taxas.some(t => t.forma_pagamento.toLowerCase() === nome.toLowerCase())) {
+            toast.error("Já existe uma forma com esse nome."); return;
+        }
+        createMutation.mutate({
+            forma_pagamento: nome,
+            descricao: novaFormaData.descricao.trim() || nome,
+            tipo_taxa: "porcentagem",
+            valor: 0,
+            acrescimo: 0,
+            acrescimo_tipo: "porcentagem",
+            desconto_vendedor: 0,
+            ativa: true,
+        });
+    };
 
     const handleEdit = (taxa) => {
         setEditando({
@@ -165,6 +203,68 @@ export default function ConfiguracaoTaxas() {
                             <span className="text-orange-700"><strong>Liq. Vendedor:</strong> Desconto na base de cálculo da comissão do vendedor</span>
                         </div>
                     </div>
+
+                    <div className="flex justify-end mb-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-green-600 text-green-700 hover:bg-green-50"
+                            onClick={() => setNovaFormaAberta(v => !v)}
+                        >
+                            <Plus className="w-4 h-4 mr-1" />
+                            Nova Forma de Pagamento
+                        </Button>
+                    </div>
+
+                    {novaFormaAberta && (
+                        <Card className="border-2 border-dashed border-green-400 bg-green-50 mb-4">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-sm font-bold text-green-700 flex items-center gap-2">
+                                    <Plus className="w-4 h-4" /> Nova Forma de Pagamento
+                                </CardTitle>
+                                <p className="text-xs text-green-600">Formas criadas aqui aparecem automaticamente no PDV.</p>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                                <div>
+                                    <Label className="text-xs font-semibold">Nome *</Label>
+                                    <Input
+                                        className="h-8 text-sm bg-white mt-1"
+                                        placeholder="Ex: Vale Presente, Permuta..."
+                                        value={novaFormaData.forma_pagamento}
+                                        onChange={e => setNovaFormaData(d => ({ ...d, forma_pagamento: e.target.value }))}
+                                    />
+                                </div>
+                                <div>
+                                    <Label className="text-xs font-semibold">Descrição</Label>
+                                    <Input
+                                        className="h-8 text-sm bg-white mt-1"
+                                        placeholder="Descrição curta (opcional)"
+                                        value={novaFormaData.descricao}
+                                        onChange={e => setNovaFormaData(d => ({ ...d, descricao: e.target.value }))}
+                                    />
+                                </div>
+                                <div className="flex gap-2 pt-1">
+                                    <Button
+                                        size="sm"
+                                        className="h-8 bg-green-600 hover:bg-green-700"
+                                        onClick={handleCreateNovaForma}
+                                        disabled={createMutation.isPending}
+                                    >
+                                        {createMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3 mr-1" />}
+                                        Criar
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8"
+                                        onClick={() => { setNovaFormaAberta(false); setNovaFormaData({ forma_pagamento: "", descricao: "" }); }}
+                                    >
+                                        Cancelar
+                                    </Button>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
 
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                         {taxasOrdenadas.map(taxa => {
