@@ -1,5 +1,5 @@
 import { supabase, base44 } from "@/api/base44Client";
-import { validatePaymentSplit } from "@/services/paymentOrchestrator";
+import { validatePaymentSplit, normalizePaymentMethod } from "@/services/paymentOrchestrator";
 
 export const MONEY_EPSILON = 0.01;
 
@@ -85,21 +85,20 @@ async function maybeCreateCardFee(entrega, valorRecebido, paymentDateIso, formaP
     if (!entrega?.venda_id || valorRecebido <= MONEY_EPSILON) return;
 
     const formaPag = String(formaPagamento || entrega.forma_pagamento_entrega || entrega.forma_pagamento || "").trim();
-    const formaNormalizada = formaPag.toLowerCase();
-    const isCartao = formaNormalizada.includes("cartão") || formaNormalizada.includes("crédito") || formaNormalizada.includes("débito");
+    const formaCanonica = normalizePaymentMethod(formaPag);
 
-    if (!isCartao) return;
+    // Só registra taxa para formas que envolvem cartão
+    const normalizeKey = (v = "") =>
+        String(v).normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+
+    const CARTAO_FORMAS = new Set(["credito 1x", "credito parcelado", "debito", "multicrédito", "afesp", "link - credito", "link - debito"]);
+    const formaKey = normalizeKey(formaCanonica);
+    if (!CARTAO_FORMAS.has(formaKey)) return;
 
     const configTaxas = await base44.entities.ConfiguracaoTaxa.list();
-    const isCreditoParcelado = formaNormalizada.includes("crédito") && !formaNormalizada.includes("1x") && /\d+x/i.test(formaPag);
-
-    const taxa = configTaxas.find((item) => {
-        if (isCreditoParcelado) return item.forma_pagamento === "Crédito Parcelado";
-
-        let nomeBusca = formaNormalizada.replace("cartão de ", "");
-        nomeBusca = nomeBusca.split("(")[0].trim();
-        return (item.forma_pagamento || "").toLowerCase().includes(nomeBusca);
-    });
+    const taxa = configTaxas.find(
+        (item) => normalizeKey(normalizePaymentMethod(item.forma_pagamento || "")) === formaKey
+    );
 
     if (!taxa || toMoneyNumber(taxa.valor) <= 0) return;
 

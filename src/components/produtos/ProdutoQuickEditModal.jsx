@@ -122,6 +122,7 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
 
     const { user, isGerente } = useAuth();
     const isGerencial = isGerente?.() || user?.cargo === 'Gerente Geral' || user?.cargo === 'Administrador';
+    const isVendedor = String(user?.cargo || '').toLowerCase().includes('vendedor');
     const { data: fornecedores = [] } = useQuery({
         queryKey: ['fornecedores'],
         queryFn: () => base44.entities.Fornecedor.list('nome_empresa'),
@@ -239,6 +240,10 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                 estoque_ideal: toNumberOrNull(formData.estoque_ideal) ?? 0,
                 [campoLojaAtual]: toNumberOrNull(formData.estoque_loja_atual) ?? 0,
             };
+
+            if (isVendedor) {
+                updatedData.preco_venda = Number(produto?.preco_venda || 0);
+            }
 
             // Recalcula o total agregado com base nos campos reais de estoque
             const produtoParaTotal = { ...produto, ...updatedData };
@@ -491,7 +496,11 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                                         className="border-green-300 bg-green-50 font-medium"
                                         value={formData.preco_venda || 0}
                                         onChange={e => setFormData({ ...formData, preco_venda: parseFloat(e.target.value) || 0 })}
+                                        disabled={isVendedor}
                                     />
+                                    {isVendedor && (
+                                        <p className="text-xs text-amber-700">Perfil Vendedor não pode alterar preço de venda.</p>
+                                    )}
                                 </div>
 
                                 {isGerencial && (

@@ -101,6 +101,117 @@ const obterDetalhesItemPDF = (item = {}) => ({
   )
 });
 
+const parseJSONSeguro = (valor, fallback = null) => {
+  if (typeof valor !== 'string') return valor ?? fallback;
+  try {
+    return JSON.parse(valor);
+  } catch (e) {
+    void e;
+    return fallback;
+  }
+};
+
+const montarEndereco = ({ rua, numero, complemento, bairro, cidade, estado }) => {
+  if (!possuiValorValido(rua)) return '-';
+
+  let endereco = `${rua}, ${obterPrimeiroValorValido(numero, 's/n')}`;
+  if (possuiValorValido(complemento)) endereco += ` - ${complemento}`;
+
+  const localidade = [bairro, cidade, estado]
+    .filter(possuiValorValido)
+    .map((valor) => String(valor).trim())
+    .join(' - ');
+
+  if (localidade) endereco += `, ${localidade}`;
+  return endereco;
+};
+
+const obterEnderecoEntregaPedido = (venda = {}, cliente = {}) => {
+  const usarMesmoEndereco = cliente?.usar_mesmo_endereco !== false;
+
+  if (!usarMesmoEndereco) {
+    const enderecoEntregaCliente = montarEndereco({
+      rua: cliente?.endereco_entrega_rua,
+      numero: cliente?.endereco_entrega_numero,
+      complemento: cliente?.endereco_entrega_complemento,
+      bairro: cliente?.endereco_entrega_bairro,
+      cidade: cliente?.endereco_entrega_cidade,
+      estado: cliente?.endereco_entrega_estado
+    });
+
+    if (enderecoEntregaCliente !== '-') {
+      return enderecoEntregaCliente;
+    }
+  }
+
+  const enderecoPrincipalCliente = montarEndereco({
+    rua: cliente?.endereco,
+    numero: cliente?.numero,
+    complemento: cliente?.complemento,
+    bairro: cliente?.bairro,
+    cidade: cliente?.cidade,
+    estado: cliente?.estado
+  });
+
+  if (enderecoPrincipalCliente !== '-') return enderecoPrincipalCliente;
+  return obterPrimeiroValorValido(venda?.endereco_entrega, 'Endereço não cadastrado');
+};
+
+const obterPontoReferenciaPedido = (venda = {}, cliente = {}) => (
+  obterPrimeiroValorValido(
+    venda?.endereco_entrega_ponto_referencia,
+    cliente?.endereco_entrega_ponto_referencia,
+    cliente?.ponto_referencia,
+    ''
+  )
+);
+
+const obterContatosAlternativosPedido = (cliente = {}) => {
+  const contatos = [];
+
+  if (possuiValorValido(cliente?.telefone_alternativo)) {
+    contatos.push(`Telefone alternativo: ${String(cliente.telefone_alternativo).trim()}`);
+  }
+
+  const contatosExtras = parseJSONSeguro(cliente?.contatos, []);
+  if (Array.isArray(contatosExtras)) {
+    contatosExtras.forEach((contato, index) => {
+      if (!contato) return;
+      const nomeContato = obterPrimeiroValorValido(
+        contato.nome,
+        contato.tipo,
+        `Contato ${index + 1}`
+      );
+      const telefoneContato = obterPrimeiroValorValido(contato.telefone, contato.celular, '');
+      const emailContato = obterPrimeiroValorValido(contato.email, '');
+
+      if (telefoneContato) {
+        contatos.push(`${nomeContato}: ${telefoneContato}`);
+      } else if (emailContato) {
+        contatos.push(`${nomeContato}: ${emailContato}`);
+      }
+    });
+  }
+
+  return contatos;
+};
+
+const obterResumoMontagemPedido = (venda = {}) => {
+  const montagemDireta = obterPrimeiroValorValido(venda?.tipo_montagem, venda?.montagem_status, '');
+  if (montagemDireta) return montagemDireta;
+
+  const itens = Array.isArray(venda?.itens) ? venda.itens : parseJSONSeguro(venda?.itens, []);
+  if (!Array.isArray(itens) || itens.length === 0) return '-';
+
+  const tipos = new Set();
+  itens.forEach((item) => {
+    const tipo = obterPrimeiroValorValido(item?.tipo_montagem, item?.detalhes_solicitacao?.tipo_montagem, '');
+    if (tipo) tipos.add(tipo);
+  });
+
+  return tipos.size > 0 ? Array.from(tipos).join(', ') : '-';
+};
+
 // Cache a logo em base64 para uso offline (chamado uma vez quando online)
 if (typeof window !== 'undefined') {
   try {
@@ -126,9 +237,14 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
   const logoSrc = getLogoSrc();
   const dataVenda = new Date(venda.data_venda).toLocaleDateString('pt-BR');
 
-  const enderecoCompleto = cliente?.endereco ?
-    `${cliente.endereco}, ${cliente.numero || 's/n'}${cliente.complemento ? ` - ${cliente.complemento}` : ''}, ${cliente.bairro || ''}, ${cliente.cidade || ''} - ${cliente.estado || ''}` :
-    'Endereço não cadastrado';
+  const enderecoCompleto = obterEnderecoEntregaPedido(venda, cliente);
+  const pontoReferencia = obterPontoReferenciaPedido(venda, cliente);
+  const contatosAlternativos = obterContatosAlternativosPedido(cliente);
+
+  const nfeNumero = obterPrimeiroValorValido(venda?.nfe_numero, venda?.numero_nfe, '');
+  const nfeStatus = obterPrimeiroValorValido(venda?.nfe_status, venda?.status_nfe, '');
+  const nfeChave = obterPrimeiroValorValido(venda?.nfe_chave, venda?.chave_nfe, '');
+  const resumoMontagem = obterResumoMontagemPedido(venda);
 
   const prazoEntrega = venda.prazo_entrega === "Retirado na loja" ? "Mercadoria retirada na loja pelo cliente" :
     venda.prazo_entrega === "15 dias" ? "15 dias úteis" :
@@ -144,7 +260,7 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
     <tr>
       <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5;">
         <div style="font-weight: 600; color: #1f2937;">${limparNomeProduto(item.produto_nome)}</div>
-        <div style="margin-top: 3px; font-size: 9px; color: #6b7280; line-height: 1.45;">
+        <div style="margin-top: 3px; font-size: 11px; color: #6b7280; line-height: 1.45;">
           Cor: ${detalhes.cor} | Tecido: ${detalhes.tecido} | Tamanho: ${detalhes.tamanho} | Fabricante: ${detalhes.fabricante}
         </div>
       </td>
@@ -168,44 +284,50 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
       <style>
         @page { size: A4; margin: 12mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Arial, sans-serif; padding: 20px; color: #333; font-size: 11px; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; padding: 20px; color: #333; font-size: 12px; }
         
         .header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 15px; border-bottom: 2px solid #07593f; margin-bottom: 15px; }
         .header-left { display: flex; align-items: center; gap: 15px; }
         .logo-img { width: 50px; height: auto; }
         .empresa-info { }
         .empresa-nome { font-size: 16px; font-weight: bold; color: #07593f; }
-        .empresa-sub { font-size: 9px; color: #666; }
+        .empresa-sub { font-size: 11px; color: #666; }
         .pedido-info { text-align: right; }
         .pedido-numero { font-size: 20px; font-weight: bold; color: #07593f; }
-        .pedido-data { font-size: 10px; color: #666; margin-top: 2px; }
+        .pedido-data { font-size: 11px; color: #666; margin-top: 2px; }
         
         .cliente-section { background: #f8fafc; padding: 12px 15px; border-radius: 6px; margin-bottom: 15px; border-left: 4px solid #07593f; }
         .cliente-nome { font-size: 14px; font-weight: bold; color: #07593f; margin-bottom: 4px; }
-        .cliente-detalhe { color: #555; font-size: 10px; line-height: 1.6; }
+        .cliente-detalhe { color: #555; font-size: 11px; line-height: 1.6; }
         
         .info-row { display: flex; gap: 12px; margin-bottom: 15px; }
-        .info-tag { background: #f0f9ff; border: 1px solid #bfdbfe; padding: 8px 12px; border-radius: 4px; font-size: 10px; flex: 1; text-align: center; }
+        .info-tag { background: #f0f9ff; border: 1px solid #bfdbfe; padding: 8px 12px; border-radius: 4px; font-size: 11px; flex: 1; text-align: center; }
         .info-tag strong { display: block; font-size: 12px; color: #07593f; margin-top: 2px; }
+        .detalhes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
+        .detalhes-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; }
+        .detalhes-box h4 { font-size: 9px; color: #6b7280; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.3px; }
+        .detalhes-linha { font-size: 11px; color: #374151; line-height: 1.5; margin-bottom: 3px; }
+        .detalhes-linha:last-child { margin-bottom: 0; }
+        .obs-chip { margin-top: 6px; background: #fff7ed; border-left: 3px solid #f97316; border-radius: 4px; padding: 6px 8px; font-size: 11px; color: #9a3412; }
         
         table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-        th { background: #07593f; color: white; padding: 8px 10px; text-align: left; font-size: 10px; font-weight: 600; }
+        th { background: #07593f; color: white; padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 600; }
         
         .resumo-row { display: flex; gap: 15px; margin-top: 15px; }
         .resumo-box { flex: 1; background: #f9fafb; padding: 12px; border-radius: 6px; border: 1px solid #e5e5e5; }
         .resumo-titulo { font-size: 9px; color: #666; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
         
-        .total-linha { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; }
+        .total-linha { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
         .total-final { font-size: 16px; font-weight: bold; color: #07593f; border-top: 2px solid #07593f; padding-top: 8px; margin-top: 8px; }
         
         .assinaturas { display: flex; gap: 40px; padding-top: 20px; position: fixed; bottom: 60px; left: 20px; right: 20px; }
         .assinatura-box { flex: 1; text-align: center; }
         .assinatura-linha { border-top: 1px solid #333; margin-top: 50px; padding-top: 8px; }
-        .assinatura-label { font-size: 10px; color: #333; font-weight: 600; }
-        .assinatura-nome { font-size: 9px; color: #666; margin-top: 2px; }
+        .assinatura-label { font-size: 11px; color: #333; font-weight: 600; }
+        .assinatura-nome { font-size: 11px; color: #666; margin-top: 2px; }
         
         .footer { text-align: center; padding-top: 12px; border-top: 1px dashed #ccc; position: fixed; bottom: 15px; left: 20px; right: 20px; }
-        .footer-text { font-size: 9px; color: #666; }
+        .footer-text { font-size: 11px; color: #666; }
         
         @media print { 
           body { padding: 15px; -webkit-print-color-adjust: exact; print-color-adjust: exact; } 
@@ -233,11 +355,29 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
           CPF: ${cliente?.cpf || '-'} &nbsp;|&nbsp; Tel: ${cliente?.telefone || venda.cliente_telefone}<br/>
           ${enderecoCompleto}
         </div>
+        ${pontoReferencia ? `<div class="obs-chip"><strong>Ponto de referência:</strong> ${pontoReferencia}</div>` : ''}
       </div>
 
       <div class="info-row">
         <div class="info-tag"><span style="color:#666;">Prazo de Entrega</span><strong>${prazoEntrega}</strong></div>
         <div class="info-tag"><span style="color:#666;">Vendedor</span><strong>${nomeVendedor}</strong></div>
+      </div>
+
+      <div class="detalhes-grid">
+        <div class="detalhes-box">
+          <h4>Contatos</h4>
+          <div class="detalhes-linha"><strong>Principal:</strong> ${cliente?.telefone || venda.cliente_telefone || '-'}</div>
+          ${contatosAlternativos.length > 0
+      ? contatosAlternativos.map((item) => `<div class="detalhes-linha">${item}</div>`).join('')
+      : '<div class="detalhes-linha">Sem contatos alternativos</div>'}
+        </div>
+        <div class="detalhes-box">
+          <h4>Detalhes Operacionais</h4>
+          <div class="detalhes-linha"><strong>Montagem:</strong> ${resumoMontagem}</div>
+          <div class="detalhes-linha"><strong>NFe:</strong> ${nfeNumero || '-'}</div>
+          ${nfeStatus ? `<div class="detalhes-linha"><strong>Status NFe:</strong> ${nfeStatus}</div>` : ''}
+          ${nfeChave ? `<div class="detalhes-linha"><strong>Chave:</strong> ${nfeChave}</div>` : ''}
+        </div>
       </div>
 
       <table>
@@ -248,8 +388,8 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
       <div class="resumo-row">
         <div class="resumo-box">
           <div class="resumo-titulo">Forma de Pagamento</div>
-          <div style="font-size:11px;color:#333;">${pagamentosHTML}</div>
-          ${venda.pagamento_na_entrega ? `<div style="margin-top:6px;font-size:11px;color:#059669;font-weight:600;">+ R$ ${venda.valor_pagamento_entrega?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} na entrega (${venda.forma_pagamento_entrega || 'A combinar'})</div>` : ''}
+          <div style="font-size:12px;color:#333;">${pagamentosHTML}</div>
+          ${venda.pagamento_na_entrega ? `<div style="margin-top:6px;font-size:12px;color:#059669;font-weight:600;">+ R$ ${venda.valor_pagamento_entrega?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} na entrega (${venda.forma_pagamento_entrega || 'A combinar'})</div>` : ''}
         </div>
         <div class="resumo-box">
           <div class="resumo-titulo">Valores</div>
@@ -257,7 +397,7 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
         </div>
       </div>
 
-      ${venda.observacoes ? `<div style="margin-top:12px;background:#fff7ed;padding:10px 12px;border-radius:4px;font-size:10px;color:#9a3412;border-left:3px solid #f97316;"><strong>Observações:</strong> ${venda.observacoes}</div>` : ''}
+      ${venda.observacoes ? `<div style="margin-top:12px;background:#fff7ed;padding:10px 12px;border-radius:4px;font-size:11px;color:#9a3412;border-left:3px solid #f97316;"><strong>Observações:</strong> ${venda.observacoes}</div>` : ''}
 
       <div class="assinaturas">
         <div class="assinatura-box">
@@ -285,9 +425,14 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
 
 // PDF INTERNO (para entregadores - com destaque de pagamento)
 export function gerarNotaInternaHTML(venda, cliente, vendedor) {
-  const enderecoCompleto = cliente?.endereco ?
-    `${cliente.endereco}, ${cliente.numero || 's/n'}${cliente.complemento ? ` - ${cliente.complemento}` : ''}, ${cliente.bairro || ''}, ${cliente.cidade || ''} - ${cliente.estado || ''}` :
-    'SEM ENDEREÇO';
+  const enderecoCompleto = obterEnderecoEntregaPedido(venda, cliente);
+  const pontoReferencia = obterPontoReferenciaPedido(venda, cliente);
+  const contatosAlternativos = obterContatosAlternativosPedido(cliente);
+
+  const nfeNumero = obterPrimeiroValorValido(venda?.nfe_numero, venda?.numero_nfe, '-');
+  const nfeStatus = obterPrimeiroValorValido(venda?.nfe_status, venda?.status_nfe, '-');
+  const nfeChave = obterPrimeiroValorValido(venda?.nfe_chave, venda?.chave_nfe, '-');
+  const resumoMontagem = obterResumoMontagemPedido(venda);
 
   const itensHTML = venda.itens.map(item => {
     const detalhes = obterDetalhesItemPDF(item);
@@ -315,7 +460,7 @@ export function gerarNotaInternaHTML(venda, cliente, vendedor) {
         .titulo { font-size: 16px; font-weight: bold; color: #07593f; border-bottom: 2px solid #07593f; padding-bottom: 8px; margin-bottom: 12px; }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
         .box { background: #f5f5f5; padding: 12px; border-radius: 6px; }
-        .box-titulo { font-size: 10px; color: #666; text-transform: uppercase; margin-bottom: 5px; }
+        .box-titulo { font-size: 11px; color: #666; text-transform: uppercase; margin-bottom: 5px; }
         .box-valor { font-size: 14px; font-weight: bold; color: #333; }
         table { width: 100%; border-collapse: collapse; }
         th { background: #333; color: white; padding: 8px; text-align: left; font-size: 11px; }
@@ -323,6 +468,9 @@ export function gerarNotaInternaHTML(venda, cliente, vendedor) {
         .pagamento-titulo { color: #065f46; font-size: 14px; font-weight: bold; margin-bottom: 10px; }
         .pagamento-valor { font-size: 32px; font-weight: bold; color: #059669; }
         .pagamento-forma { color: #065f46; margin-top: 8px; font-size: 14px; }
+        .detalhes-op { margin-top: 12px; padding: 10px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; }
+        .detalhes-op-linha { font-size: 11px; color: #7c2d12; margin-bottom: 4px; line-height: 1.4; }
+        .detalhes-op-linha:last-child { margin-bottom: 0; }
         @media print { body { padding: 10px; } .pagamento-destaque { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
       </style>
     </head>
@@ -330,11 +478,20 @@ export function gerarNotaInternaHTML(venda, cliente, vendedor) {
       <div class="titulo">📋 CONTROLE INTERNO - PEDIDO #${venda.numero_pedido}</div>
       
       <div class="grid">
-        <div class="box"><div class="box-titulo">Cliente</div><div class="box-valor">${cliente?.nome_completo || venda.cliente_nome}</div><div style="font-size:11px;color:#666;margin-top:4px;">Tel: ${cliente?.telefone || venda.cliente_telefone}</div></div>
+        <div class="box"><div class="box-titulo">Cliente</div><div class="box-valor">${cliente?.nome_completo || venda.cliente_nome}</div><div style="font-size:11px;color:#666;margin-top:4px;">Tel: ${cliente?.telefone || venda.cliente_telefone}</div>${contatosAlternativos.length > 0 ? `<div style="font-size:10px;color:#6b7280;margin-top:6px;">${contatosAlternativos.join(' • ')}</div>` : ''}</div>
         <div class="box"><div class="box-titulo">Endereço</div><div class="box-valor" style="font-size:12px;">${enderecoCompleto}</div></div>
         <div class="box"><div class="box-titulo">Vendedor</div><div class="box-valor">${vendedor || venda.responsavel_nome || '-'}</div></div>
         <div class="box"><div class="box-titulo">Status</div><div class="box-valor">${venda.prazo_entrega === 'Retirado na loja' ? '🏪 RETIRADA' : '🚚 ENTREGA'}</div></div>
       </div>
+
+      ${(pontoReferencia || venda?.observacoes || resumoMontagem !== '-' || nfeNumero !== '-') ? `
+        <div class="detalhes-op">
+          ${pontoReferencia ? `<div class="detalhes-op-linha"><strong>Ponto de referência:</strong> ${pontoReferencia}</div>` : ''}
+          ${resumoMontagem !== '-' ? `<div class="detalhes-op-linha"><strong>Montagem:</strong> ${resumoMontagem}</div>` : ''}
+          ${(nfeNumero !== '-' || nfeStatus !== '-' || nfeChave !== '-') ? `<div class="detalhes-op-linha"><strong>NFe:</strong> ${nfeNumero} | <strong>Status:</strong> ${nfeStatus}${nfeChave !== '-' ? ` | <strong>Chave:</strong> ${nfeChave}` : ''}</div>` : ''}
+          ${venda?.observacoes ? `<div class="detalhes-op-linha"><strong>Observações do pedido:</strong> ${venda.observacoes}</div>` : ''}
+        </div>
+      ` : ''}
 
       <table><thead><tr><th>Produto</th><th style="width:60px;text-align:center;">Qtd</th></tr></thead><tbody>${itensHTML}</tbody></table>
 

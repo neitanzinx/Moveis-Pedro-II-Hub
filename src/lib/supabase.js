@@ -120,6 +120,8 @@ const tableMap = {
     RegraComissao: 'regras_comissao',
     ComissaoHistorico: 'comissoes_historico',
     ComissaoFechamentoMensal: 'comissoes_fechamento_mensal',
+    NivelComissao: 'niveis_comissao',
+    NivelComissaoFaixa: 'niveis_comissao_faixas',
     TokenGerencial: 'tokens_gerenciais',
     LogUsoToken: 'log_uso_tokens',
     SolicitacaoCadastro: 'solicitacoes_cadastro_produto',

@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DollarSign, TrendingUp, Users, FileDown, AlertCircle, Calendar, Banknote, RefreshCcw, Lock, CheckCircle2 } from "lucide-react";
+import { DollarSign, TrendingUp, Users, FileDown, AlertCircle, Calendar, Banknote, RefreshCcw, Lock, CheckCircle2, Target, BarChart3 } from "lucide-react";
+import { ModalNiveisComissao } from "@/components/comissoes/ModalNiveisComissao";
+import { calcularVendasLiquidas, calcularComissaoTiered } from "@/services/comissaoTiersService";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -34,6 +36,7 @@ export default function RelatorioComissoes() {
   const [processandoPagamento, setProcessandoPagamento] = useState(false);
   const [observacaoPagamento, setObservacaoPagamento] = useState("");
   const [processandoFechamento, setProcessandoFechamento] = useState(false);
+  const [modalNiveisVendedor, setModalNiveisVendedor] = useState(null);
   const queryClient = useQueryClient();
 
   const tenantId = organization?.id || "00000000-0000-0000-0000-000000000001";
@@ -64,6 +67,21 @@ export default function RelatorioComissoes() {
   const { data: fechamentos = [] } = useQuery({
     queryKey: ['comissoes-fechamento', mesInicio, mesFim, tenantId],
     queryFn: () => base44.entities.ComissaoFechamentoMensal.list('-created_at'),
+  });
+
+  const { data: configTaxas = [] } = useQuery({
+    queryKey: ['configuracao_taxas'],
+    queryFn: () => base44.entities.ConfiguracaoTaxa.list(),
+  });
+
+  const { data: niveisComissao = [] } = useQuery({
+    queryKey: ['niveis-comissao'],
+    queryFn: () => base44.entities.NivelComissao.list(),
+  });
+
+  const { data: niveisComissaoFaixas = [] } = useQuery({
+    queryKey: ['niveis-comissao-faixas'],
+    queryFn: () => base44.entities.NivelComissaoFaixa.list(),
   });
 
   if (!user) {
@@ -179,6 +197,13 @@ export default function RelatorioComissoes() {
 
     const quantidadeVendas = vendasVendedor.length;
     const breakdownPagamentos = calcularBreakdownPorFormaPagamento(vendasVendedor);
+    const vendasLiquidas = calcularVendasLiquidas(vendasVendedor, configTaxas);
+    const nivelConfig = niveisComissao.find((n) => n.vendedor_id === grupo.vendedor.id && n.ativo !== false);
+    const faixasNivel = nivelConfig ? niveisComissaoFaixas.filter((f) => f.nivel_comissao_id === nivelConfig.id) : [];
+    const metaVendedor = nivelConfig?.meta_mensal || grupo.vendedor.meta_mensal || 0;
+    const comissaoTiered = nivelConfig && faixasNivel.length > 0
+      ? calcularComissaoTiered({ vendasBrutas: totalVendas, vendasLiquidas, meta: metaVendedor, faixas: faixasNivel })
+      : null;
 
     return {
       vendedor: grupo.vendedor,
@@ -186,6 +211,9 @@ export default function RelatorioComissoes() {
       totalVendas,
       quantidadeVendas,
       breakdownPagamentos,
+      vendasLiquidas,
+      comissaoTiered,
+      meta: metaVendedor,
       vendas: vendasVendedor
     };
   }).filter(item => item.quantidadeVendas > 0);
@@ -224,11 +252,14 @@ export default function RelatorioComissoes() {
   const comissoesConsolidadas = comissoesPorVendedor.map((item) => {
     const fechamento = mapFechamentoPorVendedor.get(item.vendedor.id);
     if (!fechamento) {
+      const totalComissaoFinal = item.comissaoTiered?.valorComissao > 0
+        ? item.comissaoTiered.valorComissao
+        : item.totalComissao;
       return {
         ...item,
         fechamento_id: null,
         status_fechamento: 'Nao Fechado',
-        totalFinal: item.totalComissao,
+        totalFinal: totalComissaoFinal,
       };
     }
 
@@ -284,12 +315,19 @@ export default function RelatorioComissoes() {
         }
 
         if (acao === 'recriar' && existente) {
+          const totalComissaoFinal = item.comissaoTiered?.valorComissao > 0
+            ? item.comissaoTiered.valorComissao
+            : item.totalComissao;
           await base44.entities.ComissaoFechamentoMensal.update(existente.id, {
             quantidade_vendas: item.quantidadeVendas,
             valor_total_vendas: Number(item.totalVendas.toFixed(2)),
-            total_comissao: Number(item.totalComissao.toFixed(2)),
-            total_final: Number(item.totalComissao.toFixed(2)),
+            total_comissao: Number(totalComissaoFinal.toFixed(2)),
+            total_final: Number(totalComissaoFinal.toFixed(2)),
             total_ajustes: Number(existente.total_ajustes || 0),
+            valor_vendas_liquidas: Number(item.vendasLiquidas.toFixed(2)),
+            percentual_meta_atingido: item.comissaoTiered ? Number(item.comissaoTiered.percentualMeta.toFixed(1)) : null,
+            faixa_comissao_aplicada: item.comissaoTiered?.faixaAplicada ? `>=${item.comissaoTiered.faixaAplicada.percentual_meta_min}%` : null,
+            percentual_comissao_aplicado: item.comissaoTiered?.percentualComissao ?? null,
             breakdown_pagamentos: item.breakdownPagamentos,
             status: existente.status || 'Pendente',
             observacoes: existente.observacoes || `Fechamento atualizado automaticamente (${politica})`,
@@ -299,6 +337,9 @@ export default function RelatorioComissoes() {
           continue;
         }
 
+        const totalComissaoFinal = item.comissaoTiered?.valorComissao > 0
+          ? item.comissaoTiered.valorComissao
+          : item.totalComissao;
         await base44.entities.ComissaoFechamentoMensal.create({
           organization_id: tenantId,
           periodo_inicio: periodoInicioIso,
@@ -307,9 +348,13 @@ export default function RelatorioComissoes() {
           loja: item.vendedor.loja || null,
           quantidade_vendas: item.quantidadeVendas,
           valor_total_vendas: Number(item.totalVendas.toFixed(2)),
-          total_comissao: Number(item.totalComissao.toFixed(2)),
+          total_comissao: Number(totalComissaoFinal.toFixed(2)),
           total_ajustes: 0,
-          total_final: Number(item.totalComissao.toFixed(2)),
+          total_final: Number(totalComissaoFinal.toFixed(2)),
+          valor_vendas_liquidas: Number(item.vendasLiquidas.toFixed(2)),
+          percentual_meta_atingido: item.comissaoTiered ? Number(item.comissaoTiered.percentualMeta.toFixed(1)) : null,
+          faixa_comissao_aplicada: item.comissaoTiered?.faixaAplicada ? `>=${item.comissaoTiered.faixaAplicada.percentual_meta_min}%` : null,
+          percentual_comissao_aplicado: item.comissaoTiered?.percentualComissao ?? null,
           status: 'Pendente',
           breakdown_pagamentos: item.breakdownPagamentos,
           observacoes: `Fechamento gerado automaticamente em ${new Date().toLocaleDateString('pt-BR')}`,
@@ -593,9 +638,18 @@ export default function RelatorioComissoes() {
                         {item.vendedor.nome.charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <CardTitle style={{ color: '#07593f' }}>
-                          {item.vendedor.nome}
-                        </CardTitle>
+                        <div className="flex items-center gap-2">
+                          <CardTitle style={{ color: '#07593f' }}>
+                            {item.vendedor.nome}
+                          </CardTitle>
+                          <button
+                            onClick={() => setModalNiveisVendedor(item.vendedor)}
+                            className="text-gray-400 hover:text-green-600 transition-colors"
+                            title="Configurar Níveis de Comissão"
+                          >
+                            <Target className="w-4 h-4" />
+                          </button>
+                        </div>
                         <p className="text-sm" style={{ color: '#8B8B8B' }}>
                           Loja {item.vendedor.loja}
                         </p>
@@ -628,7 +682,7 @@ export default function RelatorioComissoes() {
                   </div>
                 </CardHeader>
                 <CardContent className="p-6">
-                  <div className="grid md:grid-cols-3 gap-4 mb-4">
+                  <div className="grid md:grid-cols-4 gap-4 mb-4">
                     <div className="text-center p-3 rounded-lg" style={{ backgroundColor: '#FAF8F5' }}>
                       <p className="text-sm mb-1" style={{ color: '#8B8B8B' }}>Quantidade de Vendas</p>
                       <p className="text-xl font-bold" style={{ color: '#07593f' }}>
@@ -641,6 +695,12 @@ export default function RelatorioComissoes() {
                         R$ {item.totalVendas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </p>
                     </div>
+                    <div className="text-center p-3 rounded-lg" style={{ backgroundColor: '#FFF7ED' }}>
+                      <p className="text-sm mb-1" style={{ color: '#8B8B8B' }}>Vendas Líquidas</p>
+                      <p className="text-xl font-bold text-orange-600">
+                        R$ {item.vendasLiquidas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
                     <div className="text-center p-3 rounded-lg" style={{ backgroundColor: '#FAF8F5' }}>
                       <p className="text-sm mb-1" style={{ color: '#8B8B8B' }}>Ticket Médio</p>
                       <p className="text-xl font-bold" style={{ color: '#07593f' }}>
@@ -649,7 +709,32 @@ export default function RelatorioComissoes() {
                     </div>
                   </div>
 
-                  {/* Breakdown por Forma de Pagamento */}
+                  {/* Comissão por Faixas */}
+                  {item.comissaoTiered && (
+                    <div className="mb-4 p-4 rounded-lg border-2" style={{ borderColor: '#f38a4c', backgroundColor: '#fff7ed' }}>
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <BarChart3 className="w-4 h-4 text-orange-600" />
+                          <p className="text-sm font-semibold text-orange-800">Comissão por Faixas</p>
+                        </div>
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <Badge className="bg-orange-100 text-orange-700">
+                            {item.comissaoTiered.percentualMeta.toFixed(1)}% da meta
+                          </Badge>
+                          {item.comissaoTiered.faixaAplicada && (
+                            <Badge className="bg-green-100 text-green-700">
+                              {`Faixa ≥${item.comissaoTiered.faixaAplicada.percentual_meta_min}% → ${item.comissaoTiered.percentualComissao}% ${item.comissaoTiered.faixaAplicada.base_calculo === 'bruto' ? 'bruto' : 'líquido'}`}
+                            </Badge>
+                          )}
+                          <span className="text-lg font-bold text-orange-700">
+                            R$ {item.comissaoTiered.valorComissao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Breakdown por Forma de Pagamento */}}
                   {Object.keys(item.breakdownPagamentos).length > 0 && (
                     <div className="mt-4 p-4 rounded-lg border" style={{ borderColor: '#E5E0D8' }}>
                       <p className="text-sm font-semibold mb-3" style={{ color: '#07593f' }}>
@@ -668,27 +753,27 @@ export default function RelatorioComissoes() {
                     </div>
                   )}
 
-                  {item.vendedor.meta_mensal > 0 && (
+                  {item.meta > 0 && (
                     <div className="mt-4 p-4 rounded-lg" style={{ backgroundColor: '#f0f9ff' }}>
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-sm font-medium" style={{ color: '#07593f' }}>
-                          Meta Mensal: R$ {item.vendedor.meta_mensal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          Meta Mensal: R$ {item.meta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </p>
                         <Badge
                           style={{
-                            backgroundColor: item.totalVendas >= item.vendedor.meta_mensal ? '#D1FAE5' : '#FEF3C7',
-                            color: item.totalVendas >= item.vendedor.meta_mensal ? '#065F46' : '#92400E'
+                            backgroundColor: item.totalVendas >= item.meta ? '#D1FAE5' : '#FEF3C7',
+                            color: item.totalVendas >= item.meta ? '#065F46' : '#92400E'
                           }}
                         >
-                          {((item.totalVendas / item.vendedor.meta_mensal) * 100).toFixed(0)}% atingido
+                          {((item.totalVendas / item.meta) * 100).toFixed(0)}% atingido
                         </Badge>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2">
                         <div
                           className="h-2 rounded-full transition-all"
                           style={{
-                            width: `${Math.min((item.totalVendas / item.vendedor.meta_mensal) * 100, 100)}%`,
-                            backgroundColor: item.totalVendas >= item.vendedor.meta_mensal ? '#07593f' : '#f38a4c'
+                            width: `${Math.min((item.totalVendas / item.meta) * 100, 100)}%`,
+                            backgroundColor: item.totalVendas >= item.meta ? '#07593f' : '#f38a4c'
                           }}
                         />
                       </div>
@@ -700,6 +785,20 @@ export default function RelatorioComissoes() {
           </div>
         )}
 
+
+        {modalNiveisVendedor && (
+          <ModalNiveisComissao
+            vendedor={modalNiveisVendedor}
+            organizationId={tenantId}
+            niveisComissao={niveisComissao}
+            niveisComissaoFaixas={niveisComissaoFaixas}
+            onClose={() => setModalNiveisVendedor(null)}
+            onSaved={() => {
+              queryClient.invalidateQueries({ queryKey: ['niveis-comissao'] });
+              queryClient.invalidateQueries({ queryKey: ['niveis-comissao-faixas'] });
+            }}
+          />
+        )}
 
         {/* Modal de Pagamento */}
         <Dialog open={modalPagamento} onOpenChange={setModalPagamento}>
@@ -718,7 +817,7 @@ export default function RelatorioComissoes() {
               <div className="p-4 bg-green-50 rounded-lg border border-green-100 text-center">
                 <p className="text-sm text-gray-500 mb-1">Valor a Pagar</p>
                 <p className="text-3xl font-bold text-green-700">
-                  R$ {pagamentoSelecionado?.totalComissao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  R$ {pagamentoSelecionado?.totalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </p>
               </div>
 

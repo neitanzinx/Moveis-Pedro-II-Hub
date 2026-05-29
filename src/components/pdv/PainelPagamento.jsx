@@ -14,7 +14,10 @@ import { toast } from "sonner";
 import {
   PAYMENT_METHOD_OPTIONS,
   PAYMENT_METHOD_OPTIONS_DELIVERY,
+  LINK_PAYMENT_SUBTYPES,
   isInstallmentPaymentMethod,
+  isLinkPaymentMethod,
+  normalizePaymentMethod,
   normalizePaymentItem,
 } from "@/services/paymentOrchestrator";
 
@@ -44,7 +47,7 @@ export default function PainelPagamento({
   margemNegociavel = 0,
   onDescontoMargemChange
 }) {
-  const [novoPagamento, setNovoPagamento] = useState({ forma: "", valor: "", parcelas: 1 });
+  const [novoPagamento, setNovoPagamento] = useState({ forma: "", valor: "", parcelas: 1, linkSubtipo: "" });
   const [cupomCodigo, setCupomCodigo] = useState("");
   const [aplicandoCupom, setAplicandoCupom] = useState(false);
   const [erroCupom, setErroCupom] = useState("");
@@ -91,17 +94,21 @@ export default function PainelPagamento({
     queryFn: () => base44.entities.ConfiguracaoTaxa.list()
   });
 
-  // Mapa de acréscimos por forma de pagamento
+  const normalizeKey = (value = "") =>
+    String(value)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase();
+
+  // Mapa de acréscimos por forma de pagamento — match canônico exato
   const getAcrescimo = (forma) => {
-    const taxa = configTaxas.find(t =>
-      t.forma_pagamento?.toLowerCase().includes(forma.toLowerCase()) ||
-      forma.toLowerCase().includes(t.forma_pagamento?.toLowerCase())
+    const formaKey = normalizeKey(normalizePaymentMethod(forma));
+    const taxa = configTaxas.find(
+      (t) => normalizeKey(normalizePaymentMethod(t.forma_pagamento || "")) === formaKey
     );
-    if (!taxa || !taxa.acrescimo || taxa.acrescimo === 0) return null;
-    return {
-      valor: taxa.acrescimo,
-      tipo: taxa.acrescimo_tipo || 'porcentagem'
-    };
+    if (!taxa || Number(taxa.acrescimo) === 0) return null;
+    return { valor: Number(taxa.acrescimo), tipo: taxa.acrescimo_tipo || 'porcentagem' };
   };
 
   // Calcular valor do acréscimo
@@ -114,21 +121,30 @@ export default function PainelPagamento({
     return acrescimo.valor;
   };
 
+  // Resolve a forma canônica final considerando sub-tipo (Link) e parcelamento (Crédito)
+  const resolverForma = (forma, parcelas) => {
+    if (isLinkPaymentMethod(forma)) return novoPagamento.linkSubtipo;
+    if (forma === "Crédito") return parcelas > 1 ? "Crédito Parcelado" : "Crédito 1x";
+    return forma;
+  };
+
   const handleAdd = async () => {
     if (!novoPagamento.valor) return;
 
+    const formaResolvida = resolverForma(novoPagamento.forma, novoPagamento.parcelas);
+
     const valorBase = parseFloat(novoPagamento.valor);
-    const valorAcrescimo = calcularAcrescimo(novoPagamento.forma, valorBase);
+    const valorAcrescimo = calcularAcrescimo(formaResolvida, valorBase);
     const valorTotal = valorBase + valorAcrescimo;
 
     onAddPagamento(normalizePaymentItem({
-      forma_pagamento: novoPagamento.forma,
+      forma_pagamento: formaResolvida,
       valor: valorTotal,
       valor_base: valorBase,
       acrescimo: valorAcrescimo,
       parcelas: novoPagamento.parcelas
     }));
-    setNovoPagamento({ forma: "", valor: "", parcelas: 1 });
+    setNovoPagamento({ forma: "", valor: "", parcelas: 1, linkSubtipo: "" });
   };
 
 
@@ -777,10 +793,10 @@ export default function PainelPagamento({
             {/* Adicionar Pagamento */}
             <div className="bg-gray-50 dark:bg-neutral-800/50 p-4 rounded-xl border border-gray-100 dark:border-neutral-800">
               <Label className="text-xs font-semibold uppercase text-gray-500 mb-3 block">Adicionar Pagamento</Label>
-              <div className="flex flex-col sm:flex-row gap-3 items-end">
+              <div className="flex flex-col sm:flex-row gap-3 items-end flex-wrap">
                 <div className="flex-1 w-full sm:w-auto">
                   <Label className="text-xs mb-1.5 block">Forma de Pagamento</Label>
-                  <Select value={novoPagamento.forma} onValueChange={v => setNovoPagamento({ ...novoPagamento, forma: v })}>
+                  <Select value={novoPagamento.forma} onValueChange={v => setNovoPagamento({ forma: v, valor: novoPagamento.valor, parcelas: 1, linkSubtipo: "" })}>
                     <SelectTrigger className="h-10 bg-white dark:bg-neutral-800">
                       <SelectValue placeholder="Selecione" />
                     </SelectTrigger>
@@ -804,7 +820,26 @@ export default function PainelPagamento({
                   </Select>
                 </div>
 
-                {isInstallmentPaymentMethod(novoPagamento.forma) && (
+                {/* Sub-select para Link de Pagamento */}
+                {isLinkPaymentMethod(novoPagamento.forma) && (
+                  <div className="w-full sm:w-36">
+                    <Label className="text-xs mb-1.5 block">Tipo do Link</Label>
+                    <Select value={novoPagamento.linkSubtipo} onValueChange={v => setNovoPagamento({ ...novoPagamento, linkSubtipo: v, parcelas: 1 })}>
+                      <SelectTrigger className="h-10 bg-white dark:bg-neutral-800">
+                        <SelectValue placeholder="Selecione" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {LINK_PAYMENT_SUBTYPES.map(sub => (
+                          <SelectItem key={sub} value={sub}>{sub.replace('Link - ', '')}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {isInstallmentPaymentMethod(
+                  isLinkPaymentMethod(novoPagamento.forma) ? novoPagamento.linkSubtipo : novoPagamento.forma
+                ) && (
                   <div className="w-full sm:w-24">
                     <Label className="text-xs mb-1.5 block">Parcelas</Label>
                     <Select value={String(novoPagamento.parcelas)} onValueChange={v => setNovoPagamento({ ...novoPagamento, parcelas: Number(v) })}>
@@ -832,19 +867,22 @@ export default function PainelPagamento({
                     />
                   </div>
                   {/* Preview do acréscimo */}
-                  {novoPagamento.valor && novoPagamento.forma && getAcrescimo(novoPagamento.forma) && (
-                    <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
-                      <TrendingUp className="w-3 h-3" />
-                      +R$ {calcularAcrescimo(novoPagamento.forma, parseFloat(novoPagamento.valor)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de acréscimo
-                    </p>
-                  )}
+                  {(() => {
+                    const formaPreview = resolverForma(novoPagamento.forma, novoPagamento.parcelas);
+                    return novoPagamento.valor && formaPreview && getAcrescimo(formaPreview) ? (
+                      <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                        <TrendingUp className="w-3 h-3" />
+                        +R$ {calcularAcrescimo(formaPreview, parseFloat(novoPagamento.valor)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de acréscimo
+                      </p>
+                    ) : null;
+                  })()}
                 </div>
 
                 <Button
                   size="lg"
                   className="h-10 px-6 bg-green-600 hover:bg-green-700 text-white font-bold w-full sm:w-auto"
                   onClick={handleAdd}
-                  disabled={!novoPagamento.valor || !novoPagamento.forma}
+                  disabled={!novoPagamento.valor || !novoPagamento.forma || (isLinkPaymentMethod(novoPagamento.forma) && !novoPagamento.linkSubtipo)}
                 >
                   <Plus className="w-5 h-5 mr-1" /> Adicionar
                 </Button>

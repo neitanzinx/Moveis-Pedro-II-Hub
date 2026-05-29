@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Truck, MapPin, Navigation, CheckCircle, Send, Radio, Sun, Sunset, Briefcase, ArrowLeft, Package, AlertTriangle, CreditCard, Camera, PenTool, X, DollarSign, LogOut, Wrench, Link2, MessageCircle, QrCode, Copy, Download, ExternalLink, Check } from "lucide-react";
+import { Truck, MapPin, Navigation, CheckCircle, Send, Radio, Sun, Sunset, Briefcase, ArrowLeft, Package, AlertTriangle, CreditCard, Camera, PenTool, X, DollarSign, LogOut, Wrench, Link2, MessageCircle, QrCode, Copy, Download, ExternalLink, Check, GripVertical } from "lucide-react";
 import { getZapApiUrl } from '../utils/zapApiUrl';
 import { useConfirm } from "@/hooks/useConfirm";
 import AssinaturaCanvas from "@/components/logistica/AssinaturaCanvas";
@@ -136,6 +136,8 @@ export default function Entregador() {
     // Estado para checklist de carregamento
     const [modalChecklist, setModalChecklist] = useState(false);
     const [itensChecklist, setItensChecklist] = useState([]);
+    const [modoReorganizarParadas, setModoReorganizarParadas] = useState(false);
+    const [dragEntregaId, setDragEntregaId] = useState(null);
 
     // Substituindo state local pelo UseChecklistCache
     const {
@@ -219,6 +221,43 @@ export default function Entregador() {
         },
         refetchInterval: rotaIniciada ? 10000 : 30000
     });
+
+    // Vendas completas para exibir itens, observações e NF nos cards
+    const { data: vendasCompletas = [] } = useQuery({
+        queryKey: ['vendas-entregador', dataSelecionada],
+        queryFn: async () => {
+            const vendaIds = [...new Set(todasEntregas.map(e => e.venda_id).filter(Boolean))];
+            if (vendaIds.length === 0) return [];
+            const { data, error } = await supabase
+                .from('vendas')
+                .select('id, numero_pedido, itens, observacoes, forma_pagamento, valor_total, nfe_numero, nfe_status, nfe_chave, cliente_id')
+                .in('id', vendaIds);
+            if (error) return [];
+            return data || [];
+        },
+        enabled: todasEntregas.length > 0,
+        refetchInterval: rotaIniciada ? 30000 : 60000
+    });
+
+    // Clientes para telefone alternativo e contatos extras
+    const { data: clientesEntregador = [] } = useQuery({
+        queryKey: ['clientes-entregador', dataSelecionada],
+        queryFn: async () => {
+            const clienteIds = [...new Set(vendasCompletas.map(v => v.cliente_id).filter(Boolean))];
+            if (clienteIds.length === 0) return [];
+            const { data, error } = await supabase
+                .from('clientes')
+                .select('id, telefone, telefone_alternativo, contatos, email')
+                .in('id', clienteIds);
+            if (error) return [];
+            return data || [];
+        },
+        enabled: vendasCompletas.length > 0,
+        refetchInterval: 60000
+    });
+
+    const vendasMapEntregador = Object.fromEntries(vendasCompletas.map(v => [v.id, v]));
+    const clientesMapEntregador = Object.fromEntries(clientesEntregador.map(c => [c.id, c]));
 
     // Assistências Técnicas pendentes
     const { data: todasAssistencias = [], refetch: refetchAssistencias } = useQuery({
@@ -313,6 +352,66 @@ export default function Entregador() {
             queryClient.invalidateQueries({ queryKey: ['assistencias'] });
         }
     });
+
+    const moverParada = (lista, from, to) => {
+        const copia = [...lista];
+        const [item] = copia.splice(from, 1);
+        copia.splice(to, 0, item);
+        return copia;
+    };
+
+    const salvarOrdemParadas = async (ordemIds) => {
+        const updates = ordemIds.map((id, idx) => updateEntrega.mutateAsync({
+            id,
+            data: { ordem_rota: idx + 1 }
+        }));
+        await Promise.all(updates);
+    };
+
+    const iniciarDragParada = (event, entregaId) => {
+        const handle = event.target?.closest?.('[data-drag-handle="true"]');
+        if (!handle) {
+            event.preventDefault();
+            return;
+        }
+
+        event.dataTransfer.effectAllowed = 'move';
+        setDragEntregaId(entregaId);
+    };
+
+    const permitirDropParada = (event) => {
+        if (!dragEntregaId) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+    };
+
+    const finalizarDropParada = async (event, targetEntregaId) => {
+        if (!dragEntregaId) return;
+        event.preventDefault();
+
+        const ordemAtual = entregasRota.map(e => e.id);
+        const fromIndex = ordemAtual.indexOf(dragEntregaId);
+        const toIndex = ordemAtual.indexOf(targetEntregaId);
+
+        if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
+            setDragEntregaId(null);
+            return;
+        }
+
+        const novaOrdem = moverParada(ordemAtual, fromIndex, toIndex);
+        setOrdemCongelada(novaOrdem);
+        setDragEntregaId(null);
+
+        try {
+            await salvarOrdemParadas(novaOrdem);
+            toast.success('Paradas reorganizadas');
+        } catch (error) {
+            console.error('Erro ao reorganizar paradas:', error);
+            toast.error('Nao foi possivel salvar a nova ordem das paradas');
+            queryClient.invalidateQueries({ queryKey: ['entregas-dia'] });
+            queryClient.invalidateQueries({ queryKey: ['entregas'] });
+        }
+    };
 
     const abrirModalConfirmacaoPagamento = (entrega, contexto = 'manual') => {
         const valorInicial = toMoneyNumber(entrega?.valor_a_receber);
@@ -1662,16 +1761,53 @@ export default function Entregador() {
                         GPS ativo • Atualizando a cada 5s
                     </div>
                 )}
+
+                <div className="mt-3">
+                    <Button
+                        size="sm"
+                        variant={modoReorganizarParadas ? 'default' : 'outline'}
+                        className="w-full gap-2"
+                        onClick={() => {
+                            setModoReorganizarParadas((prev) => {
+                                if (prev) setDragEntregaId(null);
+                                return !prev;
+                            });
+                        }}
+                    >
+                        <GripVertical className="w-4 h-4" />
+                        {modoReorganizarParadas ? 'Concluir reorganização' : 'Reorganizar paradas'}
+                    </Button>
+                </div>
             </div>
 
             {/* Lista de Entregas */}
             <div className="space-y-3">
+                {modoReorganizarParadas && (
+                    <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 text-xs font-medium">
+                        Modo reorganização ativo: arraste cada parada pelas 3 barras para cima ou para baixo.
+                    </div>
+                )}
                 {entregasRota.map((entrega, index) => {
                     const temPagamento = entrega.pagamento_na_entrega || entrega.valor_a_receber > 0;
                     const isProxima = entrega.id === primeiraPendenteId;
+                    const venda = vendasMapEntregador[entrega.venda_id] || null;
+                    const cliente = clientesMapEntregador[venda?.cliente_id] || null;
+                    const itensVenda = Array.isArray(venda?.itens)
+                        ? venda.itens
+                        : (typeof venda?.itens === 'string' ? (() => { try { return JSON.parse(venda.itens); } catch { return []; } })() : []);
+                    const contatosExtras = Array.isArray(cliente?.contatos) ? cliente.contatos : [];
+                    const telDigits = (entrega.cliente_telefone || '').replace(/\D/g, '');
 
                     return (
-                        <Card key={entrega.id} className={`border-0 shadow-sm ${isProxima ? 'ring-2 ring-blue-500' : ''} ${entrega.status === 'Entregue' ? 'opacity-50' : ''}`}>
+                        <Card
+                            key={entrega.id}
+                            draggable={modoReorganizarParadas}
+                            onDragStart={(e) => iniciarDragParada(e, entrega.id)}
+                            onDragOver={permitirDropParada}
+                            onDrop={(e) => finalizarDropParada(e, entrega.id)}
+                            onDragEnd={() => setDragEntregaId(null)}
+                            className={`border-0 shadow-sm ${isProxima ? 'ring-2 ring-blue-500' : ''} ${entrega.status === 'Entregue' ? 'opacity-50' : ''} ${dragEntregaId === entrega.id ? 'ring-2 ring-amber-400' : ''}`}
+                        >
                             {isProxima && (
                                 <div className="bg-blue-600 text-white text-[10px] font-bold px-3 py-1 text-center">
                                     PRÓXIMA PARADA
@@ -1679,7 +1815,7 @@ export default function Entregador() {
                             )}
                             {entrega.status === 'Entregue' && (
                                 <div className="bg-green-600 text-white text-[10px] font-bold px-3 py-1 text-center">
-                                    ✓ ENTREGUE
+                                    ENTREGUE
                                 </div>
                             )}
 
@@ -1692,29 +1828,98 @@ export default function Entregador() {
                                 </div>
                             )}
 
-                            <CardContent className="p-4">
-                                {/* Header */}
-                                <div className="flex justify-between items-center mb-2">
-                                    <Badge variant="outline" className="text-sm font-bold">
-                                        #{ordemCongelada.length > 0 ? ordemCongelada.indexOf(entrega.id) + 1 : index + 1}
-                                    </Badge>
+                            <CardContent className="p-4 space-y-3">
+                                {/* Header: posição + pedido */}
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        {modoReorganizarParadas && (
+                                            <span
+                                                data-drag-handle="true"
+                                                className="p-1.5 rounded-md border border-dashed border-gray-300 text-gray-400 cursor-grab active:cursor-grabbing"
+                                                title="Arraste para reorganizar"
+                                            >
+                                                <GripVertical className="w-4 h-4" />
+                                            </span>
+                                        )}
+                                        <Badge variant="outline" className="text-sm font-bold">
+                                            #{ordemCongelada.length > 0 ? ordemCongelada.indexOf(entrega.id) + 1 : index + 1}
+                                        </Badge>
+                                    </div>
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs text-gray-400">Pedido</span>
                                         <span className="font-bold text-sm">#{entrega.numero_pedido}</span>
                                     </div>
                                 </div>
 
-                                {/* Endereço em Destaque */}
-                                <div className="bg-gray-50 rounded-lg p-3 mb-3 border border-gray-100">
+                                {/* Cliente + telefones */}
+                                <div className="bg-gray-50 rounded-lg p-3 border border-gray-100 space-y-1.5">
+                                    <p className="font-bold text-gray-900">{entrega.cliente_nome}</p>
+                                    {telDigits && (
+                                        <a
+                                            href={modoReorganizarParadas ? '#' : `https://wa.me/55${telDigits}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={(e) => {
+                                                if (modoReorganizarParadas) e.preventDefault();
+                                            }}
+                                            className={`flex items-center gap-1.5 text-sm font-medium ${modoReorganizarParadas ? 'text-gray-400 cursor-not-allowed' : 'text-green-700'}`}
+                                        >
+                                            <MessageCircle className="w-4 h-4 flex-shrink-0" />
+                                            {entrega.cliente_telefone}
+                                        </a>
+                                    )}
+                                    {cliente?.telefone_alternativo && (
+                                        <a
+                                            href={modoReorganizarParadas ? '#' : `https://wa.me/55${cliente.telefone_alternativo.replace(/\D/g, '')}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={(e) => {
+                                                if (modoReorganizarParadas) e.preventDefault();
+                                            }}
+                                            className={`flex items-center gap-1.5 text-sm ${modoReorganizarParadas ? 'text-gray-400 cursor-not-allowed' : 'text-green-700'}`}
+                                        >
+                                            <MessageCircle className="w-4 h-4 flex-shrink-0" />
+                                            {cliente.telefone_alternativo}
+                                            <span className="text-xs text-gray-400">(alternativo)</span>
+                                        </a>
+                                    )}
+                                    {contatosExtras.map((c, i) => c.telefone && (
+                                        <a
+                                            key={i}
+                                            href={modoReorganizarParadas ? '#' : `https://wa.me/55${c.telefone.replace(/\D/g, '')}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={(e) => {
+                                                if (modoReorganizarParadas) e.preventDefault();
+                                            }}
+                                            className={`flex items-center gap-1.5 text-sm ${modoReorganizarParadas ? 'text-gray-400 cursor-not-allowed' : 'text-green-700'}`}
+                                        >
+                                            <MessageCircle className="w-4 h-4 flex-shrink-0" />
+                                            {c.telefone}
+                                            {c.nome && <span className="text-xs text-gray-400">({c.nome})</span>}
+                                        </a>
+                                    ))}
+                                </div>
+
+                                {/* Endereço + Ponto de referência */}
+                                <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
                                     <div className="flex items-start gap-2">
                                         <MapPin className="w-5 h-5 mt-0.5 text-red-500 flex-shrink-0" />
                                         <div className="flex-1">
                                             <p className="font-bold text-gray-800 leading-tight">{entrega.endereco_entrega}</p>
+                                            {entrega.endereco_entrega_ponto_referencia && (
+                                                <p className="text-xs text-amber-800 mt-1 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                                                    Ref: {entrega.endereco_entrega_ponto_referencia}
+                                                </p>
+                                            )}
                                             <a
-                                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(entrega.endereco_entrega || '')}`}
+                                                href={modoReorganizarParadas ? '#' : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(entrega.endereco_entrega || '')}`}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="text-xs text-blue-600 hover:underline mt-1 inline-block"
+                                                onClick={(e) => {
+                                                    if (modoReorganizarParadas) e.preventDefault();
+                                                }}
+                                                className={`text-xs mt-1 inline-block ${modoReorganizarParadas ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600 hover:underline'}`}
                                             >
                                                 Abrir no Maps →
                                             </a>
@@ -1722,19 +1927,63 @@ export default function Entregador() {
                                     </div>
                                 </div>
 
-                                {/* Cliente */}
-                                <p className="text-sm text-gray-500 mb-3">
-                                    <span className="text-xs text-gray-400">Cliente:</span> {entrega.cliente_nome}
-                                </p>
+                                {/* Itens do pedido */}
+                                {itensVenda.length > 0 && (
+                                    <div className="rounded-lg border border-gray-100 overflow-hidden">
+                                        <div className="bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wide flex items-center gap-1">
+                                            <Package className="w-3 h-3" /> Itens ({itensVenda.length})
+                                        </div>
+                                        <div className="divide-y divide-gray-50">
+                                            {itensVenda.map((item, i) => (
+                                                <div key={i} className="px-3 py-2 flex justify-between items-start text-sm">
+                                                    <span className="text-gray-800 flex-1 pr-2">
+                                                        {item.nome || item.produto_nome || item.descricao || `Item ${i + 1}`}
+                                                        {item.cor && <span className="text-xs text-gray-400 ml-1">· {item.cor}</span>}
+                                                    </span>
+                                                    <span className="text-gray-500 flex-shrink-0 text-xs font-medium">
+                                                        {item.quantidade > 1 ? `${item.quantidade}x` : '1x'}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Observações */}
+                                {(entrega.observacoes || venda?.observacoes) && (
+                                    <div className="space-y-1">
+                                        {entrega.observacoes && (
+                                            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2 text-xs text-yellow-900">
+                                                <span className="font-semibold">Obs. entrega: </span>{entrega.observacoes}
+                                            </div>
+                                        )}
+                                        {venda?.observacoes && (
+                                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-900">
+                                                <span className="font-semibold">Obs. pedido: </span>{venda.observacoes}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Montagem */}
+                                {entrega.tipo_montagem && entrega.tipo_montagem !== 'sem_montagem' && entrega.tipo_montagem !== '' && (
+                                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-2 text-xs text-purple-900 flex items-center gap-2">
+                                        <Wrench className="w-4 h-4 flex-shrink-0 text-purple-600" />
+                                        <span>
+                                            <span className="font-semibold">Montagem: </span>{entrega.tipo_montagem}
+                                            {entrega.montagem_status && ` · ${entrega.montagem_status}`}
+                                        </span>
+                                    </div>
+                                )}
 
                                 {/* Tentativas anteriores */}
                                 {entrega.tentativas > 0 && (
-                                    <div className="bg-red-50 border border-red-200 rounded p-2 mb-3 text-xs text-red-700">
+                                    <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
                                         ⚠️ Tentativa {entrega.tentativas + 1} - {entrega.observacoes_entrega}
                                     </div>
                                 )}
 
-                                {entrega.status !== 'Entregue' && (
+                                {!modoReorganizarParadas && entrega.status !== 'Entregue' && (
                                     <div className="space-y-2">
                                         {/* Aviso de Montagem Pendente */}
                                         {temMontagemPendente(entrega) && (
@@ -1837,6 +2086,7 @@ export default function Entregador() {
                                         <Button
                                             variant="outline"
                                             size="sm"
+                                            disabled={modoReorganizarParadas}
                                             onClick={() => {
                                                 const tel = assistencia.cliente_telefone?.replace(/\D/g, '');
                                                 if (tel) window.open(`https://wa.me/55${tel}`, '_blank');
@@ -1848,6 +2098,7 @@ export default function Entregador() {
                                         <Button
                                             size="sm"
                                             className="bg-purple-600 hover:bg-purple-700"
+                                            disabled={modoReorganizarParadas}
                                             onClick={() => {
                                                 setModalConcluirAssistencia(assistencia);
                                                 setObservacaoAssistencia("");

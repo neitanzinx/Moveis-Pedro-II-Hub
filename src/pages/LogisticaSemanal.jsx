@@ -8,20 +8,29 @@ import KanbanRotasSemanal from "@/components/logistica/KanbanRotasSemanal";
 import MontagemInterna from "@/components/logistica/MontagemInterna";
 import AguardandoLiberacao from "@/components/logistica/AguardandoLiberacao";
 import MapaFrota from "@/components/logistica/MapaFrota";
+import RoteirosFreota from "@/components/logistica/RoteirosFreota";
 import ChatEquipe from "@/components/logistica/ChatEquipe";
 import { isStatusCancelado } from "@/utils/vendaStatus";
 
 export default function LogisticaSemanal() {
   const [tabAtiva, setTabAtiva] = useState("planejamento");
+  const [subTabFrota, setSubTabFrota] = useState("roteiros");
 
   const { data: entregas = [], isLoading } = useQuery({
     queryKey: ['entregas'],
-    queryFn: () => base44.entities.Entrega.list()
+    queryFn: () => base44.entities.Entrega.list(),
+    refetchInterval: 5000
   });
 
   const { data: vendas = [] } = useQuery({
     queryKey: ['vendas'],
     queryFn: () => base44.entities.Venda.list(),
+  });
+
+  const { data: clientes = [] } = useQuery({
+    queryKey: ['clientes'],
+    queryFn: () => base44.entities.Cliente.list(),
+    refetchInterval: 60000
   });
 
   // Query para caminhões com refresh a cada 5 segundos
@@ -147,7 +156,31 @@ export default function LogisticaSemanal() {
         </TabsContent>
 
         <TabsContent value="frota" className="mt-6">
-          <MapaFrota caminhoes={caminhoes} />
+          <div className="space-y-4">
+            <Tabs value={subTabFrota} onValueChange={setSubTabFrota}>
+              <TabsList className="grid w-full max-w-xs grid-cols-2">
+                <TabsTrigger value="roteiros" className="gap-2">
+                  <Truck className="w-4 h-4" />
+                  Roteiros
+                </TabsTrigger>
+                <TabsTrigger value="mapa" className="gap-2">
+                  <MapPin className="w-4 h-4" />
+                  Mapa
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="roteiros" className="mt-4">
+                <RoteirosFreota
+                  entregas={entregas}
+                  vendas={vendas}
+                  caminhoes={caminhoes}
+                  clientes={clientes}
+                />
+              </TabsContent>
+              <TabsContent value="mapa" className="mt-4">
+                <MapaFrota caminhoes={caminhoes} />
+              </TabsContent>
+            </Tabs>
+          </div>
         </TabsContent>
 
         <TabsContent value="montagem" className="mt-6">

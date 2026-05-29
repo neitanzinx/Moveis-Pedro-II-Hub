@@ -8,17 +8,36 @@ const normalizeText = (value = "") =>
     .toLowerCase();
 
 const METHOD_ALIASES = {
+  // Dinheiro / Pix
   dinheiro: "Dinheiro",
-  credito: "Crédito",
-  "cartao de credito": "Cartão de Crédito",
-  debito: "Débito",
-  "cartao de debito": "Cartão de Débito",
   pix: "Pix",
+  // Débito
+  debito: "Débito",
+  "cartao de debito": "Débito",
+  // Crédito — 1x vs parcelado separados para match exato com configuracao_taxa
+  "credito 1x": "Crédito 1x",
+  "credito parcelado": "Crédito Parcelado",
+  // "credito" sozinho = legado (vendas antigas); normaliza para "Crédito 1x" por padrão
+  credito: "Crédito 1x",
+  // Cartão de Crédito usado na entrega (sempre 1x na porta)
+  "cartao de credito": "Crédito 1x",
+  "cartao de credito 1x": "Crédito 1x",
+  "cartao de credito parcelado": "Crédito Parcelado",
+  // Outros
   afesp: "AFESP",
   multicredito: "Multicrédito",
+  boleto: "Boleto",
+  crediario: "Crediário",
+  financiamento: "Financiamento",
+  transferencia: "Transferência",
+  // Link de Pagamento
+  "link - credito": "Link - Crédito",
+  "link - debito": "Link - Débito",
+  "link - pix": "Link - Pix",
+  "link de pagamento": "Link de Pagamento",
 };
 
-const INSTALLMENT_METHODS = new Set(["Crédito", "Cartão de Crédito", "Multicrédito", "AFESP"]);
+const INSTALLMENT_METHODS = new Set(["Crédito 1x", "Crédito Parcelado", "Multicrédito", "AFESP", "Link - Crédito", "Link - Débito"]);
 
 export const PAYMENT_METHOD_OPTIONS = [
   "Dinheiro",
@@ -27,7 +46,12 @@ export const PAYMENT_METHOD_OPTIONS = [
   "Pix",
   "AFESP",
   "Multicrédito",
+  "Link de Pagamento",
 ];
+
+export const LINK_PAYMENT_SUBTYPES = ["Link - Crédito", "Link - Débito", "Link - Pix"];
+
+export const isLinkPaymentMethod = (method) => normalizeText(method || "") === "link de pagamento";
 
 export const PAYMENT_METHOD_OPTIONS_DELIVERY = [
   "Pix",
