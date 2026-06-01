@@ -8,6 +8,11 @@ import { TrendingDown, Save, Loader2, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
 
+const isMissingDescontoVendedorColumnError = (err) => {
+  const message = String(err?.message || '').toLowerCase();
+  return message.includes('desconto_vendedor') && message.includes('schema cache');
+};
+
 export default function ConfiguracaoComissoes() {
   const queryClient = useQueryClient();
   const [editando, setEditando] = useState({});
@@ -30,7 +35,13 @@ export default function ConfiguracaoComissoes() {
       queryClient.invalidateQueries({ queryKey: ['configuracao_taxas'] });
       toast.success("Configuração salva com sucesso!");
     },
-    onError: (err) => toast.error("Erro ao salvar: " + err.message),
+    onError: (err) => {
+      if (isMissingDescontoVendedorColumnError(err)) {
+        toast.error("Seu banco ainda não possui a coluna desconto_vendedor em configuracao_taxas. Aplique a migração pendente para habilitar esta configuração.");
+        return;
+      }
+      toast.error("Erro ao salvar: " + err.message);
+    },
   });
 
   const handleChange = (taxaId, valor) => {

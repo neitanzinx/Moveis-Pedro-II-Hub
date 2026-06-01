@@ -56,6 +56,11 @@ const getIcone = (forma) => {
     return <DollarSign className="w-4 h-4" />;
 };
 
+const isMissingDescontoVendedorColumnError = (err) => {
+    const message = String(err?.message || '').toLowerCase();
+    return message.includes('desconto_vendedor') && message.includes('schema cache');
+};
+
 export default function ConfiguracaoTaxas() {
     const queryClient = useQueryClient();
     const [editando, setEditando] = useState({});
@@ -73,7 +78,16 @@ export default function ConfiguracaoTaxas() {
     }, [taxas]);
 
     const updateMutation = useMutation({
-        mutationFn: ({ id, data }) => base44.entities.ConfiguracaoTaxa.update(id, data),
+        mutationFn: async ({ id, data }) => {
+            try {
+                return await base44.entities.ConfiguracaoTaxa.update(id, data);
+            } catch (err) {
+                if (!isMissingDescontoVendedorColumnError(err)) throw err;
+
+                const { desconto_vendedor, ...fallbackData } = data;
+                return base44.entities.ConfiguracaoTaxa.update(id, fallbackData);
+            }
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['configuracao_taxas'] });
             toast.success("Taxa atualizada com sucesso!");
@@ -105,7 +119,6 @@ export default function ConfiguracaoTaxas() {
             valor: 0,
             acrescimo: 0,
             acrescimo_tipo: "porcentagem",
-            desconto_vendedor: 0,
             ativa: true,
         });
     };
