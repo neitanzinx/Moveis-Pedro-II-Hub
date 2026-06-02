@@ -1668,20 +1668,23 @@ export default function PDV() {
         criarVendaMutation.mutateAsync(vendaData)
       );
 
-      atualizarProgressoPedido('Atualizando estoque...', 36);
-      const itensComProduto = itens.filter(item => !!item.produto_id);
-      const atualizarEstoquePromise = medirDuracaoEtapa('atualizar estoque', () =>
-        Promise.all(itensComProduto.map(async (item) => {
-          const prod = produtos.find(p => p.id === item.produto_id);
-          if (!prod) return null;
+      const atualizarEstoqueVenda = async () => {
+        const itensComProduto = itens.filter(item => !!item.produto_id);
 
-          const campoOrigem = item?.origem_estoque_campo || resolveStockField(configVenda.loja);
-          const estoqueLocalAposVenda = (prod[campoOrigem] || 0) - item.quantidade;
-          const updates = montarAtualizacaoEstoqueProdutoPorCampo(prod, estoqueLocalAposVenda, campoOrigem);
+        return medirDuracaoEtapa('atualizar estoque', () =>
+          Promise.all(itensComProduto.map(async (item) => {
+            const prod = await base44.entities.Produto.getById(item.produto_id);
+            if (!prod) return null;
 
-          return base44.entities.Produto.update(prod.id, updates);
-        }))
-      );
+            const campoOrigem = item?.origem_estoque_campo || resolveStockField(configVenda.loja);
+            const estoqueOrigemAtual = Number(prod?.[campoOrigem] || 0);
+            const estoqueLocalAposVenda = estoqueOrigemAtual - Number(item.quantidade || 0);
+            const updates = montarAtualizacaoEstoqueProdutoPorCampo(prod, estoqueLocalAposVenda, campoOrigem);
+
+            return base44.entities.Produto.update(prod.id, updates);
+          }))
+        );
+      };
 
       // Calcular prazo de entrega com base na configuração
       const prazoSelecionado = encontrarPrazoConfigurado(prazosConfig, configVenda.prazo);
@@ -1777,7 +1780,10 @@ export default function PDV() {
         )
         : Promise.resolve([]);
 
-      await Promise.all([atualizarEstoquePromise, criarMontagensPromise]);
+      await criarMontagensPromise;
+
+      atualizarProgressoPedido('Atualizando estoque...', 80);
+      await atualizarEstoqueVenda();
 
       // Invalidar queries após TODAS as operações serem concluídas
       atualizarProgressoPedido('Atualizando paineis...', 88);
