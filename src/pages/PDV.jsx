@@ -1940,9 +1940,15 @@ export default function PDV() {
       }
 
     } catch (err) {
-      sinalizarErroNotaPedidoPDF(printWindow, 'A venda nao foi concluida. Verifique a conexao e tente novamente.');
-      console.error(err);
-      toast.error("Erro ao finalizar venda online. Verifique sua conexão.");
+      // Extrair mensagem útil do erro (Supabase devolve detalhes em err.message ou err.details)
+      const errMsg = err?.message || err?.details || err?.hint || (typeof err === 'string' ? err : null);
+      const errDetail = err?.details ? ` (${err.details})` : '';
+      const displayMsg = errMsg
+        ? `Erro: ${errMsg}${errDetail}`
+        : 'A venda nao foi concluida. Verifique a conexao e tente novamente.';
+      sinalizarErroNotaPedidoPDF(printWindow, displayMsg);
+      console.error('[PDV] Erro ao finalizar venda:', err);
+      toast.error(errMsg ? `Erro ao finalizar venda: ${errMsg}` : "Erro ao finalizar venda. Verifique sua conexão.");
     } finally {
       setLoading(false);
       isProcessingRef.current = false;
