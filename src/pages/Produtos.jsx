@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { normSearch } from "@/lib/utils";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
@@ -82,6 +82,8 @@ export default function Produtos() {
   const [focusField, setFocusField] = useState(null);
   const [isGeradorEtiquetasOpen, setIsGeradorEtiquetasOpen] = useState(false);
   const [produtosParaEtiqueta, setProdutosParaEtiqueta] = useState([]);
+  const handledHighlightRef = useRef('');
+  const saveInFlightRef = useRef(false);
   const { user, loading, can } = useAuth();
   const { organization } = useTenant();
 
@@ -180,9 +182,20 @@ export default function Produtos() {
     const returnUrl = searchParams.get('returnUrl');
     const focus = searchParams.get('focus');
 
+    if (!highlightId) {
+      handledHighlightRef.current = '';
+      return;
+    }
+
+    const highlightKey = `${highlightId}|${focus || ''}|${returnUrl || ''}`;
+    if (handledHighlightRef.current === highlightKey) {
+      return;
+    }
+
     if (highlightId && produtos?.length > 0 && !isLoading) {
       const productToEdit = produtos.find(p => String(p.id) === String(highlightId));
       if (productToEdit) {
+        handledHighlightRef.current = highlightKey;
         setPendingReturnUrl(returnUrl ? decodeURIComponent(returnUrl) : null);
         openEditModal(productToEdit, focus);
 
@@ -306,6 +319,11 @@ export default function Produtos() {
   };
 
   const handleSave = async (data) => {
+    if (saveInFlightRef.current) {
+      return;
+    }
+
+    saveInFlightRef.current = true;
     setSavingProduto(true);
     try {
       let savedProduct;
@@ -351,6 +369,7 @@ export default function Produtos() {
       console.error("Erro ao salvar:", error);
       toast.error("Erro ao salvar produto: " + error.message);
     } finally {
+      saveInFlightRef.current = false;
       setSavingProduto(false);
     }
   };

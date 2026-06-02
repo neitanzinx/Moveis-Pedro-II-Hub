@@ -68,7 +68,6 @@ export default function PainelPagamento({
   // Estado para Margem Negociável
   const [descontoMargemPercent, setDescontoMargemPercent] = useState(0);
   const [descontoMargemValorDisplay, setDescontoMargemValorDisplay] = useState("");
-  const [tipoDescontoMargem, setTipoDescontoMargem] = useState('percentual'); // 'percentual' | 'valor'
 
   // Formatador de moeda: "1171" → "11,71"
   const formatCurrencyMask = (raw) => {
@@ -708,95 +707,70 @@ export default function PainelPagamento({
                   )}
                 </div>
 
-                <div className="flex gap-1 mb-2">
-                  <button
-                    className={`flex-1 h-7 text-xs rounded font-medium transition-colors ${tipoDescontoMargem === 'percentual'
-                      ? 'bg-green-600 text-white'
-                      : 'bg-white dark:bg-neutral-800 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-400'}`}
-                    onClick={() => setTipoDescontoMargem('percentual')}
-                  >
-                    %
-                  </button>
-                  <button
-                    className={`flex-1 h-7 text-xs rounded font-medium transition-colors ${tipoDescontoMargem === 'valor'
-                      ? 'bg-green-600 text-white'
-                      : 'bg-white dark:bg-neutral-800 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-400'}`}
-                    onClick={() => setTipoDescontoMargem('valor')}
-                  >
-                    R$
-                  </button>
-                </div>
-
-                {tipoDescontoMargem === 'percentual' ? (
-                  <div className="space-y-2">
-                    <div className="flex gap-2 items-center">
-                      <div className="relative flex-1">
-                        <Input
-                          type="number"
-                          value={descontoMargemPercent}
-                          onChange={(e) => {
-                            let val = parseFloat(e.target.value);
-                            if (isNaN(val) || val < 0) val = 0;
-                            if (val > margemNegociavel) val = margemNegociavel;
-                            setDescontoMargemPercent(val);
-                            const valorR = (valores.subtotal * val) / 100;
-                            setDescontoMargemValorDisplay(formatCurrencyMask(String(Math.round(valorR * 100))));
-                            handleAplicarDescontoMargem(val, valorR);
-                          }}
-                          className="h-8 text-xs pr-6 border-green-200 dark:border-green-700"
-                          placeholder="0"
-                          min={0}
-                          max={margemNegociavel}
-                          step={0.1}
-                        />
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
-                      </div>
-                      <span className="text-xs text-green-700 dark:text-green-400 font-medium min-w-[56px] text-right">
-                        {descontoMargemPercent > 0
-                          ? `- R$ ${((valores.subtotal * descontoMargemPercent) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
-                          : ''}
-                      </span>
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        value={descontoMargemPercent}
+                        onChange={(e) => {
+                          let val = parseFloat(e.target.value);
+                          if (isNaN(val) || val < 0) val = 0;
+                          if (val > margemNegociavel) val = margemNegociavel;
+                          const valorR = (valores.subtotal * val) / 100;
+                          setDescontoMargemPercent(val);
+                          setDescontoMargemValorDisplay(formatCurrencyMask(String(Math.round(valorR * 100))));
+                          handleAplicarDescontoMargem(val, valorR);
+                        }}
+                        className="h-8 text-xs pr-6 border-green-200 dark:border-green-700"
+                        placeholder="0"
+                        min={0}
+                        max={margemNegociavel}
+                        step={0.1}
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
                     </div>
-                    <Slider
-                      value={[descontoMargemPercent]}
-                      onValueChange={([v]) => {
-                        setDescontoMargemPercent(v);
-                        const valorR = (valores.subtotal * v) / 100;
-                        setDescontoMargemValorDisplay(formatCurrencyMask(String(Math.round(valorR * 100))));
-                        handleAplicarDescontoMargem(v, valorR);
-                      }}
-                      max={margemNegociavel}
-                      step={0.1}
-                      className="w-full"
-                    />
+
+                    <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">R$</span>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={descontoMargemValorDisplay}
+                        onChange={(e) => {
+                          const formatted = formatCurrencyMask(e.target.value);
+                          setDescontoMargemValorDisplay(formatted);
+                          let valR = parseCurrencyToNumber(formatted);
+                          if (isNaN(valR) || valR < 0) valR = 0;
+                          let percent = valores.subtotal > 0 ? (valR / valores.subtotal) * 100 : 0;
+                          if (percent > margemNegociavel) {
+                            percent = margemNegociavel;
+                            valR = (valores.subtotal * margemNegociavel) / 100;
+                            toast.error(`Limite de ${margemNegociavel}% atingido.`);
+                            setDescontoMargemValorDisplay(formatCurrencyMask(String(Math.round(valR * 100))));
+                          }
+                          setDescontoMargemPercent(percent);
+                          handleAplicarDescontoMargem(percent, valR);
+                        }}
+                        className="h-8 text-xs pl-7 border-green-200 dark:border-green-700"
+                        placeholder="0,00"
+                      />
+                    </div>
                   </div>
-                ) : (
-                  <div className="relative">
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">R$</span>
-                    <Input
-                      type="text"
-                      inputMode="numeric"
-                      value={descontoMargemValorDisplay}
-                      onChange={(e) => {
-                        const formatted = formatCurrencyMask(e.target.value);
-                        setDescontoMargemValorDisplay(formatted);
-                        let valR = parseCurrencyToNumber(formatted);
-                        if (isNaN(valR) || valR < 0) valR = 0;
-                        let percent = valores.subtotal > 0 ? (valR / valores.subtotal) * 100 : 0;
-                        if (percent > margemNegociavel) {
-                          percent = margemNegociavel;
-                          valR = (valores.subtotal * margemNegociavel) / 100;
-                          toast.error(`Limite de ${margemNegociavel}% atingido.`);
-                          setDescontoMargemValorDisplay(formatCurrencyMask(String(Math.round(valR * 100))));
-                        }
-                        setDescontoMargemPercent(percent);
-                        handleAplicarDescontoMargem(percent, valR);
-                      }}
-                      className="h-8 text-xs pl-7 border-green-200 dark:border-green-700"
-                      placeholder="0,00"
-                    />
-                  </div>
-                )}
+
+                  <Slider
+                    value={[descontoMargemPercent]}
+                    onValueChange={([v]) => {
+                      setDescontoMargemPercent(v);
+                      const valorR = (valores.subtotal * v) / 100;
+                      setDescontoMargemValorDisplay(formatCurrencyMask(String(Math.round(valorR * 100))));
+                      handleAplicarDescontoMargem(v, valorR);
+                    }}
+                    max={margemNegociavel}
+                    step={0.1}
+                    className="w-full"
+                  />
+                </div>
               </div>
             )}
 

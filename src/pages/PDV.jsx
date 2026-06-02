@@ -464,6 +464,7 @@ export default function PDV() {
           pagamentoEntrega: parsed.pagamentoEntrega || { ativo: false, valor: 0, forma: "" },
           selectedVendedorId: parsed.selectedVendedorId || null,
           aguardandoLiberacao: parsed.aguardandoLiberacao || false,
+          dataLiberacao: parsed.dataLiberacao || "",
           cupomAplicado: parsed.cupomAplicado || null,
           tokenGerencial: parsed.tokenGerencial || null
         };
@@ -495,6 +496,7 @@ export default function PDV() {
   const [pagamentoEntrega, setPagamentoEntrega] = useState(initialState?.pagamentoEntrega || { ativo: false, valor: 0, forma: "" });
   const [preferenciasEntrega, setPreferenciasEntrega] = useState(initialState?.preferenciasEntrega || { dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
   const [aguardandoLiberacao, setAguardandoLiberacao] = useState(initialState?.aguardandoLiberacao || false);
+  const [dataLiberacao, setDataLiberacao] = useState(initialState?.dataLiberacao || "");
   const [selectedVendedorId, setSelectedVendedorId] = useState(initialState?.selectedVendedorId || user?.id || null);
   const [orcamentoOrigemId, setOrcamentoOrigemId] = useState(initialState?._orcamento_id || null);
   const [modalPreferenciasOpen, setModalPreferenciasOpen] = useState(false);
@@ -546,6 +548,7 @@ export default function PDV() {
         forma: ""
       });
       setAguardandoLiberacao(false);
+      setDataLiberacao("");
       setCupomAplicado(null);
       setTokenGerencial(null);
       setOrcamentoOrigemId(parsed.orcamento_id || null);
@@ -633,9 +636,9 @@ export default function PDV() {
   useEffect(() => {
     // Não salvar se estamos no meio do carregamento de um orçamento (race condition)
     if (isLoadingOrcamentoRef.current) return;
-    const state = { etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao, selectedVendedorId, cupomAplicado, tokenGerencial, descontoMargemPercent };
+    const state = { etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao, dataLiberacao, selectedVendedorId, cupomAplicado, tokenGerencial, descontoMargemPercent };
     sessionStorage.setItem(PDV_STATE_KEY, JSON.stringify(state));
-  }, [etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao, selectedVendedorId, cupomAplicado, tokenGerencial, descontoMargemPercent]);
+  }, [etapa, clienteSelecionado, itens, pagamentos, configVenda, desconto, observacoes, pagamentoEntrega, preferenciasEntrega, aguardandoLiberacao, dataLiberacao, selectedVendedorId, cupomAplicado, tokenGerencial, descontoMargemPercent]);
 
   useEffect(() => {
     if (user && !initialState) {
@@ -1165,7 +1168,7 @@ export default function PDV() {
     setItens(prev => prev.map((item, i) => i === index ? { ...item, produto_id: newProdutoId } : item));
   };
 
-  const handleAtualizarEstoque = async (index, novaQuantidade, estoqueAposVenda) => {
+  const handleAtualizarEstoque = async (index, novaQuantidade) => {
     try {
       const item = itens[index];
       const produtoId = item.produto_id || item.id;
@@ -1176,7 +1179,7 @@ export default function PDV() {
       }
 
       const campoOrigem = item?.origem_estoque_campo || resolveStockField(configVenda.loja);
-      const updates = montarAtualizacaoEstoqueProdutoPorCampo(produtoAtual, estoqueAposVenda, campoOrigem);
+      const updates = montarAtualizacaoEstoqueProdutoPorCampo(produtoAtual, novaQuantidade, campoOrigem);
 
       await base44.entities.Produto.update(produtoId, updates);
 
@@ -1406,6 +1409,7 @@ export default function PDV() {
     if (etapa === 2) {
       if (!clienteSelecionado) return 'Selecione um cliente';
       if (!todosRetiram && !configVenda.prazo) return 'Defina o prazo de entrega';
+      if (!todosRetiram && aguardandoLiberacao && !dataLiberacao) return 'Defina a data "Liberar a partir de"';
     }
     return null;
   };
@@ -1446,6 +1450,7 @@ export default function PDV() {
     if (etapa === 2) {
       if (!clienteSelecionado) return toast.warning("Selecione um cliente");
       if (!todosRetiram && !configVenda.prazo) return toast.warning("Selecione o prazo de entrega");
+      if (!todosRetiram && aguardandoLiberacao && !dataLiberacao) return toast.warning("Selecione a data de liberação da entrega");
     }
     if (etapa < 3) setEtapa(etapa + 1);
   };
@@ -1496,6 +1501,11 @@ export default function PDV() {
       isProcessingRef.current = false;
       setLoading(false);
       return toast.warning("Selecione o prazo de entrega");
+    }
+    if (!todosRetiram && aguardandoLiberacao && !dataLiberacao) {
+      isProcessingRef.current = false;
+      setLoading(false);
+      return toast.warning("Selecione a data de liberação da entrega");
     }
 
     if (itensBloqueadosPorEstoque.length > 0) {
@@ -1677,7 +1687,8 @@ export default function PDV() {
       const prazoSelecionado = encontrarPrazoConfigurado(prazosConfig, configVenda.prazo);
       const dias = prazoSelecionado ? prazoSelecionado.quantidade_dias : 15;
       const tipoDias = prazoSelecionado ? prazoSelecionado.tipo_dias : 'uteis';
-      const limite = adicionarDias(configVenda.data, dias, tipoDias);
+      const basePrazoData = aguardandoLiberacao && dataLiberacao ? dataLiberacao : configVenda.data;
+      const limite = adicionarDias(basePrazoData, dias, tipoDias);
 
       const enderecoCompleto = temEntrega ? construirEnderecoEntrega(clienteSelecionado) : `Retirado na loja: ${configVenda.loja}`;
       const todosRetiram = itens.every(i => i.tipo_entrega === 'retira');
@@ -1700,6 +1711,7 @@ export default function PDV() {
           endereco_entrega: enderecoCompleto,
           data_limite: todosRetiram ? new Date().toISOString().split('T')[0] : limite.toISOString().split('T')[0],
           prazo_entrega: configVenda.prazo,
+          data_liberacao: aguardandoLiberacao ? (dataLiberacao || null) : null,
           status: todosRetiram
             ? (conclusaoAutomatica && restante <= 0 ? 'Entregue' : 'Retirado')
             : (aguardandoLiberacao ? 'Aguardando Liberação' : 'Pendente'),
@@ -1977,6 +1989,7 @@ export default function PDV() {
     setConfigVenda(prev => ({ ...prev, data: new Date().toISOString().split('T')[0], prazo: "" }));
     setPreferenciasEntrega({ dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
     setAguardandoLiberacao(false);
+    setDataLiberacao("");
     setSelectedVendedorId(user?.id || null);
     setCupomAplicado(null);
     setOrcamentoOrigemId(null);
@@ -2225,7 +2238,11 @@ export default function PDV() {
                       <Checkbox
                         id="aguardar-liberacao"
                         checked={aguardandoLiberacao}
-                        onCheckedChange={setAguardandoLiberacao}
+                        onCheckedChange={(checked) => {
+                          const ativo = checked === true;
+                          setAguardandoLiberacao(ativo);
+                          if (!ativo) setDataLiberacao("");
+                        }}
                       />
                       <Label htmlFor="aguardar-liberacao" className="text-sm cursor-pointer text-blue-800 dark:text-blue-300">
                         <strong>Aguardar Liberação</strong>
@@ -2233,6 +2250,23 @@ export default function PDV() {
                       </Label>
                     </div>
                     {aguardandoLiberacao && <Badge className="bg-blue-500">Ativado</Badge>}
+                  </div>
+                )}
+
+                {!todosRetiram && aguardandoLiberacao && (
+                  <div className="mt-3 p-3 bg-blue-50/80 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800 rounded-lg space-y-2">
+                    <Label htmlFor="data-liberacao" className="text-sm text-blue-900 dark:text-blue-300">Liberar a partir de:</Label>
+                    <input
+                      id="data-liberacao"
+                      type="date"
+                      value={dataLiberacao}
+                      min={configVenda.data || new Date().toISOString().split('T')[0]}
+                      onChange={(e) => setDataLiberacao(e.target.value)}
+                      className="w-full h-10 rounded-md border border-blue-200 bg-white px-3 text-sm text-gray-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    />
+                    <p className="text-xs text-blue-800 dark:text-blue-300">
+                      O prazo selecionado (normalmente 10 ou 40 dias úteis) será contado a partir da data de liberação.
+                    </p>
                   </div>
                 )}
 

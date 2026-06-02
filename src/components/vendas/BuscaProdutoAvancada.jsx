@@ -148,6 +148,19 @@ export default function BuscaProdutoAvancada(props) {
                   const tipoEstoque = produto.tipo_estoque || 'herdado';
                   const semEstoque = qtd <= 0;
                   const bloqueado = tipoEstoque === 'pronta_entrega' && semEstoque;
+                  const dimensoes = (hasMeaningfulValue(produto.largura) || hasMeaningfulValue(produto.altura) || hasMeaningfulValue(produto.profundidade))
+                    ? [
+                        hasMeaningfulValue(produto.largura) ? `L:${produto.largura}` : null,
+                        hasMeaningfulValue(produto.altura) ? `A:${produto.altura}` : null,
+                        hasMeaningfulValue(produto.profundidade) ? `P:${produto.profundidade}` : null,
+                      ].filter(Boolean).join(' ') + ' cm'
+                    : null;
+                  const detalhesTecnicos = [
+                    hasMeaningfulValue(produto.cor) ? produto.cor : null,
+                    hasMeaningfulValue(produto.material) ? produto.material : null,
+                    hasMeaningfulValue(produto.fornecedor_nome) ? produto.fornecedor_nome : null,
+                    produto.categoria || 'Outros',
+                  ].filter(Boolean).join(' · ');
 
                   return (
                     <div
@@ -188,22 +201,20 @@ export default function BuscaProdutoAvancada(props) {
                       </div>
 
                       {/* Linha de detalhes */}
-                      <div className="flex items-center justify-between w-full gap-2">
-                        <p className="text-[11px] text-gray-400 dark:text-gray-500 leading-none truncate">
-                          {[
-                            hasMeaningfulValue(produto.cor) ? produto.cor : null,
-                            hasMeaningfulValue(produto.material) ? produto.material : null,
-                            (hasMeaningfulValue(produto.largura) || hasMeaningfulValue(produto.altura) || hasMeaningfulValue(produto.profundidade))
-                              ? [
-                                  hasMeaningfulValue(produto.largura) ? `L:${produto.largura}` : null,
-                                  hasMeaningfulValue(produto.altura) ? `A:${produto.altura}` : null,
-                                  hasMeaningfulValue(produto.profundidade) ? `P:${produto.profundidade}` : null,
-                                ].filter(Boolean).join(' ') + ' cm'
-                              : null,
-                            hasMeaningfulValue(produto.fornecedor_nome) ? produto.fornecedor_nome : null,
-                            produto.categoria || 'Outros',
-                          ].filter(Boolean).join(' · ')}
-                        </p>
+                      <div className="flex items-start justify-between w-full gap-2">
+                        <div className="min-w-0 flex-1">
+                          {dimensoes && (
+                            <p className="text-[12px] font-semibold text-emerald-800 dark:text-emerald-300 leading-tight truncate">
+                              <span className="inline-block mr-1.5 px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 text-[10px] font-bold uppercase tracking-wide">
+                                Medidas
+                              </span>
+                              <span className="tracking-wide">{dimensoes}</span>
+                            </p>
+                          )}
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-none truncate mt-0.5">
+                            {detalhesTecnicos}
+                          </p>
+                        </div>
                         <div className="flex items-center gap-1 shrink-0">
                           <span className="text-[10px] font-semibold">
                             {bloqueado ? (

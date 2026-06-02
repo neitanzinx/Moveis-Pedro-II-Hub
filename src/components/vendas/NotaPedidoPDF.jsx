@@ -241,11 +241,6 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
   const pontoReferencia = obterPontoReferenciaPedido(venda, cliente);
   const contatosAlternativos = obterContatosAlternativosPedido(cliente);
 
-  const nfeNumero = obterPrimeiroValorValido(venda?.nfe_numero, venda?.numero_nfe, '');
-  const nfeStatus = obterPrimeiroValorValido(venda?.nfe_status, venda?.status_nfe, '');
-  const nfeChave = obterPrimeiroValorValido(venda?.nfe_chave, venda?.chave_nfe, '');
-  const resumoMontagem = obterResumoMontagemPedido(venda);
-
   const prazoEntrega = venda.prazo_entrega === "Retirado na loja" ? "Mercadoria retirada na loja pelo cliente" :
     venda.prazo_entrega === "15 dias" ? "15 dias úteis" :
       venda.prazo_entrega === "45 dias" ? "45 dias úteis" :
@@ -303,7 +298,7 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
         .info-row { display: flex; gap: 12px; margin-bottom: 15px; }
         .info-tag { background: #f0f9ff; border: 1px solid #bfdbfe; padding: 8px 12px; border-radius: 4px; font-size: 11px; flex: 1; text-align: center; }
         .info-tag strong { display: block; font-size: 12px; color: #07593f; margin-top: 2px; }
-        .detalhes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
+        .detalhes-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 15px; }
         .detalhes-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; }
         .detalhes-box h4 { font-size: 9px; color: #6b7280; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.3px; }
         .detalhes-linha { font-size: 11px; color: #374151; line-height: 1.5; margin-bottom: 3px; }
@@ -370,13 +365,6 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
           ${contatosAlternativos.length > 0
       ? contatosAlternativos.map((item) => `<div class="detalhes-linha">${item}</div>`).join('')
       : '<div class="detalhes-linha">Sem contatos alternativos</div>'}
-        </div>
-        <div class="detalhes-box">
-          <h4>Detalhes Operacionais</h4>
-          <div class="detalhes-linha"><strong>Montagem:</strong> ${resumoMontagem}</div>
-          <div class="detalhes-linha"><strong>NFe:</strong> ${nfeNumero || '-'}</div>
-          ${nfeStatus ? `<div class="detalhes-linha"><strong>Status NFe:</strong> ${nfeStatus}</div>` : ''}
-          ${nfeChave ? `<div class="detalhes-linha"><strong>Chave:</strong> ${nfeChave}</div>` : ''}
         </div>
       </div>
 

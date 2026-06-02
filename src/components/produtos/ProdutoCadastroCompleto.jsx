@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
 import { useTenant, useLojas } from '@/contexts/TenantContext';
@@ -309,6 +309,8 @@ export default function ProdutoCadastroCompleto({
     const [activeView, setActiveView] = useState('ficha');
     const [showFornecedorModal, setShowFornecedorModal] = useState(false);
     const [dismissedSuggestionName, setDismissedSuggestionName] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const submitLockRef = useRef(false);
 
     // Multi-Tenant: Carrega lojas dinâmicas e configurações
     const { data: lojas = [] } = useLojas();
@@ -723,97 +725,106 @@ export default function ProdutoCadastroCompleto({
     };
 
     // Submete o formulário
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         if (readOnly || !onSave) return;
+        if (submitLockRef.current || isLoading || isSubmitting) return;
         if (!validateForm()) return;
 
-        // Calcula estoque total das lojas
-        const estoqueCd = parseInt(formData.estoque_cd) || 0;
-        const estoquePorLoja = ESTOQUE_LOJA_FIELDS.reduce((acc, field) => {
-            acc[field] = parseInt(formData[field]) || 0;
-            return acc;
-        }, {});
-        const estoqueTotal = estoqueCd + Object.values(estoquePorLoja).reduce((sum, value) => sum + value, 0);
+        submitLockRef.current = true;
+        setIsSubmitting(true);
 
-        let precoVenda = parseFloat(formData.preco_venda) || 0;
-        let precoCusto = parseFloat(formData.preco_custo) || 0;
-        let largura = formData.largura ? parseFloat(formData.largura) : null;
-        let altura = formData.altura ? parseFloat(formData.altura) : null;
-        let profundidade = formData.profundidade ? parseFloat(formData.profundidade) : null;
-        const custoBase = parseFloat(formData.preco_custo_tabela) || precoCusto || 0;
-        const impostosCalc = parseFlexibleCharge(formData.impostos_percentual, custoBase);
-        const freteCalc = parseFlexibleCharge(formData.frete_custo, custoBase);
-        const ipiCalc = parseFlexibleCharge(formData.ipi_percentual, custoBase);
+        try {
+            // Calcula estoque total das lojas
+            const estoqueCd = parseInt(formData.estoque_cd) || 0;
+            const estoquePorLoja = ESTOQUE_LOJA_FIELDS.reduce((acc, field) => {
+                acc[field] = parseInt(formData[field]) || 0;
+                return acc;
+            }, {});
+            const estoqueTotal = estoqueCd + Object.values(estoquePorLoja).reduce((sum, value) => sum + value, 0);
+
+            let precoVenda = parseFloat(formData.preco_venda) || 0;
+            let precoCusto = parseFloat(formData.preco_custo) || 0;
+            let largura = formData.largura ? parseFloat(formData.largura) : null;
+            let altura = formData.altura ? parseFloat(formData.altura) : null;
+            let profundidade = formData.profundidade ? parseFloat(formData.profundidade) : null;
+            const custoBase = parseFloat(formData.preco_custo_tabela) || precoCusto || 0;
+            const impostosCalc = parseFlexibleCharge(formData.impostos_percentual, custoBase);
+            const freteCalc = parseFlexibleCharge(formData.frete_custo, custoBase);
+            const ipiCalc = parseFlexibleCharge(formData.ipi_percentual, custoBase);
 
 
 
-        const dataToSave = {
-            nome: normalizeProductName(formData.nome),
-            modelo_referencia: formData.modelo_referencia || null,
-            categoria: formData.categoria,
-            ambiente: formData.ambiente || null,
-            fornecedor_id: formData.fornecedor_id || null,
-            fornecedor_nome: formData.fornecedor_nome || null,
-            descricao: formData.descricao || null,
-            tipo_entrega_padrao: formData.tipo_entrega_padrao,
-            largura,
-            altura,
-            profundidade,
-            material: formData.material || null,
-            ncm: formData.ncm || null,
-            cest: formData.cest || null,
-            cfop: formData.cfop || null,
-            unidade: formData.unidade || 'UN',
-            origem_mercadoria: formData.origem_mercadoria || '0',
-            csosn: formData.csosn || null,
-            cst_icms: formData.cst_icms || null,
-            cst_pis: formData.cst_pis || null,
-            cst_cofins: formData.cst_cofins || null,
-            aliquota_icms: formData.aliquota_icms ? parseFloat(formData.aliquota_icms) : null,
-            percentual_tributos: formData.percentual_tributos ? parseFloat(formData.percentual_tributos) : null,
-            peso_bruto: formData.peso_bruto ? parseFloat(formData.peso_bruto) : null,
-            peso_liquido: formData.peso_liquido ? parseFloat(formData.peso_liquido) : null,
-            altura_embalagem: formData.altura_embalagem ? parseFloat(formData.altura_embalagem) : null,
-            largura_embalagem: formData.largura_embalagem ? parseFloat(formData.largura_embalagem) : null,
-            profundidade_embalagem: formData.profundidade_embalagem ? parseFloat(formData.profundidade_embalagem) : null,
-            // Preços de custo
-            preco_custo_tabela: parseFloat(formData.preco_custo_tabela) || null,
-            impostos_percentual: formData.impostos_percentual ? impostosCalc.percent : null,
-            frete_custo: formData.frete_custo ? freteCalc.percent : null,
-            ipi_percentual: formData.ipi_percentual ? ipiCalc.percent : null,
-            // Promoção removida da interface - limpando dados antigos
-            preco_custo_promocional: null,
-            promocao_inicio: null,
-            promocao_fim: null,
-            promocao_observacao: null,
-            // preco_custo agora é sempre igual ao preço de tabela
-            preco_custo: parseFloat(formData.preco_custo_tabela) || precoCusto || null,
-            markup_multiplicador: formData.markup_multiplicador ? parseFloat(formData.markup_multiplicador) : null,
-            markup_percentual: formData.markup_percentual ? parseFloat(formData.markup_percentual) : null,
-            preco_final_sugerido: suggestedPrice > 0 ? suggestedPrice : null,
-            preco_final_manual: formData.preco_final_manual ? parseFloat(formData.preco_final_manual) : null,
-            usar_markup_fornecedor: Boolean(formData.usar_markup_fornecedor),
-            preco_venda: precoVenda,
-            valor_montagem: formData.valor_montagem ? parseFloat(formData.valor_montagem) : null,
-            quantidade_estoque: estoqueTotal,
-            estoque_cd: estoqueCd,
-            ...estoquePorLoja,
-            estoque_minimo: formData.estoque_minimo ? parseInt(formData.estoque_minimo) : 0,
-            estoque_ideal: formData.estoque_ideal ? parseInt(formData.estoque_ideal) : 0,
-            cor: formData.cor || null,
-            cor_hex: formData.cor_hex || null,
-            variacoes: formData.variacoes || [],
-            fotos: formData.fotos,
-            codigo_barras: formData.codigo_barras || null,
-            ativo: formData.ativo,
-        };
+            const dataToSave = {
+                nome: normalizeProductName(formData.nome),
+                modelo_referencia: formData.modelo_referencia || null,
+                categoria: formData.categoria,
+                ambiente: formData.ambiente || null,
+                fornecedor_id: formData.fornecedor_id || null,
+                fornecedor_nome: formData.fornecedor_nome || null,
+                descricao: formData.descricao || null,
+                tipo_entrega_padrao: formData.tipo_entrega_padrao,
+                largura,
+                altura,
+                profundidade,
+                material: formData.material || null,
+                ncm: formData.ncm || null,
+                cest: formData.cest || null,
+                cfop: formData.cfop || null,
+                unidade: formData.unidade || 'UN',
+                origem_mercadoria: formData.origem_mercadoria || '0',
+                csosn: formData.csosn || null,
+                cst_icms: formData.cst_icms || null,
+                cst_pis: formData.cst_pis || null,
+                cst_cofins: formData.cst_cofins || null,
+                aliquota_icms: formData.aliquota_icms ? parseFloat(formData.aliquota_icms) : null,
+                percentual_tributos: formData.percentual_tributos ? parseFloat(formData.percentual_tributos) : null,
+                peso_bruto: formData.peso_bruto ? parseFloat(formData.peso_bruto) : null,
+                peso_liquido: formData.peso_liquido ? parseFloat(formData.peso_liquido) : null,
+                altura_embalagem: formData.altura_embalagem ? parseFloat(formData.altura_embalagem) : null,
+                largura_embalagem: formData.largura_embalagem ? parseFloat(formData.largura_embalagem) : null,
+                profundidade_embalagem: formData.profundidade_embalagem ? parseFloat(formData.profundidade_embalagem) : null,
+                // Preços de custo
+                preco_custo_tabela: parseFloat(formData.preco_custo_tabela) || null,
+                impostos_percentual: formData.impostos_percentual ? impostosCalc.percent : null,
+                frete_custo: formData.frete_custo ? freteCalc.percent : null,
+                ipi_percentual: formData.ipi_percentual ? ipiCalc.percent : null,
+                // Promoção removida da interface - limpando dados antigos
+                preco_custo_promocional: null,
+                promocao_inicio: null,
+                promocao_fim: null,
+                promocao_observacao: null,
+                // preco_custo agora é sempre igual ao preço de tabela
+                preco_custo: parseFloat(formData.preco_custo_tabela) || precoCusto || null,
+                markup_multiplicador: formData.markup_multiplicador ? parseFloat(formData.markup_multiplicador) : null,
+                markup_percentual: formData.markup_percentual ? parseFloat(formData.markup_percentual) : null,
+                preco_final_sugerido: suggestedPrice > 0 ? suggestedPrice : null,
+                preco_final_manual: formData.preco_final_manual ? parseFloat(formData.preco_final_manual) : null,
+                usar_markup_fornecedor: Boolean(formData.usar_markup_fornecedor),
+                preco_venda: precoVenda,
+                valor_montagem: formData.valor_montagem ? parseFloat(formData.valor_montagem) : null,
+                quantidade_estoque: estoqueTotal,
+                estoque_cd: estoqueCd,
+                ...estoquePorLoja,
+                estoque_minimo: formData.estoque_minimo ? parseInt(formData.estoque_minimo) : 0,
+                estoque_ideal: formData.estoque_ideal ? parseInt(formData.estoque_ideal) : 0,
+                cor: formData.cor || null,
+                cor_hex: formData.cor_hex || null,
+                variacoes: formData.variacoes || [],
+                fotos: formData.fotos,
+                codigo_barras: formData.codigo_barras || null,
+                ativo: formData.ativo,
+            };
 
-        onSave(dataToSave);
+            await Promise.resolve(onSave(dataToSave));
+        } finally {
+            submitLockRef.current = false;
+            setIsSubmitting(false);
+        }
     };
 
     return (
         <>
-            <Dialog open={isOpen} onOpenChange={onClose}>
+            <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose?.(); }}>
                 <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0">
                     <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
                         <DialogTitle className="text-xl font-bold">
@@ -1708,7 +1719,7 @@ export default function ProdutoCadastroCompleto({
                                 type="button"
                                 variant="ghost"
                                 onClick={onClose}
-                                disabled={isLoading}
+                                disabled={isLoading || isSubmitting}
                             >
                                 {readOnly ? 'Fechar' : 'Cancelar'}
                             </Button>
@@ -1717,10 +1728,10 @@ export default function ProdutoCadastroCompleto({
                                 <Button
                                     type="button"
                                     onClick={handleSubmit}
-                                    disabled={isLoading}
+                                    disabled={isLoading || isSubmitting}
                                     className="bg-green-600 hover:bg-green-700 min-w-[140px] shadow-lg shadow-green-100 transition-all hover:scale-105"
                                 >
-                                    {isLoading ? (
+                                    {(isLoading || isSubmitting) ? (
                                         <>
                                             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                                             Salvando...

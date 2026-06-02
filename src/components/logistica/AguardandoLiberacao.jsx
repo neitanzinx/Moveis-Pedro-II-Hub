@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Search, Unlock, Clock, MapPin, Package, Loader2 } from "lucide-react";
+import { Search, Unlock, Clock, MapPin, Package, Loader2, AlertTriangle } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { base44 } from "@/api/base44Client";
@@ -15,14 +15,80 @@ export default function AguardandoLiberacao({ entregas, vendas }) {
   const [search, setSearch] = useState("");
   const [modalLiberarEntrega, setModalLiberarEntrega] = useState(null); // { entregaId, pedido }
   const queryClient = useQueryClient();
+  const processingAutoReleaseRef = useRef(false);
+
+  const formatarData = (dateString) => {
+    if (!dateString) return "-";
+    return new Date(`${dateString.split('T')[0]}T12:00:00`).toLocaleDateString('pt-BR');
+  };
+
+  const montarAvisoLiberacao = ({ dataRecebimento, dataLiberacao }) => {
+    const recebimentoFormatado = dataRecebimento
+      ? new Date(dataRecebimento).toLocaleDateString('pt-BR')
+      : '-';
+    const liberacaoFormatada = formatarData(dataLiberacao);
+    return `Pedido recebido em ${recebimentoFormatado}, com liberação prevista para ${liberacaoFormatada}.`;
+  };
+
+  useEffect(() => {
+    if (processingAutoReleaseRef.current) return;
+
+    const hojeIso = new Date().toISOString().split('T')[0];
+    const entregasAutoLiberaveis = (entregas || []).filter((entrega) =>
+      entrega.status === 'Aguardando Liberação' &&
+      entrega.data_liberacao &&
+      entrega.data_liberacao <= hojeIso
+    );
+
+    if (!entregasAutoLiberaveis.length) return;
+
+    processingAutoReleaseRef.current = true;
+
+    const autoLiberar = async () => {
+      try {
+        await Promise.all(
+          entregasAutoLiberaveis.map((entrega) => {
+            const aviso = montarAvisoLiberacao({
+              dataRecebimento: entrega.created_date || entrega.created_at,
+              dataLiberacao: entrega.data_liberacao
+            });
+            const observacoesBase = entrega.observacoes ? `${entrega.observacoes}\n` : '';
+
+            return base44.entities.Entrega.update(entrega.id, {
+              status: 'Pendente',
+              data_agendada: null,
+              turno: null,
+              observacoes: `${observacoesBase}${aviso}`
+            });
+          })
+        );
+
+        queryClient.invalidateQueries({ queryKey: ['entregas'] });
+        toast.success(`${entregasAutoLiberaveis.length} pedido(s) foram liberados automaticamente para a Triagem.`);
+      } catch (error) {
+        console.error('Erro ao liberar entregas automaticamente:', error);
+        toast.error('Erro ao processar liberação automática das entregas.');
+      } finally {
+        processingAutoReleaseRef.current = false;
+      }
+    };
+
+    autoLiberar();
+  }, [entregas, queryClient]);
 
   const liberarEntregaMutation = useMutation({
-    mutationFn: (id) => base44.entities.Entrega.update(id, {
-      status: 'Pendente', // Volta para ser um pedido "Pendente" normal
-      data_agendada: null,
-      turno: null,
-      observacoes: "Entrega liberada pelo cliente."
-    }),
+    mutationFn: ({ entregaId, dataLiberacao, dataRecebimento, observacoesAtuais }) => {
+      const observacaoLiberacao = dataLiberacao
+        ? montarAvisoLiberacao({ dataRecebimento, dataLiberacao })
+        : "Entrega liberada pelo cliente.";
+
+      return base44.entities.Entrega.update(entregaId, {
+        status: 'Pendente', // Volta para ser um pedido "Pendente" normal
+        data_agendada: null,
+        turno: null,
+        observacoes: observacoesAtuais ? `${observacoesAtuais}\n${observacaoLiberacao}` : observacaoLiberacao
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entregas'] });
       toast.success("Entrega liberada! O pedido voltou para a Triagem.");
@@ -35,7 +101,12 @@ export default function AguardandoLiberacao({ entregas, vendas }) {
 
   const confirmarLiberarEntrega = () => {
     if (!modalLiberarEntrega) return;
-    liberarEntregaMutation.mutate(modalLiberarEntrega.entregaId);
+    liberarEntregaMutation.mutate({
+      entregaId: modalLiberarEntrega.entregaId,
+      dataLiberacao: modalLiberarEntrega.dataLiberacao,
+      dataRecebimento: modalLiberarEntrega.dataRecebimento,
+      observacoesAtuais: modalLiberarEntrega.observacoesAtuais
+    });
   };
 
   const entregasFiltradas = entregas.filter(e => {
@@ -105,13 +176,23 @@ export default function AguardandoLiberacao({ entregas, vendas }) {
                     <span className="truncate">{entrega.endereco_entrega}</span>
                   </div>
 
+                  {entrega.data_liberacao && (
+                    <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 flex items-start gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span>Este pedido será liberado a partir de <strong>{formatarData(entrega.data_liberacao)}</strong>.</span>
+                    </div>
+                  )}
+
                   {podeLiberar ? (
                     <Button
                       className="w-full bg-green-600 hover:bg-green-700 gap-2"
                       onClick={() => {
                         setModalLiberarEntrega({
                           entregaId: entrega.id,
-                          pedido: entrega.numero_pedido
+                          pedido: entrega.numero_pedido,
+                          dataLiberacao: entrega.data_liberacao,
+                          dataRecebimento: entrega.created_date || entrega.created_at,
+                          observacoesAtuais: entrega.observacoes || ""
                         });
                       }}
                       disabled={liberarEntregaMutation.isPending}

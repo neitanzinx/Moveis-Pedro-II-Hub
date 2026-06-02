@@ -55,7 +55,7 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
       const estoqueAposVenda = novaQtd - qtdVenda;
 
       if (onAtualizarEstoque) {
-        await onAtualizarEstoque(itemParaEstoque.index, novaQtd, estoqueAposVenda);
+        await onAtualizarEstoque(itemParaEstoque.index, novaQtd);
       }
 
       toast.success(`Estoque atualizado! Após a venda: ${estoqueAposVenda} un.`);

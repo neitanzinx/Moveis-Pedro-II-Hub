@@ -79,6 +79,14 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
         .replace('.', '')
         .replace(/^./, (char) => char.toUpperCase())
     : null;
+  const foiLiberadaComData = entrega.status !== 'Aguardando Liberação' && Boolean(entrega.data_liberacao);
+  const dataRecebimento = entrega.created_date || entrega.created_at;
+  const dataRecebimentoFormatada = dataRecebimento
+    ? new Date(dataRecebimento).toLocaleDateString('pt-BR')
+    : '-';
+  const dataLiberacaoFormatada = entrega.data_liberacao
+    ? new Date(`${entrega.data_liberacao.split('T')[0]}T12:00:00`).toLocaleDateString('pt-BR')
+    : '-';
 
   return (
     <div
@@ -165,6 +173,13 @@ export default function EntregaCard({ entrega, venda, onClick, isColumn = false 
             {entrega.endereco_entrega || "Sem endereço"}
           </span>
         </div>
+
+        {foiLiberadaComData && (
+          <div className="w-full rounded border border-amber-200 bg-amber-50 px-1.5 py-1 text-[9px] text-amber-900 leading-tight flex items-start gap-1">
+            <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+            <span>Pedido recebido em {dataRecebimentoFormatada}, com liberação a partir de {dataLiberacaoFormatada}.</span>
+          </div>
+        )}
 
         {/* Meio: Produtos (Compacto) */}
         <div className="flex-1 min-h-0 flex items-start gap-1.5 overflow-hidden">
