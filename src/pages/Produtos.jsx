@@ -109,7 +109,7 @@ export default function Produtos() {
 
   // Query 1: todos os produtos (sem filtro de fabricante — feito via useMemo abaixo)
   const { data: rawProdutos = [], isLoading } = useQuery({
-    queryKey: ['produtos', debouncedSearch, selectedCategoria, filtroAtencao],
+    queryKey: ['produtos'],
     queryFn: async () => {
       const allProdutos = await base44.entities.Produto.list('nome');
       return allProdutos || [];
@@ -151,7 +151,29 @@ export default function Produtos() {
 
     const scored = mapped
       .map(p => {
-        const texto = [p.nome, p.modelo_referencia, p.categoria, p.ambiente, p.codigo_barras, p.sku, p.fornecedor_nome, p.cor]
+        const texto = [
+          p.id,
+          p.nome,
+          p.modelo_referencia,
+          p.categoria,
+          p.ambiente,
+          p.codigo_barras,
+          p.sku,
+          p.fornecedor_nome,
+          p.cor,
+          p.material,
+          p.tamanho,
+          p.descricao,
+          p.descricao_completa,
+          p.observacoes,
+          p.ncm,
+          p.gtin,
+          p.ean,
+          p.marca,
+          p.largura,
+          p.altura,
+          p.profundidade,
+        ]
           .filter(Boolean).map(normSearch).join(' ');
         const matches = termos.filter(t => texto.includes(t)).length;
         return { p, score: matches };

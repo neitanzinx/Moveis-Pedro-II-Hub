@@ -15,6 +15,7 @@ import CategoriasManager from "./CategoriasManager";
 import { getBrazilTodayISO } from "@/lib/dateBrazil";
 import { verificarConciliacao } from "@/lib/conciliacaoInteligente";
 import ConciliacaoAlertModal from "./ConciliacaoAlertModal";
+import { DEFAULT_RECORRENCIA_TIPO, RECORRENCIA_OPTIONS } from "@/lib/financeiroRecorrencia";
 
 const CATEGORIAS_PADRAO = {
   Entrada: ["Venda de Produtos", "Recebimento de Parcela", "Comissão Recebida", "Serviço de Montagem", "Devolução Recebida"],
@@ -77,7 +78,7 @@ export default function LancamentoForm({ categorias }) {
     status: "Pago",
     observacao: "",
     recorrente: false,
-    recorrencia_tipo: "Mensal"
+    recorrencia_tipo: DEFAULT_RECORRENCIA_TIPO
   });
   const [validationError, setValidationError] = useState("");
   const [conciliacaoState, setConciliacaoState] = useState(null); // { duplicatas, payload }
@@ -140,7 +141,7 @@ export default function LancamentoForm({ categorias }) {
         status: "Pago",
         observacao: "",
         recorrente: false,
-        recorrencia_tipo: "Mensal"
+        recorrencia_tipo: DEFAULT_RECORRENCIA_TIPO
       });
       setValidationError("");
       setCategoriaModo("select");
@@ -512,7 +513,7 @@ export default function LancamentoForm({ categorias }) {
               onCheckedChange={(checked) => setFormData({ ...formData, recorrente: checked })}
             />
             <Label htmlFor="recorrente" className="cursor-pointer">
-              Lançamento Recorrente
+              Automatizar próximos vencimentos
             </Label>
           </div>
 
@@ -527,12 +528,14 @@ export default function LancamentoForm({ categorias }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Mensal">Mensal</SelectItem>
-                  <SelectItem value="Trimestral">Trimestral</SelectItem>
-                  <SelectItem value="Semestral">Semestral</SelectItem>
-                  <SelectItem value="Anual">Anual</SelectItem>
+                  {RECORRENCIA_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-gray-500 mt-2">
+                O lançamento continua normal na lista e será usado como atalho para gerar os próximos vencimentos automaticamente.
+              </p>
             </div>
           )}
 
@@ -568,7 +571,7 @@ export default function LancamentoForm({ categorias }) {
                   status: "Pago",
                   observacao: "",
                   recorrente: false,
-                  recorrencia_tipo: "Mensal"
+                  recorrencia_tipo: DEFAULT_RECORRENCIA_TIPO
                 });
                 setValidationError("");
                 setCategoriaModo("select");

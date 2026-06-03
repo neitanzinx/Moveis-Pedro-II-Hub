@@ -10,11 +10,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { useReactToPrint } from "react-to-print";
 import EtiquetaImpressao from "./EtiquetaImpressao";
-import { Printer, Plus, Minus, Search, Trash2, ArrowRight } from "lucide-react";
+import { Printer, Plus, Minus, Search, Trash2, ArrowRight, Loader2, Upload, Palette } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { base44 } from "@/api/base44Client";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useTenant } from "@/contexts/TenantContext";
+import { supabase } from "@/lib/supabase";
+import { useQuery } from "@tanstack/react-query";
+import BuscaProdutoAvancada from "../vendas/BuscaProdutoAvancada";
 
 export default function GeradorEtiquetasModal({
     isOpen,
@@ -23,15 +27,110 @@ export default function GeradorEtiquetasModal({
     user
 }) {
     const componentRef = useRef(null);
+    const { organization, refreshTenant } = useTenant();
 
     // Lista de itens a serem impressos: { produto, quantidade }
     const [itensImpressao, setItensImpressao] = useState(
         produtosPreSelecionados.map(p => ({ produto: p, quantidade: 1 }))
     );
 
-    const [searchTerm, setSearchTerm] = useState("");
-    const [isSearching, setIsSearching] = useState(false);
-    const [searchResults, setSearchResults] = useState([]);
+    const [logoOption, setLogoOption] = useState("default");
+    const [logoCustomizadaUrl, setLogoCustomizadaUrl] = useState("");
+    const [isSavingLogo, setIsSavingLogo] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
+
+    // Carregar configurações de logo
+    React.useEffect(() => {
+        if (!isOpen || !organization) return;
+
+        const dbOption = organization.logo_etiqueta_option;
+        const dbUrl = organization.logo_etiqueta_url;
+
+        const localOption = localStorage.getItem(`etiqueta_logo_option_${organization.id}`);
+        const localUrl = localStorage.getItem(`etiqueta_logo_url_${organization.id}`);
+
+        if (dbOption) {
+            setLogoOption(dbOption);
+        } else if (localOption) {
+            setLogoOption(localOption);
+        } else {
+            setLogoOption("default");
+        }
+
+        if (dbUrl) {
+            setLogoCustomizadaUrl(dbUrl);
+        } else if (localUrl) {
+            setLogoCustomizadaUrl(localUrl);
+        } else {
+            setLogoCustomizadaUrl("");
+        }
+    }, [isOpen, organization]);
+
+    const handleSaveLogoConfig = async (option, customUrl) => {
+        if (!organization) return;
+        setIsSavingLogo(true);
+        try {
+            const { error } = await supabase
+                .from('organizations')
+                .update({
+                    logo_etiqueta_option: option,
+                    logo_etiqueta_url: customUrl
+                })
+                .eq('id', organization.id);
+
+            if (error) {
+                // Fallback para localStorage
+                localStorage.setItem(`etiqueta_logo_option_${organization.id}`, option);
+                localStorage.setItem(`etiqueta_logo_url_${organization.id}`, customUrl);
+            } else {
+                if (refreshTenant) await refreshTenant();
+            }
+        } catch (err) {
+            console.warn("Erro ao salvar no banco, usando localStorage:", err);
+            localStorage.setItem(`etiqueta_logo_option_${organization.id}`, option);
+            localStorage.setItem(`etiqueta_logo_url_${organization.id}`, customUrl);
+        } finally {
+            setIsSavingLogo(false);
+        }
+    };
+
+    const handleLogoUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            toast.error('Selecione um arquivo de imagem válido (PNG, JPG).');
+            return;
+        }
+
+        setIsUploading(true);
+        try {
+            const { file_url } = await base44.integrations.Core.UploadFile({ file });
+            setLogoCustomizadaUrl(file_url);
+            await handleSaveLogoConfig(logoOption, file_url);
+            toast.success("Logo personalizada enviada com sucesso!");
+        } catch (err) {
+            toast.error("Erro ao enviar arquivo: " + err.message);
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    const handleRemoveCustomLogo = async () => {
+        setLogoCustomizadaUrl("");
+        await handleSaveLogoConfig(logoOption, "");
+        toast.success("Logo personalizada removida.");
+    };
+
+    const { data: produtos = [] } = useQuery({
+        queryKey: ['produtos'],
+        queryFn: () => base44.entities.Produto.list()
+    });
+
+    const { data: fornecedores = [] } = useQuery({
+        queryKey: ['fornecedores'],
+        queryFn: () => base44.entities.Fornecedor.list()
+    });
 
     // Atualizar quando a prop produtosPreSelecionados mudar e o modal abrir
     React.useEffect(() => {
@@ -40,31 +139,7 @@ export default function GeradorEtiquetasModal({
         } else if (isOpen && produtosPreSelecionados.length === 0) {
             setItensImpressao([]);
         }
-        setSearchTerm("");
-        setSearchResults([]);
     }, [isOpen, produtosPreSelecionados]);
-
-    // Busca de produtos para adicionar à lista
-    const handleSearch = async (e) => {
-        e.preventDefault();
-        if (!searchTerm || searchTerm.length < 2) return;
-
-        setIsSearching(true);
-        try {
-            const { data } = await base44.entities.Produto.search({
-                search: searchTerm,
-                limit: 10
-            });
-            setSearchResults(data || []);
-            if (data?.length === 0) {
-                toast.info("Nenhum produto encontrado");
-            }
-        } catch (error) {
-            toast.error("Erro na busca: " + error.message);
-        } finally {
-            setIsSearching(false);
-        }
-    };
 
     const adicionarProduto = (produto) => {
         setItensImpressao(prev => {
@@ -142,36 +217,109 @@ export default function GeradorEtiquetasModal({
                         {/* Busca */}
                         <div className="space-y-3">
                             <h3 className="font-semibold text-sm text-gray-700">Adicionar Produtos</h3>
-                            <form onSubmit={handleSearch} className="flex gap-2">
-                                <Input
-                                    placeholder="Buscar produto por nome ou ref..."
-                                    value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
-                                    className="bg-white"
-                                />
-                                <Button type="submit" disabled={isSearching} variant="secondary">
-                                    <Search className="w-4 h-4" />
-                                </Button>
-                            </form>
+                            <BuscaProdutoAvancada
+                                produtos={produtos}
+                                fornecedores={fornecedores}
+                                onSelectProduto={(prod) => adicionarProduto(prod)}
+                            />
+                        </div>
 
-                            {/* Resultados da Busca */}
-                            {searchResults.length > 0 && (
-                                <div className="bg-white border rounded-md shadow-sm max-h-40 overflow-y-auto w-full z-10 p-1">
-                                    {searchResults.map(prod => (
-                                        <div
-                                            key={prod.id}
-                                            className="flex justify-between items-center p-2 hover:bg-gray-50 rounded text-sm cursor-pointer border-b last:border-0"
-                                            onClick={() => adicionarProduto(prod)}
-                                        >
-                                            <div className="truncate pr-2">
-                                                <span className="font-medium block truncate">{prod.nome}</span>
-                                                <span className="text-xs text-gray-400">R$ {prod.preco_venda}</span>
-                                            </div>
-                                            <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0 rounded-full bg-green-50 text-green-600 hover:bg-green-100">
-                                                <Plus className="h-3 w-3" />
+                        {/* Configuração da Logo da Etiqueta */}
+                        <div className="border rounded-lg bg-white p-4 shadow-sm space-y-3">
+                            <h3 className="font-semibold text-sm text-gray-700 flex items-center gap-2">
+                                <Palette className="w-4 h-4 text-green-600" />
+                                Logo da Etiqueta
+                            </h3>
+                            
+                            <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-lg text-xs font-medium">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setLogoOption("default");
+                                        handleSaveLogoConfig("default", logoCustomizadaUrl);
+                                    }}
+                                    className={`py-1.5 px-2 rounded-md transition-all text-center ${
+                                        logoOption === "default"
+                                            ? "bg-white shadow text-gray-900"
+                                            : "text-gray-500 hover:text-gray-900"
+                                    }`}
+                                >
+                                    Loja
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setLogoOption("custom");
+                                        handleSaveLogoConfig("custom", logoCustomizadaUrl);
+                                    }}
+                                    className={`py-1.5 px-2 rounded-md transition-all text-center ${
+                                        logoOption === "custom"
+                                            ? "bg-white shadow text-gray-900"
+                                            : "text-gray-500 hover:text-gray-900"
+                                    }`}
+                                >
+                                    Personalizada
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setLogoOption("none");
+                                        handleSaveLogoConfig("none", logoCustomizadaUrl);
+                                    }}
+                                    className={`py-1.5 px-2 rounded-md transition-all text-center ${
+                                        logoOption === "none"
+                                            ? "bg-white shadow text-gray-900"
+                                            : "text-gray-500 hover:text-gray-900"
+                                    }`}
+                                >
+                                    Sem Logo
+                                </button>
+                            </div>
+
+                            {logoOption === "custom" && (
+                                <div className="space-y-2 mt-2 animate-in fade-in-50 duration-200">
+                                    {logoCustomizadaUrl ? (
+                                        <div className="flex items-center justify-between border rounded-lg p-2 bg-gray-50/50">
+                                            <img
+                                                src={logoCustomizadaUrl}
+                                                alt="Logo Personalizada"
+                                                className="h-10 max-w-[120px] object-contain rounded bg-white p-1 border shadow-sm"
+                                            />
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={handleRemoveCustomLogo}
+                                                className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-full"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
                                             </Button>
                                         </div>
-                                    ))}
+                                    ) : (
+                                        <label className="block cursor-pointer">
+                                            <input
+                                                type="file"
+                                                accept="image/png, image/jpeg, image/webp"
+                                                className="hidden"
+                                                onChange={handleLogoUpload}
+                                                disabled={isUploading}
+                                            />
+                                            <div className="border border-dashed border-gray-300 rounded-lg p-4 text-center hover:bg-gray-50 transition-colors flex flex-col items-center gap-1.5">
+                                                {isUploading ? (
+                                                    <>
+                                                        <Loader2 className="w-5 h-5 text-green-600 animate-spin" />
+                                                        <span className="text-xs text-gray-500 font-medium">Enviando logo...</span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Upload className="w-5 h-5 text-gray-400" />
+                                                        <span className="text-xs font-semibold text-gray-700">Enviar Imagem</span>
+                                                        <span className="text-[10px] text-gray-400">PNG com fundo transparente</span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </label>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -251,9 +399,14 @@ export default function GeradorEtiquetasModal({
                             {produtosImpressao.length > 0 ? (
                                 <div className="scale-[0.4] origin-top-left translate-x-4 translate-y-4 w-[210mm] pointer-events-none">
                                     {/* Renderizamos o componente invisível que será pescado pelo react-to-print,
-                       e o mesmo componente visualmente apenas para preview */}
+                        e o mesmo componente visualmente apenas para preview */}
                                     <div className="bg-white shadow">
-                                        <EtiquetaImpressao empresa={user} produtos={produtosImpressao} />
+                                        <EtiquetaImpressao 
+                                            empresa={organization || user} 
+                                            produtos={produtosImpressao} 
+                                            logoOption={logoOption}
+                                            logoCustomizadaUrl={logoCustomizadaUrl}
+                                        />
                                     </div>
                                 </div>
                             ) : (
@@ -267,8 +420,10 @@ export default function GeradorEtiquetasModal({
                         <div className="hidden">
                             <EtiquetaImpressao
                                 ref={componentRef}
-                                empresa={user}
+                                empresa={organization || user}
                                 produtos={produtosImpressao}
+                                logoOption={logoOption}
+                                logoCustomizadaUrl={logoCustomizadaUrl}
                             />
                         </div>
                     </div>

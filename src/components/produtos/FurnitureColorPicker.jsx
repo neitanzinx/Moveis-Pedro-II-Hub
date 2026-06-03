@@ -4,7 +4,8 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import { Check, ChevronDown, Plus } from 'lucide-react';
+import { Check, ChevronDown, Plus, X } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 // Paleta de cores de móveis comuns no Brasil
 const CORES_MOVEIS = [
@@ -117,7 +118,8 @@ export default function FurnitureColorPicker({
     onHexChange = () => { },
     placeholder = "Selecione uma cor",
     customOptions = [],
-    allowCreate = true
+    allowCreate = true,
+    multiple = false
 }) {
     const [open, setOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -172,29 +174,63 @@ export default function FurnitureColorPicker({
 
     const handleSelectColor = (colorName) => {
         const nextName = String(colorName || '').trim();
-        const nextHex = getColorHex(nextName);
-        onChange(nextName);
-        onHexChange(nextHex);
-        setOpen(false);
-        setSearchTerm('');
+        if (multiple) {
+            const currentList = Array.isArray(value) ? value : [];
+            const isSelected = currentList.some(v => normalize(v) === normalize(nextName));
+            let newList;
+            if (isSelected) {
+                newList = currentList.filter(v => normalize(v) !== normalize(nextName));
+            } else {
+                newList = [...currentList, nextName];
+            }
+            onChange(newList);
+            if (newList.length > 0) {
+                onHexChange(getColorHex(newList[newList.length - 1]));
+            } else {
+                onHexChange('');
+            }
+        } else {
+            const nextHex = getColorHex(nextName);
+            onChange(nextName);
+            onHexChange(nextHex);
+            setOpen(false);
+            setSearchTerm('');
+        }
     };
+
+    const handleRemoveColor = (colorToRemove) => {
+        const currentList = Array.isArray(value) ? value : [];
+        const newList = currentList.filter(v => normalize(v) !== normalize(colorToRemove));
+        onChange(newList);
+        if (newList.length > 0) {
+            onHexChange(getColorHex(newList[newList.length - 1]));
+        } else {
+            onHexChange('');
+        }
+    };
+
+    const displayValue = multiple
+        ? (Array.isArray(value) ? value.join(', ') : '')
+        : value;
 
     return (
         <div className="space-y-2">
             <Popover open={open} onOpenChange={setOpen}>
                 <PopoverTrigger asChild>
                     <div className="relative">
-                        <div
-                            className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-6 rounded-md border shadow-sm"
-                            style={{ backgroundColor: hexValue || getColorHex(value) }}
-                        >
-                        </div>
+                        {!multiple && (
+                            <div
+                                className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-6 rounded-md border shadow-sm"
+                                style={{ backgroundColor: hexValue || getColorHex(value) }}
+                            />
+                        )}
                         <Input
-                            value={value}
-                            onChange={(e) => onChange(e.target.value)}
+                            value={displayValue}
+                            onChange={(e) => !multiple && onChange(e.target.value)}
                             placeholder={placeholder}
-                            className="pl-14 pr-10 cursor-pointer text-ellipsis"
+                            className={cn("pr-10 cursor-pointer text-ellipsis", multiple ? "pl-3" : "pl-14")}
                             onClick={() => setOpen(true)}
+                            readOnly={multiple}
                         />
                         <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     </div>
@@ -207,6 +243,13 @@ export default function FurnitureColorPicker({
                             placeholder="Buscar nome da cor..."
                             className="h-9"
                             autoFocus
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && canCreate) {
+                                    e.preventDefault();
+                                    handleSelectColor(searchTerm);
+                                    setSearchTerm('');
+                                }
+                            }}
                         />
 
                         {canCreate && (
@@ -214,7 +257,10 @@ export default function FurnitureColorPicker({
                                 type="button"
                                 variant="outline"
                                 className="w-full justify-start"
-                                onClick={() => handleSelectColor(searchTerm)}
+                                onClick={() => {
+                                    handleSelectColor(searchTerm);
+                                    setSearchTerm('');
+                                }}
                             >
                                 <Plus className="w-4 h-4 mr-2" />
                                 Cadastrar nova cor: &quot;{searchTerm.trim()}&quot;
@@ -230,7 +276,9 @@ export default function FurnitureColorPicker({
                                 </Label>
                                 <div className="space-y-1">
                                     {cores.map((cor) => {
-                                        const isSelected = normalize(value) === normalize(cor.nome);
+                                        const isSelected = multiple
+                                            ? Array.isArray(value) && value.some(val => normalize(val) === normalize(cor.nome))
+                                            : normalize(value) === normalize(cor.nome);
                                         return (
                                             <button
                                                 key={cor.nome}
@@ -267,6 +315,31 @@ export default function FurnitureColorPicker({
 
                 </PopoverContent>
             </Popover>
+
+            {multiple && Array.isArray(value) && value.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                    {value.map((colorName) => (
+                        <Badge
+                            key={colorName}
+                            variant="secondary"
+                            className="flex items-center gap-1 px-2 py-0.5 text-xs bg-white border border-gray-200"
+                        >
+                            <div
+                                className="w-2.5 h-2.5 rounded-full border border-gray-300"
+                                style={{ backgroundColor: getColorHex(colorName) }}
+                            />
+                            <span>{colorName}</span>
+                            <button
+                                type="button"
+                                onClick={() => handleRemoveColor(colorName)}
+                                className="text-gray-400 hover:text-gray-600 focus:outline-none"
+                            >
+                                <X className="w-3 h-3 ml-1" />
+                            </button>
+                        </Badge>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }

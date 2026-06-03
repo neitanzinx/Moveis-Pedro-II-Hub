@@ -3,7 +3,18 @@ import { EMPRESA } from "@/config/empresa";
 
 // O componente de EtiquetaImpressao
 // Ref é usado pelo react-to-print para capturar o nó DOM que será impresso
-export const EtiquetaImpressao = forwardRef(({ empresa, produtos }, ref) => {
+export const EtiquetaImpressao = forwardRef(({ empresa, produtos, logoOption = 'default', logoCustomizadaUrl = '' }, ref) => {
+    // Determinar o logo de acordo com a opção configurada
+    let logoUrl = null;
+    if (logoOption === 'default') {
+        logoUrl = empresa?.logo_url || EMPRESA.logo_url;
+    } else if (logoOption === 'custom') {
+        logoUrl = logoCustomizadaUrl;
+    }
+
+    const showFallbackBox = logoOption !== 'none' && !logoUrl;
+    const nomeEmpresa = empresa?.name || EMPRESA.nome;
+
     // O tamanho exato de A6 (1/4 de A4) é 105mm x 148.5mm
     // Porém, por questões de margens de impressora, podemos forçar o formato na div base e
     // contar com o estilo global de impressão
@@ -51,22 +62,23 @@ export const EtiquetaImpressao = forwardRef(({ empresa, produtos }, ref) => {
                     >
                         {/* Header com Logo e Nome da Empresa */}
                         <div className="flex flex-col items-center justify-center mb-6 mt-4">
-                            {empresa?.logo_url || EMPRESA.logo_url ? (
+                            {logoUrl && (
                                 <img
-                                    src={empresa?.logo_url || EMPRESA.logo_url}
-                                    alt={EMPRESA.nome}
+                                    src={logoUrl}
+                                    alt={nomeEmpresa}
                                     className="max-h-16 max-w-[200px] object-contain mb-2 shadow-sm"
                                 />
-                            ) : (
+                            )}
+                            {showFallbackBox && (
                                 <div className="h-16 w-16 bg-white/20 rounded mb-2 flex items-center justify-center">
                                     <span className="text-white font-bold text-xl">
-                                        {EMPRESA.nome.charAt(0)}
+                                        {nomeEmpresa.charAt(0)}
                                     </span>
                                 </div>
                             )}
                             {/* Opcionalmente exibir o nome da empresa abaixo da logo caso necessário */}
                             <h1 className="text-white text-lg font-bold uppercase tracking-widest text-center">
-                                {EMPRESA.nome}
+                                {nomeEmpresa}
                             </h1>
                         </div>
 

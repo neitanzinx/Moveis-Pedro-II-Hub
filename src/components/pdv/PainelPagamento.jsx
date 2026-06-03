@@ -48,7 +48,8 @@ export default function PainelPagamento({
   tokenGerencial,
   setTokenGerencial,
   margemNegociavel = 0,
-  onDescontoMargemChange
+  onDescontoMargemChange,
+  hideActions = false
 }) {
   const [novoPagamento, setNovoPagamento] = useState({ forma: "", valor: "", parcelas: 1, linkSubtipo: "" });
   const [cupomCodigo, setCupomCodigo] = useState("");
@@ -370,6 +371,33 @@ export default function PainelPagamento({
     }
   }, [valores.restante, pagamentoEntrega.ativo]);
 
+  const creditoDisponivel = Number(cliente?.saldo_credito || 0);
+  const creditoJaAplicado = pagamentos.some((p) => p.forma_pagamento === 'Crédito de Loja');
+  const valorCreditoAplicavel = Math.min(creditoDisponivel, Math.max(0, valores.restante));
+
+  const handleAplicarCredito = () => {
+    if (creditoJaAplicado || valorCreditoAplicavel <= 0) return;
+    onAddPagamento(normalizePaymentItem({
+      forma_pagamento: 'Crédito de Loja',
+      valor: valorCreditoAplicavel,
+      parcelas: 1,
+    }));
+  };
+
+  const handleFinalizarComCredito = async () => {
+    const pagamentoCredito = pagamentos.find((p) => p.forma_pagamento === 'Crédito de Loja');
+    if (pagamentoCredito && cliente?.id && pagamentoCredito.valor > 0) {
+      try {
+        const saldoAtual = Number(cliente.saldo_credito || 0);
+        const novoSaldo = Math.max(0, saldoAtual - pagamentoCredito.valor);
+        await base44.entities.Cliente.update(cliente.id, { saldo_credito: novoSaldo });
+      } catch (err) {
+        console.warn('Erro ao debitar crédito do cliente:', err);
+      }
+    }
+    onFinalizar();
+  };
+
   return (
     <div className="bg-white dark:bg-neutral-900 rounded-xl shadow-sm border border-gray-200 dark:border-neutral-800 p-4 h-full">
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 h-full">
@@ -600,7 +628,7 @@ export default function PainelPagamento({
                               const formatted = formatCurrencyMask(e.target.value);
                               setDescontoValorDisplay(formatted);
                               
-                              const valR = parseCurrencyToNumber(formatted);
+                              let valR = parseCurrencyToNumber(formatted);
                               if (isNaN(valR) || valR < 0) {
                                 setDesconto(0);
                                 setDescontoPercent(0);
@@ -615,7 +643,7 @@ export default function PainelPagamento({
                                 // Se passar do limite, trava no limite
                                 newPercent = maxPercent;
                                 valR = (valores.subtotal * maxPercent) / 100;
-                                toast.error(`Limite de <span>${maxPercent}%</span> atingido.`);
+                                toast.error(`Limite de ${maxPercent}% atingido.`);
                                 setDescontoValorDisplay(formatCurrencyMask(String(Math.round(valR * 100))));
                               }
 
@@ -880,6 +908,23 @@ export default function PainelPagamento({
               </div>
             </div>
 
+            {creditoDisponivel > 0 && !creditoJaAplicado && valorCreditoAplicavel > 0 && (
+              <button
+                type="button"
+                onClick={handleAplicarCredito}
+                className="w-full p-3 rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 dark:bg-blue-900/10 dark:border-blue-800 flex items-center gap-3 hover:bg-blue-100 dark:hover:bg-blue-900/20 transition-colors text-left mb-2"
+              >
+                <div className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-blue-600 shrink-0">
+                  <Wallet className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-blue-800 dark:text-blue-400">Crédito disponível na loja</p>
+                  <p className="text-xs text-blue-600/80">
+                    Saldo: R$ {creditoDisponivel.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} — Clique para aplicar R$ {valorCreditoAplicavel.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </button>
+            )}
             {/* Lista de Pagamentos */}
             <div className="flex-1 bg-gray-50 dark:bg-neutral-800/30 rounded-xl border border-gray-100 dark:border-neutral-800 overflow-hidden flex flex-col">
               <div className="p-3 border-b border-gray-100 dark:border-neutral-800 flex justify-between items-center bg-gray-50/50 dark:bg-neutral-900/50">
@@ -1021,58 +1066,60 @@ export default function PainelPagamento({
 
           </div>
 
-          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100 dark:border-neutral-800">
-            <Button
-              variant="outline"
-              className="h-14 text-sm border-gray-200 hover:bg-gray-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-              onClick={() => setModalOrcamentoOpen(true)}
-              disabled={disabled || savingOrcamento}
-            >
-              {savingOrcamento ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Clock className="w-4 h-4 mr-2" />}
-              Salvar Orçamento
-            </Button>
+          {!hideActions && (
+            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100 dark:border-neutral-800">
+              <Button
+                variant="outline"
+                className="h-14 text-sm border-gray-200 hover:bg-gray-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                onClick={() => setModalOrcamentoOpen(true)}
+                disabled={disabled || savingOrcamento}
+              >
+                {savingOrcamento ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Clock className="w-4 h-4 mr-2" />}
+                Salvar Orçamento
+              </Button>
 
-            <Dialog open={modalOrcamentoOpen} onOpenChange={setModalOrcamentoOpen}>
-              <DialogContent className="sm:max-w-[425px]">
-                <DialogHeader>
-                  <DialogTitle>Salvar Orçamento</DialogTitle>
-                  <DialogDescription>
-                    Defina a validade deste orçamento em dias.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="py-2">
-                  <Label>Validade (Dias)</Label>
-                  <Input
-                    type="number"
-                    value={validadeOrcamentoDias}
-                    onChange={(e) => setValidadeOrcamentoDias(Number(e.target.value))}
-                    min={1}
-                    max={365}
-                    className="mt-2 h-10"
-                  />
-                  <p className="text-xs text-gray-500 mt-2">
-                    Válido até: <strong>{new Date(Date.now() + validadeOrcamentoDias * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR')}</strong>
-                  </p>
-                </div>
-                <DialogFooter className="mt-4">
-                  <Button variant="outline" onClick={() => setModalOrcamentoOpen(false)}>Cancelar</Button>
-                  <Button onClick={() => {
-                    setModalOrcamentoOpen(false);
-                    onOrcamento(validadeOrcamentoDias);
-                  }} className="bg-green-600 hover:bg-green-700 text-white">Salvar Orçamento</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+              <Dialog open={modalOrcamentoOpen} onOpenChange={setModalOrcamentoOpen}>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Salvar Orçamento</DialogTitle>
+                    <DialogDescription>
+                      Defina a validade deste orçamento em dias.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="py-2">
+                    <Label>Validade (Dias)</Label>
+                    <Input
+                      type="number"
+                      value={validadeOrcamentoDias}
+                      onChange={(e) => setValidadeOrcamentoDias(Number(e.target.value))}
+                      min={1}
+                      max={365}
+                      className="mt-2 h-10"
+                    />
+                    <p className="text-xs text-gray-500 mt-2">
+                      Válido até: <strong>{new Date(Date.now() + validadeOrcamentoDias * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR')}</strong>
+                    </p>
+                  </div>
+                  <DialogFooter className="mt-4">
+                    <Button variant="outline" onClick={() => setModalOrcamentoOpen(false)}>Cancelar</Button>
+                    <Button onClick={() => {
+                      setModalOrcamentoOpen(false);
+                      onOrcamento(validadeOrcamentoDias);
+                    }} className="bg-green-600 hover:bg-green-700 text-white">Salvar Orçamento</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
-            <Button
-              className="h-14 bg-green-600 hover:bg-green-700 text-white font-bold text-lg shadow-lg shadow-green-900/20 active:scale-[0.98] transition-all"
-              onClick={onFinalizar}
-              disabled={disabled || loading || (valores.restante > 0 && !pagamentoEntrega.ativo)}
-            >
-              {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Receipt className="w-5 h-5 mr-2" />}
-              FINALIZAR VENDA
-            </Button>
-          </div>
+              <Button
+                className="h-14 bg-green-600 hover:bg-green-700 text-white font-bold text-lg shadow-lg shadow-green-900/20 active:scale-[0.98] transition-all"
+                onClick={handleFinalizarComCredito}
+                disabled={disabled || loading || (valores.restante > 0 && !pagamentoEntrega.ativo)}
+              >
+                {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Receipt className="w-5 h-5 mr-2" />}
+                FINALIZAR VENDA
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </div>

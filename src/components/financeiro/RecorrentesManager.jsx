@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -12,50 +12,23 @@ import {
   AlertCircle,
   Clock
 } from "lucide-react";
+import {
+  addRecorrenciaToDate,
+  buildRecurringOccurrenceKey,
+  getRecorrenciaAnchorDate,
+  getRecorrenciaTipo,
+  isRecurringOccurrenceDuplicate,
+} from "@/lib/financeiroRecorrencia";
 
 export default function RecorrentesManager({ lancamentos }) {
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
+  const autoProcessedRef = useRef(false);
   const queryClient = useQueryClient();
 
   const createMutation = useMutation({
     mutationFn: (data) => base44.entities.LancamentoFinanceiro.create(data),
   });
-
-  // Calcular próxima data baseada no tipo de recorrência
-  const calcularProximaData = (dataBase, tipoRecorrencia) => {
-    const data = new Date(dataBase);
-    
-    switch (tipoRecorrencia) {
-      case 'Mensal':
-        data.setMonth(data.getMonth() + 1);
-        break;
-      case 'Trimestral':
-        data.setMonth(data.getMonth() + 3);
-        break;
-      case 'Semestral':
-        data.setMonth(data.getMonth() + 6);
-        break;
-      case 'Anual':
-        data.setFullYear(data.getFullYear() + 1);
-        break;
-      default:
-        data.setMonth(data.getMonth() + 1);
-    }
-    
-    return data.toISOString().split('T')[0];
-  };
-
-  // Verificar se já existe lançamento para o mês/período
-  const jaExisteLancamento = (lancamentoOriginal, dataVerificar, todosLancamentos) => {
-    return todosLancamentos.some(l => 
-      l.descricao === lancamentoOriginal.descricao &&
-      l.valor === lancamentoOriginal.valor &&
-      l.categoria_id === lancamentoOriginal.categoria_id &&
-      l.data_lancamento === dataVerificar &&
-      l.id !== lancamentoOriginal.id
-    );
-  };
 
   const gerarLancamentosRecorrentes = async () => {
     setProcessing(true);
@@ -63,40 +36,57 @@ export default function RecorrentesManager({ lancamentos }) {
 
     try {
       const hoje = new Date();
+      const hojeIso = hoje.toISOString().slice(0, 10);
       const recorrentes = lancamentos.filter(l => l.recorrente === true);
       
       let gerados = 0;
       let ignorados = 0;
       const detalhes = [];
+      const lancamentosAtualizados = [...lancamentos];
 
       for (const lanc of recorrentes) {
-        const dataLancamento = new Date(lanc.data_lancamento);
-        let proximaData = calcularProximaData(lanc.data_lancamento, lanc.recorrencia_tipo);
-        let dataProxima = new Date(proximaData);
+        const tipoRecorrencia = getRecorrenciaTipo(lanc.recorrencia_tipo);
+        const dataBase = getRecorrenciaAnchorDate(lanc);
+        if (!dataBase) {
+          ignorados++;
+          continue;
+        }
+
+        let competencia = addRecorrenciaToDate(dataBase, tipoRecorrencia);
+        if (!competencia) {
+          ignorados++;
+          continue;
+        }
 
         // Gerar todos os lançamentos pendentes até hoje
-        while (dataProxima <= hoje) {
+        while (competencia && competencia <= hojeIso) {
           // Verificar se já existe
-          if (!jaExisteLancamento(lanc, proximaData, lancamentos)) {
+          if (!isRecurringOccurrenceDuplicate(lanc, competencia, lancamentosAtualizados)) {
+            const origemRef = buildRecurringOccurrenceKey(lanc.id, competencia);
             // Criar novo lançamento
-            await createMutation.mutateAsync({
+            const novoLancamento = await createMutation.mutateAsync({
               tipo: lanc.tipo,
               categoria_id: lanc.categoria_id,
               categoria_nome: lanc.categoria_nome,
               descricao: lanc.descricao,
               valor: lanc.valor,
-              data_lancamento: proximaData,
+              data_lancamento: competencia,
+              data_vencimento: competencia,
               forma_pagamento: lanc.forma_pagamento,
               status: 'Pendente', // Novos lançamentos recorrentes começam como pendentes
-              observacao: `Gerado automaticamente de lançamento recorrente (${lanc.recorrencia_tipo})`,
+              observacao: `Gerado automaticamente de lançamento com recorrência (${tipoRecorrencia})`,
               recorrente: false, // O novo lançamento não é recorrente
-              anexo_url: lanc.anexo_url
+              anexo_url: lanc.anexo_url,
+              origem_tipo: 'recorrencia',
+              origem_ref: origemRef || null,
             });
+
+            lancamentosAtualizados.push(novoLancamento);
 
             gerados++;
             detalhes.push({
               descricao: lanc.descricao,
-              data: proximaData,
+              data: competencia,
               valor: lanc.valor
             });
           } else {
@@ -104,8 +94,7 @@ export default function RecorrentesManager({ lancamentos }) {
           }
 
           // Calcular próxima data
-          proximaData = calcularProximaData(proximaData, lanc.recorrencia_tipo);
-          dataProxima = new Date(proximaData);
+          competencia = addRecorrenciaToDate(competencia, tipoRecorrencia);
         }
       }
 
@@ -133,9 +122,12 @@ export default function RecorrentesManager({ lancamentos }) {
   // Auto-executar ao montar o componente
   useEffect(() => {
     const autoGenerate = async () => {
+      if (autoProcessedRef.current) return;
+
       // Verificar se há lançamentos recorrentes
       const recorrentes = lancamentos.filter(l => l.recorrente === true);
       if (recorrentes.length > 0) {
+        autoProcessedRef.current = true;
         // Pequeno delay para não executar imediatamente
         await new Promise(resolve => setTimeout(resolve, 1000));
         gerarLancamentosRecorrentes();
@@ -143,7 +135,7 @@ export default function RecorrentesManager({ lancamentos }) {
     };
 
     autoGenerate();
-  }, []); // Apenas na montagem
+  }, [lancamentos]);
 
   const recorrentes = lancamentos.filter(l => l.recorrente === true);
 
@@ -234,7 +226,7 @@ export default function RecorrentesManager({ lancamentos }) {
                   <div className="flex items-center gap-4 text-sm" style={{ color: '#8B8B8B' }}>
                     <span>R$ {lanc.valor?.toFixed(2)}</span>
                     <Badge variant="outline">{lanc.recorrencia_tipo}</Badge>
-                    <span>Desde {new Date(lanc.data_lancamento).toLocaleDateString('pt-BR')}</span>
+                    <span>Vence em {new Date((lanc.data_vencimento || lanc.data_lancamento)).toLocaleDateString('pt-BR')}</span>
                   </div>
                 </div>
                 <Badge className={lanc.tipo === 'Entrada' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>

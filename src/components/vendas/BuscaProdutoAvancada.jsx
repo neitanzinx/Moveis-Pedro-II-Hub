@@ -28,6 +28,23 @@ export default function BuscaProdutoAvancada(props) {
     return normalized !== '' && !['n/a', 'na', '-', 'null', 'undefined', '?'].includes(normalized);
   };
 
+  const getEstoqueDisponivel = (produto) => {
+    if (!produto) return 0;
+
+    const estoqueCampos = Object.entries(produto)
+      .filter(([key, value]) => key.startsWith('estoque_') && typeof value !== 'object')
+      .map(([, value]) => Number(value || 0))
+      .filter((value) => Number.isFinite(value));
+
+    const estoquePrincipal = Number(produto.quantidade_estoque || 0);
+    const estoqueBase = estoqueCampos.length > 0
+      ? Math.max(estoquePrincipal, ...estoqueCampos)
+      : estoquePrincipal;
+    const reservado = Number(produto.quantidade_reservada || 0);
+
+    return Math.max(0, estoqueBase - reservado);
+  };
+
   // Fechar resultados ao clicar fora
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -70,9 +87,30 @@ export default function BuscaProdutoAvancada(props) {
   // Filtrar e pontuar produtos
   const searchTokens = normSearch(searchTerm).split(/\s+/).filter(t => t.length > 0);
   const scoredProdutos = searchTokens.length === 0 ? [] : produtos
-    .filter(p => p.ativo)
+    .filter((p) => p.ativo !== false)
     .map(p => {
-      const camposBusca = [p.nome, p.codigo_barras, p.categoria, p.material, p.cor, p.fornecedor_nome, p.modelo_referencia]
+      const camposBusca = [
+        p.id,
+        p.nome,
+        p.modelo_referencia,
+        p.codigo_barras,
+        p.sku,
+        p.gtin,
+        p.ean,
+        p.ncm,
+        p.categoria,
+        p.ambiente,
+        p.material,
+        p.cor,
+        p.marca,
+        p.fornecedor_nome,
+        p.descricao,
+        p.descricao_completa,
+        p.observacoes,
+        p.largura,
+        p.altura,
+        p.profundidade,
+      ]
         .filter(Boolean).map(normSearch).join(' ');
       const matches = searchTokens.filter(token => camposBusca.includes(token)).length;
       return { produto: p, score: matches };
@@ -143,7 +181,7 @@ export default function BuscaProdutoAvancada(props) {
               </div>
               <div className="max-h-52 overflow-y-auto">
                 {produtosFiltrados.slice(0, 10).map((produto, index) => {
-                  const qtd = (produto.quantidade_estoque || 0) - (produto.quantidade_reservada || 0);
+                  const qtd = getEstoqueDisponivel(produto);
                   const isSelected = index === selectedIndex;
                   const tipoEstoque = produto.tipo_estoque || 'herdado';
                   const semEstoque = qtd <= 0;

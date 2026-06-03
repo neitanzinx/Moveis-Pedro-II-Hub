@@ -22,8 +22,8 @@ export default function Estoque() {
   const [activeTab, setActiveTab] = useState("estoque");
 
   const { data: produtos = [] } = useQuery({
-    queryKey: ['produtos-estoque-count'],
-    queryFn: () => base44.entities.Produto.list(),
+    queryKey: ['produtos'],
+    queryFn: () => base44.entities.Produto.list('nome'),
   });
 
   const { data: transferencias = [] } = useQuery({

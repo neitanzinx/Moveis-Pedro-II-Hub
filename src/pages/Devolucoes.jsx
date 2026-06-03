@@ -1,41 +1,142 @@
-import React, { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import React, { useState } from "react";
+import { base44 } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Filter, RotateCcw, Trash2, Edit, Loader2 } from "lucide-react";
+import { Plus, Search, Trash2, Edit, Loader2 } from "lucide-react";
 import DevolucaoModal from "../components/devolucoes/DevolucaoModal";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function Devolucoes() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDevolucao, setEditingDevolucao] = useState(null);
   const queryClient = useQueryClient();
+    const { can } = useAuth();
 
-  const { data: devolucoes = [], isLoading } = useQuery({ queryKey: ['devolucoes'], queryFn: () => base44.entities.Devolucao.list('-created_date') });
-  const { data: vendas = [] } = useQuery({ queryKey: ['vendas'], queryFn: () => base44.entities.Venda.list() });
-  const { data: produtos = [] } = useQuery({ queryKey: ['produtos'], queryFn: () => base44.entities.Produto.list() });
+    const canViewDevolucoes = can('view_devolucoes') || can('approve_devolucoes') || can('view_vendas') || can('manage_vendas');
+    const canManageDevolucoes = can('approve_devolucoes') || can('manage_vendas');
 
-  const createMutation = useMutation({ mutationFn: (data) => base44.entities.Devolucao.create(data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['devolucoes'] }); setIsModalOpen(false); setEditingDevolucao(null); }});
-  const updateMutation = useMutation({ mutationFn: ({ id, data }) => base44.entities.Devolucao.update(id, data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['devolucoes'] }); setIsModalOpen(false); setEditingDevolucao(null); }});
-  const deleteMutation = useMutation({ mutationFn: (id) => base44.entities.Devolucao.delete(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['devolucoes'] })});
+    const { data: devolucoes = [], isLoading } = useQuery({
+        queryKey: ['devolucoes'],
+        queryFn: () => base44.entities.Devolucao.list('-created_date'),
+        enabled: canViewDevolucoes,
+    });
+    const { data: vendas = [] } = useQuery({
+        queryKey: ['vendas'],
+        queryFn: () => base44.entities.Venda.list(),
+        enabled: canViewDevolucoes,
+    });
+    const { data: produtos = [] } = useQuery({
+        queryKey: ['produtos'],
+        queryFn: () => base44.entities.Produto.list('nome'),
+        enabled: canViewDevolucoes,
+    });
+    const { data: fornecedores = [] } = useQuery({
+        queryKey: ['fornecedores'],
+        queryFn: () => base44.entities.Fornecedor.list(),
+        enabled: canViewDevolucoes,
+    });
+
+    const invalidateRelatedData = async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['devolucoes'] }),
+            queryClient.invalidateQueries({ queryKey: ['produtos'] }),
+            queryClient.invalidateQueries({ queryKey: ['vendas'] }),
+            queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] }),
+            queryClient.invalidateQueries({ queryKey: ['movimentacoes-estoque'] })
+        ]);
+    };
+
+    const createMutation = useMutation({
+        mutationFn: (data) => base44.entities.Devolucao.create(data),
+        onSuccess: async () => {
+            await invalidateRelatedData();
+            setIsModalOpen(false);
+            setEditingDevolucao(null);
+        }
+    });
+
+    const updateMutation = useMutation({
+        mutationFn: ({ id, data }) => base44.entities.Devolucao.update(id, data),
+        onSuccess: async () => {
+            await invalidateRelatedData();
+            setIsModalOpen(false);
+            setEditingDevolucao(null);
+        }
+    });
+
+    const deleteMutation = useMutation({
+        mutationFn: (id) => base44.entities.Devolucao.delete(id),
+        onSuccess: async () => {
+            await invalidateRelatedData();
+        }
+    });
+
+    const handleSave = async (data) => {
+        const performSave = async (payload) => {
+            if (editingDevolucao) {
+                return updateMutation.mutateAsync({ id: editingDevolucao.id, data: payload });
+            }
+            return createMutation.mutateAsync(payload);
+        };
+
+        try {
+            return await performSave(data);
+        } catch (error) {
+            const msg = String(error?.message || '').toLowerCase();
+            if (!msg.includes('column') || !msg.includes('does not exist')) {
+                throw error;
+            }
+
+            const payloadCompat = {
+                ...data,
+            };
+
+            delete payloadCompat.financeiro_tipo;
+            delete payloadCompat.justificativa_financeira;
+            delete payloadCompat.destino_estoque;
+            delete payloadCompat.cliente_nome;
+            delete payloadCompat.financeiro_lancamento_id;
+            delete payloadCompat.financeiro_lancamentos_ids;
+            delete payloadCompat.processado_por;
+            delete payloadCompat.data_processamento;
+            delete payloadCompat.organization_id;
+
+            return await performSave(payloadCompat);
+        }
+    };
 
   const filtered = devolucoes.filter(dev =>
     dev.numero_pedido?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     dev.cliente_nome?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  return (
+    if (!canViewDevolucoes) {
+        return (
+            <div className="max-w-3xl mx-auto py-10">
+                <div className="bg-white dark:bg-neutral-900 rounded-xl border border-gray-100 dark:border-neutral-800 p-6">
+                    <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Devoluções e Trocas</h1>
+                    <p className="mt-2 text-sm text-gray-500">Você não possui permissão para visualizar este módulo.</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="flex justify-between items-center">
         <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Devoluções e Trocas</h1>
             <p className="text-sm text-gray-500">Gestão de devoluções de mercadoria</p>
         </div>
-        <Button onClick={() => { setEditingDevolucao(null); setIsModalOpen(true); }} className="bg-green-700 hover:bg-green-800 text-white">
+                <Button
+                    onClick={() => { setEditingDevolucao(null); setIsModalOpen(true); }}
+                    className="bg-green-700 hover:bg-green-800 text-white"
+                    disabled={!canManageDevolucoes}
+                >
             <Plus className="w-4 h-4 mr-2" /> Nova Devolução
         </Button>
       </div>
@@ -84,7 +185,14 @@ export default function Devolucoes() {
                                     <Button variant="ghost" size="icon" onClick={() => { setEditingDevolucao(dev); setIsModalOpen(true); }}>
                                         <Edit className="w-4 h-4 text-blue-600" />
                                     </Button>
-                                    <Button variant="ghost" size="icon" onClick={() => { if(confirm('Excluir registro?')) deleteMutation.mutate(dev.id) }}>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            disabled={!canManageDevolucoes || dev.status === 'Aprovada'}
+                                                                            onClick={() => {
+                                                                                if (confirm('Excluir registro?')) deleteMutation.mutate(dev.id)
+                                                                            }}
+                                                                        >
                                         <Trash2 className="w-4 h-4 text-red-600" />
                                     </Button>
                                 </div>
@@ -99,10 +207,12 @@ export default function Devolucoes() {
       <DevolucaoModal
         isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); setEditingDevolucao(null); }}
-        onSave={(data) => editingDevolucao ? updateMutation.mutate({ id: editingDevolucao.id, data }) : createMutation.mutate(data)}
+        onSave={handleSave}
         devolucao={editingDevolucao}
+        devolucoes={devolucoes}
         vendas={vendas}
         produtos={produtos}
+                fornecedores={fornecedores}
         isLoading={createMutation.isPending || updateMutation.isPending}
       />
     </div>

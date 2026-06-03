@@ -1,14 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Store, CheckCircle, Loader2 } from "lucide-react";
+import { Store, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { base44, supabase } from "@/api/base44Client";
+import { useLojas } from "@/hooks/useLojas";
 
 export default function StoreSelectorModal() {
     const { user, selectedStore, setSelectedStore, loading } = useAuth();
-    const [lojas, setLojas] = useState([]);
-    const [fetching, setFetching] = useState(false);
+    const { data: lojas = [], isLoading: fetching } = useLojas();
 
     // Derived state: Modal MUST be open if user is admin/manager (no fixed loja) and hasn't selected a store yet.
     // Roles that require a store context:
@@ -16,29 +15,8 @@ export default function StoreSelectorModal() {
     const isOpen = !loading && !!user && !user.loja && !selectedStore && ROLES_REQUIRING_STORE.includes(user.cargo);
 
     useEffect(() => {
-        if (isOpen) {
-            fetchLojas();
-        }
+        // Mantido para preservar comportamento de abertura controlada.
     }, [isOpen]);
-
-    const fetchLojas = async () => {
-        setFetching(true);
-        try {
-            // Tenta buscar da tabela 'lojas'
-            const { data, error } = await supabase.from('lojas').select('*').eq('ativa', true);
-            if (error) throw error;
-            setLojas(data || []);
-        } catch (err) {
-            console.error("Erro ao buscar lojas:", err);
-            // Fallback
-            setLojas([
-                { id: 1, nome: 'Centro' },
-                { id: 2, nome: 'Depósito' }
-            ]);
-        } finally {
-            setFetching(false);
-        }
-    };
 
     const handleSelect = (lojaNome) => {
         setSelectedStore(lojaNome);
@@ -69,6 +47,10 @@ export default function StoreSelectorModal() {
                     {fetching ? (
                         <div className="flex justify-center py-8">
                             <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+                        </div>
+                    ) : lojas.length === 0 ? (
+                        <div className="py-6 text-sm text-gray-500">
+                            Nenhuma loja cadastrada ativa em Configurações.
                         </div>
                     ) : (
                         <div className="grid grid-cols-2 gap-3">

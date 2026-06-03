@@ -9,6 +9,7 @@ const Dashboard = lazy(() => import("./Dashboard.jsx"));
 const Produtos = lazy(() => import("./Produtos.jsx"));
 const Clientes = lazy(() => import("./Clientes.jsx"));
 const Vendas = lazy(() => import("./Vendas.jsx"));
+const Devolucoes = lazy(() => import("./Devolucoes.jsx"));
 
 const Orcamentos = lazy(() => import("./Orcamentos.jsx"));
 const AssistenciaTecnica = lazy(() => import("./AssistenciaTecnica.jsx"));
@@ -185,7 +186,7 @@ function OperatorRouteGate() {
 
 
 const PAGES = {
-    Dashboard, Produtos, Clientes, Vendas, Orcamentos, AssistenciaTecnica,
+    Dashboard, Produtos, Clientes, Vendas, Devolucoes, Orcamentos, AssistenciaTecnica,
     Configuracoes, SelecaoVendedor,
     BoasVindas, GerenciamentoUsuarios, Financeiro, Montagem, Fornecedores, Compras,
     Inventario, Estoque, ModoReuniao, PDV, CatalogoWhatsApp,
@@ -432,6 +433,7 @@ function PagesContent() {
                         <Route path="/admin/Dashboard" element={<Dashboard />} />
                         <Route path="/admin/PDV" element={<PDV />} />
                         <Route path="/admin/Vendas" element={<Vendas />} />
+                        <Route path="/admin/Devolucoes" element={<Devolucoes />} />
                         <Route path="/admin/Orcamentos" element={<Orcamentos />} />
                         <Route path="/admin/Clientes" element={<Clientes />} />
 

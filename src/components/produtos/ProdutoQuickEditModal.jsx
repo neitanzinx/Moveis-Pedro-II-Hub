@@ -31,6 +31,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
+import { useLojas } from '@/hooks/useLojas';
 import { CATEGORIAS, AMBIENTES } from '@/constants/productConstants';
 import { getProductTotalStock, resolveStockField } from '@/utils/stockUtils';
 import { detectProductKeywordSuggestion } from '@/lib/productKeywordDetector';
@@ -123,16 +124,48 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
     const { user, isGerente } = useAuth();
     const isGerencial = isGerente?.() || user?.cargo === 'Gerente Geral' || user?.cargo === 'Administrador';
     const isVendedor = String(user?.cargo || '').toLowerCase().includes('vendedor');
+    const { data: lojasAtivas = [] } = useLojas();
     const { data: fornecedores = [] } = useQuery({
         queryKey: ['fornecedores'],
         queryFn: () => base44.entities.Fornecedor.list('nome_empresa'),
     });
     const campoLojaAtual = resolveStockField(lojaAtual || 'CD');
-    const estoqueLojaAtual = Number(produto?.[campoLojaAtual] || 0);
     const nomeExibicaoLoja = lojaAtual || 'CD';
+
+    const estoqueUnits = useMemo(() => {
+        const units = [];
+        const usedFields = new Set();
+
+        const addUnit = (label, field) => {
+            if (!field || usedFields.has(field)) return;
+            if (produto && !(field in produto) && !(field in INITIAL_FORM_DATA)) return;
+
+            usedFields.add(field);
+            units.push({ label, field });
+        };
+
+        addUnit('CD', 'estoque_cd');
+
+        (lojasAtivas || []).forEach((loja) => {
+            const field = resolveStockField(loja);
+            const label = loja?.nome || loja?.codigo || 'Loja';
+            addUnit(label, field);
+        });
+
+        if (nomeExibicaoLoja) {
+            addUnit(nomeExibicaoLoja, campoLojaAtual);
+        }
+
+        return units;
+    }, [lojasAtivas, produto, nomeExibicaoLoja, campoLojaAtual]);
 
     useEffect(() => {
         if (produto) {
+            const estoquePorUnidade = estoqueUnits.reduce((acc, { field }) => {
+                acc[field] = Number(produto?.[field] || 0);
+                return acc;
+            }, {});
+
             setFormData({
                 ...INITIAL_FORM_DATA,
                 nome: produto.nome || '',
@@ -160,14 +193,14 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                 estoque_cd: produto.estoque_cd || 0,
                 estoque_minimo: produto.estoque_minimo || 0,
                 estoque_ideal: produto.estoque_ideal || 0,
-                estoque_loja_atual: estoqueLojaAtual,
+                ...estoquePorUnidade,
             });
             setDismissedSuggestionName('');
         } else {
             setFormData(INITIAL_FORM_DATA);
             setDismissedSuggestionName('');
         }
-    }, [produto, estoqueLojaAtual]);
+    }, [produto, estoqueUnits]);
 
     const keywordSuggestion = useMemo(
         () => detectProductKeywordSuggestion(formData.nome),
@@ -215,6 +248,11 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                 return Number.isFinite(parsed) ? parsed : null;
             };
 
+            const estoquePorUnidadeData = estoqueUnits.reduce((acc, { field }) => {
+                acc[field] = toNumberOrNull(formData[field]) ?? 0;
+                return acc;
+            }, {});
+
             const updatedData = {
                 nome: formData.nome,
                 categoria: formData.categoria,
@@ -235,10 +273,9 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                 preco_custo: toNumberOrNull(formData.preco_custo) ?? 0,
                 markup_aplicado: toNumberOrNull(formData.markup_aplicado) ?? 0,
                 quantidade_estoque: toNumberOrNull(formData.quantidade_estoque) ?? 0,
-                estoque_cd: toNumberOrNull(formData.estoque_cd) ?? 0,
+                ...estoquePorUnidadeData,
                 estoque_minimo: toNumberOrNull(formData.estoque_minimo) ?? 0,
                 estoque_ideal: toNumberOrNull(formData.estoque_ideal) ?? 0,
-                [campoLojaAtual]: toNumberOrNull(formData.estoque_loja_atual) ?? 0,
             };
 
             if (isVendedor) {
@@ -561,22 +598,23 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                             </div>
                         </CardHeader>
                         <CardContent>
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                                <div className="space-y-2 col-span-2 md:col-span-3 lg:col-span-2">
-                                    <Label className="font-bold cursor-help text-xs" title="Quantidade de estoque da loja selecionada no PDV">Estoque Loja ({nomeExibicaoLoja})</Label>
-                                    <div className="h-8 flex items-center px-3 bg-blue-50 border border-blue-100 rounded-md text-blue-700 font-bold">
-                                        {parseInt(formData.estoque_loja_atual) || 0}
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                {estoqueUnits.map(({ label, field }) => (
+                                    <div key={field} className="space-y-1">
+                                        <Label className="text-[10px] text-gray-500 uppercase">{`Estoque ${label}`}</Label>
+                                        <Input
+                                            type="number"
+                                            className="h-8"
+                                            value={formData[field] ?? 0}
+                                            onChange={e => setFormData({ ...formData, [field]: parseInt(e.target.value, 10) || 0 })}
+                                        />
                                     </div>
-                                </div>
-                                <div className="space-y-1">
-                                    <Label className="text-[10px] text-gray-500 uppercase">Ajustar Estoque ({nomeExibicaoLoja})</Label>
-                                    <Input
-                                        type="number"
-                                        className="h-8"
-                                        value={formData.estoque_loja_atual || 0}
-                                        onChange={e => setFormData({ ...formData, estoque_loja_atual: parseInt(e.target.value) || 0 })}
-                                    />
-                                </div>
+                                ))}
+                                {estoqueUnits.length === 0 && (
+                                    <div className="col-span-full text-sm text-gray-500">
+                                        Nenhuma loja ativa encontrada para ajustar estoque.
+                                    </div>
+                                )}
                             </div>
                         </CardContent>
                     </Card>

@@ -263,13 +263,25 @@ export function formatarNumero(valor) {
  */
 export function capitalizar(texto) {
     if (!texto) return '';
-    return texto
-        .toString()
-        .toLowerCase()
-        .trim()
-        .split(/\s+/)
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
+    
+    const textoStr = texto.toString();
+    const matchLeading = textoStr.match(/^\s*/);
+    const matchTrailing = textoStr.match(/\s*$/);
+    const leading = matchLeading ? matchLeading[0] : '';
+    const trailing = matchTrailing ? matchTrailing[0] : '';
+    
+    const trimmed = textoStr.trim();
+    if (!trimmed) return textoStr;
+    
+    const capitalized = trimmed
+        .split(/(\s+)/)
+        .map(word => {
+            if (word.trim() === '') return word;
+            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        })
+        .join('');
+        
+    return leading + capitalized + trailing;
 }
 
 /**

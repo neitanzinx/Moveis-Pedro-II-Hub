@@ -11,7 +11,8 @@ export function cn(...inputs) {
  * Exemplo: normSearch("freijó / chumbo") === normSearch("freijo/chumbo") === "freijo chumbo"
  */
 export function normSearch(str) {
-  return (str || '')
+  if (str == null) return '';
+  return String(str)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[-/|_.]+/g, ' ')

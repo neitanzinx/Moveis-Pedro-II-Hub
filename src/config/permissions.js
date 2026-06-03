@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Warehouse, Users, ShoppingCart, Truck, Building2,
   FileText, DollarSign, UserCog, MessageCircle, CreditCard,
-  Settings, CalendarDays, Tag, Wrench, Target, TrendingUp, Activity
+  Settings, CalendarDays, Tag, Wrench, Target, TrendingUp, Activity, RotateCcw
 } from "lucide-react";
 
 // Níveis de Acesso aos Dados
@@ -310,6 +310,7 @@ export const MENU_ITEMS = [
   { title: "Logística", url: "/admin/LogisticaSemanal", icon: CalendarDays, permission: 'view_entregas', section: "Operacional" },
   { title: "Montagem", url: "/admin/Montagem", icon: Building2, permission: 'view_montagem', section: "Operacional", module: 'montagem' },
   { title: "Assistência Técnica", url: "/admin/AssistenciaTecnica", icon: Wrench, permission: 'view_assistencia', section: "Operacional", module: 'assistencia_tecnica' },
+  { title: "Devoluções", url: "/admin/Devolucoes", icon: RotateCcw, permission: 'view_vendas', section: "Operacional" },
 
   { title: "Financeiro", url: "/admin/Financeiro", icon: DollarSign, permission: 'view_financeiro', section: "Gestão" },
   { title: "Central Analítica", url: "/admin/CentralAnalitica", icon: TrendingUp, permission: ['view_relatorios', 'view_financeiro'], section: "Gestão" },

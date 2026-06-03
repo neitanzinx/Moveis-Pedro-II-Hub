@@ -20,6 +20,14 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useAuth } from "@/hooks/useAuth";
 import { formatBrazilDate, formatBrazilDateTime } from "@/lib/dateBrazil";
 import {
+  buildCategoriaFilterValue,
+  DEFAULT_RECORRENCIA_TIPO,
+  getLancamentoCategoriaLabel,
+  lancamentoMatchesCategoriaFilter,
+  normalizeCategoriaId,
+  RECORRENCIA_OPTIONS,
+} from "@/lib/financeiroRecorrencia";
+import {
   TrendingUp,
   TrendingDown,
   Trash2,
@@ -74,7 +82,7 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
     status: "Pendente",
     observacao: "",
     recorrente: false,
-    recorrencia_tipo: "Mensal",
+    recorrencia_tipo: DEFAULT_RECORRENCIA_TIPO,
     anexo_url: ""
   });
 
@@ -140,6 +148,20 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
     if (!key) return null;
     return paidDeclarationByLancamento[key] || null;
   }, [selectedLancamento, paidDeclarationByLancamento]);
+
+  const categoriasFiltro = useMemo(() => {
+    const seen = new Set();
+    const options = [];
+
+    categorias.forEach((categoria) => {
+      const value = buildCategoriaFilterValue(categoria);
+      if (!value || seen.has(value)) return;
+      seen.add(value);
+      options.push({ value, label: categoria.nome || "Sem nome" });
+    });
+
+    return options;
+  }, [categorias]);
 
   const handleStatusChange = async (id, newStatus) => {
     const lanc = lancamentos.find((item) => item.id === id);
@@ -215,7 +237,7 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
       status: lanc.status || "Pendente",
       observacao: lanc.observacao || "",
       recorrente: Boolean(lanc.recorrente),
-      recorrencia_tipo: lanc.recorrencia_tipo || "Mensal",
+      recorrencia_tipo: lanc.recorrencia_tipo || DEFAULT_RECORRENCIA_TIPO,
       anexo_url: lanc.anexo_url || ""
     });
     setIsDetalhesOpen(true);
@@ -278,7 +300,9 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
       return;
     }
 
-    const categoriaSelecionada = categorias.find((cat) => cat.id === detalhesForm.categoria_id);
+    const categoriaSelecionada = categorias.find(
+      (cat) => normalizeCategoriaId(cat.id) === normalizeCategoriaId(detalhesForm.categoria_id)
+    );
 
     const payload = {
       ...detalhesForm,
@@ -349,7 +373,7 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
 
   // Separar impostos/taxas por categoria
   const isImpostoOuTaxa = (lanc) => {
-    const categoriaNome = (lanc.categoria_nome || "").toLowerCase();
+    const categoriaNome = (getLancamentoCategoriaLabel(lanc, categorias) || "").toLowerCase();
     return categoriaNome.includes("imposto") || categoriaNome.includes("taxa") || categoriaNome.includes("tributo");
   };
 
@@ -360,7 +384,8 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
       if (busca) {
         const termo = busca.toLowerCase();
         const matchDescricao = lanc.descricao?.toLowerCase().includes(termo);
-        const matchCategoria = lanc.categoria_nome?.toLowerCase().includes(termo);
+        const categoriaLabel = getLancamentoCategoriaLabel(lanc, categorias);
+        const matchCategoria = categoriaLabel?.toLowerCase().includes(termo);
         if (!matchDescricao && !matchCategoria) return false;
       }
       // Tipo
@@ -372,7 +397,7 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
       // Status
       if (statusFiltro !== "todos" && lanc.status !== statusFiltro) return false;
       // Categoria
-      if (categoriaFiltro !== "todos" && lanc.categoria_nome !== categoriaFiltro) return false;
+      if (!lancamentoMatchesCategoriaFilter(lanc, categoriaFiltro)) return false;
       return true;
     });
   };
@@ -717,13 +742,13 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
                   <Label>Categoria</Label>
                   {isEditing ? (
                     <Select
-                      value={detalhesForm.categoria_id || "sem-categoria"}
+                      value={normalizeCategoriaId(detalhesForm.categoria_id) || "sem-categoria"}
                       onValueChange={(value) => {
                         if (value === "sem-categoria") {
                           setDetalhesForm((prev) => ({ ...prev, categoria_id: "", categoria_nome: "" }));
                           return;
                         }
-                        const categoria = categorias.find((cat) => cat.id === value);
+                        const categoria = categorias.find((cat) => normalizeCategoriaId(cat.id) === value);
                         setDetalhesForm((prev) => ({
                           ...prev,
                           categoria_id: value,
@@ -737,7 +762,7 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
                       <SelectContent>
                         <SelectItem value="sem-categoria">Sem categoria</SelectItem>
                         {categorias.map((cat) => (
-                          <SelectItem key={cat.id} value={cat.id}>{cat.nome}</SelectItem>
+                          <SelectItem key={cat.id} value={normalizeCategoriaId(cat.id)}>{cat.nome}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -808,17 +833,16 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
                   <Label>Periodicidade</Label>
                   {isEditing ? (
                     <Select
-                      value={detalhesForm.recorrencia_tipo || "Mensal"}
+                      value={detalhesForm.recorrencia_tipo || DEFAULT_RECORRENCIA_TIPO}
                       onValueChange={(value) => setDetalhesForm((prev) => ({ ...prev, recorrencia_tipo: value }))}
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Mensal">Mensal</SelectItem>
-                        <SelectItem value="Trimestral">Trimestral</SelectItem>
-                        <SelectItem value="Semestral">Semestral</SelectItem>
-                        <SelectItem value="Anual">Anual</SelectItem>
+                        {RECORRENCIA_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   ) : (
@@ -951,8 +975,8 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="todos">Todas Categorias</SelectItem>
-                {categorias.map(cat => (
-                  <SelectItem key={cat.id} value={cat.nome}>{cat.nome}</SelectItem>
+                {categoriasFiltro.map((cat) => (
+                  <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -1131,13 +1155,13 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
                   <Label>Categoria</Label>
                   {isEditing ? (
                     <Select
-                      value={detalhesForm.categoria_id || "sem-categoria"}
+                      value={normalizeCategoriaId(detalhesForm.categoria_id) || "sem-categoria"}
                       onValueChange={(value) => {
                         if (value === "sem-categoria") {
                           setDetalhesForm((prev) => ({ ...prev, categoria_id: "", categoria_nome: "" }));
                           return;
                         }
-                        const categoria = categorias.find((cat) => cat.id === value);
+                        const categoria = categorias.find((cat) => normalizeCategoriaId(cat.id) === value);
                         setDetalhesForm((prev) => ({
                           ...prev,
                           categoria_id: value,
@@ -1151,7 +1175,7 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
                       <SelectContent>
                         <SelectItem value="sem-categoria">Sem categoria</SelectItem>
                         {categorias.map((cat) => (
-                          <SelectItem key={cat.id} value={cat.id}>{cat.nome}</SelectItem>
+                          <SelectItem key={cat.id} value={normalizeCategoriaId(cat.id)}>{cat.nome}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -1222,17 +1246,16 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
                   <Label>Periodicidade</Label>
                   {isEditing ? (
                     <Select
-                      value={detalhesForm.recorrencia_tipo || "Mensal"}
+                      value={detalhesForm.recorrencia_tipo || DEFAULT_RECORRENCIA_TIPO}
                       onValueChange={(value) => setDetalhesForm((prev) => ({ ...prev, recorrencia_tipo: value }))}
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Mensal">Mensal</SelectItem>
-                        <SelectItem value="Trimestral">Trimestral</SelectItem>
-                        <SelectItem value="Semestral">Semestral</SelectItem>
-                        <SelectItem value="Anual">Anual</SelectItem>
+                        {RECORRENCIA_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   ) : (

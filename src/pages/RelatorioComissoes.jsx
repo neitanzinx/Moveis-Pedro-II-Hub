@@ -734,7 +734,7 @@ export default function RelatorioComissoes() {
                     </div>
                   )}
 
-                  {/* Breakdown por Forma de Pagamento */}}
+                  {/* Breakdown por Forma de Pagamento */}
                   {Object.keys(item.breakdownPagamentos).length > 0 && (
                     <div className="mt-4 p-4 rounded-lg border" style={{ borderColor: '#E5E0D8' }}>
                       <p className="text-sm font-semibold mb-3" style={{ color: '#07593f' }}>

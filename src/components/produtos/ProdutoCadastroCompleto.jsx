@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
 import { useTenant, useLojas } from '@/contexts/TenantContext';
+import { useAuth } from '@/hooks/useAuth';
 import {
     Dialog,
     DialogContent,
@@ -277,6 +278,7 @@ const INITIAL_FORM_DATA = {
     // Cor do produto (único, sem variações)
     cor: '',
     cor_hex: '',
+    cores: [],
     // Estoque
     estoque_cd: '',
     ...ESTOQUE_LOJA_FIELDS.reduce((acc, field) => {
@@ -315,6 +317,7 @@ export default function ProdutoCadastroCompleto({
     // Multi-Tenant: Carrega lojas dinâmicas e configurações
     const { data: lojas = [] } = useLojas();
     const { settings, organization } = useTenant();
+    const { user } = useAuth();
     const showFinancials = !readOnly;
 
     // Busca dados necessários
@@ -429,6 +432,7 @@ export default function ProdutoCadastroCompleto({
                 profundidade_embalagem: produto.profundidade_embalagem?.toString() || '',
                 fotos: produto.fotos || [],
                 variacoes: produto.variacoes || [],
+                cores: produto.cor ? [produto.cor] : [],
             });
             setErrors({});
             setDuplicatas([]);
@@ -816,6 +820,40 @@ export default function ProdutoCadastroCompleto({
             };
 
             await Promise.resolve(onSave(dataToSave));
+
+            // Se for um novo cadastro e tiver múltiplas cores selecionadas, cria as réplicas
+            if (!produto && formData.cores && formData.cores.length > 1) {
+                const remainingColors = formData.cores.slice(1);
+                for (const otherColor of remainingColors) {
+                    const replicaData = {
+                        ...dataToSave,
+                        cor: otherColor,
+                        cor_hex: getColorHex(otherColor),
+                        codigo_barras: null, // Clear barcode to prevent unique constraint violation
+                    };
+
+                    const createdReplica = await base44.entities.Produto.create(replicaData);
+
+                    // Cria o histórico de preços inicial para a réplica
+                    try {
+                        const precoNovo = parseFloat(replicaData.preco_venda) || 0;
+                        if (createdReplica && createdReplica.id && precoNovo > 0) {
+                            await base44.entities.HistoricoPrecos?.create?.({
+                                organization_id: organization?.id || '00000000-0000-0000-0000-000000000001',
+                                produto_id: createdReplica.id,
+                                preco_antigo: 0,
+                                preco_novo: precoNovo,
+                                tipo: 'venda',
+                                motivo: 'Cadastro Inicial (Réplica de Cor)',
+                                usuario_nome: user?.nome || 'Sistema'
+                            });
+                        }
+                    } catch (histErr) {
+                        console.warn('Não foi possível registrar histórico de preços para réplica:', histErr);
+                    }
+                }
+                toast.success(`${remainingColors.length} réplica(s) de cores criada(s) com sucesso`);
+            }
         } finally {
             submitLockRef.current = false;
             setIsSubmitting(false);
@@ -1034,15 +1072,37 @@ export default function ProdutoCadastroCompleto({
                                     <CardContent className="space-y-4">
                                         <div className="grid md:grid-cols-2 gap-4">
                                             <div className="md:col-span-2">
-                                                <Label>Cor e Acabamento</Label>
-                                                <FurnitureColorPicker
-                                                    value={formData.cor}
-                                                    hexValue={formData.cor_hex}
-                                                    onChange={(val) => handleChange('cor', val)}
-                                                    onHexChange={(hex) => handleChange('cor_hex', hex)}
-                                                    customOptions={coresCatalogo}
-                                                    placeholder="Selecione a cor por nomenclatura"
-                                                />
+                                                <Label>{!produto ? 'Cores do Produto (Selecione uma ou mais) *' : 'Cor e Acabamento'}</Label>
+                                                {!produto ? (
+                                                    <FurnitureColorPicker
+                                                        multiple={true}
+                                                        value={formData.cores || []}
+                                                        hexValue={formData.cor_hex}
+                                                        onChange={(selectedCores) => {
+                                                            handleChange('cores', selectedCores);
+                                                            if (selectedCores && selectedCores.length > 0) {
+                                                                handleChange('cor', selectedCores[0]);
+                                                                handleChange('cor_hex', getColorHex(selectedCores[0]));
+                                                            } else {
+                                                                handleChange('cor', '');
+                                                                handleChange('cor_hex', '');
+                                                            }
+                                                        }}
+                                                        onHexChange={(hex) => handleChange('cor_hex', hex)}
+                                                        customOptions={coresCatalogo}
+                                                        placeholder="Selecione as cores por nomenclatura"
+                                                    />
+                                                ) : (
+                                                    <FurnitureColorPicker
+                                                        multiple={false}
+                                                        value={formData.cor}
+                                                        hexValue={formData.cor_hex}
+                                                        onChange={(val) => handleChange('cor', val)}
+                                                        onHexChange={(hex) => handleChange('cor_hex', hex)}
+                                                        customOptions={coresCatalogo}
+                                                        placeholder="Selecione a cor por nomenclatura"
+                                                    />
+                                                )}
                                             </div>
                                             <div>
                                                 <Label>Material Principal</Label>

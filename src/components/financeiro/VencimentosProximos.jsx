@@ -10,6 +10,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useAuth } from "@/hooks/useAuth";
 import { base44 } from "@/lib/supabase";
 import { isStatusCancelado } from "@/utils/vendaStatus";
+import { DEFAULT_RECORRENCIA_TIPO, isLancamentoSugestaoRecorrencia } from "@/lib/financeiroRecorrencia";
 
 const fmt = (v) =>
   `R$ ${Math.abs(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
@@ -45,10 +46,12 @@ function weekKey(isoDate) {
   return monday.toISOString().slice(0, 10);
 }
 
-function ItemRow({ lanc, onStatusChange, updating }) {
+function ItemRow({ lanc, onStatusChange, onEnableRecurring, updating, recurringUpdateId }) {
   const venc = lanc.data_vencimento
     ? new Date(lanc.data_vencimento + "T00:00:00").toLocaleDateString("pt-BR")
     : "—";
+  const podeSugerirRecorrencia = isLancamentoSugestaoRecorrencia(lanc);
+  const salvandoRecorrencia = recurringUpdateId === lanc.id;
 
   return (
     <div 
@@ -70,6 +73,23 @@ function ItemRow({ lanc, onStatusChange, updating }) {
       </div>
       <div className="flex items-center gap-2 ml-3 flex-shrink-0">
         <span className="text-sm font-bold text-red-600">{fmt(lanc.valor)}</span>
+        {lanc.recorrente ? (
+          <Badge className="bg-blue-100 text-blue-800 text-[10px]">Recorrente</Badge>
+        ) : null}
+        {podeSugerirRecorrencia ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-6 px-2 text-[10px]"
+            disabled={salvandoRecorrencia}
+            onClick={(e) => {
+              e.stopPropagation();
+              onEnableRecurring(lanc);
+            }}
+          >
+            {salvandoRecorrencia ? "Salvando..." : "Marcar recorrente"}
+          </Button>
+        ) : null}
         {lanc.status === "Pendente" ? (
           <div onClick={(e) => e.stopPropagation()}>
             <Select
@@ -113,7 +133,7 @@ function ItemRow({ lanc, onStatusChange, updating }) {
   );
 }
 
-function Grupo({ titulo, icon: Icon, cor, items, total, onStatusChange, updatingId, defaultAberto = false }) {
+function Grupo({ titulo, icon: Icon, cor, items, total, onStatusChange, onEnableRecurring, updatingId, recurringUpdateId, defaultAberto = false }) {
   const [aberto, setAberto] = useState(defaultAberto);
   if (items.length === 0) return null;
   return (
@@ -136,7 +156,14 @@ function Grupo({ titulo, icon: Icon, cor, items, total, onStatusChange, updating
       {aberto && (
         <div className="border rounded-xl overflow-hidden divide-y dark:divide-neutral-700">
           {items.map((l) => (
-            <ItemRow key={l.id} lanc={l} onStatusChange={onStatusChange} updating={updatingId === l.id} />
+            <ItemRow
+              key={l.id}
+              lanc={l}
+              onStatusChange={onStatusChange}
+              onEnableRecurring={onEnableRecurring}
+              updating={updatingId === l.id}
+              recurringUpdateId={recurringUpdateId}
+            />
           ))}
         </div>
       )}
@@ -150,6 +177,7 @@ export default function VencimentosProximos({ lancamentos = [] }) {
   const confirm = useConfirm();
   const { user } = useAuth();
   const [updatingId, setUpdatingId] = useState(null);
+  const [recurringUpdateId, setRecurringUpdateId] = useState(null);
   const [visibleWeeks, setVisibleWeeks] = useState(3);
 
   const grupos = useMemo(() => {
@@ -214,6 +242,15 @@ export default function VencimentosProximos({ lancamentos = [] }) {
     onError: () => setUpdatingId(null)
   });
 
+  const recorrenciaMutation = useMutation({
+    mutationFn: async ({ id, data }) => base44.entities.LancamentoFinanceiro.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["lancamentos-financeiros"] });
+      setRecurringUpdateId(null);
+    },
+    onError: () => setRecurringUpdateId(null)
+  });
+
   const handleStatusChange = async (lanc, newStatus) => {
     if (lanc.status === newStatus) return;
     const previousStatus = lanc.status || "Pendente";
@@ -261,6 +298,29 @@ export default function VencimentosProximos({ lancamentos = [] }) {
     );
   };
 
+  const handleEnableRecurring = async (lanc) => {
+    if (!lanc?.id || lanc.recorrente) return;
+
+    const confirmed = await confirm({
+      title: "Ativar recorrência",
+      message: `Marcar ${lanc.descricao || "lançamento"} como recorrente para gerar os próximos vencimentos automaticamente?`,
+      confirmText: "Ativar",
+      cancelText: "Cancelar",
+      variant: "default",
+    });
+
+    if (!confirmed) return;
+    setRecurringUpdateId(lanc.id);
+
+    recorrenciaMutation.mutate({
+      id: lanc.id,
+      data: {
+        recorrente: true,
+        recorrencia_tipo: lanc.recorrencia_tipo || DEFAULT_RECORRENCIA_TIPO,
+      },
+    });
+  };
+
   const temAlgum =
     grupos.atrasados.length > 0 ||
     grupos.hojeItems.length > 0 ||
@@ -288,7 +348,9 @@ export default function VencimentosProximos({ lancamentos = [] }) {
           items={grupos.atrasados}
           total={totalAtrasados}
           onStatusChange={handleStatusChange}
+          onEnableRecurring={handleEnableRecurring}
           updatingId={updatingId}
+          recurringUpdateId={recurringUpdateId}
         />
         <Grupo
           titulo="Vencendo hoje"
@@ -297,7 +359,9 @@ export default function VencimentosProximos({ lancamentos = [] }) {
           items={grupos.hojeItems}
           total={totalHoje}
           onStatusChange={handleStatusChange}
+          onEnableRecurring={handleEnableRecurring}
           updatingId={updatingId}
+          recurringUpdateId={recurringUpdateId}
         />
         <Grupo
           titulo="Vencendo amanhã"
@@ -306,7 +370,9 @@ export default function VencimentosProximos({ lancamentos = [] }) {
           items={grupos.amanha}
           total={totalAmanha}
           onStatusChange={handleStatusChange}
+          onEnableRecurring={handleEnableRecurring}
           updatingId={updatingId}
+          recurringUpdateId={recurringUpdateId}
         />
         <Grupo
           titulo="Próximos 3 dias"
@@ -315,7 +381,9 @@ export default function VencimentosProximos({ lancamentos = [] }) {
           items={grupos.ate3}
           total={totalAte3}
           onStatusChange={handleStatusChange}
+          onEnableRecurring={handleEnableRecurring}
           updatingId={updatingId}
+          recurringUpdateId={recurringUpdateId}
         />
         <Grupo
           titulo="De 3 a 5 dias"
@@ -324,7 +392,9 @@ export default function VencimentosProximos({ lancamentos = [] }) {
           items={grupos.de3a5}
           total={totalDe3a5}
           onStatusChange={handleStatusChange}
+          onEnableRecurring={handleEnableRecurring}
           updatingId={updatingId}
+          recurringUpdateId={recurringUpdateId}
         />
         {grupos.semanasOrdenadas.slice(0, visibleWeeks).map((sem) => (
           <Grupo
@@ -335,7 +405,9 @@ export default function VencimentosProximos({ lancamentos = [] }) {
             items={sem.items}
             total={sem.total}
             onStatusChange={handleStatusChange}
+            onEnableRecurring={handleEnableRecurring}
             updatingId={updatingId}
+            recurringUpdateId={recurringUpdateId}
             defaultAberto={false}
           />
         ))}

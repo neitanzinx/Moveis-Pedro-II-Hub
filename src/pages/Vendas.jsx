@@ -29,6 +29,7 @@ import { getVendaFinanceiro, getVendaResumoLogistico, isStatusCancelado, isVenda
 import { buildProductDisplayName } from "@/utils/productReference";
 import { MONEY_EPSILON, toMoneyNumber } from "@/utils/deliveryPayment";
 import { isInstallmentPaymentMethod, validatePaymentSplit } from "@/services/paymentOrchestrator";
+import { findCategoriaByNames } from "@/lib/financeiroRecorrencia";
 
 const STATUS_ENTREGA_OPTIONS = [
     'Aguardando Liberação',
@@ -154,6 +155,11 @@ export default function Vendas() {
     const { data: clientes = [] } = useQuery({
         queryKey: ['clientes'],
         queryFn: () => base44.entities.Cliente.list()
+    });
+
+    const { data: categoriasFinanceiras = [] } = useQuery({
+        queryKey: ['categorias-financeiras'],
+        queryFn: () => base44.entities.CategoriaFinanceira.list('nome')
     });
 
     // Smart Return Flow: Reabrir modal de emissão se solicitado via URL
@@ -467,6 +473,12 @@ export default function Vendas() {
             await base44.entities.Venda.update(venda.id, fallbackPayload);
         }
 
+        const categoriaRecebimento = findCategoriaByNames(categoriasFinanceiras, [
+            'Recebimento de Parcela',
+            'Venda de Produtos',
+            'Vendas',
+        ]);
+
         for (const pagamento of novosPagamentos) {
             const descricaoParcelas = pagamento.parcelas > 1 ? ` (${pagamento.parcelas}x)` : '';
             await base44.entities.LancamentoFinanceiro.create({
@@ -476,6 +488,8 @@ export default function Vendas() {
                 data_lancamento: dataPagamento,
                 data_vencimento: dataPagamento,
                 pago: true,
+                categoria_id: categoriaRecebimento?.id || null,
+                categoria_nome: categoriaRecebimento?.nome || 'Recebimento de Parcela',
                 forma_pagamento: pagamento.forma_pagamento,
                 status: 'Pago',
                 observacao: observacao || 'Pagamento antecipado registrado na listagem de vendas.',
@@ -784,17 +798,12 @@ export default function Vendas() {
             .map((loja) => normalizarNomeLoja(loja?.nome))
             .filter(Boolean);
 
-        const lojasFallback = vendas
-            .map((venda) => normalizarNomeLoja(venda?.loja))
-            .filter(Boolean);
-
         const lojaAtuacaoAtual = normalizarNomeLoja(getUserLoja?.()).toLowerCase();
-        const base = lojasCadastradas.length ? lojasCadastradas : lojasFallback;
 
-        return base
+        return lojasCadastradas
             .filter((nome, index, arr) => arr.findIndex((item) => item.toLowerCase() === nome.toLowerCase()) === index)
             .filter((nome) => nome.toLowerCase() !== lojaAtuacaoAtual);
-    }, [getUserLoja, lojasAtivas, vendas]);
+    }, [getUserLoja, lojasAtivas]);
 
     React.useEffect(() => {
         if (bulkLoja && !lojasDisponiveis.some((loja) => loja === bulkLoja)) {
