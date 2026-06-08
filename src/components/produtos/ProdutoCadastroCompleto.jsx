@@ -318,6 +318,7 @@ export default function ProdutoCadastroCompleto({
     const { data: lojas = [] } = useLojas();
     const { settings, organization } = useTenant();
     const { user } = useAuth();
+    const isVendedor = String(user?.cargo || '').toLowerCase().includes('vendedor');
     const showFinancials = !readOnly;
 
     // Busca dados necessários
@@ -759,7 +760,7 @@ export default function ProdutoCadastroCompleto({
 
 
             const dataToSave = {
-                nome: normalizeProductName(formData.nome),
+                nome: (isVendedor && !!produto) ? produto.nome : normalizeProductName(formData.nome),
                 modelo_referencia: formData.modelo_referencia || null,
                 categoria: formData.categoria,
                 ambiente: formData.ambiente || null,
@@ -913,10 +914,14 @@ export default function ProdutoCadastroCompleto({
                                                     id="nome"
                                                     value={formData.nome}
                                                     onChange={(e) => handleChange('nome', e.target.value)}
-                                                            onBlur={handleNomeBlur}
+                                                    onBlur={handleNomeBlur}
                                                     placeholder="Ex: Sofá Retrátil 3 Lugares"
                                                     className={cn("text-lg", errors.nome && 'border-red-500')}
+                                                    disabled={isVendedor && !!produto}
                                                 />
+                                                {isVendedor && !!produto && (
+                                                    <p className="text-xs text-amber-700 mt-1">Perfil Vendedor não tem permissão para alterar o nome de um produto cadastrado.</p>
+                                                )}
                                                 {errors.nome && <p className="text-xs text-red-500 mt-1">{errors.nome}</p>}
 
                                                 {duplicatas.length > 0 && (

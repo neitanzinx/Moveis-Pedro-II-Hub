@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Trash2, Package, Wrench, Truck, Store, AlertTriangle, Ban, ImageIcon, ImagePlus, Upload, Loader2, Check, Edit2 } from "lucide-react";
+import { Trash2, Package, Wrench, Truck, Store, AlertTriangle, Ban, ImageIcon, ImagePlus, Upload, Loader2, Check, Edit2, Tag, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -394,36 +394,37 @@ export default function CarrinhoVenda({ itens = [], onRemoveItem, onToggleEntreg
                   )}
                 </div>
               </div>
+            </div>
 
-              <div className="flex items-center gap-4">
-                <p className="font-bold text-gray-800 dark:text-gray-200 w-24 text-right">
-                  R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </p>
-                
-                {onEditProduto && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                    onClick={() => onEditProduto(item)}
-                    title="Editar Produto"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </Button>
-                )}
+            {/* Preço + Ações */}
+            <div className="flex items-center gap-2 mt-2 justify-end">
+              <p className="font-bold text-gray-800 dark:text-gray-200 w-28 text-right">
+                R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
 
+              {onEditProduto && (
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
-                  onClick={() => onRemoveItem(index)}
+                  className="h-8 w-8 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                  onClick={() => onEditProduto(item)}
+                  title="Editar Produto"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Edit2 className="w-4 h-4" />
                 </Button>
-              </div>
+              )}
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                onClick={() => onRemoveItem(index)}
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
             </div>
 
-            {/* === SE              LETOR DE ENTREGA (Linha 1) === */}
+            {/* === SELETOR DE ENTREGA (Linha 1) === */}
             {onToggleEntrega && (
               <div className="mt-2 pt-2 border-t border-gray-100 dark:border-neutral-800">
                 <div className="flex flex-col gap-1">

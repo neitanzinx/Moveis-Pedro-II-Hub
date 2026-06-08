@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Receipt, CreditCard, Wallet, DollarSign, Plus, X, Loader2, Clock, Tag, Check, Percent, Truck, User, Package, Key, Ban, TrendingUp } from "lucide-react";
+import { Receipt, CreditCard, Wallet, DollarSign, Plus, X, Loader2, Clock, Tag, Check, Percent, Truck, User, Package, Key, Ban, TrendingUp, RefreshCw, Search, ShoppingBag, ChevronDown, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { base44, supabase } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
@@ -49,12 +49,25 @@ export default function PainelPagamento({
   setTokenGerencial,
   margemNegociavel = 0,
   onDescontoMargemChange,
-  hideActions = false
+  hideActions = false,
+  vendas = [],
+  itens = [],
+  onAtualizarItem,
+  descontoMaxProduto = 0,
+  isProdutoComDesconto
 }) {
   const [novoPagamento, setNovoPagamento] = useState({ forma: "", valor: "", parcelas: 1, linkSubtipo: "" });
   const [cupomCodigo, setCupomCodigo] = useState("");
   const [aplicandoCupom, setAplicandoCupom] = useState(false);
   const [erroCupom, setErroCupom] = useState("");
+
+  // Estado para Modal de Troca
+  const [modalTrocaOpen, setModalTrocaOpen] = useState(false);
+  const [buscaPedido, setBuscaPedido] = useState("");
+  const [pedidoSelecionado, setPedidoSelecionado] = useState(null);
+  const [itensTrocaChecked, setItensTrocaChecked] = useState({});
+
+  const isTrocaPayment = (forma) => String(forma || "").toLowerCase() === "troca";
 
   const [modalOrcamentoOpen, setModalOrcamentoOpen] = useState(false);
   const [validadeOrcamentoDias, setValidadeOrcamentoDias] = useState(30);
@@ -147,6 +160,10 @@ export default function PainelPagamento({
 
   const handleAdd = async () => {
     if (!novoPagamento.valor) return;
+    if (isTrocaPayment(novoPagamento.forma)) {
+      setModalTrocaOpen(true);
+      return;
+    }
 
     const formaResolvida = resolverForma(novoPagamento.forma, novoPagamento.parcelas);
 
@@ -161,6 +178,35 @@ export default function PainelPagamento({
       acrescimo: valorAcrescimo,
       parcelas: novoPagamento.parcelas
     }));
+    setNovoPagamento({ forma: "", valor: "", parcelas: 1, linkSubtipo: "" });
+  };
+
+  const handleConfirmarTroca = () => {
+    if (!pedidoSelecionado) return;
+    const itensPedido = pedidoSelecionado.itens || [];
+    const itensSelecionados = itensPedido.filter((_, idx) => itensTrocaChecked[idx]);
+    if (itensSelecionados.length === 0) {
+      toast.warning("Selecione pelo menos um item para trocar.");
+      return;
+    }
+    itensSelecionados.forEach((item) => {
+      const valorItem = Number(item.preco_unitario || 0) * Number(item.quantidade || 1);
+      onAddPagamento(normalizePaymentItem({
+        forma_pagamento: "Troca",
+        valor: valorItem,
+        parcelas: 1,
+        troca_pedido_numero: pedidoSelecionado.numero_pedido,
+        troca_pedido_id: pedidoSelecionado.id,
+        troca_produto_nome: item.produto_nome || item.nome,
+        troca_produto_id: item.produto_id,
+        troca_quantidade: item.quantidade,
+      }));
+    });
+    toast.success(`${itensSelecionados.length} item(ns) de troca adicionados!`);
+    setModalTrocaOpen(false);
+    setPedidoSelecionado(null);
+    setBuscaPedido("");
+    setItensTrocaChecked({});
     setNovoPagamento({ forma: "", valor: "", parcelas: 1, linkSubtipo: "" });
   };
 
@@ -313,6 +359,40 @@ export default function PainelPagamento({
     if (onDescontoMargemChange) onDescontoMargemChange(0);
   };
 
+  // ---- Desconto por item ----
+  const handleDescontoItem = (index, item, percentStr) => {
+    let percent = parseFloat(percentStr);
+    if (isNaN(percent) || percent < 0) percent = 0;
+    if (percent > descontoMaxProduto) {
+      toast.error(`Limite de ${descontoMaxProduto}% atingido.`);
+      percent = descontoMaxProduto;
+    }
+    const precoOriginal = item.preco_original ?? item.preco_unitario;
+    const novoPrecoUnit = precoOriginal * (1 - percent / 100);
+    const novoSubtotal = novoPrecoUnit * (item.quantidade || 1);
+    if (onAtualizarItem) {
+      onAtualizarItem(index, {
+        desconto_item_percent: percent,
+        desconto_item_valor: precoOriginal * (percent / 100) * (item.quantidade || 1),
+        preco_original: precoOriginal,
+        preco_unitario: novoPrecoUnit,
+        subtotal: novoSubtotal
+      });
+    }
+  };
+
+  const handleRemoverDescontoItem = (index, item) => {
+    const precoOriginal = item.preco_original ?? item.preco_unitario;
+    if (onAtualizarItem) {
+      onAtualizarItem(index, {
+        desconto_item_percent: 0,
+        desconto_item_valor: 0,
+        preco_unitario: precoOriginal,
+        subtotal: precoOriginal * (item.quantidade || 1)
+      });
+    }
+  };
+
   // Sincronizar desconto de margem quando o subtotal muda
   useEffect(() => {
     if (descontoMargemPercent > 0 && !cupomAplicado && !tokenGerencial) {
@@ -421,6 +501,77 @@ export default function PainelPagamento({
               </div>
             </div>
           </div>
+
+          {/* Lista de Itens com Desconto por Produto */}
+          {itens.length > 0 && (
+            <div className="bg-gray-50 dark:bg-neutral-800/30 rounded-xl p-3 border border-gray-100 dark:border-neutral-700/50 max-h-[180px] overflow-y-auto">
+              <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Itens do Pedido</h4>
+              <div className="space-y-2">
+                {itens.map((item, index) => {
+                  const eligible = isProdutoComDesconto && isProdutoComDesconto(item);
+                  return (
+                    <div key={index} className="flex flex-col gap-1 p-2 bg-white dark:bg-neutral-900 rounded border border-gray-100 dark:border-neutral-800">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-xs font-medium text-gray-800 dark:text-gray-200 line-clamp-2 leading-tight flex-1">
+                          {item.quantidade}x {item.produto_nome}
+                        </p>
+                        <div className="text-right whitespace-nowrap">
+                          {(item.desconto_item_percent || 0) > 0 && item.preco_original ? (
+                            <div className="flex flex-col">
+                              <span className="text-[10px] text-gray-400 line-through">
+                                R$ {(item.preco_original * (item.quantidade || 1)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                                R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                              R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Desconto do Item */}
+                      {eligible && (
+                        <div className="flex items-center justify-between mt-1 pt-1 border-t border-dashed border-gray-100 dark:border-neutral-800">
+                          <span className="text-[10px] text-emerald-600 flex items-center gap-1">
+                            <Tag className="w-3 h-3" />
+                            Desconto (máx {descontoMaxProduto}%)
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <div className="relative">
+                              <Input
+                                type="number"
+                                min={0}
+                                max={descontoMaxProduto}
+                                step={0.5}
+                                value={item.desconto_item_percent || 0}
+                                onChange={(e) => handleDescontoItem(index, item, e.target.value)}
+                                className="h-6 w-16 text-[11px] pr-5 border-emerald-200 focus-visible:ring-emerald-500"
+                              />
+                              <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 text-[10px]">%</span>
+                            </div>
+                            {(item.desconto_item_percent || 0) > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoverDescontoItem(index, item)}
+                                className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                title="Remover desconto"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <h3 className="font-semibold text-sm uppercase text-gray-500 dark:text-gray-400 flex items-center justify-between mt-2 mb-2">
             <div className="flex items-center gap-2">
@@ -627,7 +778,7 @@ export default function PainelPagamento({
                             onChange={(e) => {
                               const formatted = formatCurrencyMask(e.target.value);
                               setDescontoValorDisplay(formatted);
-                              
+
                               let valR = parseCurrencyToNumber(formatted);
                               if (isNaN(valR) || valR < 0) {
                                 setDesconto(0);
@@ -809,13 +960,224 @@ export default function PainelPagamento({
         <div className="md:col-span-7 lg:col-span-8 flex flex-col gap-4 h-full">
           <div className="flex-1 flex flex-col gap-4">
 
+            {/* Modal de Troca de Mercadoria */}
+            <Dialog open={modalTrocaOpen} onOpenChange={(open) => {
+              setModalTrocaOpen(open);
+              if (!open) {
+                setPedidoSelecionado(null);
+                setBuscaPedido("");
+                setItensTrocaChecked({});
+                setNovoPagamento(prev => ({ ...prev, forma: "" }));
+              }
+            }}>
+              <DialogContent className="sm:max-w-[620px] max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <RefreshCw className="w-5 h-5 text-teal-600" />
+                    Troca de Mercadoria
+                  </DialogTitle>
+                  <DialogDescription>
+                    Busque um pedido anterior e selecione os itens que serão aceitos como crédito na venda atual.
+                  </DialogDescription>
+                </DialogHeader>
+
+                {/* Busca de Pedido */}
+                {!pedidoSelecionado && (
+                  <div className="space-y-3">
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <Input
+                        placeholder="Digite o número do pedido (ex: 10001)"
+                        value={buscaPedido}
+                        onChange={(e) => setBuscaPedido(e.target.value)}
+                        className="pl-9 h-10"
+                        autoFocus
+                      />
+                    </div>
+
+                    {/* Resultados da Busca */}
+                    {buscaPedido.trim().length >= 1 && (() => {
+                      const termo = buscaPedido.trim().toLowerCase();
+                      const encontrados = vendas.filter(v =>
+                        String(v.numero_pedido || "").toLowerCase().includes(termo) ||
+                        String(v.cliente_nome || "").toLowerCase().includes(termo)
+                      ).slice(0, 8);
+                      return (
+                        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                          {encontrados.length === 0 ? (
+                            <p className="text-sm text-gray-400 text-center py-4">Nenhum pedido encontrado</p>
+                          ) : (
+                            encontrados.map((venda) => (
+                              <button
+                                key={venda.id}
+                                type="button"
+                                onClick={() => {
+                                  setPedidoSelecionado(venda);
+                                  const initialChecked = {};
+                                  (venda.itens || []).forEach((_, idx) => { initialChecked[idx] = false; });
+                                  setItensTrocaChecked(initialChecked);
+                                }}
+                                className="w-full text-left p-3 rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:border-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-all"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <p className="font-bold text-sm text-gray-800 dark:text-gray-200">Pedido #{venda.numero_pedido}</p>
+                                    <p className="text-xs text-gray-500 mt-0.5">{venda.cliente_nome}</p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-sm font-semibold text-teal-700 dark:text-teal-400">
+                                      R$ {Number(venda.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </p>
+                                    <p className="text-xs text-gray-400">
+                                      {venda.data_venda ? new Date(venda.data_venda + 'T00:00:00').toLocaleDateString('pt-BR') : ''}
+                                      {venda.status && ` · ${venda.status}`}
+                                    </p>
+                                  </div>
+                                </div>
+                                {(venda.itens || []).length > 0 && (
+                                  <p className="text-xs text-gray-400 mt-1">{venda.itens.length} item(ns)</p>
+                                )}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {buscaPedido.trim().length === 0 && (
+                      <p className="text-sm text-gray-400 text-center py-4 flex items-center justify-center gap-2">
+                        <Search className="w-4 h-4" /> Digite para buscar pedidos
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Itens do Pedido Selecionado */}
+                {pedidoSelecionado && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-teal-700 dark:text-teal-400">Pedido #{pedidoSelecionado.numero_pedido}</p>
+                        <p className="text-sm text-gray-500">{pedidoSelecionado.cliente_nome}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPedidoSelecionado(null);
+                          setBuscaPedido("");
+                          setItensTrocaChecked({});
+                        }}
+                        className="text-xs text-teal-600 hover:underline flex items-center gap-1"
+                      >
+                        <Search className="w-3 h-3" /> Buscar outro pedido
+                      </button>
+                    </div>
+
+                    <div className="bg-teal-50 dark:bg-teal-900/10 rounded-lg p-2 border border-teal-100 dark:border-teal-800">
+                      <div className="flex items-center justify-between mb-2 px-1">
+                        <p className="text-xs font-semibold uppercase text-teal-600 dark:text-teal-400">Itens do Pedido</p>
+                        <button
+                          type="button"
+                          className="text-xs text-teal-600 hover:underline"
+                          onClick={() => {
+                            const allChecked = (pedidoSelecionado.itens || []).every((_, i) => itensTrocaChecked[i]);
+                            const newState = {};
+                            (pedidoSelecionado.itens || []).forEach((_, i) => { newState[i] = !allChecked; });
+                            setItensTrocaChecked(newState);
+                          }}
+                        >
+                          {(pedidoSelecionado.itens || []).every((_, i) => itensTrocaChecked[i]) ? 'Desmarcar todos' : 'Selecionar todos'}
+                        </button>
+                      </div>
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {(pedidoSelecionado.itens || []).map((item, idx) => {
+                          const valorItem = Number(item.preco_unitario || 0) * Number(item.quantidade || 1);
+                          const isChecked = !!itensTrocaChecked[idx];
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setItensTrocaChecked(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                              className={`w-full text-left p-3 rounded-lg border transition-all flex items-start gap-3 ${isChecked
+                                ? 'bg-teal-100 dark:bg-teal-900/30 border-teal-400 dark:border-teal-600'
+                                : 'bg-white dark:bg-neutral-800 border-gray-200 dark:border-neutral-700 hover:border-teal-300'
+                                }`}
+                            >
+                              <div className={`w-5 h-5 rounded flex items-center justify-center border shrink-0 mt-0.5 transition-colors ${isChecked
+                                ? 'bg-teal-600 border-teal-600 text-white'
+                                : 'bg-white dark:bg-neutral-700 border-gray-300 dark:border-neutral-500'
+                                }`}>
+                                {isChecked && <Check className="w-3 h-3" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-sm text-gray-800 dark:text-gray-200 truncate">
+                                  {item.produto_nome || item.nome || 'Produto'}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                  Qtd: {item.quantidade || 1} · R$ {Number(item.preco_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} cada
+                                </p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className={`font-bold text-sm ${isChecked ? 'text-teal-700 dark:text-teal-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                                  R$ {valorItem.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Resumo da seleção */}
+                    {(() => {
+                      const selecionados = (pedidoSelecionado.itens || []).filter((_, i) => itensTrocaChecked[i]);
+                      const totalTroca = selecionados.reduce((acc, item) => acc + Number(item.preco_unitario || 0) * Number(item.quantidade || 1), 0);
+                      return selecionados.length > 0 ? (
+                        <div className="bg-teal-600 text-white rounded-lg p-3 flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-semibold">{selecionados.length} item(ns) selecionado(s)</p>
+                            <p className="text-xs opacity-80">Crédito total de troca</p>
+                          </div>
+                          <p className="text-xl font-bold">R$ {totalTroca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-400 text-center py-2">Selecione ao menos um item para prosseguir</p>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                <DialogFooter className="mt-2">
+                  <Button variant="outline" onClick={() => {
+                    setModalTrocaOpen(false);
+                    setPedidoSelecionado(null);
+                    setBuscaPedido("");
+                    setItensTrocaChecked({});
+                    setNovoPagamento(prev => ({ ...prev, forma: "" }));
+                  }}>Cancelar</Button>
+                  <Button
+                    className="bg-teal-600 hover:bg-teal-700 text-white"
+                    disabled={!pedidoSelecionado || !(pedidoSelecionado.itens || []).some((_, i) => itensTrocaChecked[i])}
+                    onClick={handleConfirmarTroca}
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" /> Confirmar Troca
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             {/* Adicionar Pagamento */}
             <div className="bg-gray-50 dark:bg-neutral-800/50 p-4 rounded-xl border border-gray-100 dark:border-neutral-800">
               <Label className="text-xs font-semibold uppercase text-gray-500 mb-3 block">Adicionar Pagamento</Label>
               <div className="flex flex-col sm:flex-row gap-3 items-end flex-wrap">
                 <div className="flex-1 w-full sm:w-auto">
                   <Label className="text-xs mb-1.5 block">Forma de Pagamento</Label>
-                  <Select value={novoPagamento.forma} onValueChange={v => setNovoPagamento({ forma: v, valor: novoPagamento.valor, parcelas: 1, linkSubtipo: "" })}>
+                  <Select value={novoPagamento.forma} onValueChange={v => {
+                    setNovoPagamento({ forma: v, valor: "", parcelas: 1, linkSubtipo: "" });
+                    if (v === "Troca") {
+                      setModalTrocaOpen(true);
+                    }
+                  }}>
                     <SelectTrigger className="h-10 bg-white dark:bg-neutral-800">
                       <SelectValue placeholder="Selecione" />
                     </SelectTrigger>
@@ -859,52 +1221,66 @@ export default function PainelPagamento({
                 {isInstallmentPaymentMethod(
                   isLinkPaymentMethod(novoPagamento.forma) ? novoPagamento.linkSubtipo : novoPagamento.forma
                 ) && (
-                  <div className="w-full sm:w-24">
-                    <Label className="text-xs mb-1.5 block">Parcelas</Label>
-                    <Select value={String(novoPagamento.parcelas)} onValueChange={v => setNovoPagamento({ ...novoPagamento, parcelas: Number(v) })}>
-                      <SelectTrigger className="h-10 bg-white dark:bg-neutral-800"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {Array.from({ length: 12 }).map((_, i) => (
-                          <SelectItem key={i + 1} value={String(i + 1)}>{i + 1}x</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="w-full sm:w-24">
+                      <Label className="text-xs mb-1.5 block">Parcelas</Label>
+                      <Select value={String(novoPagamento.parcelas)} onValueChange={v => setNovoPagamento({ ...novoPagamento, parcelas: Number(v) })}>
+                        <SelectTrigger className="h-10 bg-white dark:bg-neutral-800"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {Array.from({ length: 12 }).map((_, i) => (
+                            <SelectItem key={i + 1} value={String(i + 1)}>{i + 1}x</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                {/* Campo de Valor — oculto para Troca */}
+                {!isTrocaPayment(novoPagamento.forma) && (
+                  <div className="flex-1 w-full sm:w-auto">
+                    <Label className="text-xs mb-1.5 block">Valor (R$)</Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">R$</span>
+                      <Input
+                        type="number"
+                        className="h-10 pl-9 text-lg font-bold bg-white dark:bg-neutral-800"
+                        placeholder="0,00"
+                        value={novoPagamento.valor}
+                        onChange={e => setNovoPagamento({ ...novoPagamento, valor: e.target.value })}
+                        onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                      />
+                    </div>
+                    {/* Preview do acréscimo */}
+                    {(() => {
+                      const formaPreview = resolverForma(novoPagamento.forma, novoPagamento.parcelas);
+                      return novoPagamento.valor && formaPreview && getAcrescimo(formaPreview) ? (
+                        <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                          <TrendingUp className="w-3 h-3" />
+                          +R$ {calcularAcrescimo(formaPreview, parseFloat(novoPagamento.valor)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de acréscimo
+                        </p>
+                      ) : null;
+                    })()}
                   </div>
                 )}
 
-                <div className="flex-1 w-full sm:w-auto">
-                  <Label className="text-xs mb-1.5 block">Valor (R$)</Label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">R$</span>
-                    <Input
-                      type="number"
-                      className="h-10 pl-9 text-lg font-bold bg-white dark:bg-neutral-800"
-                      placeholder="0,00"
-                      value={novoPagamento.valor}
-                      onChange={e => setNovoPagamento({ ...novoPagamento, valor: e.target.value })}
-                      onKeyDown={e => e.key === 'Enter' && handleAdd()}
-                    />
-                  </div>
-                  {/* Preview do acréscimo */}
-                  {(() => {
-                    const formaPreview = resolverForma(novoPagamento.forma, novoPagamento.parcelas);
-                    return novoPagamento.valor && formaPreview && getAcrescimo(formaPreview) ? (
-                      <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
-                        <TrendingUp className="w-3 h-3" />
-                        +R$ {calcularAcrescimo(formaPreview, parseFloat(novoPagamento.valor)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de acréscimo
-                      </p>
-                    ) : null;
-                  })()}
-                </div>
-
-                <Button
-                  size="lg"
-                  className="h-10 px-6 bg-green-600 hover:bg-green-700 text-white font-bold w-full sm:w-auto"
-                  onClick={handleAdd}
-                  disabled={!novoPagamento.valor || !novoPagamento.forma || (isLinkPaymentMethod(novoPagamento.forma) && !novoPagamento.linkSubtipo)}
-                >
-                  <Plus className="w-5 h-5 mr-1" /> Adicionar
-                </Button>
+                {/* Botão especial de Troca */}
+                {isTrocaPayment(novoPagamento.forma) ? (
+                  <Button
+                    size="lg"
+                    className="h-10 px-6 bg-teal-600 hover:bg-teal-700 text-white font-bold w-full sm:w-auto"
+                    onClick={() => setModalTrocaOpen(true)}
+                  >
+                    <RefreshCw className="w-5 h-5 mr-1" /> Selecionar Pedido
+                  </Button>
+                ) : (
+                  <Button
+                    size="lg"
+                    className="h-10 px-6 bg-green-600 hover:bg-green-700 text-white font-bold w-full sm:w-auto"
+                    onClick={handleAdd}
+                    disabled={!novoPagamento.valor || !novoPagamento.forma || (isLinkPaymentMethod(novoPagamento.forma) && !novoPagamento.linkSubtipo)}
+                  >
+                    <Plus className="w-5 h-5 mr-1" /> Adicionar
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -941,7 +1317,10 @@ export default function PainelPagamento({
                 ) : (
                   <>
                     {pagamentos.map((p, i) => (
-                      <div key={i} className="flex justify-between items-center p-3 bg-white dark:bg-neutral-800 rounded-lg shadow-sm border border-gray-100 dark:border-neutral-700/50 hover:border-green-200 dark:hover:border-green-900 transition-colors">
+                      <div key={i} className={`flex justify-between items-center p-3 rounded-lg shadow-sm border transition-colors ${p.forma_pagamento === 'Troca'
+                        ? 'bg-teal-50 dark:bg-teal-900/10 border-teal-200 dark:border-teal-800/50 hover:border-teal-300'
+                        : 'bg-white dark:bg-neutral-800 border-gray-100 dark:border-neutral-700/50 hover:border-green-200 dark:hover:border-green-900'
+                        }`}>
                         <div className="flex items-center gap-3">
                           <BadgePagamento tipo={p.forma_pagamento} />
                           <div>
@@ -951,6 +1330,11 @@ export default function PainelPagamento({
                               {p.acrescimo > 0 && (
                                 <span className="text-xs text-blue-600">
                                   R$ {(p.valor_base || p.valor - p.acrescimo).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} + R$ {p.acrescimo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} acréscimo
+                                </span>
+                              )}
+                              {p.forma_pagamento === 'Troca' && p.troca_produto_nome && (
+                                <span className="text-xs text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-900/30 px-1.5 py-0.5 rounded truncate max-w-[140px]">
+                                  {p.troca_produto_nome}{p.troca_pedido_numero ? ` · Ped. #${p.troca_pedido_numero}` : ''}
                                 </span>
                               )}
                             </div>
@@ -1130,10 +1514,14 @@ function BadgePagamento({ tipo }) {
   const icons = {
     Dinheiro: <Wallet className="w-3 h-3" />,
     Pix: <span className="font-bold text-[11px]">PIX</span>,
+    Troca: <RefreshCw className="w-3 h-3" />,
     default: <CreditCard className="w-3 h-3" />
   };
   return (
-    <div className="w-5 h-5 bg-white dark:bg-neutral-900 rounded flex items-center justify-center text-gray-500 border border-gray-200">
+    <div className={`w-5 h-5 rounded flex items-center justify-center border ${tipo === 'Troca'
+      ? 'bg-teal-100 dark:bg-teal-900/40 text-teal-600 border-teal-300 dark:border-teal-700'
+      : 'bg-white dark:bg-neutral-900 text-gray-500 border-gray-200'
+      }`}>
       {icons[tipo] || icons.default}
     </div>
   );

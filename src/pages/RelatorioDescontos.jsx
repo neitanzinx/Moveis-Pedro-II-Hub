@@ -17,6 +17,7 @@ const ORIGEM_LABELS = {
   token: { label: "Token Gerencial", color: "bg-amber-100 text-amber-700" },
   cupom: { label: "Cupom", color: "bg-purple-100 text-purple-700" },
   arredondamento: { label: "Arredondamento", color: "bg-blue-100 text-blue-700" },
+  desconto_produto: { label: "Desc. por Produto", color: "bg-emerald-100 text-emerald-700" },
 };
 
 export default function RelatorioDescontos() {
@@ -167,6 +168,7 @@ export default function RelatorioDescontos() {
                   <SelectItem value="token">Token Gerencial</SelectItem>
                   <SelectItem value="cupom">Cupom</SelectItem>
                   <SelectItem value="arredondamento">Arredondamento</SelectItem>
+                  <SelectItem value="desconto_produto">Desc. por Produto</SelectItem>
                 </SelectContent>
               </Select>
             </div>

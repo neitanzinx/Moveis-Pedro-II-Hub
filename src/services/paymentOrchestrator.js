@@ -24,6 +24,8 @@ const METHOD_ALIASES = {
   "cartao de credito 1x": "Crédito 1x",
   "cartao de credito parcelado": "Crédito Parcelado",
   // Outros
+  troca: "Troca",
+  "troca de mercadoria": "Troca",
   afesp: "AFESP",
   multicredito: "Multicrédito",
   boleto: "Boleto",
@@ -47,6 +49,7 @@ export const PAYMENT_METHOD_OPTIONS = [
   "AFESP",
   "Multicrédito",
   "Link de Pagamento",
+  "Troca",
 ];
 
 export const LINK_PAYMENT_SUBTYPES = ["Link - Crédito", "Link - Débito", "Link - Pix"];

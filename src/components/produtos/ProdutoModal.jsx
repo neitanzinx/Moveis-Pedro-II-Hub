@@ -44,6 +44,7 @@ const categorias = [
 
 export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoading }) {
   const { user } = useAuth();
+  const isVendedor = String(user?.cargo || '').toLowerCase().includes('vendedor');
   const showFinancials = user?.cargo === 'Administrador';
   const [formData, setFormData] = useState({
     codigo_barras: "",
@@ -201,6 +202,7 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
 
     const dataToSave = {
       ...formData,
+      nome: (isVendedor && !!produto) ? produto.nome : formData.nome,
       preco_venda: parseFloat(formData.preco_final_manual || formData.preco_venda),
       preco_custo: formData.preco_custo ? parseFloat(formData.preco_custo) : undefined,
       markup_multiplicador: formData.markup_multiplicador ? parseFloat(formData.markup_multiplicador) : null,
@@ -256,7 +258,11 @@ export default function ProdutoModal({ isOpen, onClose, onSave, produto, isLoadi
               value={formData.nome}
               onChange={(e) => handleChange("nome", e.target.value)}
               className={errors.nome ? "border-red-500" : ""}
+              disabled={isVendedor && !!produto}
             />
+            {isVendedor && !!produto && (
+              <p className="text-xs text-amber-700 mt-1">Perfil Vendedor não tem permissão para alterar o nome de um produto cadastrado.</p>
+            )}
             {errors.nome && (
               <p className="text-xs text-red-500 mt-1">{errors.nome}</p>
             )}

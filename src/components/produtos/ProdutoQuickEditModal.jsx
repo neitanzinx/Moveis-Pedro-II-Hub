@@ -280,6 +280,7 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
 
             if (isVendedor) {
                 updatedData.preco_venda = Number(produto?.preco_venda || 0);
+                updatedData.nome = produto?.nome || '';
             }
 
             // Recalcula o total agregado com base nos campos reais de estoque
@@ -343,7 +344,11 @@ export default function ProdutoQuickEditModal({ isOpen, onClose, produto, onSave
                                         if (dismissedSuggestionName) setDismissedSuggestionName('');
                                     }}
                                     placeholder="Nome do produto"
+                                    disabled={isVendedor}
                                 />
+                                {isVendedor && (
+                                    <p className="text-xs text-amber-700 mt-1">Perfil Vendedor não tem permissão para alterar o nome de um produto cadastrado.</p>
+                                )}
                             </div>
 
                             <div className="space-y-2">

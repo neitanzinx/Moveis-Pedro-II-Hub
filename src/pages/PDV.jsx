@@ -675,7 +675,7 @@ export default function PDV() {
             return;
           }
 
-          console.log("🔄 Produto atualizado em realtime:", newProduto?.nome || payload.eventType);
+          console.log("Produto atualizado em realtime:", newProduto?.nome || payload.eventType);
 
           // 1. Atualiza o cache da lista de produtos (para a busca encontrar o preço novo)
           queryClient.invalidateQueries({ queryKey: ['produtos'] });
@@ -722,6 +722,12 @@ export default function PDV() {
     queryFn: () => base44.entities.Loja.list()
   });
 
+  const { data: descontoExcecoes = [] } = useQuery({
+    queryKey: ['desconto_produto_excecoes'],
+    queryFn: () => base44.entities.DescontoProdutoExcecao.list(),
+    enabled: isOnline
+  });
+
   const { data: clientes = [] } = useQuery({
     queryKey: ['clientes'],
     queryFn: () => base44.entities.Cliente.list()
@@ -729,7 +735,7 @@ export default function PDV() {
 
   const { data: vendas = [] } = useQuery({
     queryKey: ['vendas'],
-    queryFn: () => base44.entities.Venda.list('-data_venda', 50),
+    queryFn: () => base44.entities.Venda.list('-data_venda', 500),
     enabled: isOnline
   });
 
@@ -838,6 +844,28 @@ export default function PDV() {
     const lojaObj = (lojas || []).find(l => l.nome === configVenda.loja);
     return parseFloat(lojaObj?.margem_negociavel || 0);
   }, [lojas, configVenda.loja]);
+
+  // Configurações de desconto por produto da loja ativa
+  const lojaAtivaPDV = useMemo(() => (lojas || []).find(l => l.nome === configVenda.loja), [lojas, configVenda.loja]);
+  const descontoProdutoAtivo = lojaAtivaPDV?.desconto_produto_ativo === true;
+  const descontoMaxProduto = parseFloat(lojaAtivaPDV?.desconto_produto_max_percent || 0);
+
+  // Exceções da loja ativa (produto_id ou categoria bloqueados)
+  const excecoesDaLoja = useMemo(() => {
+    if (!lojaAtivaPDV?.id) return [];
+    return (descontoExcecoes || []).filter(e => e.loja_id === lojaAtivaPDV.id);
+  }, [descontoExcecoes, lojaAtivaPDV?.id]);
+
+  // Retorna true se o produto pode receber desconto individual no carrinho
+  const isProdutoComDesconto = useMemo(() => {
+    return (item) => {
+      if (!descontoProdutoAtivo || descontoMaxProduto <= 0) return false;
+      const excecoes = excecoesDaLoja;
+      const bloqueadoPorProduto = excecoes.some(e => e.produto_id && e.produto_id === item.produto_id);
+      const bloqueadoPorCategoria = excecoes.some(e => e.categoria && e.categoria === item.categoria);
+      return !bloqueadoPorProduto && !bloqueadoPorCategoria;
+    };
+  }, [descontoProdutoAtivo, descontoMaxProduto, excecoesDaLoja]);
 
   const criarOrcamentoMutation = useMutation({
     mutationFn: (data) => base44.entities.Orcamento.create(data),
@@ -2411,6 +2439,11 @@ export default function PDV() {
                 setTokenGerencial={setTokenGerencial}
                 margemNegociavel={margemNegociavel}
                 onDescontoMargemChange={(percent) => setDescontoMargemPercent(percent)}
+                vendas={vendas}
+                itens={itens}
+                onAtualizarItem={handleAtualizarItem}
+                descontoMaxProduto={descontoMaxProduto}
+                isProdutoComDesconto={isProdutoComDesconto}
               />
             </div>
           )}

@@ -57,7 +57,9 @@ import {
     Search,
     Eye,
     FileText,
-    Filter
+    Filter,
+    Tag,
+    X
 } from "lucide-react";
 import {
     AreaChart,
@@ -126,6 +128,200 @@ function MargemLojaRow({ loja, salvando, onSave }) {
     );
 }
 
+// Sub-componente para configurar Desconto por Produto de uma loja
+function DescontoProdutoLojaRow({ loja, salvando, excecoes = [], produtos = [], onSave, onAddExcecao, onRemoveExcecao, categorias = [] }) {
+    const [ativo, setAtivo] = useState(loja.desconto_produto_ativo ?? false);
+    const [maxPercent, setMaxPercent] = useState(loja.desconto_produto_max_percent ?? 0);
+    const [tipoExcecao, setTipoExcecao] = useState('categoria'); // 'categoria' | 'produto'
+    const [categoriaSelecionada, setCategoriaSelecionada] = useState('');
+    const [produtoBusca, setProdutoBusca] = useState('');
+    const [produtoSelecionado, setProdutoSelecionado] = useState(null);
+
+    const ativoSalvo = loja.desconto_produto_ativo ?? false;
+    const maxSalvo = parseFloat(loja.desconto_produto_max_percent ?? 0);
+    const alterado = ativo !== ativoSalvo || parseFloat(maxPercent) !== maxSalvo;
+
+    const produtosFiltrados = produtoBusca.length >= 2
+        ? produtos.filter(p => p.nome?.toLowerCase().includes(produtoBusca.toLowerCase())).slice(0, 8)
+        : [];
+
+    const excecoesDaLoja = excecoes.filter(e => e.loja_id === loja.id);
+
+    return (
+        <div className="p-3 bg-white dark:bg-neutral-800 rounded-lg border border-blue-100 dark:border-blue-900/40 space-y-3">
+            {/* Cabeçalho da loja */}
+            <div className="flex items-center justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm text-gray-800 dark:text-gray-100 truncate">{loja.nome}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                        {!ativoSalvo ? 'Desconto por produto desabilitado' : `Até ${maxSalvo}% por item`}
+                    </p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Switch
+                        checked={ativo}
+                        onCheckedChange={setAtivo}
+                        className="data-[state=checked]:bg-blue-600"
+                    />
+                    {ativo && (
+                        <>
+                            <div className="relative w-24">
+                                <Input
+                                    type="number"
+                                    value={maxPercent}
+                                    onChange={e => {
+                                        let v = parseFloat(e.target.value);
+                                        if (isNaN(v) || v < 0) v = 0;
+                                        if (v > 100) v = 100;
+                                        setMaxPercent(v);
+                                    }}
+                                    className="h-9 text-sm pr-6"
+                                    min={0}
+                                    max={100}
+                                    step={0.5}
+                                    placeholder="0"
+                                />
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
+                            </div>
+                            <Button
+                                size="sm"
+                                className="h-9 bg-blue-600 hover:bg-blue-700 text-white"
+                                onClick={() => onSave({ ativo, maxPercent: parseFloat(maxPercent) || 0 })}
+                                disabled={salvando || !alterado}
+                            >
+                                {salvando ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                            </Button>
+                        </>
+                    )}
+                    {!ativo && alterado && (
+                        <Button
+                            size="sm"
+                            className="h-9 bg-blue-600 hover:bg-blue-700 text-white"
+                            onClick={() => onSave({ ativo, maxPercent: parseFloat(maxPercent) || 0 })}
+                            disabled={salvando}
+                        >
+                            {salvando ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                        </Button>
+                    )}
+                </div>
+            </div>
+
+            {/* Exceções — só mostra quando ativo */}
+            {ativo && (
+                <>
+                    {/* Lista de exceções */}
+                    {excecoesDaLoja.length > 0 && (
+                        <div className="space-y-1">
+                            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Exceções (sem desconto):</p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {excecoesDaLoja.map(exc => (
+                                    <span
+                                        key={exc.id}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800"
+                                    >
+                                        {exc.categoria ? `Categoria: ${exc.categoria}` : (exc.produto_nome || 'Produto')}
+                                        <button
+                                            type="button"
+                                            onClick={() => onRemoveExcecao(exc.id)}
+                                            className="ml-0.5 hover:text-red-900 transition-colors"
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Adicionar exceção */}
+                    <div className="space-y-2 pt-1 border-t border-gray-100 dark:border-neutral-700">
+                        <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Adicionar exceção:</p>
+                        <div className="flex gap-2 items-start flex-wrap">
+                            <Select value={tipoExcecao} onValueChange={setTipoExcecao}>
+                                <SelectTrigger className="h-8 w-28 text-xs">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="categoria">Categoria</SelectItem>
+                                    <SelectItem value="produto">Produto</SelectItem>
+                                </SelectContent>
+                            </Select>
+
+                            {tipoExcecao === 'categoria' ? (
+                                <>
+                                    <Select value={categoriaSelecionada} onValueChange={setCategoriaSelecionada}>
+                                        <SelectTrigger className="h-8 flex-1 min-w-[140px] text-xs">
+                                            <SelectValue placeholder="Selecionar categoria" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {categorias.map(cat => (
+                                                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-8 text-xs px-2"
+                                        onClick={() => {
+                                            if (!categoriaSelecionada) return;
+                                            onAddExcecao({ loja_id: loja.id, categoria: categoriaSelecionada });
+                                            setCategoriaSelecionada('');
+                                        }}
+                                        disabled={!categoriaSelecionada}
+                                    >
+                                        <Plus className="w-3 h-3" />
+                                    </Button>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="relative flex-1 min-w-[160px]">
+                                        <Input
+                                            type="text"
+                                            placeholder="Buscar produto..."
+                                            value={produtoBusca}
+                                            onChange={e => { setProdutoBusca(e.target.value); setProdutoSelecionado(null); }}
+                                            className="h-8 text-xs"
+                                        />
+                                        {produtosFiltrados.length > 0 && !produtoSelecionado && (
+                                            <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                                                {produtosFiltrados.map(p => (
+                                                    <button
+                                                        key={p.id}
+                                                        type="button"
+                                                        onClick={() => { setProdutoSelecionado(p); setProdutoBusca(p.nome); }}
+                                                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 dark:hover:bg-neutral-700 border-b border-gray-100 dark:border-neutral-700 last:border-0"
+                                                    >
+                                                        {p.nome}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-8 text-xs px-2"
+                                        onClick={() => {
+                                            if (!produtoSelecionado) return;
+                                            onAddExcecao({ loja_id: loja.id, produto_id: produtoSelecionado.id, produto_nome: produtoSelecionado.nome });
+                                            setProdutoBusca('');
+                                            setProdutoSelecionado(null);
+                                        }}
+                                        disabled={!produtoSelecionado}
+                                    >
+                                        <Plus className="w-3 h-3" />
+                                    </Button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
+
 export default function DashboardGerente() {
     const { user, isGerente, filterData } = useAuth();
     const queryClient = useQueryClient();
@@ -158,6 +354,9 @@ export default function DashboardGerente() {
 
     // Estado para margem negociável por loja
     const [margemSalvando, setMargemSalvando] = useState({});
+
+    // Estado para desconto por produto por loja
+    const [descontoProdutoSalvando, setDescontoProdutoSalvando] = useState({});
 
     // Estados para dashboard tabs e pesquisa
     const [abaDashboard, setAbaDashboard] = useState('visao-geral');
@@ -273,6 +472,12 @@ export default function DashboardGerente() {
     const { data: fechamentosComissao = [] } = useQuery({
         queryKey: ['comissoes-fechamento-dashboard'],
         queryFn: () => base44.entities.ComissaoFechamentoMensal.list('-created_at'),
+        enabled: !!user
+    });
+
+    const { data: descontoExcecoes = [], refetch: refetchDescontoExcecoes } = useQuery({
+        queryKey: ['desconto-produto-excecoes-gerente'],
+        queryFn: () => base44.entities.DescontoProdutoExcecao.list(),
         enabled: !!user
     });
 
@@ -3135,6 +3340,80 @@ export default function DashboardGerente() {
                                         }}
                                     />
                                 ))}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+
+                {/* Desconto por Produto */}
+                <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-lg flex items-center gap-2">
+                            <Tag className="w-5 h-5 text-blue-600" />
+                            Desconto por Produto
+                        </CardTitle>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                            Permita que vendedores apliquem desconto individual por item no carrinho. Configure o limite máximo e adicione exceções (produtos ou categorias que não podem ser descontados).
+                        </p>
+                    </CardHeader>
+                    <CardContent>
+                        {lojasGerenciadas.length === 0 ? (
+                            <div className="text-center py-6 text-gray-500">
+                                <Store className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                                <p className="text-sm">Nenhuma loja encontrada</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                {lojasGerenciadas.map(loja => {
+                                    const categoriasDaLoja = [...new Set(produtos.map(p => p.categoria).filter(Boolean))].sort();
+                                    return (
+                                        <DescontoProdutoLojaRow
+                                            key={loja.id}
+                                            loja={loja}
+                                            salvando={!!descontoProdutoSalvando[loja.id]}
+                                            excecoes={descontoExcecoes}
+                                            produtos={produtos}
+                                            categorias={categoriasDaLoja}
+                                            onSave={async ({ ativo, maxPercent }) => {
+                                                setDescontoProdutoSalvando(prev => ({ ...prev, [loja.id]: true }));
+                                                try {
+                                                    await base44.entities.Loja.update(loja.id, {
+                                                        desconto_produto_ativo: ativo,
+                                                        desconto_produto_max_percent: maxPercent
+                                                    });
+                                                    queryClient.invalidateQueries({ queryKey: ['lojas-ativas'] });
+                                                    queryClient.invalidateQueries({ queryKey: ['lojas'] });
+                                                    toast.success(`Desconto por produto de ${loja.nome} salvo!`);
+                                                } catch (err) {
+                                                    console.error('Erro ao salvar desconto por produto:', err);
+                                                    toast.error('Erro ao salvar configuração');
+                                                } finally {
+                                                    setDescontoProdutoSalvando(prev => ({ ...prev, [loja.id]: false }));
+                                                }
+                                            }}
+                                            onAddExcecao={async (dados) => {
+                                                try {
+                                                    await base44.entities.DescontoProdutoExcecao.create(dados);
+                                                    refetchDescontoExcecoes();
+                                                    toast.success('Exceção adicionada!');
+                                                } catch (err) {
+                                                    console.error('Erro ao adicionar exceção:', err);
+                                                    toast.error('Erro ao adicionar exceção');
+                                                }
+                                            }}
+                                            onRemoveExcecao={async (id) => {
+                                                try {
+                                                    await base44.entities.DescontoProdutoExcecao.delete(id);
+                                                    refetchDescontoExcecoes();
+                                                    toast.success('Exceção removida!');
+                                                } catch (err) {
+                                                    console.error('Erro ao remover exceção:', err);
+                                                    toast.error('Erro ao remover exceção');
+                                                }
+                                            }}
+                                        />
+                                    );
+                                })}
                             </div>
                         )}
                     </CardContent>

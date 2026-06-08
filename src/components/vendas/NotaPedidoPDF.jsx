@@ -250,6 +250,10 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
 
   const itensHTML = venda.itens.map(item => {
     const detalhes = obterDetalhesItemPDF(item);
+    const temDescontoItem = (item.desconto_item_percent || 0) > 0;
+    const precoOriginalTotal = temDescontoItem && item.preco_original
+      ? item.preco_original * (item.quantidade || 1)
+      : item.subtotal;
 
     return `
     <tr>
@@ -258,10 +262,18 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
         <div style="margin-top: 3px; font-size: 11px; color: #6b7280; line-height: 1.45;">
           Cor: ${detalhes.cor} | Tecido: ${detalhes.tecido} | Tamanho: ${detalhes.tamanho} | Fabricante: ${detalhes.fabricante}
         </div>
+        ${temDescontoItem ? `<div style="margin-top: 4px; font-size: 11px; color: #059669; font-weight: 600;">✂ Desconto ${item.desconto_item_percent}%: -R$ ${(item.desconto_item_valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>` : ''}
       </td>
       <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: center;">${item.quantidade}</td>
-      <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: right;">R$ ${item.preco_unitario?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-      <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: right; font-weight: 600;">R$ ${item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+      <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: right;">
+        ${temDescontoItem && item.preco_original
+          ? `<span style="text-decoration: line-through; color: #9ca3af; font-size: 11px;">R$ ${item.preco_original.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span><br><span style="color: #059669; font-weight: 600;">R$ ${(item.preco_unitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>`
+          : `R$ ${item.preco_unitario?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+        }
+      </td>
+      <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: right; font-weight: 600;">
+        ${temDescontoItem ? `<span style="text-decoration: line-through; color: #9ca3af; font-size: 11px;">R$ ${precoOriginalTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span><br><span style="color: #059669;">R$ ${item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>` : `R$ ${item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+      </td>
     </tr>
   `;
   }).join('');
@@ -381,6 +393,20 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
         </div>
         <div class="resumo-box">
           <div class="resumo-titulo">Valores</div>
+          ${(() => {
+            const totalDescontosItens = (venda.itens || []).reduce((acc, item) => acc + (item.desconto_item_valor || 0), 0);
+            const subtotalBruto = (venda.itens || []).reduce((acc, item) => acc + ((item.preco_original || item.preco_unitario || 0) * (item.quantidade || 1)), 0);
+            const temDescontoItens = totalDescontosItens > 0;
+            const temDescontoGlobal = venda.desconto > 0;
+            if (temDescontoItens || temDescontoGlobal) {
+              return `
+                ${temDescontoItens ? `<div class="total-linha"><span>Subtotal bruto:</span><span>R$ ${subtotalBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>` : ''}
+                ${temDescontoItens ? `<div class="total-linha" style="color:#059669;"><span>Descontos em produtos:</span><span>-R$ ${totalDescontosItens.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>` : ''}
+                ${temDescontoGlobal ? `<div class="total-linha" style="color:#059669;"><span>Desconto negociável:</span><span>-R$ ${Number(venda.desconto).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>` : ''}
+              `;
+            }
+            return '';
+          })()}
           <div class="total-linha total-final"><span>TOTAL:</span><span>R$ ${venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></div>
         </div>
       </div>
