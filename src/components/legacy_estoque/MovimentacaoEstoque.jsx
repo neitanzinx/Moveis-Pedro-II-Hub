@@ -57,7 +57,16 @@ export default function MovimentacaoEstoque({ barcodeInputRef }) {
       
       if (type === 'saida' && novaQtd < 0) throw new Error("Estoque insuficiente");
       
-      await base44.entities.Produto.update(selectedProduct.id, { quantidade_estoque: novaQtd });
+      const updates = { quantidade_estoque: novaQtd };
+      const cdQtd = type === 'entrada'
+        ? (selectedProduct.estoque_cd || 0) + qtd
+        : Math.max(0, (selectedProduct.estoque_cd || 0) - qtd);
+
+      if (Object.prototype.hasOwnProperty.call(selectedProduct, 'estoque_cd')) {
+        updates.estoque_cd = cdQtd;
+      }
+
+      await base44.entities.Produto.update(selectedProduct.id, updates);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['produtos'] });

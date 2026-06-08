@@ -8,11 +8,14 @@ ALTER TABLE lojas
   ADD COLUMN IF NOT EXISTS desconto_produto_ativo boolean DEFAULT false,
   ADD COLUMN IF NOT EXISTS desconto_produto_max_percent numeric(5,2) DEFAULT 0;
 
+-- Remover a tabela se já existir para corrigir o tipo incompatível do produto_id (uuid)
+DROP TABLE IF EXISTS desconto_produto_excecoes CASCADE;
+
 -- 2. Nova tabela de exceções
-CREATE TABLE IF NOT EXISTS desconto_produto_excecoes (
+CREATE TABLE desconto_produto_excecoes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   loja_id uuid REFERENCES lojas(id) ON DELETE CASCADE,
-  produto_id bigint REFERENCES produtos(id) ON DELETE CASCADE,
+  produto_id uuid REFERENCES produtos(id) ON DELETE CASCADE,
   produto_nome text,          -- cache para exibição rápida
   categoria text,             -- quando a exceção é por categoria
   created_at timestamptz DEFAULT now()

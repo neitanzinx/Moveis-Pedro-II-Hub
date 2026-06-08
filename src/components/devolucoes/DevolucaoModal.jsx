@@ -618,9 +618,15 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
           throw new Error(`Estoque insuficiente para o item de troca ${item.produto_nome}.`);
         }
 
-        await base44.entities.Produto.update(produto.id, {
+        const updates = {
           quantidade_estoque: estoqueAntes - quantidade
-        });
+        };
+
+        if (campoDestino && Object.prototype.hasOwnProperty.call(produto, campoDestino)) {
+          updates[campoDestino] = Math.max(0, Number(produto[campoDestino] || 0) - quantidade);
+        }
+
+        await base44.entities.Produto.update(produto.id, updates);
 
         try {
           await supabase.from('movimentacoes_estoque').insert({

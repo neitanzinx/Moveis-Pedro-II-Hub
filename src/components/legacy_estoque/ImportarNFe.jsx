@@ -460,6 +460,7 @@ export default function ImportarNFe({ user }) {
           // Atualizar estoque e custo
           await base44.entities.Produto.update(produtoExistente.id, {
             quantidade_estoque: (produtoExistente.quantidade_estoque || 0) + item.quantidade,
+            estoque_cd: (produtoExistente.estoque_cd || 0) + item.quantidade,
             preco_custo: item.valor_unitario,
             ncm: item.ncm || produtoExistente.ncm,
             ultima_nfe_id: nfe.id,
@@ -476,6 +477,7 @@ export default function ImportarNFe({ user }) {
             preco_custo: item.valor_unitario,
             preco_venda: item.valor_unitario * (1 + (parseFloat(localStorage.getItem("nfe_margem_lucro") || "80") / 100)),
             quantidade_estoque: item.quantidade,
+            estoque_cd: item.quantidade,
             estoque_minimo: 5,
             ativo: true,
             ncm: item.ncm,

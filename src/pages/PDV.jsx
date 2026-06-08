@@ -688,15 +688,22 @@ export default function PDV() {
             return prevItens.map(item => {
               if (item.produto_id == newProduto.id) {
                 const novoPreco = parseFloat(newProduto.preco_venda);
+                const precoOriginalBase = item.preco_original ?? item.preco_unitario;
 
-                // Só notifica/atualiza se o preço realmente mudou
-                if (item.preco_unitario !== novoPreco) {
+                // Só notifica/atualiza se o preço no banco realmente mudou
+                if (precoOriginalBase !== novoPreco) {
                   toast.info(`Preço atualizado: ${newProduto.nome} agora é R$ ${novoPreco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
+
+                  const percent = item.desconto_item_percent || 0;
+                  const novoPrecoUnit = percent > 0 ? novoPreco * (1 - percent / 100) : novoPreco;
+                  const novoDescontoValor = percent > 0 ? novoPreco * (percent / 100) * (item.quantidade || 1) : 0;
 
                   return {
                     ...item,
-                    preco_unitario: novoPreco,
-                    subtotal: item.quantidade * novoPreco
+                    preco_original: percent > 0 ? novoPreco : undefined,
+                    preco_unitario: novoPrecoUnit,
+                    desconto_item_valor: novoDescontoValor,
+                    subtotal: (item.quantidade || 1) * novoPrecoUnit
                   };
                 }
               }
@@ -846,8 +853,8 @@ export default function PDV() {
   }, [lojas, configVenda.loja]);
 
   // Configurações de desconto por produto da loja ativa
-  const lojaAtivaPDV = useMemo(() => (lojas || []).find(l => l.nome === configVenda.loja), [lojas, configVenda.loja]);
-  const descontoProdutoAtivo = lojaAtivaPDV?.desconto_produto_ativo === true;
+  const lojaAtivaPDV = useMemo(() => (lojas || []).find(l => l.nome && configVenda.loja && String(l.nome).trim().toLowerCase() === String(configVenda.loja).trim().toLowerCase()), [lojas, configVenda.loja]);
+  const descontoProdutoAtivo = lojaAtivaPDV?.desconto_produto_ativo === true || String(lojaAtivaPDV?.desconto_produto_ativo) === 'true';
   const descontoMaxProduto = parseFloat(lojaAtivaPDV?.desconto_produto_max_percent || 0);
 
   // Exceções da loja ativa (produto_id ou categoria bloqueados)
@@ -862,10 +869,15 @@ export default function PDV() {
       if (!descontoProdutoAtivo || descontoMaxProduto <= 0) return false;
       const excecoes = excecoesDaLoja;
       const bloqueadoPorProduto = excecoes.some(e => e.produto_id && e.produto_id === item.produto_id);
-      const bloqueadoPorCategoria = excecoes.some(e => e.categoria && e.categoria === item.categoria);
+      const bloqueadoPorCategoria = excecoes.some(e => {
+        if (!e.categoria) return false;
+        const prod = produtos.find(p => p.id === item.produto_id);
+        const itemCat = item.categoria || prod?.categoria;
+        return itemCat && String(e.categoria).toLowerCase() === String(itemCat).toLowerCase();
+      });
       return !bloqueadoPorProduto && !bloqueadoPorCategoria;
     };
-  }, [descontoProdutoAtivo, descontoMaxProduto, excecoesDaLoja]);
+  }, [descontoProdutoAtivo, descontoMaxProduto, excecoesDaLoja, produtos]);
 
   const criarOrcamentoMutation = useMutation({
     mutationFn: (data) => base44.entities.Orcamento.create(data),
@@ -1374,7 +1386,7 @@ export default function PDV() {
       return Number(produto?.[campoOrigem] || 0);
     }
 
-    const total = Number(produto?.quantidade_estoque ?? getProductTotalStock(produto));
+    const total = Number(getProductTotalStock(produto));
     const reservado = Number(produto?.quantidade_reservada || 0);
     if (!Number.isFinite(total)) return null;
     return total - reservado;

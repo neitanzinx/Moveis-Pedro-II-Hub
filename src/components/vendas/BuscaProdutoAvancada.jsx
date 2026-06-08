@@ -32,14 +32,19 @@ export default function BuscaProdutoAvancada(props) {
     if (!produto) return 0;
 
     const estoqueCampos = Object.entries(produto)
-      .filter(([key, value]) => key.startsWith('estoque_') && typeof value !== 'object')
+      .filter(([key, value]) => 
+        key.startsWith('estoque_') && 
+        key !== 'estoque_minimo' && 
+        key !== 'estoque_ideal' && 
+        typeof value !== 'object'
+      )
       .map(([, value]) => Number(value || 0))
       .filter((value) => Number.isFinite(value));
 
-    const estoquePrincipal = Number(produto.quantidade_estoque || 0);
+    const sumLocations = estoqueCampos.reduce((acc, val) => acc + val, 0);
     const estoqueBase = estoqueCampos.length > 0
-      ? Math.max(estoquePrincipal, ...estoqueCampos)
-      : estoquePrincipal;
+      ? sumLocations
+      : Number(produto.quantidade_estoque || 0);
     const reservado = Number(produto.quantidade_reservada || 0);
 
     return Math.max(0, estoqueBase - reservado);

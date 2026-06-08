@@ -123,6 +123,7 @@ const tableMap = {
     NivelComissao: 'niveis_comissao',
     NivelComissaoFaixa: 'niveis_comissao_faixas',
     TokenGerencial: 'tokens_gerenciais',
+    DescontoProdutoExcecao: 'desconto_produto_excecoes',
     LogUsoToken: 'log_uso_tokens',
     SolicitacaoCadastro: 'solicitacoes_cadastro_produto',
     PromocaoFornecedor: 'promocoes_fornecedor',
