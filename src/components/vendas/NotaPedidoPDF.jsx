@@ -233,7 +233,7 @@ if (typeof window !== 'undefined') {
 }
 
 // PDF PARA O CLIENTE (limpo e elegante)
-export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
+export function gerarNotaPedidoHTML(venda, cliente, vendedor, lojaInfo) {
   const logoSrc = getLogoSrc();
   const dataVenda = new Date(venda.data_venda).toLocaleDateString('pt-BR');
 
@@ -348,6 +348,9 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor) {
           <div class="empresa-info">
             <div class="empresa-nome">Móveis Pedro II</div>
             <div class="empresa-sub">Loja ${venda.loja}</div>
+            ${lojaInfo?.cnpj ? `<div class="empresa-sub">CNPJ: ${lojaInfo.cnpj}</div>` : ''}
+            ${lojaInfo?.endereco ? `<div class="empresa-sub">${lojaInfo.endereco}</div>` : ''}
+            ${lojaInfo?.telefone ? `<div class="empresa-sub">Tel: ${lojaInfo.telefone}</div>` : ''}
           </div>
         </div>
         <div class="pedido-info">
@@ -523,8 +526,8 @@ export function gerarNotaInternaHTML(venda, cliente, vendedor) {
   `;
 }
 
-export function abrirNotaPedidoPDF(venda, cliente, vendedor) {
-  const html = gerarNotaPedidoHTML(venda, cliente, vendedor);
+export function abrirNotaPedidoPDF(venda, cliente, vendedor, lojaInfo) {
+  const html = gerarNotaPedidoHTML(venda, cliente, vendedor, lojaInfo);
   const printWindow = window.open('', '_blank');
 
   // Check if popup was blocked
@@ -670,11 +673,11 @@ export function sinalizarErroNotaPedidoPDF(printWindow, mensagem = 'Nao foi poss
 /**
  * Preenche e imprime a janela já aberta com os dados da nota
  */
-export function preencherEImprimirPDF(printWindow, venda, cliente, vendedor) {
+export function preencherEImprimirPDF(printWindow, venda, cliente, vendedor, lojaInfo) {
   if (!printWindow) {
     // Se por algum motivo a janela não existe, tenta abrir normalmente
     console.warn('Janela não disponível, tentando abrir nova...');
-    abrirNotaPedidoPDF(venda, cliente, vendedor);
+    abrirNotaPedidoPDF(venda, cliente, vendedor, lojaInfo);
     return;
   }
 
@@ -684,7 +687,7 @@ export function preencherEImprimirPDF(printWindow, venda, cliente, vendedor) {
     progress: 100
   });
 
-  const html = gerarNotaPedidoHTML(venda, cliente, vendedor);
+  const html = gerarNotaPedidoHTML(venda, cliente, vendedor, lojaInfo);
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
@@ -744,9 +747,9 @@ export function enviarWhatsApp(telefone, numeroPedido, valorTotal, nomeCliente, 
  * @param {string} vendedor - Nome do vendedor
  * @returns {Promise<string>} - PDF em base64 (sem o prefixo data:application/pdf;base64,)
  */
-export async function gerarNotaPedidoBase64(venda, cliente, vendedor) {
+export async function gerarNotaPedidoBase64(venda, cliente, vendedor, lojaInfo) {
   try {
-    const htmlContent = gerarNotaPedidoHTML(venda, cliente, vendedor);
+    const htmlContent = gerarNotaPedidoHTML(venda, cliente, vendedor, lojaInfo);
 
     // Criar container temporário 
     const container = document.createElement('div');

@@ -1518,8 +1518,8 @@ export default function Vendas() {
                                                             const u = users.find(user => user.id === venda.responsavel_id);
                                                             if (u && u.full_name) nomeVendedor = u.full_name;
                                                         }
-
-                                                        abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name);
+                                                        const lojaInfoPdf1 = lojasAtivas.find(l => String(l.nome).trim().toLowerCase() === String(venda.loja || '').trim().toLowerCase()) || null;
+                                                        abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name, lojaInfoPdf1);
                                                     }}>
                                                         <FileText className="w-4 h-4 text-blue-600" />
                                                     </Button>
@@ -1781,8 +1781,8 @@ export default function Vendas() {
                                                         if (venda.responsavel_id) {
                                                             const u = users.find(user => user.id === venda.responsavel_id);
                                                             if (u && u.full_name) nomeVendedor = u.full_name;
-                                                        }
-                                                        abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name);
+                                                        const lojaInfoPdf2 = lojasAtivas.find(l => String(l.nome).trim().toLowerCase() === String(venda.loja || '').trim().toLowerCase()) || null;
+                                                        abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name, lojaInfoPdf2);
                                                     }}>
                                                         <FileText className="w-4 h-4 text-blue-600" />
                                                     </Button>

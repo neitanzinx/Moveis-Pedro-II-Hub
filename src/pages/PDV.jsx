@@ -1691,7 +1691,7 @@ export default function PDV() {
       const salvou = saveOfflineSale(vendaData);
       if (salvou) {
         toast.warning("⚠️ Sem internet: Venda salva no dispositivo! Será sincronizada quando a conexão voltar.");
-        abrirNotaPedidoPDF({ ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name);
+        abrirNotaPedidoPDF({ ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name, lojaAtivaPDV || null);
         resetForm();
         carregarVendasPendentes();
       } else {
@@ -1838,7 +1838,7 @@ export default function PDV() {
 
       // 4. IMPRESSÃO
       atualizarProgressoPedido('Preparando impressao...', 96);
-      preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name);
+      preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name, lojaAtivaPDV || null);
 
       toast.success("Venda finalizada com sucesso!");
 
@@ -1952,7 +1952,7 @@ export default function PDV() {
             let pdfBase64 = null;
             try {
               // Nota: vendaData ainda está acessível no closure
-              pdfBase64 = await gerarNotaPedidoBase64(vendaData, { ...clienteSelecionado }, vendedorFinal.nome || user.full_name);
+              pdfBase64 = await gerarNotaPedidoBase64(vendaData, { ...clienteSelecionado }, vendedorFinal.nome || user.full_name, lojaAtivaPDV || null);
 
               if (pdfBase64) {
                 console.log(`📄 PDF gerado com sucesso (${pdfBase64.length} bytes)`);

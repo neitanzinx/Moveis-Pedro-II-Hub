@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Filter, FileText, Trash2, Edit, Loader2, ArrowRight, Printer } from "lucide-react";
+import { Plus, Search, Filter, FileText, Trash2, Edit, Loader2, ArrowRight, Printer, AlertTriangle } from "lucide-react";
 import OrcamentoModal from "../components/orcamentos/OrcamentoModal";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useNavigate } from "react-router-dom";
@@ -14,6 +14,7 @@ import { createPageUrl } from "@/utils";
 import { toast } from "sonner";
 import { formatarTelefone, formatarNome } from "@/utils/formatters";
 import { useAuth } from "@/hooks/useAuth";
+import { useTenant } from "@/contexts/TenantContext";
 
 export default function Orcamentos() {
     const [searchTerm, setSearchTerm] = useState("");
@@ -24,7 +25,8 @@ export default function Orcamentos() {
     const queryClient = useQueryClient();
     const confirm = useConfirm();
     const navigate = useNavigate();
-    const { user } = useAuth();
+    const { user, filterData } = useAuth();
+    const { lojas } = useTenant();
     const [generatingPdfId, setGeneratingPdfId] = useState(null);
 
     const handleGerarPDF = async (orcamento) => {
@@ -34,10 +36,10 @@ export default function Orcamentos() {
             const { abrirOrcamentoPDF } = await import("../utils/orcamentoPDF");
             
             const sellerId = orcamentoFull.vendedor_id;
-            const seller = users.find(u => u.id === sellerId);
-            const sellerName = seller ? (seller.full_name || seller.email) : (user?.nome || user?.full_name || '');
+            const seller = sellerId ? users.find(u => u.id === sellerId) : null;
+            const sellerName = seller?.full_name || seller?.email || user?.full_name || user?.nome || '';
             
-            abrirOrcamentoPDF(orcamentoFull, sellerName);
+            abrirOrcamentoPDF(orcamentoFull, sellerName, lojas.find(l => String(l.nome).trim().toLowerCase() === String(orcamentoFull.loja || '').trim().toLowerCase()) || null);
             toast.success("PDF gerado com sucesso!");
         } catch (err) {
             console.error(err);
@@ -144,7 +146,13 @@ export default function Orcamentos() {
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orcamentos'] })
     });
 
-    const filtered = orcamentos.filter(orc => {
+    // Filtra orçamentos pelo escopo do usuário (Admin=todos, Gerente=loja, Vendedor=próprios)
+    const orcamentosPermitidos = filterData(orcamentos, {
+        userField: 'vendedor_id',
+        lojaField: 'loja'
+    });
+
+    const filtered = orcamentosPermitidos.filter(orc => {
         const matchesSearch = orc.numero_orcamento?.toLowerCase().includes(searchTerm.toLowerCase()) || orc.cliente_nome?.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesStatus = statusFilter === "all" || orc.status === statusFilter;
         const matchesFornecedor = fornecedorFilter === "all" || (orc.itens || []).some((item) => {
@@ -217,7 +225,8 @@ export default function Orcamentos() {
                         <TableRow>
                             <TableHead>Número</TableHead>
                             <TableHead>Cliente</TableHead>
-                            <TableHead>Data</TableHead>
+                            <TableHead>Vendedor</TableHead>
+                            <TableHead>Emissão</TableHead>
                             <TableHead>Validade</TableHead>
                             <TableHead>Total</TableHead>
                             <TableHead>Status</TableHead>
@@ -226,11 +235,13 @@ export default function Orcamentos() {
                     </TableHeader>
                     <TableBody>
                         {isLoading ? (
-                            <TableRow><TableCell colSpan={7} className="text-center py-8"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></TableCell></TableRow>
+                            <TableRow><TableCell colSpan={8} className="text-center py-8"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></TableCell></TableRow>
                         ) : filtered.length === 0 ? (
-                            <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">Nenhum orçamento encontrado.</TableCell></TableRow>
+                            <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">Nenhum orçamento encontrado.</TableCell></TableRow>
                         ) : (
-                            filtered.map(orc => (
+                            filtered.map(orc => {
+                                const expirado = checkExpirado(orc);
+                                return (
                                 <TableRow key={orc.id}>
                                     <TableCell className="font-medium">#{orc.numero_orcamento}</TableCell>
                                     <TableCell>
@@ -239,10 +250,37 @@ export default function Orcamentos() {
                                             <span className="text-xs text-gray-500">{formatarTelefone(orc.cliente_telefone)}</span>
                                         </div>
                                     </TableCell>
-                                    <TableCell className="text-sm text-gray-600 dark:text-gray-400">{new Date(orc.data_orcamento).toLocaleDateString('pt-BR')}</TableCell>
-                                    <TableCell className="text-sm text-gray-600 dark:text-gray-400">{new Date(orc.validade).toLocaleDateString('pt-BR')}</TableCell>
+                                    <TableCell>
+                                        {(() => {
+                                            const seller = orc.vendedor_id ? users.find(u => u.id === orc.vendedor_id) : null;
+                                            const nome = seller?.full_name || seller?.email || null;
+                                            return nome ? (
+                                                <span className="text-sm text-gray-700 dark:text-gray-300 font-medium">{nome}</span>
+                                            ) : (
+                                                <span className="text-xs text-gray-400">—</span>
+                                            );
+                                        })()}
+                                    </TableCell>
+                                    <TableCell>
+                                        <div className="flex flex-col">
+                                            <span className="text-sm text-gray-700 dark:text-gray-300">{new Date(orc.data_orcamento).toLocaleDateString('pt-BR')}</span>
+                                            <span className="text-xs text-gray-400">{new Date(orc.data_orcamento).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                                        </div>
+                                    </TableCell>
+                                    <TableCell>
+                                        {orc.validade ? (
+                                            <div className="flex items-center gap-1.5">
+                                                <span className={`text-sm ${expirado ? 'text-red-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}>
+                                                    {new Date(orc.validade).toLocaleDateString('pt-BR')}
+                                                </span>
+                                                {expirado && <AlertTriangle className="w-3.5 h-3.5 text-red-500" />}
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs text-gray-400">—</span>
+                                        )}
+                                    </TableCell>
                                     <TableCell className="font-bold text-gray-900 dark:text-white">R$ {orc.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</TableCell>
-                                    <TableCell><StatusBadge status={orc.status} /></TableCell>
+                                    <TableCell><StatusBadge status={expirado && orc.status === 'Pendente' ? 'Expirado' : orc.status} /></TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex justify-end gap-2">
                                             <Button
@@ -272,7 +310,7 @@ export default function Orcamentos() {
                                             }}>
                                                 <Trash2 className="w-4 h-4 text-red-600" />
                                             </Button>
-                                            {orc.status === 'Pendente' && !checkExpirado(orc) && (
+                                            {orc.status === 'Pendente' && !expirado && (
                                                 <Button
                                                     size="sm"
                                                     onClick={() => handleConverterVenda(orc)}
@@ -285,7 +323,8 @@ export default function Orcamentos() {
                                         </div>
                                     </TableCell>
                                 </TableRow>
-                            ))
+                                );
+                            })
                         )}
                     </TableBody>
                 </Table>

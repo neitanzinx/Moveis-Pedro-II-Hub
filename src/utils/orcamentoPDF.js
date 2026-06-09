@@ -16,7 +16,7 @@ const formatarTelefone = (tel) => {
   return tel;
 };
 
-export function gerarOrcamentoHTML(orcamento, vendedorNome) {
+export function gerarOrcamentoHTML(orcamento, vendedorNome, lojaInfo) {
   const logoSrc = EMPRESA.logo_url;
   const dataOrcamento = orcamento.data_orcamento
     ? new Date(orcamento.data_orcamento).toLocaleDateString('pt-BR')
@@ -117,6 +117,9 @@ export function gerarOrcamentoHTML(orcamento, vendedorNome) {
           <div class="empresa-info">
             <div class="empresa-nome">Móveis Pedro II</div>
             <div class="empresa-sub">Loja ${orcamento.loja || 'Centro'}</div>
+            ${lojaInfo?.cnpj ? `<div class="empresa-sub">CNPJ: ${lojaInfo.cnpj}</div>` : ''}
+            ${lojaInfo?.endereco ? `<div class="empresa-sub">${lojaInfo.endereco}</div>` : ''}
+            ${lojaInfo?.telefone ? `<div class="empresa-sub">Tel: ${lojaInfo.telefone}</div>` : ''}
           </div>
         </div>
         <div class="pedido-info">
@@ -193,7 +196,9 @@ export function gerarOrcamentoHTML(orcamento, vendedorNome) {
       </div>
 
       <div class="footer">
-        <div class="footer-text"><strong>Móveis Pedro II</strong></div>
+        <div class="footer-text"><strong>Móveis Pedro II${orcamento.loja ? ` - Loja ${orcamento.loja}` : ''}</strong></div>
+        ${lojaInfo?.cnpj ? `<div class="footer-text" style="font-size:9px;color:#888;">CNPJ: ${lojaInfo.cnpj}</div>` : ''}
+        ${lojaInfo?.endereco ? `<div class="footer-text" style="font-size:9px;color:#888;">${lojaInfo.endereco}</div>` : ''}
         <div class="footer-text" style="margin-top:3px;font-size:8px;color:#999;">Orçamento gerado em ${new Date().toLocaleString('pt-BR')}</div>
       </div>
     </body>
@@ -201,8 +206,8 @@ export function gerarOrcamentoHTML(orcamento, vendedorNome) {
   `;
 }
 
-export function abrirOrcamentoPDF(orcamento, vendedorNome) {
-  const html = gerarOrcamentoHTML(orcamento, vendedorNome);
+export function abrirOrcamentoPDF(orcamento, vendedorNome, lojaInfo) {
+  const html = gerarOrcamentoHTML(orcamento, vendedorNome, lojaInfo);
   const printWindow = window.open('', '_blank');
 
   if (!printWindow) {

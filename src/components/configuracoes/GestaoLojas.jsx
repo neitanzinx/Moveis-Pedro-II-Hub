@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { base44 } from "@/api/base44Client";
+import { useTenant } from "@/contexts/TenantContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Store, Plus, Pencil, Trash2, MapPin, Loader2, Building2, Search, Phone, Mail, FileText } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -13,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 
 const INITIAL_FORM_DATA = {
     nome: "",
+    cnpj: "",
     endereco: "",
     cidade: "",
     estado: "",
@@ -28,6 +30,7 @@ export default function GestaoLojas() {
     const [searchTerm, setSearchTerm] = useState("");
 
     const queryClient = useQueryClient();
+    const { refreshTenant } = useTenant();
 
     const { data: lojas = [], isLoading } = useQuery({
         queryKey: ['lojas'],
@@ -38,6 +41,7 @@ export default function GestaoLojas() {
         mutationFn: (data) => base44.entities.Loja.create(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['lojas'] });
+            if (refreshTenant) refreshTenant();
             handleCloseModal();
         },
         onError: (err) => setError(err.message || "Erro ao criar loja"),
@@ -47,6 +51,7 @@ export default function GestaoLojas() {
         mutationFn: ({ id, data }) => base44.entities.Loja.update(id, data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['lojas'] });
+            if (refreshTenant) refreshTenant();
             handleCloseModal();
         },
         onError: (err) => setError(err.message || "Erro ao atualizar loja"),
@@ -56,6 +61,7 @@ export default function GestaoLojas() {
         mutationFn: (id) => base44.entities.Loja.delete(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['lojas'] });
+            if (refreshTenant) refreshTenant();
         },
     });
 
@@ -64,6 +70,7 @@ export default function GestaoLojas() {
         if (loja) {
             setFormData({
                 nome: loja.nome || "",
+                cnpj: loja.cnpj || "",
                 endereco: loja.endereco || "",
                 cidade: loja.cidade || "",
                 estado: loja.estado || "",
@@ -336,7 +343,19 @@ export default function GestaoLojas() {
                                     />
                                 </div>
 
-                                <div className="col-span-2">
+                                <div>
+                                    <Label htmlFor="cnpj">CNPJ</Label>
+                                    <Input
+                                        id="cnpj"
+                                        value={formData.cnpj}
+                                        onChange={(e) => handleChange("cnpj", formatCNPJ(e.target.value))}
+                                        placeholder="00.000.000/0000-00"
+                                        className="bg-gray-50 mt-1 font-mono"
+                                        maxLength={18}
+                                    />
+                                </div>
+
+                                <div>
                                     <Label htmlFor="telefone">Telefone</Label>
                                     <Input
                                         id="telefone"
