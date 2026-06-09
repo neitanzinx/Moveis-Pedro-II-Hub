@@ -23,6 +23,7 @@ import { buildProductDisplayName } from "@/utils/productReference";
 import { formatDimensions } from "@/utils/productFormatters";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { obterDataLocalString } from "@/utils/dateUtils";
 import BuscaProdutoAvancada from "@/components/vendas/BuscaProdutoAvancada";
 
 
@@ -32,8 +33,12 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
   const { getUserLoja, user } = useAuth();
   const [formData, setFormData] = useState({
     numero_orcamento: "",
-    data_orcamento: new Date().toISOString().split('T')[0],
-    validade: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+    data_orcamento: obterDataLocalString(),
+    validade: (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 30);
+      return obterDataLocalString(d);
+    })(),
     loja: "Centro",
     cliente_id: "",
     cliente_nome: "",
@@ -137,8 +142,12 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
       const numeroOrcamento = `ORC-${Math.floor(10000 + Math.random() * 90000)}`; // Fixed random number generation
       setFormData({
         numero_orcamento: numeroOrcamento,
-        data_orcamento: new Date().toISOString().split('T')[0],
-        validade: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+        data_orcamento: obterDataLocalString(),
+        validade: (() => {
+          const d = new Date();
+          d.setDate(d.getDate() + 30);
+          return obterDataLocalString(d);
+        })(),
         loja: getUserLoja() || user?.loja || "Centro",
         cliente_id: "",
         cliente_nome: "",
@@ -335,8 +344,9 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                       key={dias}
                       type="button"
                       onClick={() => {
-                        const novaValidade = new Date(Date.now() + dias * 86400000);
-                        setFormData({ ...formData, validade: novaValidade.toISOString().split('T')[0] });
+                        const d = new Date();
+                        d.setDate(d.getDate() + dias);
+                        setFormData({ ...formData, validade: obterDataLocalString(d) });
                       }}
                       className="px-2 py-0.5 text-[10px] rounded-full border border-gray-200 hover:bg-gray-100 text-gray-600"
                     >
@@ -357,8 +367,9 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                           const unidade = document.getElementById('validade_custom_unidade')?.value || 'd';
                           if (!num || num < 1) return;
                           const mult = unidade === 's' ? 7 : unidade === 'm' ? 30 : 1;
-                          const novaValidade = new Date(Date.now() + num * mult * 86400000);
-                          setFormData({ ...formData, validade: novaValidade.toISOString().split('T')[0] });
+                          const d = new Date();
+                          d.setDate(d.getDate() + num * mult);
+                          setFormData({ ...formData, validade: obterDataLocalString(d) });
                         }
                       }}
                       onBlur={(e) => {
@@ -366,8 +377,9 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                         const unidade = document.getElementById('validade_custom_unidade')?.value || 'd';
                         if (!num || num < 1) return;
                         const mult = unidade === 's' ? 7 : unidade === 'm' ? 30 : 1;
-                        const novaValidade = new Date(Date.now() + num * mult * 86400000);
-                        setFormData({ ...formData, validade: novaValidade.toISOString().split('T')[0] });
+                        const d = new Date();
+                        d.setDate(d.getDate() + num * mult);
+                        setFormData({ ...formData, validade: obterDataLocalString(d) });
                       }}
                     />
                     <select

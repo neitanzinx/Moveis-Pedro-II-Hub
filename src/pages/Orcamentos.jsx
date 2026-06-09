@@ -15,6 +15,8 @@ import { toast } from "sonner";
 import { formatarTelefone, formatarNome } from "@/utils/formatters";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenant } from "@/contexts/TenantContext";
+import { formatarDataExibicao } from "@/utils/dateUtils";
+
 
 export default function Orcamentos() {
     const [searchTerm, setSearchTerm] = useState("");
@@ -271,15 +273,15 @@ export default function Orcamentos() {
                                     </TableCell>
                                     <TableCell>
                                         <div className="flex flex-col">
-                                            <span className="text-sm text-gray-700 dark:text-gray-300">{new Date(orc.data_orcamento).toLocaleDateString('pt-BR')}</span>
-                                            <span className="text-xs text-gray-400">{new Date(orc.data_orcamento).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                                            <span className="text-sm text-gray-700 dark:text-gray-300">{formatarDataExibicao(orc.data_orcamento)}</span>
+                                            <span className="text-xs text-gray-400">{new Date(orc.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
                                         </div>
                                     </TableCell>
                                     <TableCell>
                                         {orc.validade ? (
                                             <div className="flex items-center gap-1.5">
                                                 <span className={`text-sm ${expirado ? 'text-red-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}>
-                                                    {new Date(orc.validade).toLocaleDateString('pt-BR')}
+                                                    {formatarDataExibicao(orc.validade)}
                                                 </span>
                                                 {expirado && <AlertTriangle className="w-3.5 h-3.5 text-red-500" />}
                                             </div>

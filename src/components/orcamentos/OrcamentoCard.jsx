@@ -3,11 +3,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pencil, Trash2, Calendar, ArrowRight } from "lucide-react";
-import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
+import { formatarDataExibicao } from "@/utils/dateUtils";
 import { createPageUrl } from "@/utils";
 import { base44 } from "@/api/base44Client";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { buildProductDisplayName } from "@/utils/productReference";
 import { formatDimensions } from "@/utils/productFormatters";
@@ -147,11 +147,11 @@ export default function OrcamentoCard({ orcamento, onEdit, onDelete }) {
         <div className="space-y-2 mb-4">
           <div className="flex items-center gap-2 text-sm" style={{ color: '#8B8B8B' }}>
             <Calendar className="w-4 h-4" />
-            <span>Criado em {format(new Date(orcamento.data_orcamento), "dd/MM/yyyy")}</span>
+            <span>Criado em {formatarDataExibicao(orcamento.data_orcamento)}</span>
           </div>
           <div className="flex items-center gap-2 text-sm" style={{ color: '#8B8B8B' }}>
             <Calendar className="w-4 h-4" />
-            <span>Válido até {format(new Date(orcamento.validade), "dd/MM/yyyy")}</span>
+            <span>Válido até {formatarDataExibicao(orcamento.validade)}</span>
           </div>
           {orcamento.itens && orcamento.itens.length > 0 && (
             <div className="pt-2 border-t" style={{ borderColor: '#E5E0D8' }}>

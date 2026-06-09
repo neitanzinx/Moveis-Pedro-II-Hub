@@ -28,6 +28,7 @@ import { VendaDetalhesModal } from "@/components/vendas/VendaDetalhesModal";
 import { getVendaFinanceiro, getVendaResumoLogistico, isStatusCancelado, isVendaCancelada } from "@/utils/vendaStatus";
 import { buildProductDisplayName } from "@/utils/productReference";
 import { MONEY_EPSILON, toMoneyNumber } from "@/utils/deliveryPayment";
+import { formatarDataExibicao, obterDataLocalString } from "@/utils/dateUtils";
 import { isInstallmentPaymentMethod, validatePaymentSplit } from "@/services/paymentOrchestrator";
 import { findCategoriaByNames } from "@/lib/financeiroRecorrencia";
 
@@ -1414,7 +1415,7 @@ export default function Vendas() {
                                                 </div>
                                             </TableCell>
                                             <TableCell className="text-sm text-gray-600 dark:text-gray-400">
-                                                {new Date(venda.data_venda).toLocaleDateString('pt-BR')}
+                                                {formatarDataExibicao(venda.data_venda)}
                                             </TableCell>
                                             <TableCell className="font-bold text-gray-900 dark:text-white">
                                                 R$ {venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1732,7 +1733,7 @@ export default function Vendas() {
                                                 </div>
                                             </TableCell>
                                             <TableCell className="text-sm text-gray-600 dark:text-gray-400">
-                                                {new Date(venda.data_venda).toLocaleDateString('pt-BR')}
+                                                {formatarDataExibicao(venda.data_venda)}
                                             </TableCell>
                                             <TableCell className="font-bold text-gray-900 dark:text-white">
                                                 R$ {venda.valor_total?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -2481,7 +2482,7 @@ function OrderStatusBadge({ venda, entregas, montagens, financeiro }) {
         } else {
             // Tem entregas
             const entrega = resumoLogistico.entregaPrincipal || entregasVenda[0];
-            const dataEntrega = entrega.data_agendada ? new Date(entrega.data_agendada).toLocaleDateString('pt-BR') : null;
+            const dataEntrega = entrega.data_agendada ? formatarDataExibicao(entrega.data_agendada) : null;
 
             const todosRetira = resumoLogistico.allRetirada;
 
@@ -2502,7 +2503,7 @@ function OrderStatusBadge({ venda, entregas, montagens, financeiro }) {
                 } else if (entrega.status === 'Em Rota') {
                     pushBadge('em_rota', 'bg-blue-100 text-blue-700 border border-blue-200', Truck, 'Em Rota');
                 } else {
-                    const hojeIso = new Date().toLocaleDateString('en-CA');
+                    const hojeIso = obterDataLocalString();
                     const dataEntregaIso = entrega.data_agendada ? entrega.data_agendada.split('T')[0] : null;
                     const isAtrasada = dataEntregaIso && dataEntregaIso < hojeIso;
 

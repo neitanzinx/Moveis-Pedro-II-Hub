@@ -1,6 +1,6 @@
 import { EMPRESA } from "@/config/empresa";
-import { format } from "date-fns";
 import { stripInternalProductPrefixes } from "@/utils/productReference";
+import { formatarDataExibicao } from "@/utils/dateUtils";
 
 const limparNomeProduto = (nome) => stripInternalProductPrefixes(nome) || '-';
 
@@ -19,10 +19,10 @@ const formatarTelefone = (tel) => {
 export function gerarOrcamentoHTML(orcamento, vendedorNome, lojaInfo) {
   const logoSrc = EMPRESA.logo_url;
   const dataOrcamento = orcamento.data_orcamento
-    ? new Date(orcamento.data_orcamento).toLocaleDateString('pt-BR')
-    : new Date().toLocaleDateString('pt-BR');
+    ? formatarDataExibicao(orcamento.data_orcamento)
+    : formatarDataExibicao(new Date());
   const validadeOrcamento = orcamento.validade
-    ? new Date(orcamento.validade).toLocaleDateString('pt-BR')
+    ? formatarDataExibicao(orcamento.validade)
     : '-';
 
   const localidadeArray = [];

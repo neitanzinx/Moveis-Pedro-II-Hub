@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { formatarNome, formatarTelefone, formatarEndereco } from "@/utils/formatters";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
+import { obterDataLocalString, formatarDataExibicao } from "@/utils/dateUtils";
 import {
   Dialog,
   DialogContent,
@@ -80,7 +81,7 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
   const { organization, settings } = useTenant();
   const [formData, setFormData] = useState({
     numero_pedido: proximoNumero || "",
-    data_venda: new Date().toISOString().split('T')[0],
+    data_venda: obterDataLocalString(),
     loja: userLoja || "Centro",
     responsavel_id: "",
     responsavel_nome: "",
@@ -172,7 +173,7 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
     } else {
       setFormData({
         numero_pedido: proximoNumero || "",
-        data_venda: new Date().toISOString().split('T')[0],
+        data_venda: obterDataLocalString(),
         loja: userLoja || "Centro",
         responsavel_id: user?.id || "",
         responsavel_nome: user?.full_name || "",
@@ -508,7 +509,7 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
           </div>
           <div class="info-row">
             <span class="info-label">Data:</span>
-            <span class="info-value">${new Date(vendaData.data_venda).toLocaleDateString('pt-BR')}</span>
+            <span class="info-value">${formatarDataExibicao(vendaData.data_venda)}</span>
           </div>
           <div class="info-row">
             <span class="info-label">Status:</span>
@@ -752,7 +753,7 @@ _Móveis Pedro II - ${vendaData.loja}_`;
             endereco_entrega: cliente?.endereco
               ? `${cliente.endereco}, ${cliente.numero || 's/n'} - ${cliente.bairro || ''}`
               : "Endereço a definir",
-            data_limite: limite.toISOString().split('T')[0],
+            data_limite: obterDataLocalString(limite),
             status: "Pendente",
             impresso: false
           });

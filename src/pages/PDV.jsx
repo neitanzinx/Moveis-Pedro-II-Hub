@@ -35,7 +35,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
-import { adicionarDias } from "@/utils/dateUtils";
+import { adicionarDias, obterDataLocalString } from "@/utils/dateUtils";
 import { formatarNome, formatarEndereco } from "@/utils/formatters";
 import { getProductTotalStock, resolveStockField } from "@/utils/stockUtils";
 import { buildProductDisplayName, stripInternalProductPrefixes } from "@/utils/productReference";
@@ -147,7 +147,7 @@ const obterPrazoEncomenda = (prazos) => {
 // --- FUNÇÃO PARA CRIAR LANÇAMENTOS FINANCEIROS AUTOMÁTICOS ---
 const criarLancamentosVenda = async (vendaData, taxas, vendaId) => {
   try {
-    const hoje = new Date().toISOString().split('T')[0];
+    const hoje = obterDataLocalString();
 
     // 1. Receita Bruta da Venda
     await base44.entities.LancamentoFinanceiro.create({
@@ -425,7 +425,7 @@ export default function PDV() {
           itens: parsed.itens || [],
           pagamentos: parsed.pagamentos || [],
           configVenda: {
-            data: new Date().toISOString().split('T')[0],
+            data: obterDataLocalString(),
             loja: parsed.loja || "Centro",
             prazo: ""
           },
@@ -455,7 +455,7 @@ export default function PDV() {
           itens: parsed.itens || [],
           pagamentos: parsed.pagamentos || [],
           configVenda: parsed.configVenda || {
-            data: new Date().toISOString().split('T')[0],
+            data: obterDataLocalString(),
             loja: "Centro",
             prazo: ""
           },
@@ -487,7 +487,7 @@ export default function PDV() {
   const [itens, setItens] = useState(initialState?.itens || []);
   const [pagamentos, setPagamentos] = useState(initialState?.pagamentos || []);
   const [configVenda, setConfigVenda] = useState(initialState?.configVenda || {
-    data: new Date().toISOString().split('T')[0],
+    data: obterDataLocalString(),
     loja: "Centro",
     prazo: ""
   });
@@ -1752,7 +1752,7 @@ export default function PDV() {
           cliente_nome: clienteSelecionado.nome_completo,
           cliente_telefone: clienteSelecionado.telefone,
           endereco_entrega: enderecoCompleto,
-          data_limite: todosRetiram ? new Date().toISOString().split('T')[0] : limite.toISOString().split('T')[0],
+          data_limite: todosRetiram ? obterDataLocalString() : obterDataLocalString(limite),
           prazo_entrega: configVenda.prazo,
           data_liberacao: aguardandoLiberacao ? (dataLiberacao || null) : null,
           status: todosRetiram
@@ -2039,7 +2039,7 @@ export default function PDV() {
     setDesconto(0);
     setObservacoes("");
     setPagamentoEntrega({ ativo: false, valor: 0, forma: "" });
-    setConfigVenda(prev => ({ ...prev, data: new Date().toISOString().split('T')[0], prazo: "" }));
+    setConfigVenda(prev => ({ ...prev, data: obterDataLocalString(), prazo: "" }));
     setPreferenciasEntrega({ dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" });
     setAguardandoLiberacao(false);
     setDataLiberacao("");
@@ -2313,7 +2313,7 @@ export default function PDV() {
                       id="data-liberacao"
                       type="date"
                       value={dataLiberacao}
-                      min={configVenda.data || new Date().toISOString().split('T')[0]}
+                      min={configVenda.data || obterDataLocalString()}
                       onChange={(e) => setDataLiberacao(e.target.value)}
                       className="w-full h-10 rounded-md border border-blue-200 bg-white px-3 text-sm text-gray-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     />

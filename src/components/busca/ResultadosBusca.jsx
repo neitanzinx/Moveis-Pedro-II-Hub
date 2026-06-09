@@ -2,6 +2,7 @@ import React from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ChevronRight } from "lucide-react";
+import { formatarDataExibicao } from "@/utils/dateUtils";
 
 export default function ResultadosBusca({ titulo, icon: Icon, dados, tipo, onClicar, termo }) {
   const destacarTexto = (texto, termo) => {
@@ -44,7 +45,7 @@ export default function ResultadosBusca({ titulo, icon: Icon, dados, tipo, onCli
                   Cliente: {destacarTexto(item.cliente_nome, termo)}
                 </p>
                 <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
-                  <span>📅 {new Date(item.data_venda).toLocaleDateString('pt-BR')}</span>
+                  <span>📅 {formatarDataExibicao(item.data_venda)}</span>
                   <span>💰 R$ {item.valor_total?.toFixed(2)}</span>
                   <span>🏪 {item.loja}</span>
                 </div>
@@ -137,9 +138,9 @@ export default function ResultadosBusca({ titulo, icon: Icon, dados, tipo, onCli
                   Cliente: {destacarTexto(item.cliente_nome, termo)}
                 </p>
                 <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
-                  <span>📅 {new Date(item.data_orcamento).toLocaleDateString('pt-BR')}</span>
+                  <span>📅 {formatarDataExibicao(item.data_orcamento)}</span>
                   <span>💰 R$ {item.valor_total?.toFixed(2)}</span>
-                  <span>⏰ Validade: {new Date(item.validade).toLocaleDateString('pt-BR')}</span>
+                  <span>⏰ Validade: {formatarDataExibicao(item.validade)}</span>
                 </div>
               </div>
               <ChevronRight className="w-5 h-5 text-gray-400" />
@@ -177,7 +178,7 @@ export default function ResultadosBusca({ titulo, icon: Icon, dados, tipo, onCli
                 </p>
                 {item.data_agendada && (
                   <p className="text-xs text-gray-500 mt-1">
-                    📅 Agendada: {new Date(item.data_agendada).toLocaleDateString('pt-BR')} - {item.turno}
+                    📅 Agendada: {formatarDataExibicao(item.data_agendada)} - {item.turno}
                   </p>
                 )}
               </div>
