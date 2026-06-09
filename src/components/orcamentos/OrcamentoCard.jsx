@@ -69,7 +69,8 @@ export default function OrcamentoCard({ orcamento, onEdit, onDelete }) {
         cidade: orcamentoFull.cidade || "",
         bairro: orcamentoFull.bairro || "",
         endereco: orcamentoFull.endereco || "",
-        valor_frete: parseFloat(orcamentoFull.valor_frete) || 0
+        valor_frete: parseFloat(orcamentoFull.valor_frete) || 0,
+        selectedVendedorId: orcamentoFull.vendedor_id || null
       };
 
       // Marcar o orçamento como Convertido para impedir dupla conversão

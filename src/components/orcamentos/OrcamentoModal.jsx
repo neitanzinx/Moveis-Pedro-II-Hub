@@ -44,6 +44,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     desconto: 0,
     status: "Pendente",
     observacoes: "",
+    vendedor_id: user?.id || "",
   });
 
   const [quantidade, setQuantidade] = useState(1);
@@ -61,6 +62,14 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     queryFn: () => base44.entities.Loja.list('nome'),
     select: (data) => data.filter(l => l.ativa),
   });
+
+  const { data: users = [] } = useQuery({
+    queryKey: ['users_list'],
+    queryFn: () => base44.entities.User.list(),
+  });
+
+  const hasMasterAccess = String(user?.cargo || '').toLowerCase().includes('admin') || String(user?.cargo || '').toLowerCase().includes('master');
+  const vendedoresDisponiveis = (users || []).filter((u) => !!u?.id);
 
   const criarClienteMutation = useMutation({
     mutationFn: async (dados) => {
@@ -111,7 +120,10 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
 
   useEffect(() => {
     if (orcamento) {
-      setFormData(orcamento);
+      setFormData({
+        ...orcamento,
+        vendedor_id: orcamento.vendedor_id || user?.id || "",
+      });
       // Initialize search with client name if editing an existing quote
       if (orcamento.cliente_nome) {
         setSearchCliente(orcamento.cliente_nome);
@@ -139,9 +151,10 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
         bairro: "",
         endereco: "",
         valor_frete: 0,
+        vendedor_id: user?.id || "",
       });
     }
-  }, [orcamento, isOpen]);
+  }, [orcamento, isOpen, user]);
 
   useEffect(() => {
     calcularTotal();
@@ -350,7 +363,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
               </div>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid md:grid-cols-3 gap-4">
               <div className="relative">
                 <Label htmlFor="cliente">Cliente *</Label>
                 <div className="relative mt-2">
@@ -459,23 +472,56 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
               </div>
               <div>
                 <Label htmlFor="loja">Loja *</Label>
-                <Select
-                  value={formData.loja}
-                  onValueChange={(value) => setFormData({ ...formData, loja: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {lojas.length === 0 ? (
-                      <SelectItem value="Centro" disabled>Carregando...</SelectItem>
-                    ) : (
-                      lojas.map(loja => (
-                        <SelectItem key={loja.id} value={loja.nome}>{loja.nome}</SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+                <div className="mt-2">
+                  <Select
+                    value={formData.loja}
+                    onValueChange={(value) => setFormData({ ...formData, loja: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lojas.length === 0 ? (
+                        <SelectItem value="Centro" disabled>Carregando...</SelectItem>
+                      ) : (
+                        lojas.map(loja => (
+                          <SelectItem key={loja.id} value={loja.nome}>{loja.nome}</SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="vendedor">Vendedor *</Label>
+                <div className="mt-2">
+                  {hasMasterAccess ? (
+                    <Select
+                      value={formData.vendedor_id || user?.id || ''}
+                      onValueChange={(value) => setFormData({ ...formData, vendedor_id: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione o vendedor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {vendedoresDisponiveis.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.full_name || u.email}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      value={(() => {
+                        const selId = formData.vendedor_id || user?.id;
+                        const u = users.find(x => x.id === selId);
+                        return u ? (u.full_name || u.email) : (user?.full_name || user?.email || "");
+                      })()}
+                      disabled
+                    />
+                  )}
+                </div>
               </div>
             </div>
 

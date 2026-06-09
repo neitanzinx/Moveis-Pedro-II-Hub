@@ -32,7 +32,12 @@ export default function Orcamentos() {
         try {
             const orcamentoFull = await base44.entities.Orcamento.getById(orcamento.id);
             const { abrirOrcamentoPDF } = await import("../utils/orcamentoPDF");
-            abrirOrcamentoPDF(orcamentoFull, user?.nome || user?.full_name || '');
+            
+            const sellerId = orcamentoFull.vendedor_id;
+            const seller = users.find(u => u.id === sellerId);
+            const sellerName = seller ? (seller.full_name || seller.email) : (user?.nome || user?.full_name || '');
+            
+            abrirOrcamentoPDF(orcamentoFull, sellerName);
             toast.success("PDF gerado com sucesso!");
         } catch (err) {
             console.error(err);
@@ -76,7 +81,8 @@ export default function Orcamentos() {
                 cidade: orcamentoFull.cidade || "",
                 bairro: orcamentoFull.bairro || "",
                 endereco: orcamentoFull.endereco || "",
-                valor_frete: parseFloat(orcamentoFull.valor_frete) || 0
+                valor_frete: parseFloat(orcamentoFull.valor_frete) || 0,
+                selectedVendedorId: orcamentoFull.vendedor_id || null
             };
             // Marcar o orçamento como Convertido para impedir dupla conversão
             await base44.entities.Orcamento.update(orcamentoFull.id, { status: 'Convertido' });
@@ -99,6 +105,7 @@ export default function Orcamentos() {
     const { data: clientes = [] } = useQuery({ queryKey: ['clientes'], queryFn: () => base44.entities.Cliente.list() });
     const { data: produtos = [] } = useQuery({ queryKey: ['produtos'], queryFn: () => base44.entities.Produto.list() });
     const { data: fornecedores = [] } = useQuery({ queryKey: ['fornecedores'], queryFn: () => base44.entities.Fornecedor.list('nome_empresa') });
+    const { data: users = [] } = useQuery({ queryKey: ['users_list'], queryFn: () => base44.entities.User.list() });
 
     const produtosById = produtos.reduce((acc, produto) => {
         acc[String(produto.id)] = produto;
