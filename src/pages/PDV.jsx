@@ -2019,7 +2019,8 @@ export default function PDV() {
         endereco: clienteSelecionado.endereco || "",
         valor_frete: pagamentoEntrega.ativo ? pagamentoEntrega.valor : 0,
         status: "Pendente",
-        observacoes
+        observacoes,
+        vendedor_id: vendedorFinal.id || user?.id || null
       });
       toast.success("Orçamento salvo!");
       resetForm();

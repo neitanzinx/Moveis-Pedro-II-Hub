@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Plus, Trash2, Search, Pencil } from "lucide-react";
+import { Loader2, Plus, Trash2, Search, Pencil, UserPlus } from "lucide-react";
 import ClienteModal from "@/components/clientes/ClienteModal";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
@@ -44,7 +44,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     desconto: 0,
     status: "Pendente",
     observacoes: "",
-    vendedor_id: user?.id || "",
+    vendedor_id: user?.id || null,
   });
 
   const [quantidade, setQuantidade] = useState(1);
@@ -55,6 +55,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
   const [showNovoClienteForm, setShowNovoClienteForm] = useState(false);
   const [novoClienteData, setNovoClienteData] = useState({ nome_completo: "", telefone: "", sem_whatsapp: false });
   const [editandoCliente, setEditandoCliente] = useState(null);
+  const [isCriandoCliente, setIsCriandoCliente] = useState(false);
   const [isEditClienteLoading, setIsEditClienteLoading] = useState(false);
 
   const { data: lojas = [] } = useQuery({
@@ -119,10 +120,11 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
   }, [fornecedorSelecionado, isOpen]);
 
   useEffect(() => {
+    if (!isOpen) return;
     if (orcamento) {
       setFormData({
         ...orcamento,
-        vendedor_id: orcamento.vendedor_id || user?.id || "",
+        vendedor_id: orcamento.vendedor_id || user?.id || null,
       });
       // Initialize search with client name if editing an existing quote
       if (orcamento.cliente_nome) {
@@ -137,7 +139,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
         numero_orcamento: numeroOrcamento,
         data_orcamento: new Date().toISOString().split('T')[0],
         validade: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
-        loja: "Centro",
+        loja: getUserLoja() || user?.loja || "Centro",
         cliente_id: "",
         cliente_nome: "",
         cliente_telefone: "",
@@ -150,11 +152,11 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
         cidade: "",
         bairro: "",
         endereco: "",
-        valor_frete: 0,
-        vendedor_id: user?.id || "",
+        vendedor_id: user?.id || null,
       });
+      setSearchCliente("");
     }
-  }, [orcamento, isOpen, user]);
+  }, [orcamento, isOpen]);
 
   useEffect(() => {
     calcularTotal();
@@ -244,6 +246,24 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     setFormData({
       ...formData,
       itens: formData.itens.filter((_, i) => i !== index)
+    });
+  };
+
+  const alterarQuantidade = (index, novaQtd) => {
+    const qty = Math.max(1, novaQtd);
+    setFormData(prev => {
+      const novosItens = [...prev.itens];
+      const item = novosItens[index];
+      const subtotal = item.preco_unitario * qty;
+      novosItens[index] = {
+        ...item,
+        quantidade: qty,
+        subtotal: subtotal
+      };
+      return {
+        ...prev,
+        itens: novosItens
+      };
     });
   };
 
@@ -365,7 +385,21 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
 
             <div className="grid md:grid-cols-3 gap-4">
               <div className="relative">
-                <Label htmlFor="cliente">Cliente *</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="cliente">Cliente *</Label>
+                  <Button 
+                    type="button" 
+                    variant="link" 
+                    className="h-auto p-0 text-green-700 text-xs"
+                    onClick={() => {
+                      setIsCriandoCliente(true);
+                      setIsClienteDropdownOpen(false);
+                    }}
+                  >
+                    <UserPlus className="w-3 h-3 mr-1" />
+                    Novo Cliente
+                  </Button>
+                </div>
                 <div className="relative mt-2">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <Input
@@ -589,19 +623,46 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                             </p>
                           )}
                         </div>
-                        <div className="flex items-center gap-3 ml-4">
-                          <p className="font-bold" style={{ color: '#07593f' }}>
-                            R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                          </p>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removerProduto(index)}
-                            className="text-red-600"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                        <div className="flex flex-col items-end gap-2 ml-4 shrink-0">
+                          <div className="flex items-center gap-3">
+                            <p className="font-bold text-lg" style={{ color: '#07593f' }}>
+                              R$ {item.subtotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </p>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removerProduto(index)}
+                              className="text-red-600 hover:bg-red-50 h-8 w-8 p-0"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                          
+                          <div className="flex items-center gap-1 border border-gray-200 dark:border-neutral-800 rounded-lg p-0.5 bg-gray-50 dark:bg-neutral-900">
+                            <button
+                              type="button"
+                              onClick={() => alterarQuantidade(index, item.quantidade - 1)}
+                              disabled={item.quantidade <= 1}
+                              className="w-7 h-7 rounded flex items-center justify-center text-gray-500 hover:bg-gray-200 dark:hover:bg-neutral-800 disabled:opacity-40 transition-colors"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantidade}
+                              onChange={(e) => alterarQuantidade(index, parseInt(e.target.value) || 1)}
+                              className="w-12 text-center bg-transparent border-0 font-semibold text-sm focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => alterarQuantidade(index, item.quantidade + 1)}
+                              className="w-7 h-7 rounded flex items-center justify-center text-gray-500 hover:bg-gray-200 dark:hover:bg-neutral-800 transition-colors"
+                            >
+                              +
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -622,45 +683,23 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
                   onChange={(e) => setFormData({ ...formData, desconto: parseFloat(e.target.value) || 0 })}
                 />
               </div>
-              <div>
-                <Label htmlFor="valor_frete">Frete (R$)</Label>
-                <Input
-                  id="valor_frete"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.valor_frete}
-                  onChange={(e) => setFormData({ ...formData, valor_frete: parseFloat(e.target.value) || 0 })}
-                />
-              </div>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-4">
-              <div>
-                <Label htmlFor="cidade">Cidade</Label>
-                <Input
-                  id="cidade"
-                  value={formData.cidade}
-                  onChange={(e) => setFormData({ ...formData, cidade: e.target.value })}
-                />
+            {formData.cliente_id && (
+              <div className="p-3 bg-gray-50 border rounded-lg">
+                <Label className="text-gray-600 mb-1 block">Endereço do Cliente</Label>
+                <div className="text-sm">
+                  {(() => {
+                    const cliente = clientes.find(c => c.id === formData.cliente_id);
+                    if (!cliente) return "Endereço não encontrado";
+                    const enderecoCompleto = [cliente.endereco, cliente.numero].filter(Boolean).join(", ");
+                    const localidade = [cliente.bairro, cliente.cidade, cliente.estado].filter(Boolean).join(" - ");
+                    const full = [enderecoCompleto, localidade].filter(Boolean).join(" | ");
+                    return full || "Nenhum endereço cadastrado para este cliente.";
+                  })()}
+                </div>
               </div>
-              <div>
-                <Label htmlFor="bairro">Bairro</Label>
-                <Input
-                  id="bairro"
-                  value={formData.bairro}
-                  onChange={(e) => setFormData({ ...formData, bairro: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="endereco">Endereço</Label>
-                <Input
-                  id="endereco"
-                  value={formData.endereco}
-                  onChange={(e) => setFormData({ ...formData, endereco: e.target.value })}
-                />
-              </div>
-            </div>
+            )}
 
             <div className="flex items-end">
               <div className="w-full p-4 rounded-lg" style={{ backgroundColor: '#07593f', color: 'white' }}>
@@ -705,31 +744,50 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
       </DialogContent>
     </Dialog>
 
-    {editandoCliente && (
+    {(editandoCliente || isCriandoCliente) && (
       <ClienteModal
-        isOpen={!!editandoCliente}
-        onClose={() => setEditandoCliente(null)}
+        isOpen={!!editandoCliente || isCriandoCliente}
+        onClose={() => { setEditandoCliente(null); setIsCriandoCliente(false); }}
         cliente={editandoCliente}
         isLoading={isEditClienteLoading}
         clientes={clientes}
         onSave={async (dadosAtualizados) => {
           setIsEditClienteLoading(true);
           try {
-            await base44.entities.Cliente.update(editandoCliente.id, dadosAtualizados);
-            queryClient.invalidateQueries({ queryKey: ['clientes'] });
-            if (formData.cliente_id === editandoCliente.id) {
-              const telefoneWhatsApp = dadosAtualizados.telefone || "";
+            if (editandoCliente) {
+              await base44.entities.Cliente.update(editandoCliente.id, dadosAtualizados);
+              queryClient.invalidateQueries({ queryKey: ['clientes'] });
+              if (formData.cliente_id === editandoCliente.id) {
+                const telefoneWhatsApp = dadosAtualizados.telefone || "";
+                setFormData(prev => ({
+                  ...prev,
+                  cliente_nome: dadosAtualizados.nome_completo || prev.cliente_nome,
+                  cliente_telefone: telefoneWhatsApp,
+                }));
+                setSearchCliente(formatarNome(dadosAtualizados.nome_completo || ""));
+              }
+              toast.success("Cliente atualizado com sucesso!");
+              setEditandoCliente(null);
+            } else {
+              const novoCliente = await base44.entities.Cliente.create(dadosAtualizados);
+              queryClient.setQueryData(['clientes'], (old) => {
+                if (old) return [...old, novoCliente];
+                return [novoCliente];
+              });
+              queryClient.invalidateQueries({ queryKey: ['clientes'] });
               setFormData(prev => ({
                 ...prev,
-                cliente_nome: dadosAtualizados.nome_completo || prev.cliente_nome,
-                cliente_telefone: telefoneWhatsApp,
+                cliente_id: novoCliente.id,
+                cliente_nome: novoCliente.nome_completo || "",
+                cliente_telefone: novoCliente.telefone || ""
               }));
-              setSearchCliente(formatarNome(dadosAtualizados.nome_completo || ""));
+              setSearchCliente(formatarNome(novoCliente.nome_completo || ""));
+              setIsClienteDropdownOpen(false);
+              toast.success("Cliente criado com sucesso!");
+              setIsCriandoCliente(false);
             }
-            toast.success("Cliente atualizado com sucesso!");
-            setEditandoCliente(null);
           } catch (err) {
-            toast.error(err?.message || "Erro ao atualizar cliente");
+            toast.error(err?.message || "Erro ao salvar cliente");
           } finally {
             setIsEditClienteLoading(false);
           }

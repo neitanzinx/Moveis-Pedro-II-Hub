@@ -39,6 +39,13 @@ export default function Orcamentos() {
             const seller = sellerId ? users.find(u => u.id === sellerId) : null;
             const sellerName = seller?.full_name || seller?.email || user?.full_name || user?.nome || '';
             
+            const cliente = clientes.find(c => c.id === orcamentoFull.cliente_id);
+            if (cliente) {
+                orcamentoFull.endereco = cliente.endereco || orcamentoFull.endereco || '';
+                orcamentoFull.bairro = cliente.bairro || orcamentoFull.bairro || '';
+                orcamentoFull.cidade = cliente.cidade || orcamentoFull.cidade || '';
+            }
+            
             abrirOrcamentoPDF(orcamentoFull, sellerName, lojas.find(l => String(l.nome).trim().toLowerCase() === String(orcamentoFull.loja || '').trim().toLowerCase()) || null);
             toast.success("PDF gerado com sucesso!");
         } catch (err) {
@@ -66,6 +73,7 @@ export default function Orcamentos() {
     const handleConverterVenda = async (orcamento) => {
         try {
             const orcamentoFull = await base44.entities.Orcamento.getById(orcamento.id);
+            const cliente = clientes.find(c => c.id === orcamentoFull.cliente_id);
             const pdvState = {
                 cliente_id: orcamentoFull.cliente_id,
                 orcamento_id: orcamentoFull.id,
@@ -80,9 +88,9 @@ export default function Orcamentos() {
                 pagamentos: orcamentoFull.pagamentos || [],
                 observacoes: orcamentoFull.observacoes || "",
                 loja: orcamentoFull.loja || "",
-                cidade: orcamentoFull.cidade || "",
-                bairro: orcamentoFull.bairro || "",
-                endereco: orcamentoFull.endereco || "",
+                cidade: cliente?.cidade || orcamentoFull.cidade || "",
+                bairro: cliente?.bairro || orcamentoFull.bairro || "",
+                endereco: cliente?.endereco || orcamentoFull.endereco || "",
                 valor_frete: parseFloat(orcamentoFull.valor_frete) || 0,
                 selectedVendedorId: orcamentoFull.vendedor_id || null
             };
