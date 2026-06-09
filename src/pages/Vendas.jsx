@@ -1781,6 +1781,7 @@ export default function Vendas() {
                                                         if (venda.responsavel_id) {
                                                             const u = users.find(user => user.id === venda.responsavel_id);
                                                             if (u && u.full_name) nomeVendedor = u.full_name;
+                                                        }
                                                         const lojaInfoPdf2 = lojasAtivas.find(l => String(l.nome).trim().toLowerCase() === String(venda.loja || '').trim().toLowerCase()) || null;
                                                         abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name, lojaInfoPdf2);
                                                     }}>
