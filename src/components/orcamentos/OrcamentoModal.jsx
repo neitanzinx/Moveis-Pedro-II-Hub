@@ -23,12 +23,13 @@ import { buildProductDisplayName } from "@/utils/productReference";
 import { formatDimensions } from "@/utils/productFormatters";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import BuscaProdutoAvancada from "@/components/vendas/BuscaProdutoAvancada";
 
 
 
 export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, clientes, produtos, fornecedores, fornecedorSelecionado, isLoading }) {
   const queryClient = useQueryClient();
-  const { getUserLoja } = useAuth();
+  const { getUserLoja, user } = useAuth();
   const [formData, setFormData] = useState({
     numero_orcamento: "",
     data_orcamento: new Date().toISOString().split('T')[0],
@@ -45,12 +46,8 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     observacoes: "",
   });
 
-  const [searchProduto, setSearchProduto] = useState("");
-  const [selectedProduto, setSelectedProduto] = useState(null);
   const [quantidade, setQuantidade] = useState(1);
   const [fornecedorFilter, setFornecedorFilter] = useState(String(fornecedorSelecionado || "all"));
-  const [showResultadosProduto, setShowResultadosProduto] = useState(false);
-  const [selectedIndexProduto, setSelectedIndexProduto] = useState(0);
 
   const [searchCliente, setSearchCliente] = useState("");
   const [isClienteDropdownOpen, setIsClienteDropdownOpen] = useState(false);
@@ -58,8 +55,6 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
   const [novoClienteData, setNovoClienteData] = useState({ nome_completo: "", telefone: "", sem_whatsapp: false });
   const [editandoCliente, setEditandoCliente] = useState(null);
   const [isEditClienteLoading, setIsEditClienteLoading] = useState(false);
-  const productSearchRef = useRef(null);
-  const deferredSearchProduto = useDeferredValue(searchProduto);
 
   const { data: lojas = [] } = useQuery({
     queryKey: ['lojas'],
@@ -152,16 +147,7 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     calcularTotal();
   }, [formData.itens, formData.desconto]);
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (productSearchRef.current && !productSearchRef.current.contains(event.target)) {
-        setShowResultadosProduto(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  // No productSearchRef setup needed anymore as BuscaProdutoAvancada handles it internally
 
   const handleClienteChange = (clienteId) => {
     const cliente = clientes.find(c => c.id === clienteId);
@@ -209,45 +195,18 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     return String(item.fornecedor_nome || fornecedoresById[String(item.fornecedor_id)] || '').trim();
   };
 
-  const handleKeyDownProduto = (event, resultados) => {
-    if (!showResultadosProduto || resultados.length === 0) return;
-
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      setSelectedIndexProduto((prev) => Math.min(prev + 1, resultados.length - 1));
-      return;
-    }
-
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      setSelectedIndexProduto((prev) => Math.max(prev - 1, 0));
-      return;
-    }
-
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      const produtoSelecionado = resultados[selectedIndexProduto];
-      if (!produtoSelecionado) return;
-      setSelectedProduto(produtoSelecionado.id);
-      setSearchProduto(produtoSelecionado.nome);
-      setShowResultadosProduto(false);
-    }
-  };
-
-  const adicionarProduto = () => {
-    if (!selectedProduto || quantidade <= 0) return;
-
-    const produto = produtos.find(p => p.id === selectedProduto);
+  const handleSelectProduto = (produto) => {
     if (!produto) return;
 
-    const subtotal = produto.preco_venda * quantidade;
+    const qty = quantidade || 1;
+    const subtotal = produto.preco_venda * qty;
     
     const novoItem = {
       produto_id: produto.id,
       produto_nome: buildProductDisplayName(produto.nome, produto.modelo_referencia),
       fornecedor_id: produto.fornecedor_id || null,
       fornecedor_nome: fornecedoresById[String(produto.fornecedor_id)] || produto.fornecedor_nome || '',
-      quantidade: quantidade,
+      quantidade: qty,
       preco_unitario: produto.preco_venda,
       subtotal: subtotal,
       caracteristicas: getItemCaracteristicas(produto),
@@ -259,14 +218,13 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
       profundidade: produto.profundidade
     };
 
-    setFormData({
-      ...formData,
-      itens: [...formData.itens, novoItem]
-    });
+    setFormData(prev => ({
+      ...prev,
+      itens: [...prev.itens, novoItem]
+    }));
 
-    setSelectedProduto(null);
     setQuantidade(1);
-    setSearchProduto("");
+    toast.success(`${produto.nome} adicionado ao orçamento!`);
   };
 
   const removerProduto = (index) => {
@@ -297,48 +255,10 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
     return acc;
   }, {});
 
-  const produtosPesquisa = useMemo(() => {
-    return (produtos || []).map((produto) => {
-      const fornecedorNome = fornecedoresById[String(produto.fornecedor_id)] || produto.fornecedor_nome || '';
-      const textoBusca = [
-        produto.nome,
-        produto.codigo_barras,
-        produto.categoria,
-        produto.material,
-        produto.cor,
-        fornecedorNome,
-        produto.modelo_referencia
-      ]
-        .filter(Boolean)
-        .map(normSearch)
-        .join(' ');
-
-      return {
-        ...produto,
-        fornecedor_nome: fornecedorNome,
-        texto_busca: textoBusca
-      };
-    });
-  }, [produtos, fornecedoresById]);
-
-  const produtosFiltrados = useMemo(() => {
-    const termoNorm = normSearch(deferredSearchProduto);
-    if (!termoNorm) return [];
-
-    const tokens = termoNorm.split(/\s+/).filter(Boolean);
-
-    return produtosPesquisa
-      .filter((produto) => {
-        if (!produto.ativo) return false;
-        if (fornecedorFilter !== "all" && String(produto.fornecedor_id || "") !== fornecedorFilter) return false;
-        return tokens.every((token) => produto.texto_busca.includes(token));
-      })
-      .slice(0, 10);
-  }, [produtosPesquisa, deferredSearchProduto, fornecedorFilter]);
-
-  useEffect(() => {
-    setSelectedIndexProduto(0);
-  }, [deferredSearchProduto, fornecedorFilter]);
+  const produtosFiltradosPorFornecedor = useMemo(() => {
+    if (fornecedorFilter === "all") return produtos;
+    return (produtos || []).filter(p => String(p.fornecedor_id || "") === fornecedorFilter);
+  }, [produtos, fornecedorFilter]);
 
   return (
     <>
@@ -578,78 +498,27 @@ export default function OrcamentoModal({ isOpen, onClose, onSave, orcamento, cli
               </div>
 
               <div className="grid md:grid-cols-12 gap-3 mb-4">
-                <div className="md:col-span-7" ref={productSearchRef}>
-                  <Label>Produto</Label>
-                  <div className="relative mt-2">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4" style={{ color: '#8B8B8B' }} />
-                    <Input
-                      placeholder="Buscar produto..."
-                      value={searchProduto}
-                      onChange={(e) => {
-                        setSearchProduto(e.target.value);
-                        setSelectedProduto(null);
-                        setShowResultadosProduto(true);
-                        setSelectedIndexProduto(0);
-                      }}
-                      onFocus={() => setShowResultadosProduto(true)}
-                      onKeyDown={(event) => handleKeyDownProduto(event, produtosFiltrados)}
-                      className="pl-9"
+                <div className="md:col-span-9">
+                  <Label>Buscar Produto</Label>
+                  <div className="mt-2">
+                    <BuscaProdutoAvancada
+                      produtos={produtosFiltradosPorFornecedor}
+                      fornecedores={fornecedores}
+                      onSelectProduto={handleSelectProduto}
+                      user={user}
                     />
                   </div>
-                  {showResultadosProduto && searchProduto && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                      {produtosFiltrados.length === 0 ? (
-                        <div className="px-4 py-3 text-sm text-gray-500">Nenhum produto encontrado</div>
-                      ) : produtosFiltrados.map((produto, index) => (
-                        <button
-                          key={produto.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedProduto(produto.id);
-                            setSearchProduto(produto.nome);
-                            setShowResultadosProduto(false);
-                          }}
-                          className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 ${index === selectedIndexProduto ? 'bg-green-50' : 'hover:bg-gray-50'}`}
-                        >
-                          <p className="font-medium" style={{ color: '#07593f' }}>{produto.nome}</p>
-                          {getItemFabricante(produto) && (
-                            <p className="text-xs mt-1 font-medium" style={{ color: '#8B8B8B' }}>
-                              Fabricante: {getItemFabricante(produto)}
-                            </p>
-                          )}
-                          {getItemCaracteristicas(produto) && (
-                            <p className="text-xs mt-1" style={{ color: '#666' }}>
-                              {getItemCaracteristicas(produto)}
-                            </p>
-                          )}
-                          <p className="text-sm" style={{ color: '#8B8B8B' }}>
-                            R$ {produto.preco_venda?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                          </p>
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 <div className="md:col-span-3">
-                  <Label>Quantidade</Label>
+                  <Label htmlFor="quantidade_input">Qtd. a Adicionar</Label>
                   <Input
+                    id="quantidade_input"
                     type="number"
                     min="1"
                     value={quantidade}
                     onChange={(e) => setQuantidade(parseInt(e.target.value) || 1)}
-                    className="mt-2"
+                    className="mt-2 h-11"
                   />
-                </div>
-                <div className="md:col-span-2 flex items-end">
-                  <Button
-                    type="button"
-                    onClick={adicionarProduto}
-                    disabled={!selectedProduto}
-                    className="w-full"
-                    style={{ background: 'linear-gradient(135deg, #f38a4c 0%, #f5a164 100%)' }}
-                  >
-                    <Plus className="w-4 h-4" />
-                  </Button>
                 </div>
               </div>
 

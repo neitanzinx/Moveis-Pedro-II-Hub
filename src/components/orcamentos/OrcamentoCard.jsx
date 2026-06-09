@@ -64,7 +64,7 @@ export default function OrcamentoCard({ orcamento, onEdit, onDelete }) {
         })),
         desconto: parseFloat(orcamentoFull.desconto) || 0,
         pagamentos: orcamentoFull.pagamentos || [],
-        observacoes: orcamentoFull.observacoes || `Convertido do orçamento #${orcamentoFull.numero_orcamento}`,
+        observacoes: orcamentoFull.observacoes || "",
         loja: orcamentoFull.loja || "",
         cidade: orcamentoFull.cidade || "",
         bairro: orcamentoFull.bairro || "",

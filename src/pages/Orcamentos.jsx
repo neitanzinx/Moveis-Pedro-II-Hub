@@ -6,13 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Filter, FileText, Trash2, Edit, Loader2, ArrowRight } from "lucide-react";
+import { Plus, Search, Filter, FileText, Trash2, Edit, Loader2, ArrowRight, Printer } from "lucide-react";
 import OrcamentoModal from "../components/orcamentos/OrcamentoModal";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { toast } from "sonner";
 import { formatarTelefone, formatarNome } from "@/utils/formatters";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function Orcamentos() {
     const [searchTerm, setSearchTerm] = useState("");
@@ -23,6 +24,23 @@ export default function Orcamentos() {
     const queryClient = useQueryClient();
     const confirm = useConfirm();
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const [generatingPdfId, setGeneratingPdfId] = useState(null);
+
+    const handleGerarPDF = async (orcamento) => {
+        setGeneratingPdfId(orcamento.id);
+        try {
+            const orcamentoFull = await base44.entities.Orcamento.getById(orcamento.id);
+            const { abrirOrcamentoPDF } = await import("../utils/orcamentoPDF");
+            abrirOrcamentoPDF(orcamentoFull, user?.nome || user?.full_name || '');
+            toast.success("PDF gerado com sucesso!");
+        } catch (err) {
+            console.error(err);
+            toast.error("Erro ao gerar PDF do orçamento.");
+        } finally {
+            setGeneratingPdfId(null);
+        }
+    };
 
     const checkExpirado = (orcamento) => {
         if (!orcamento.validade) return false;
@@ -53,7 +71,7 @@ export default function Orcamentos() {
                 })),
                 desconto: parseFloat(orcamentoFull.desconto) || 0,
                 pagamentos: orcamentoFull.pagamentos || [],
-                observacoes: orcamentoFull.observacoes || `Convertido do orçamento #${orcamentoFull.numero_orcamento}`,
+                observacoes: orcamentoFull.observacoes || "",
                 loja: orcamentoFull.loja || "",
                 cidade: orcamentoFull.cidade || "",
                 bairro: orcamentoFull.bairro || "",
@@ -220,6 +238,19 @@ export default function Orcamentos() {
                                     <TableCell><StatusBadge status={orc.status} /></TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex justify-end gap-2">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => handleGerarPDF(orc)}
+                                                disabled={generatingPdfId !== null}
+                                                title="Gerar PDF"
+                                            >
+                                                {generatingPdfId === orc.id ? (
+                                                    <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
+                                                ) : (
+                                                    <Printer className="w-4 h-4 text-gray-600 hover:text-gray-800" />
+                                                )}
+                                            </Button>
                                             <Button variant="ghost" size="icon" onClick={() => { setEditingOrcamento(orc); setIsModalOpen(true); }} title="Editar">
                                                 <Edit className="w-4 h-4 text-blue-600" />
                                             </Button>
