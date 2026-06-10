@@ -36,6 +36,7 @@ import {
     MapPin,
     CreditCard,
     Shield,
+    AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatarCEP, formatarCPF, formatarTelefone } from "@/utils/formatters";
@@ -128,6 +129,8 @@ export default function ColaboradorModal({
                 Number(colaborador?.vale_refeicao)
             ),
         dia_vale: colaborador?.dia_vale || 20,
+        valor_dia_pagamento: colaborador?.valor_dia_pagamento || "",
+        valor_dia_vale: colaborador?.valor_dia_vale || "",
         vale_transporte: colaborador?.vale_transporte || "",
         vale_alimentacao: colaborador?.vale_alimentacao || "",
         vale_refeicao: colaborador?.vale_refeicao || "",
@@ -726,6 +729,59 @@ export default function ColaboradorModal({
                                 </div>
                             )}
                         </div>
+
+                        {formData.recebe_vale && (
+                            <div className="border-t pt-4" style={{ borderColor: "#E5E0D8" }}>
+                                <SectionTitle>Distribuição do Salário</SectionTitle>
+                                <p className="text-xs text-gray-500 mb-3">
+                                    Defina quanto será pago em cada data. Os valores devem somar o salário líquido.
+                                </p>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <Label>Valor no Dia {formData.dia_pagamento || 5} (R$)</Label>
+                                        <Input
+                                            type="number"
+                                            value={formData.valor_dia_pagamento}
+                                            onChange={(e) =>
+                                                handleChange("valor_dia_pagamento", Number(e.target.value))
+                                            }
+                                            placeholder="0,00"
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label>Valor no Dia {formData.dia_vale || 20} — Vale (R$)</Label>
+                                        <Input
+                                            type="number"
+                                            value={formData.valor_dia_vale}
+                                            onChange={(e) =>
+                                                handleChange("valor_dia_vale", Number(e.target.value))
+                                            }
+                                            placeholder="0,00"
+                                        />
+                                    </div>
+                                </div>
+                                {(() => {
+                                    const somaDistribuicao =
+                                        (Number(formData.valor_dia_pagamento) || 0) +
+                                        (Number(formData.valor_dia_vale) || 0);
+                                    const liquido = totals.salario_liquido || 0;
+                                    const temValores = somaDistribuicao > 0;
+                                    const diferenca = Math.abs(somaDistribuicao - liquido);
+                                    if (temValores && diferenca > 0.01) {
+                                        return (
+                                            <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-2">
+                                                <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                                                <div className="text-sm text-amber-800">
+                                                    <p className="font-medium">Atenção: a soma dos valores ({formatCurrency(somaDistribuicao)}) é diferente do salário líquido estimado ({formatCurrency(liquido)}).</p>
+                                                    <p className="text-xs text-amber-600 mt-1">Diferença: {formatCurrency(diferenca)}</p>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })()}
+                            </div>
+                        )}
 
                         <div className="border-t pt-4" style={{ borderColor: "#E5E0D8" }}>
                             <SectionTitle>Benefícios</SectionTitle>

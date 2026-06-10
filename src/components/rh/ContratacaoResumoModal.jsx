@@ -233,6 +233,25 @@ export default function ContratacaoResumoModal({ colaborador, onClose, onGenerat
                                 <p className="text-base font-semibold text-amber-700">
                                     {recebeVale ? `Sim, todo dia ${diaVale}` : 'Não'}
                                 </p>
+                                {recebeVale && (Number(colaborador.valor_dia_pagamento) > 0 || Number(colaborador.valor_dia_vale) > 0) && (
+                                    <div className="mt-3 pt-3 border-t border-amber-200">
+                                        <p className="text-sm text-gray-600 mb-2">Distribuição do Salário</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {Number(colaborador.valor_dia_pagamento) > 0 && (
+                                                <div className="p-2 bg-amber-100 rounded-lg text-center">
+                                                    <p className="text-xs text-amber-600">Dia {diaPagamento}</p>
+                                                    <p className="text-sm font-bold text-amber-800">{formatCurrency(colaborador.valor_dia_pagamento)}</p>
+                                                </div>
+                                            )}
+                                            {Number(colaborador.valor_dia_vale) > 0 && (
+                                                <div className="p-2 bg-amber-100 rounded-lg text-center">
+                                                    <p className="text-xs text-amber-600">Dia {diaVale} (Vale)</p>
+                                                    <p className="text-sm font-bold text-amber-800">{formatCurrency(colaborador.valor_dia_vale)}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </CardContent>
                     </Card>

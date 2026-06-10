@@ -206,6 +206,12 @@ export default function ColaboradorDetalhesModal({ colaborador, onClose, onEdit,
                                 {colaborador.recebe_vale && (
                                     <InfoItem icon={Calendar} label="Dia do Vale" value={colaborador.dia_vale ? `Todo dia ${colaborador.dia_vale}` : null} />
                                 )}
+                                {colaborador.recebe_vale && (Number(colaborador.valor_dia_pagamento) > 0 || Number(colaborador.valor_dia_vale) > 0) && (
+                                    <>
+                                        <InfoItem icon={DollarSign} label={`Valor no Dia ${colaborador.dia_pagamento || 5}`} value={Number(colaborador.valor_dia_pagamento) > 0 ? `R$ ${Number(colaborador.valor_dia_pagamento).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
+                                        <InfoItem icon={DollarSign} label={`Valor no Dia ${colaborador.dia_vale || 20} (Vale)`} value={Number(colaborador.valor_dia_vale) > 0 ? `R$ ${Number(colaborador.valor_dia_vale).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
+                                    </>
+                                )}
                                 <InfoItem icon={DollarSign} label="Vale Transporte" value={colaborador.vale_transporte ? `R$ ${Number(colaborador.vale_transporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
                                 <InfoItem icon={DollarSign} label="Vale Alimentação" value={colaborador.vale_alimentacao ? `R$ ${Number(colaborador.vale_alimentacao).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />
                                 <InfoItem icon={DollarSign} label="Vale Refeição" value={colaborador.vale_refeicao ? `R$ ${Number(colaborador.vale_refeicao).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : null} />

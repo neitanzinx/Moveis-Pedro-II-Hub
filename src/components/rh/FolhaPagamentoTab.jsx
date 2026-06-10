@@ -172,16 +172,65 @@ export default function FolhaPagamentoTab() {
 
             // 2. Create Financial Entry (Optional)
             if (gerarLancamentoFinanceiro) {
-                // Salary entry
-                await base44.entities.LancamentoFinanceiro.create({
-                    descricao: `Pagamento Folha - ${MESES[folhaParaPagar.mes_referencia - 1]}/${folhaParaPagar.ano_referencia} - ${folhaParaPagar.colaborador_nome}`,
-                    valor: -Number(folhaParaPagar.salario_liquido),
-                    tipo: 'despesa',
-                    categoria_nome: 'Salário / Folha',
-                    data_lancamento: new Date().toISOString().slice(0, 10),
-                    forma_pagamento: 'Transferência',
-                    status: 'Pago'
-                });
+                // Look up collaborator data to check vale distribution
+                const colab = colaboradores.find(c => c.id === folhaParaPagar.colaborador_id);
+                const recebeVale = colab?.recebe_vale === true;
+                const valorDiaPagamento = Number(colab?.valor_dia_pagamento) || 0;
+                const valorDiaVale = Number(colab?.valor_dia_vale) || 0;
+                const temDistribuicao = recebeVale && (valorDiaPagamento + valorDiaVale) > 0;
+
+                if (temDistribuicao) {
+                    // Create separate entries for each payment date
+                    const mesRef = folhaParaPagar.mes_referencia;
+                    const anoRef = folhaParaPagar.ano_referencia;
+                    const mesStr = `${MESES[mesRef - 1]}/${anoRef}`;
+                    const nome = folhaParaPagar.colaborador_nome;
+
+                    const buildDate = (dia) => {
+                        const d = String(dia).padStart(2, '0');
+                        const m = String(mesRef).padStart(2, '0');
+                        return `${anoRef}-${m}-${d}`;
+                    };
+
+                    // Entry for Dia do Pagamento
+                    if (valorDiaPagamento > 0) {
+                        const diaPgto = colab?.dia_pagamento || 5;
+                        await base44.entities.LancamentoFinanceiro.create({
+                            descricao: `Folha Pgto (Dia ${diaPgto}) - ${mesStr} - ${nome}`,
+                            valor: -valorDiaPagamento,
+                            tipo: 'despesa',
+                            categoria_nome: 'Folha de Pagamento',
+                            data_lancamento: buildDate(diaPgto),
+                            forma_pagamento: 'Transferência',
+                            status: 'Pago'
+                        });
+                    }
+
+                    // Entry for Dia do Vale
+                    if (valorDiaVale > 0) {
+                        const diaVale = colab?.dia_vale || 20;
+                        await base44.entities.LancamentoFinanceiro.create({
+                            descricao: `Vale (Dia ${diaVale}) - ${mesStr} - ${nome}`,
+                            valor: -valorDiaVale,
+                            tipo: 'despesa',
+                            categoria_nome: 'Folha de Pagamento',
+                            data_lancamento: buildDate(diaVale),
+                            forma_pagamento: 'Transferência',
+                            status: 'Pago'
+                        });
+                    }
+                } else {
+                    // Default: single salary entry
+                    await base44.entities.LancamentoFinanceiro.create({
+                        descricao: `Pagamento Folha - ${MESES[folhaParaPagar.mes_referencia - 1]}/${folhaParaPagar.ano_referencia} - ${folhaParaPagar.colaborador_nome}`,
+                        valor: -Number(folhaParaPagar.salario_liquido),
+                        tipo: 'despesa',
+                        categoria_nome: 'Salário / Folha',
+                        data_lancamento: new Date().toISOString().slice(0, 10),
+                        forma_pagamento: 'Transferência',
+                        status: 'Pago'
+                    });
+                }
 
                 // INSS entry (if > 0)
                 if (Number(folhaParaPagar.inss) > 0) {
