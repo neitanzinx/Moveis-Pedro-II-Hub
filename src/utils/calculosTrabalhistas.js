@@ -297,25 +297,88 @@ export function calcularFolhaCompleta(colaborador, extras = {}) {
     const salarioBruto = salarioBase + adicNoturno + insalubridade + periculosidade + horasExtras.valor;
 
     // 3. DESCONTOS OBRIGATÓRIOS
-    const inssResult = calcularINSS(salarioBruto);
     const pensaoAlimenticia = Number(colaborador.pensao_alimenticia) || 0;
-    const irrfResult = calcularIRRF(
-        salarioBruto,
-        inssResult.valor,
-        Number(colaborador.numero_dependentes) || 0,
-        pensaoAlimenticia
-    );
-    const descontoVT = calcularDescontoVT(salarioBase, Number(colaborador.vale_transporte) || 0);
-    const outrosDescontos = Number(extras.outros_descontos) || 0;
+
+    // INSS Customizável
+    let inssValor = 0;
+    let inssFaixa = "";
+    let inssAliquotaEfetiva = 0;
+
+    if (colaborador.tipo_inss === "isento") {
+        inssValor = 0;
+        inssFaixa = "Isento";
+    } else if (colaborador.tipo_inss === "valor") {
+        inssValor = Number(colaborador.valor_inss) || 0;
+        inssFaixa = "Manual (Valor Fixo)";
+        inssAliquotaEfetiva = salarioBruto > 0 ? inssValor / salarioBruto : 0;
+    } else if (colaborador.tipo_inss === "porcentagem") {
+        const pct = Number(colaborador.valor_inss) || 0;
+        inssValor = Math.round(salarioBruto * (pct / 100) * 100) / 100;
+        inssFaixa = `Manual (${pct}%)`;
+        inssAliquotaEfetiva = pct / 100;
+    } else { // automatico
+        const inssResult = calcularINSS(salarioBruto);
+        inssValor = inssResult.valor;
+        inssFaixa = inssResult.faixa;
+        inssAliquotaEfetiva = inssResult.aliquotaEfetiva;
+    }
+
+    // IRRF Customizável
+    let irrfValor = 0;
+    let irrfFaixa = "";
+    let irrfBaseCalculo = salarioBruto - inssValor - pensaoAlimenticia - (Number(colaborador.numero_dependentes) || 0) * 189.59; // DEDUCAO_DEPENDENTE_IRRF
+
+    if (colaborador.tipo_irrf === "isento") {
+        irrfValor = 0;
+        irrfFaixa = "Isento";
+    } else if (colaborador.tipo_irrf === "valor") {
+        irrfValor = Number(colaborador.valor_irrf) || 0;
+        irrfFaixa = "Manual (Valor Fixo)";
+    } else if (colaborador.tipo_irrf === "porcentagem") {
+        const pct = Number(colaborador.valor_irrf) || 0;
+        irrfValor = Math.round(Math.max(irrfBaseCalculo, 0) * (pct / 100) * 100) / 100;
+        irrfFaixa = `Manual (${pct}%)`;
+    } else { // automatico
+        const irrfResult = calcularIRRF(
+            salarioBruto,
+            inssValor,
+            Number(colaborador.numero_dependentes) || 0,
+            pensaoAlimenticia
+        );
+        irrfValor = irrfResult.valor;
+        irrfFaixa = irrfResult.faixa;
+        irrfBaseCalculo = irrfResult.baseCalculo;
+    }
+
+    const descontoVTEstimado = calcularDescontoVT(salarioBase, Number(colaborador.vale_transporte) || 0);
+    const descontoVT = colaborador.desconto_vale_transporte !== "" && colaborador.desconto_vale_transporte !== undefined 
+        ? Number(colaborador.desconto_vale_transporte) 
+        : descontoVTEstimado;
+
+    const descontoPlanoSaude = Number(colaborador.desconto_plano_saude) || 0;
+    const descontoAdiantamento = Number(colaborador.desconto_adiantamento) || 0;
+    const outrosDescontosForm = Number(colaborador.outros_descontos) || 0;
+
+    const outrosDescontos = (Number(extras.outros_descontos) || 0) + descontoPlanoSaude + descontoAdiantamento + outrosDescontosForm;
 
     // 4. BENEFÍCIOS
     const salarioFamilia = calcularSalarioFamilia(salarioBruto, Number(colaborador.numero_dependentes) || 0);
 
-    // 5. FGTS (a recolher pela empresa, não desconta do funcionário)
-    const fgts = calcularFGTS(salarioBruto);
+    // 5. FGTS Customizável (a recolher pela empresa, não desconta do funcionário)
+    let fgts = 0;
+    if (colaborador.tipo_fgts === "isento") {
+        fgts = 0;
+    } else if (colaborador.tipo_fgts === "valor") {
+        fgts = Number(colaborador.valor_fgts) || 0;
+    } else if (colaborador.tipo_fgts === "porcentagem") {
+        const pct = Number(colaborador.valor_fgts) || 0;
+        fgts = Math.round(salarioBruto * (pct / 100) * 100) / 100;
+    } else { // automatico
+        fgts = calcularFGTS(salarioBruto);
+    }
 
     // 6. SALÁRIO LÍQUIDO
-    const totalDescontos = inssResult.valor + irrfResult.valor + descontoVT + pensaoAlimenticia + outrosDescontos;
+    const totalDescontos = inssValor + irrfValor + descontoVT + pensaoAlimenticia + outrosDescontos;
     const totalBeneficios = salarioFamilia;
     const salarioLiquido = salarioBruto - totalDescontos + totalBeneficios;
 
@@ -332,12 +395,12 @@ export function calcularFolhaCompleta(colaborador, extras = {}) {
         valor_hora: horasExtras.valorHoraNormal,
 
         // Descontos
-        inss: inssResult.valor,
-        inss_faixa: inssResult.faixa,
-        inss_aliquota_efetiva: inssResult.aliquotaEfetiva,
-        irrf: irrfResult.valor,
-        irrf_faixa: irrfResult.faixa,
-        irrf_base_calculo: irrfResult.baseCalculo,
+        inss: inssValor,
+        inss_faixa: inssFaixa,
+        inss_aliquota_efetiva: inssAliquotaEfetiva,
+        irrf: irrfValor,
+        irrf_faixa: irrfFaixa,
+        irrf_base_calculo: irrfBaseCalculo,
         vale_transporte: descontoVT,
         pensao_alimenticia: pensaoAlimenticia,
         outros_descontos: outrosDescontos,
@@ -404,9 +467,11 @@ export function gerarResumoEstimado(colaborador) {
         // INFORMAÇÕES DE PAGAMENTO
         // ═════════════════════════════════════════════════════════════
         dia_pagamento: Number(colaborador.dia_pagamento) || 5,
+        tipo_dia_pagamento: colaborador.tipo_dia_pagamento || 'util',
         tipo_pagamento: colaborador.tipo_pagamento || 'Mensal',
         recebe_vale: !!colaborador.recebe_vale,
         dia_vale: colaborador.recebe_vale ? (Number(colaborador.dia_vale) || 20) : null,
+        tipo_dia_vale: colaborador.tipo_dia_vale || 'fixo',
 
         // ═════════════════════════════════════════════════════════════
         // REMUNERAÇÃO BASE

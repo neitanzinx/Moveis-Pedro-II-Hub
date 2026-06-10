@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
@@ -37,6 +37,7 @@ import {
     CreditCard,
     Shield,
     AlertTriangle,
+    X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatarCEP, formatarCPF, formatarTelefone } from "@/utils/formatters";
@@ -120,6 +121,7 @@ export default function ColaboradorModal({
         salario_base: colaborador?.salario_base || "",
         numero_dependentes: colaborador?.numero_dependentes || 0,
         dia_pagamento: colaborador?.dia_pagamento || 5,
+        tipo_dia_pagamento: colaborador?.tipo_dia_pagamento || "util",
         tipo_pagamento: colaborador?.tipo_pagamento || "Mensal",
         recebe_vale: typeof colaborador?.recebe_vale === "boolean"
             ? colaborador.recebe_vale
@@ -129,6 +131,7 @@ export default function ColaboradorModal({
                 Number(colaborador?.vale_refeicao)
             ),
         dia_vale: colaborador?.dia_vale || 20,
+        tipo_dia_vale: colaborador?.tipo_dia_vale || "fixo",
         valor_dia_pagamento: colaborador?.valor_dia_pagamento || "",
         valor_dia_vale: colaborador?.valor_dia_vale || "",
         vale_transporte: colaborador?.vale_transporte || "",
@@ -140,6 +143,19 @@ export default function ColaboradorModal({
         outros_beneficios: colaborador?.outros_beneficios || "",
         descricao_outros_beneficios: colaborador?.descricao_outros_beneficios || "",
         pensao_alimenticia: Number(colaborador?.pensao_alimenticia) || 0,
+        // Descontos
+        desconto_vale_transporte: colaborador?.desconto_vale_transporte || "",
+        desconto_plano_saude: colaborador?.desconto_plano_saude || "",
+        desconto_adiantamento: colaborador?.desconto_adiantamento || "",
+        outros_descontos: colaborador?.outros_descontos || "",
+        descricao_outros_descontos: colaborador?.descricao_outros_descontos || "",
+        // Tributos Manuais
+        tipo_inss: colaborador?.tipo_inss || "automatico",
+        valor_inss: colaborador?.valor_inss || "",
+        tipo_irrf: colaborador?.tipo_irrf || "automatico",
+        valor_irrf: colaborador?.valor_irrf || "",
+        tipo_fgts: colaborador?.tipo_fgts || "automatico",
+        valor_fgts: colaborador?.valor_fgts || "",
         // Dados bancários
         banco: colaborador?.banco || "",
         agencia: colaborador?.agencia || "",
@@ -150,6 +166,33 @@ export default function ColaboradorModal({
     });
 
     const [saving, setSaving] = useState(false);
+
+    // Estado local para lista dinâmica de descontos
+    const [listaDescontos, setListaDescontos] = useState(() => {
+        try {
+            const parsed = JSON.parse(colaborador?.descricao_outros_descontos || "[]");
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        } catch {
+            // Se não for JSON (sistema antigo), tenta usar o valor existente
+            if (colaborador?.outros_descontos > 0) {
+                return [{ descricao: colaborador?.descricao_outros_descontos || "Outros", valor: Number(colaborador?.outros_descontos) || 0 }];
+            }
+        }
+        return [];
+    });
+
+    // Atualiza formData sempre que a lista de descontos muda
+    useEffect(() => {
+        const total = listaDescontos.reduce((acc, curr) => acc + (Number(curr.valor) || 0), 0);
+        const descricaoJson = JSON.stringify(listaDescontos);
+        
+        // Atualiza apenas se mudou para evitar loop
+        if (total !== formData.outros_descontos || descricaoJson !== formData.descricao_outros_descontos) {
+            handleChange("outros_descontos", total);
+            handleChange("descricao_outros_descontos", descricaoJson);
+        }
+    }, [listaDescontos, formData.outros_descontos, formData.descricao_outros_descontos]);
+
     const usaPinMontagem =
         !!formData.pin_montagem ||
         formData.descricao_cargo?.toLowerCase().includes("montador");
@@ -228,10 +271,42 @@ export default function ColaboradorModal({
         if (e) e.preventDefault();
         setSaving(true);
         try {
+            // Limpa campos numéricos vazios para evitar erro do Supabase
+            const cleanPayload = { ...formData };
+            const numericFields = [
+                'salario_base', 'numero_dependentes', 'dia_pagamento', 'dia_vale',
+                'valor_dia_pagamento', 'valor_dia_vale', 'vale_transporte', 'vale_alimentacao',
+                'vale_refeicao', 'plano_saude', 'plano_odontologico', 'bonus_mensal',
+                'outros_beneficios', 'pensao_alimenticia', 'desconto_vale_transporte',
+                'desconto_plano_saude', 'desconto_adiantamento', 'outros_descontos',
+                'valor_inss', 'valor_irrf', 'valor_fgts'
+            ];
+
+            for (const field of numericFields) {
+                if (cleanPayload[field] === "") {
+                    cleanPayload[field] = null;
+                } else if (cleanPayload[field] !== null && cleanPayload[field] !== undefined) {
+                    cleanPayload[field] = Number(cleanPayload[field]);
+                }
+            }
+
+            // Limpa campos de data vazios
+            const dateFields = ['data_nascimento', 'data_admissao', 'data_demissao'];
+            for (const field of dateFields) {
+                if (cleanPayload[field] === "") {
+                    cleanPayload[field] = null;
+                }
+            }
+
             const payload = {
-                ...formData,
-                user_id: colaborador?.user_id || formData.user_id || "",
+                ...cleanPayload,
+                user_id: colaborador?.user_id || formData.user_id || null,
             };
+            
+            // Remove user_id nulo para não violar foreign key se não tiver uuid
+            if (!payload.user_id) {
+                delete payload.user_id;
+            }
 
             if (isEditing) {
                 await updateMutation.mutateAsync({ id: colaborador.id, data: payload });
@@ -247,7 +322,10 @@ export default function ColaboradorModal({
 
     return (
         <Dialog open onOpenChange={onClose}>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogContent 
+                className="max-w-4xl max-h-[90vh] overflow-y-auto"
+                onInteractOutside={(e) => e.preventDefault()}
+            >
                 <DialogHeader>
                     <DialogTitle
                         className="flex items-center gap-2 text-xl font-bold"
@@ -441,7 +519,7 @@ export default function ColaboradorModal({
                             <Input
                                 value={formData.descricao_cargo}
                                 onChange={(e) => handleChange("descricao_cargo", e.target.value)}
-                                placeholder="Ex: Gerente de Loja, Vendedor, Auxiliar de Estoque..."
+                                placeholder="Ex: Vendedor, Montador..."
                             />
                         </div>
 
@@ -668,23 +746,37 @@ export default function ColaboradorModal({
                             </div>
                             <div>
                                 <Label>Dia do Pagamento</Label>
-                                <Select
-                                    value={String(formData.dia_pagamento)}
-                                    onValueChange={(v) =>
-                                        handleChange("dia_pagamento", Number(v))
-                                    }
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Dia" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {DIAS_PAGAMENTO.map((d) => (
-                                            <SelectItem key={d} value={String(d)}>
-                                                Dia {d}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <div className="flex gap-2">
+                                    <Select
+                                        value={formData.tipo_dia_pagamento}
+                                        onValueChange={(v) => handleChange("tipo_dia_pagamento", v)}
+                                    >
+                                        <SelectTrigger className="w-1/2">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="util">Dia Útil</SelectItem>
+                                            <SelectItem value="fixo">Dia Fixo</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <Select
+                                        value={String(formData.dia_pagamento)}
+                                        onValueChange={(v) =>
+                                            handleChange("dia_pagamento", Number(v))
+                                        }
+                                    >
+                                        <SelectTrigger className="w-1/2">
+                                            <SelectValue placeholder="Dia" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {DIAS_PAGAMENTO.map((d) => (
+                                                <SelectItem key={d} value={String(d)}>
+                                                    {formData.tipo_dia_pagamento === "util" ? `${d}º Dia Útil` : `Dia ${d}`}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                             </div>
                             <div>
                                 <Label>Recebe Vale</Label>
@@ -709,23 +801,37 @@ export default function ColaboradorModal({
                             {formData.recebe_vale && (
                                 <div>
                                     <Label>Dia do Vale</Label>
-                                    <Select
-                                        value={String(formData.dia_vale || 20)}
-                                        onValueChange={(v) =>
-                                            handleChange("dia_vale", Number(v))
-                                        }
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Dia" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {DIAS_PAGAMENTO.map((d) => (
-                                                <SelectItem key={d} value={String(d)}>
-                                                    Dia {d}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <div className="flex gap-2">
+                                        <Select
+                                            value={formData.tipo_dia_vale}
+                                            onValueChange={(v) => handleChange("tipo_dia_vale", v)}
+                                        >
+                                            <SelectTrigger className="w-1/2">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="util">Dia Útil</SelectItem>
+                                                <SelectItem value="fixo">Dia Fixo</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <Select
+                                            value={String(formData.dia_vale || 20)}
+                                            onValueChange={(v) =>
+                                                handleChange("dia_vale", Number(v))
+                                            }
+                                        >
+                                            <SelectTrigger className="w-1/2">
+                                                <SelectValue placeholder="Dia" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {DIAS_PAGAMENTO.map((d) => (
+                                                    <SelectItem key={d} value={String(d)}>
+                                                        {formData.tipo_dia_vale === "util" ? `${d}º Dia Útil` : `Dia ${d}`}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -901,8 +1007,126 @@ export default function ColaboradorModal({
                         </div>
 
                         <div className="border-t pt-4" style={{ borderColor: "#E5E0D8" }}>
+                            <SectionTitle>Descontos (Além dos Tributários)</SectionTitle>
+                            <p className="text-xs text-gray-500 mb-3">
+                                Valores que serão descontados do salário líquido mensalmente. Deixe em branco no Vale Transporte para usar o cálculo padrão de 6%.
+                            </p>
+                            <div className="grid grid-cols-3 gap-4">
+                                <div>
+                                    <Label>Vale Transporte (R$)</Label>
+                                    <Input
+                                        type="number"
+                                        value={formData.desconto_vale_transporte}
+                                        onChange={(e) =>
+                                            handleChange(
+                                                "desconto_vale_transporte",
+                                                e.target.value
+                                            )
+                                        }
+                                        placeholder="Cálculo auto (6%)"
+                                    />
+                                </div>
+                                <div>
+                                    <Label>Plano de Saúde (R$)</Label>
+                                    <Input
+                                        type="number"
+                                        value={formData.desconto_plano_saude}
+                                        onChange={(e) =>
+                                            handleChange(
+                                                "desconto_plano_saude",
+                                                e.target.value
+                                            )
+                                        }
+                                        placeholder="0,00"
+                                    />
+                                </div>
+                                <div>
+                                    <Label>Adiantamento (R$)</Label>
+                                    <Input
+                                        type="number"
+                                        value={formData.desconto_adiantamento}
+                                        onChange={(e) =>
+                                            handleChange(
+                                                "desconto_adiantamento",
+                                                e.target.value
+                                            )
+                                        }
+                                        placeholder="0,00"
+                                    />
+                                </div>
+                                <div className="col-span-3 border p-3 rounded-lg bg-gray-50 mt-2">
+                                    <div className="flex justify-between items-center mb-3">
+                                        <Label className="text-sm">Outros Descontos Adicionais</Label>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setListaDescontos([...listaDescontos, { descricao: "", valor: 0 }])}
+                                        >
+                                            + Adicionar
+                                        </Button>
+                                    </div>
+                                    
+                                    {listaDescontos.length === 0 ? (
+                                        <p className="text-xs text-gray-500 italic">Nenhum desconto adicional cadastrado.</p>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {listaDescontos.map((desc, idx) => (
+                                                <div key={idx} className="flex gap-2 items-start">
+                                                    <div className="flex-1">
+                                                        <Input
+                                                            value={desc.descricao}
+                                                            onChange={(e) => {
+                                                                const newLista = [...listaDescontos];
+                                                                newLista[idx].descricao = e.target.value;
+                                                                setListaDescontos(newLista);
+                                                            }}
+                                                            placeholder="Descrição (Ex: Farmácia, Quebra de Caixa)"
+                                                            className="text-xs h-8"
+                                                        />
+                                                    </div>
+                                                    <div className="w-32">
+                                                        <Input
+                                                            type="number"
+                                                            value={desc.valor || ""}
+                                                            onChange={(e) => {
+                                                                const newLista = [...listaDescontos];
+                                                                newLista[idx].valor = Number(e.target.value);
+                                                                setListaDescontos(newLista);
+                                                            }}
+                                                            placeholder="R$ 0,00"
+                                                            className="text-xs h-8"
+                                                        />
+                                                    </div>
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="text-red-500 h-8 w-8 p-0"
+                                                        onClick={() => {
+                                                            const newLista = listaDescontos.filter((_, i) => i !== idx);
+                                                            setListaDescontos(newLista);
+                                                        }}
+                                                    >
+                                                        <X className="w-4 h-4" />
+                                                    </Button>
+                                                </div>
+                                            ))}
+                                            <div className="text-right border-t pt-2 mt-2">
+                                                <span className="text-xs text-gray-600 mr-2">Total Adicional:</span>
+                                                <span className="font-bold text-red-600">
+                                                    - R$ {listaDescontos.reduce((acc, curr) => acc + (Number(curr.valor) || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="border-t pt-4" style={{ borderColor: "#E5E0D8" }}>
                             <SectionTitle>Tributário</SectionTitle>
-                            <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div className="grid grid-cols-3 gap-4 mb-4">
                                 <div>
                                     <Label>Pensão Alimenticia (R$)</Label>
                                     <Input
@@ -918,6 +1142,83 @@ export default function ColaboradorModal({
                                     />
                                 </div>
                             </div>
+
+                            <p className="text-xs text-gray-500 mb-3 mt-2">Configurações Manuais (INSS, FGTS, IRRF)</p>
+                            <div className="grid grid-cols-3 gap-4 mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                {/* INSS */}
+                                <div className="space-y-2">
+                                    <Label className="text-xs">Cálculo INSS</Label>
+                                    <Select value={formData.tipo_inss} onValueChange={(v) => handleChange("tipo_inss", v)}>
+                                        <SelectTrigger className="h-8 text-xs">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="automatico">Automático (Tabela)</SelectItem>
+                                            <SelectItem value="valor">Valor Fixo (R$)</SelectItem>
+                                            <SelectItem value="porcentagem">Porcentagem (%)</SelectItem>
+                                            <SelectItem value="isento">Isento / Não Tem</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    {(formData.tipo_inss === "valor" || formData.tipo_inss === "porcentagem") && (
+                                        <Input
+                                            type="number"
+                                            className="h-8 text-xs mt-2"
+                                            placeholder={formData.tipo_inss === "valor" ? "0,00" : "0"}
+                                            value={formData.valor_inss}
+                                            onChange={(e) => handleChange("valor_inss", e.target.value)}
+                                        />
+                                    )}
+                                </div>
+                                {/* FGTS */}
+                                <div className="space-y-2">
+                                    <Label className="text-xs">Cálculo FGTS</Label>
+                                    <Select value={formData.tipo_fgts} onValueChange={(v) => handleChange("tipo_fgts", v)}>
+                                        <SelectTrigger className="h-8 text-xs">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="automatico">Automático (8%)</SelectItem>
+                                            <SelectItem value="valor">Valor Fixo (R$)</SelectItem>
+                                            <SelectItem value="porcentagem">Porcentagem (%)</SelectItem>
+                                            <SelectItem value="isento">Isento / Não Tem</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    {(formData.tipo_fgts === "valor" || formData.tipo_fgts === "porcentagem") && (
+                                        <Input
+                                            type="number"
+                                            className="h-8 text-xs mt-2"
+                                            placeholder={formData.tipo_fgts === "valor" ? "0,00" : "0"}
+                                            value={formData.valor_fgts}
+                                            onChange={(e) => handleChange("valor_fgts", e.target.value)}
+                                        />
+                                    )}
+                                </div>
+                                {/* IRRF */}
+                                <div className="space-y-2">
+                                    <Label className="text-xs">Cálculo IRRF</Label>
+                                    <Select value={formData.tipo_irrf} onValueChange={(v) => handleChange("tipo_irrf", v)}>
+                                        <SelectTrigger className="h-8 text-xs">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="automatico">Automático (Tabela)</SelectItem>
+                                            <SelectItem value="valor">Valor Fixo (R$)</SelectItem>
+                                            <SelectItem value="porcentagem">Porcentagem (%)</SelectItem>
+                                            <SelectItem value="isento">Isento / Não Tem</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    {(formData.tipo_irrf === "valor" || formData.tipo_irrf === "porcentagem") && (
+                                        <Input
+                                            type="number"
+                                            className="h-8 text-xs mt-2"
+                                            placeholder={formData.tipo_irrf === "valor" ? "0,00" : "0"}
+                                            value={formData.valor_irrf}
+                                            onChange={(e) => handleChange("valor_irrf", e.target.value)}
+                                        />
+                                    )}
+                                </div>
+                            </div>
+
                             <div className="grid grid-cols-3 gap-3 text-sm">
                                 <div className="bg-red-50 rounded-lg p-3">
                                     <p className="text-xs text-red-600">INSS (Desconto)</p>

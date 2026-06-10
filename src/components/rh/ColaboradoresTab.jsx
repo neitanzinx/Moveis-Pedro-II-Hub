@@ -255,7 +255,7 @@ export default function ColaboradoresTab() {
         let csv =
             "Nome,Matrícula,CPF,Cargo,Status,Tipo Contrato,Salário Base,Data Admissão,Telefone,Email\n";
         colaboradoresFiltrados.forEach((c) => {
-            csv += `"${c.nome_completo || ""}","${c.matricula || ""}","${c.cpf || ""}","${c.cargo || ""}","${c.status || ""}","${c.tipo_contrato || ""}","${c.salario_base || ""}","${c.data_admissao || ""}","${c.telefone || ""}","${c.email || ""}"\n`;
+            csv += `"${c.nome_completo || ""}","${c.matricula || ""}","${c.cpf || ""}","${c.descricao_cargo || ""}","${c.status || ""}","${c.tipo_contrato || ""}","${c.salario_base || ""}","${c.data_admissao || ""}","${c.telefone || ""}","${c.email || ""}"\n`;
         });
         const blob = new Blob([csv], { type: "text/csv" });
         const url = window.URL.createObjectURL(blob);
@@ -492,7 +492,7 @@ export default function ColaboradoresTab() {
                                                         )}
                                                         {/* On mobile, show cargo below name */}
                                                         <p className="text-xs text-gray-500 md:hidden mt-0.5">
-                                                            {colaborador.cargo || "Sem cargo"}
+                                                            {colaborador.descricao_cargo || "Sem cargo"}
                                                         </p>
                                                     </div>
                                                 </div>
@@ -502,7 +502,7 @@ export default function ColaboradoresTab() {
                                             <td className="px-4 py-3 hidden md:table-cell">
                                                 <span className="flex items-center gap-1.5 text-gray-700">
                                                     <Building className="w-3 h-3 text-gray-400 shrink-0" />
-                                                    {colaborador.cargo || (
+                                                    {colaborador.descricao_cargo || (
                                                         <span className="text-gray-300 italic">
                                                             Sem cargo
                                                         </span>
