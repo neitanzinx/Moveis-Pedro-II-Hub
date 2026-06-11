@@ -127,6 +127,12 @@ export default function Financeiro() {
     ...queryOpts,
   });
 
+  const { data: colaboradores = [] } = useQuery({
+    queryKey: ['colaboradores-financeiro'],
+    queryFn: async () => await base44.entities.Colaborador.list() || [],
+    ...queryOpts,
+  });
+
   const { data: entregas = [] } = useQuery({
     queryKey: ['entregas-financeiro'],
     queryFn: async () => await base44.entities.Entrega.list('-created_at') || [],
@@ -293,6 +299,7 @@ export default function Financeiro() {
               comissoes={comissoes}
               contasPagarCompras={contasPagarCompras}
               metas={metas}
+              colaboradores={colaboradores}
               mesAno={mesAno}
               dreModo={dreModo}
               dreDataInicio={dreDataInicio}
@@ -310,6 +317,7 @@ export default function Financeiro() {
               comissoes={comissoes}
               contasPagarCompras={contasPagarCompras}
               lancamentos={listaLancamentos}
+              colaboradores={colaboradores}
               mesAno={mesAno}
               isLoadingFolha={loadingFolhas}
               isLoadingComissoes={loadingComissoes}

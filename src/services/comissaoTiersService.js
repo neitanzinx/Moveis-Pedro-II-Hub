@@ -1,4 +1,4 @@
-﻿import { normalizePaymentMethod } from "@/services/paymentOrchestrator";
+import { normalizePaymentMethod } from "@/services/paymentOrchestrator";
 
 const normalizeKey = (v = "") =>
   String(v).normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
@@ -48,11 +48,11 @@ export function calcularVendasLiquidas(vendasArr, configTaxas) {
  * @param {Array}  params.faixas          - Faixas de niveis_comissao_faixas
  * @returns {{ percentualMeta, faixaAplicada, percentualComissao, valorComissao }}
  */
-export function calcularComissaoTiered({ vendasBrutas, vendasLiquidas, meta, faixas }) {
+export function calcularComissaoTiered({ vendasBrutas, vendasLiquidas, meta, faixas, percentualMetaOverride }) {
   const zero = { percentualMeta: 0, faixaAplicada: null, percentualComissao: 0, valorComissao: 0 };
-  if (!meta || meta <= 0 || !faixas || faixas.length === 0) return zero;
+  if (!faixas || faixas.length === 0) return zero;
 
-  const percentualMeta = (vendasBrutas / meta) * 100;
+  const percentualMeta = percentualMetaOverride !== undefined ? percentualMetaOverride : (meta > 0 ? (vendasBrutas / meta) * 100 : 0);
 
   // Faixa qualificada = a de maior min% que ainda <= % atingido
   const faixaAplicada = [...faixas]

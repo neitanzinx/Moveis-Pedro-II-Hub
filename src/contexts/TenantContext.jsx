@@ -25,6 +25,9 @@ const DEFAULT_SETTINGS = {
     comissao_sobre: 'bruto',
     comissao_prioridade_estrategia: 'mais_especifica',
     comissao_recalculo_politica: 'nao_recalcular',
+    comissao_modelo_calculo: 'regra_venda',
+    comissao_faixa_referencia: 'vendedor',
+    comissao_meta_minima_loja_percentual: 0,
     compras_aprovacao_automatica: ['a_vista'],
     modulos_ativos: {
         montagem: true,

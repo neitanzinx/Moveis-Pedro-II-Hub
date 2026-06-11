@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pencil, Trash2, User, Calendar, CreditCard, Package, FileDown, MapPin, XCircle } from "lucide-react";
 import { format } from "date-fns";
+import { formatarDataExibicao } from "@/utils/dateUtils";
 import { stripInternalProductPrefixes } from "@/utils/productReference";
 import { isStatusCancelado } from "@/utils/vendaStatus";
 import {
@@ -283,7 +284,7 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
           </div>
           <div class="info-row">
             <span class="info-label">Data:</span>
-            <span class="info-value">${new Date(venda.data_venda).toLocaleDateString('pt-BR')}</span>
+            <span class="info-value">${formatarDataExibicao(venda.data_venda)}</span>
           </div>
           <div class="info-row">
             <span class="info-label">Status:</span>
@@ -389,7 +390,7 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
               <div className="flex items-center gap-4 text-sm" style={{ color: '#8B8B8B' }}>
                 <div className="flex items-center gap-2">
                   <Calendar className="w-4 h-4" />
-                  {format(new Date(venda.data_venda), "dd/MM/yyyy")}
+                  {formatarDataExibicao(venda.data_venda)}
                 </div>
                 {venda.loja && (
                   <div className="flex items-center gap-2">

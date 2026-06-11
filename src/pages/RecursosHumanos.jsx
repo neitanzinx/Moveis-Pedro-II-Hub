@@ -165,8 +165,43 @@ export default function RecursosHumanos() {
     const folhasMesAtual = folhas.filter(f =>
       f.mes_referencia === currentMonth && f.ano_referencia === currentYear
     );
+
+    const isFolhaPendente = (f) => {
+      if (f.status === 'Pago' || f.status === 'Cancelado') return false;
+
+      // Se for de meses/anos anteriores, qualquer coisa não paga está pendente
+      const isPastMonth = f.ano_referencia < currentYear || (f.ano_referencia === currentYear && f.mes_referencia < currentMonth);
+      if (isPastMonth) return true;
+
+      // Se for de meses futuros, nada está pendente ainda
+      const isFutureMonth = f.ano_referencia > currentYear || (f.ano_referencia === currentYear && f.mes_referencia > currentMonth);
+      if (isFutureMonth) return false;
+
+      // Mês atual: verificar por datas
+      const colab = colaboradores.find(c => c.id === f.colaborador_id || c.nome_completo === f.colaborador_nome);
+      const diaHoje = hoje.getDate();
+
+      const recebeVale = colab?.recebe_vale === true;
+      const valorDiaPagamento = Number(colab?.valor_dia_pagamento) || 0;
+      const valorDiaVale = Number(colab?.valor_dia_vale) || 0;
+      const temDistribuicao = recebeVale && (valorDiaPagamento + valorDiaVale) > 0;
+
+      if (temDistribuicao) {
+        const diaPgto = Number(colab.dia_pagamento) || 5;
+        const diaV = Number(colab.dia_vale) || 20;
+
+        const salPendente = f.salario_pago !== true && diaHoje >= diaPgto;
+        const valePendente = f.vale_pago !== true && diaHoje >= diaV;
+
+        return salPendente || valePendente;
+      } else {
+        const diaPgto = Number(colab?.dia_pagamento) || 5;
+        return f.salario_pago !== true && diaHoje >= diaPgto;
+      }
+    };
+
     const totalFolhaMes = folhasMesAtual.reduce((sum, f) => sum + (Number(f.salario_liquido) || 0), 0);
-    const folhasPendentes = folhasMesAtual.filter(f => f.status === 'Gerado').length;
+    const folhasPendentes = folhasMesAtual.filter(isFolhaPendente).length;
 
     // Avaliações
     const avaliacoesPendentes = avaliacoes.filter(a => a.status === 'Rascunho').length;

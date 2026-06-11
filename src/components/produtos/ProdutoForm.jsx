@@ -411,19 +411,46 @@ export default function ProdutoForm({ produto = null, onSave, isLoading }) {
         {formData.fotos.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
             {formData.fotos.map((foto, index) => (
-              <div key={index} className="relative group">
+              <div key={index} className="relative group aspect-square rounded-lg overflow-hidden border bg-white shadow-sm">
                 <img
                   src={foto}
                   alt={`Foto ${index + 1}`}
-                  className="w-full h-32 object-cover rounded-lg"
+                  className="w-full h-full object-cover"
                 />
-                <button
-                  type="button"
-                  onClick={() => removerFoto(index)}
-                  className="absolute top-2 right-2 bg-red-600 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => removerFoto(index)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                  {index > 0 && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-8 text-xs font-bold"
+                      onClick={() => {
+                        setFormData(prev => {
+                          const newFotos = [...prev.fotos];
+                          const [moved] = newFotos.splice(index, 1);
+                          newFotos.unshift(moved);
+                          return { ...prev, fotos: newFotos };
+                        });
+                      }}
+                    >
+                      Tornar Principal
+                    </Button>
+                  )}
+                </div>
+                {index === 0 && (
+                  <div className="absolute top-2 left-2 px-2 py-0.5 bg-green-500 text-white text-[10px] font-bold rounded shadow-sm">
+                    PRINCIPAL
+                  </div>
+                )}
               </div>
             ))}
           </div>

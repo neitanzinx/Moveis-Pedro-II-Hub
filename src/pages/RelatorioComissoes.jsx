@@ -167,22 +167,28 @@ export default function RelatorioComissoes() {
     return acc;
   }, {});
 
+  const faturamentosLoja = {};
+  Object.values(gruposPorVendedor).forEach((grupo) => {
+    const loja = grupo.vendedor.loja || "-";
+    const vendasVendedor = grupo.vendas;
+    const totalVendasVendedor = vendasVendedor.reduce((sum, v) => {
+      const assistencia = assistencias.find(a => a.numero_pedido === v.numero_pedido && a.status === 'Concluída');
+      return sum + ((v.valor_total || 0) - (assistencia?.valor_devolvido || 0));
+    }, 0);
+    faturamentosLoja[loja] = (faturamentosLoja[loja] || 0) + totalVendasVendedor;
+  });
+
   const comissoesPorVendedor = Object.values(gruposPorVendedor).map((grupo) => {
     const vendasVendedor = grupo.vendas;
 
     // Calcular comissão subtraindo devoluções
     const totalComissao = vendasVendedor.reduce((sum, v) => {
-      // Verificar se há assistência de devolução/troca concluída para este pedido
       const assistencia = assistencias.find(a =>
         a.numero_pedido === v.numero_pedido &&
         a.status === 'Concluída' &&
         (a.tipo === 'Devolução' || a.tipo === 'Troca')
       );
 
-      // Se houve devolução total (valor_devolvido >= valor_total), comissão é 0
-      // Se houve devolução parcial, subtraímos proporcionalmente? 
-      // Por simplicidade, se houve devolução/troca de item, o custo da assistência ou perda de venda impacta aqui.
-      // Regra sugerida: Se valor_devolvido existe, subtraímos a comissão sobre esse valor.
       const valorBaseComissao = Math.max(0, (v.valor_total || 0) - (assistencia?.valor_devolvido || 0));
       const porcentagem = v.comissao_calculada / (v.valor_total || 1);
       const comissaoAjustada = valorBaseComissao * porcentagem;
@@ -198,11 +204,45 @@ export default function RelatorioComissoes() {
     const quantidadeVendas = vendasVendedor.length;
     const breakdownPagamentos = calcularBreakdownPorFormaPagamento(vendasVendedor);
     const vendasLiquidas = calcularVendasLiquidas(vendasVendedor, configTaxas);
+    
     const nivelConfig = niveisComissao.find((n) => n.vendedor_id === grupo.vendedor.id && n.ativo !== false);
     const faixasNivel = nivelConfig ? niveisComissaoFaixas.filter((f) => f.nivel_comissao_id === nivelConfig.id) : [];
     const metaVendedor = nivelConfig?.meta_mensal || grupo.vendedor.meta_mensal || 0;
-    const comissaoTiered = nivelConfig && faixasNivel.length > 0
-      ? calcularComissaoTiered({ vendasBrutas: totalVendas, vendasLiquidas, meta: metaVendedor, faixas: faixasNivel })
+
+    // Configurações do modelo
+    const faixaRef = settings?.comissao_faixa_referencia || 'vendedor';
+    const pisoLoja = Number(settings?.comissao_meta_minima_loja_percentual || 0);
+
+    const lojaVendedor = grupo.vendedor.loja || "-";
+    const faturamentoLoja = faturamentosLoja[lojaVendedor] || 0;
+
+    // Buscar meta da loja
+    const metaLojaObj = metas.find(m => m.mes === `${mesInicio}-01` && m.loja === lojaVendedor && !m.vendedor_id);
+    const metaLoja = metaLojaObj?.meta_valor || 0;
+
+    const percentualMetaVendedor = metaVendedor > 0 ? (totalVendas / metaVendedor) * 100 : 0;
+    const percentualMetaLoja = metaLoja > 0 ? (faturamentoLoja / metaLoja) * 100 : 0;
+
+    let overridePercentual = undefined;
+    let pisoLojaAtingido = true;
+
+    if (faixaRef === 'loja') {
+      overridePercentual = percentualMetaLoja;
+    } else if (faixaRef === 'ambos') {
+      overridePercentual = percentualMetaVendedor;
+      if (percentualMetaLoja < pisoLoja) {
+        pisoLojaAtingido = false;
+      }
+    }
+
+    const comissaoTiered = nivelConfig && faixasNivel.length > 0 && (faixaRef !== 'ambos' || pisoLojaAtingido)
+      ? calcularComissaoTiered({
+          vendasBrutas: totalVendas,
+          vendasLiquidas,
+          meta: metaVendedor,
+          faixas: faixasNivel,
+          percentualMetaOverride: overridePercentual
+        })
       : null;
 
     return {
@@ -214,12 +254,15 @@ export default function RelatorioComissoes() {
       vendasLiquidas,
       comissaoTiered,
       meta: metaVendedor,
+      metaLoja,
+      faturamentoLoja,
+      percentualMetaLoja,
+      pisoLojaAtingido,
+      pisoLoja,
+      faixaRef,
       vendas: vendasVendedor
     };
   }).filter(item => item.quantidadeVendas > 0);
-
-  const totalGeralComissoes = comissoesPorVendedor.reduce((sum, item) => sum + item.totalComissao, 0);
-  const totalGeralVendas = comissoesPorVendedor.reduce((sum, item) => sum + item.totalVendas, 0);
 
   const getPeriodoInicioDate = () => new Date(`${mesInicio}-01T00:00:00`);
 
@@ -251,10 +294,20 @@ export default function RelatorioComissoes() {
 
   const comissoesConsolidadas = comissoesPorVendedor.map((item) => {
     const fechamento = mapFechamentoPorVendedor.get(item.vendedor.id);
+    const modelo = settings?.comissao_modelo_calculo || 'regra_venda';
+
+    let totalComissaoFinal = item.totalComissao;
+    if (modelo === 'faixas_meta') {
+      if (item.comissaoTiered && item.comissaoTiered.valorComissao > 0) {
+        totalComissaoFinal = item.comissaoTiered.valorComissao;
+      } else if (item.comissaoTiered && !item.pisoLojaAtingido) {
+        totalComissaoFinal = item.totalComissao; // fallback se piso não atingido
+      } else {
+        totalComissaoFinal = 0; // se atingiu o piso mas faturamento abaixo do primeiro tier
+      }
+    }
+
     if (!fechamento) {
-      const totalComissaoFinal = item.comissaoTiered?.valorComissao > 0
-        ? item.comissaoTiered.valorComissao
-        : item.totalComissao;
       return {
         ...item,
         fechamento_id: null,
@@ -267,10 +320,13 @@ export default function RelatorioComissoes() {
       ...item,
       fechamento_id: fechamento.id,
       status_fechamento: fechamento.status || 'Pendente',
-      totalFinal: Number(fechamento.total_final || fechamento.total_comissao || item.totalComissao),
+      totalFinal: Number(fechamento.total_final || fechamento.total_comissao || totalComissaoFinal),
       fechamento,
     };
   });
+
+  const totalGeralComissoes = comissoesConsolidadas.reduce((sum, item) => sum + item.totalFinal, 0);
+  const totalGeralVendas = comissoesConsolidadas.reduce((sum, item) => sum + item.totalVendas, 0);
 
   const totalPendente = comissoesConsolidadas
     .filter((item) => item.status_fechamento !== 'Pago')
@@ -295,6 +351,7 @@ export default function RelatorioComissoes() {
   const gerarFechamentoPeriodo = async () => {
     setProcessandoFechamento(true);
     const politica = settings?.comissao_recalculo_politica || 'nao_recalcular';
+    const modelo = settings?.comissao_modelo_calculo || 'regra_venda';
 
     try {
       const existentesPorVendedor = new Map(
@@ -314,10 +371,18 @@ export default function RelatorioComissoes() {
           continue;
         }
 
+        let totalComissaoFinal = item.totalComissao;
+        if (modelo === 'faixas_meta') {
+          if (item.comissaoTiered && item.comissaoTiered.valorComissao > 0) {
+            totalComissaoFinal = item.comissaoTiered.valorComissao;
+          } else if (item.comissaoTiered && !item.pisoLojaAtingido) {
+            totalComissaoFinal = item.totalComissao; // fallback
+          } else {
+            totalComissaoFinal = 0;
+          }
+        }
+
         if (acao === 'recriar' && existente) {
-          const totalComissaoFinal = item.comissaoTiered?.valorComissao > 0
-            ? item.comissaoTiered.valorComissao
-            : item.totalComissao;
           await base44.entities.ComissaoFechamentoMensal.update(existente.id, {
             quantidade_vendas: item.quantidadeVendas,
             valor_total_vendas: Number(item.totalVendas.toFixed(2)),
@@ -337,9 +402,6 @@ export default function RelatorioComissoes() {
           continue;
         }
 
-        const totalComissaoFinal = item.comissaoTiered?.valorComissao > 0
-          ? item.comissaoTiered.valorComissao
-          : item.totalComissao;
         await base44.entities.ComissaoFechamentoMensal.create({
           organization_id: tenantId,
           periodo_inicio: periodoInicioIso,
@@ -710,28 +772,62 @@ export default function RelatorioComissoes() {
                   </div>
 
                   {/* Comissão por Faixas */}
-                  {item.comissaoTiered && (
-                    <div className="mb-4 p-4 rounded-lg border-2" style={{ borderColor: '#f38a4c', backgroundColor: '#fff7ed' }}>
-                      <div className="flex items-center justify-between flex-wrap gap-2">
-                        <div className="flex items-center gap-2">
-                          <BarChart3 className="w-4 h-4 text-orange-600" />
-                          <p className="text-sm font-semibold text-orange-800">Comissão por Faixas</p>
+                  {settings?.comissao_modelo_calculo === 'faixas_meta' && (
+                    <>
+                      {/* Caso 1: Piso da loja não atingido */}
+                      {!item.pisoLojaAtingido && (
+                        <div className="mb-4 p-4 rounded-lg border-2 border-red-200 bg-red-50/50">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                              <AlertCircle className="w-4 h-4 text-red-600" />
+                              <p className="text-sm font-semibold text-red-800">Piso da Loja Não Atingido</p>
+                            </div>
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <Badge className="bg-red-100 text-red-700">
+                                Loja: {item.percentualMetaLoja.toFixed(1)}% (Piso Mínimo: {item.pisoLoja}%)
+                              </Badge>
+                              <span className="text-xs text-red-600 font-medium">
+                                Revertido para Comissão Simples (Por Venda)
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-3 flex-wrap">
-                          <Badge className="bg-orange-100 text-orange-700">
-                            {item.comissaoTiered.percentualMeta.toFixed(1)}% da meta
-                          </Badge>
-                          {item.comissaoTiered.faixaAplicada && (
-                            <Badge className="bg-green-100 text-green-700">
-                              {`Faixa ≥${item.comissaoTiered.faixaAplicada.percentual_meta_min}% → ${item.comissaoTiered.percentualComissao}% ${item.comissaoTiered.faixaAplicada.base_calculo === 'bruto' ? 'bruto' : 'líquido'}`}
-                            </Badge>
-                          )}
-                          <span className="text-lg font-bold text-orange-700">
-                            R$ {item.comissaoTiered.valorComissao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                          </span>
+                      )}
+
+                      {/* Caso 2: Piso atingido e possui faixa ativa */}
+                      {item.pisoLojaAtingido && item.comissaoTiered && item.comissaoTiered.faixaAplicada && (
+                        <div className="mb-4 p-4 rounded-lg border-2" style={{ borderColor: '#f38a4c', backgroundColor: '#fff7ed' }}>
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                              <BarChart3 className="w-4 h-4 text-orange-600" />
+                              <p className="text-sm font-semibold text-orange-800">Comissão por Faixas (Meta Atingida)</p>
+                            </div>
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <Badge className="bg-orange-100 text-orange-700">
+                                {item.comissaoTiered.percentualMeta.toFixed(1)}% da meta
+                              </Badge>
+                              <Badge className="bg-green-100 text-green-700">
+                                {`Faixa ≥${item.comissaoTiered.faixaAplicada.percentual_meta_min}% → ${item.comissaoTiered.percentualComissao}% ${item.comissaoTiered.faixaAplicada.base_calculo === 'bruto' ? 'bruto' : 'líquido'}`}
+                              </Badge>
+                              <span className="text-lg font-bold text-orange-700">
+                                R$ {item.comissaoTiered.valorComissao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
+                      )}
+
+                      {/* Caso 3: Piso atingido mas faturamento abaixo do primeiro tier */}
+                      {item.pisoLojaAtingido && item.comissaoTiered && !item.comissaoTiered.faixaAplicada && (
+                        <div className="mb-4 p-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 text-gray-500" />
+                            <span className="text-xs text-gray-500 font-medium">Faturamento individual abaixo do percentual mínimo para receber comissão.</span>
+                          </div>
+                          <Badge className="bg-gray-200 text-gray-700">0% de comissão</Badge>
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {/* Breakdown por Forma de Pagamento */}
@@ -757,7 +853,7 @@ export default function RelatorioComissoes() {
                     <div className="mt-4 p-4 rounded-lg" style={{ backgroundColor: '#f0f9ff' }}>
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-sm font-medium" style={{ color: '#07593f' }}>
-                          Meta Mensal: R$ {item.meta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          Meta Individual: R$ {item.meta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </p>
                         <Badge
                           style={{
@@ -774,6 +870,31 @@ export default function RelatorioComissoes() {
                           style={{
                             width: `${Math.min((item.totalVendas / item.meta) * 100, 100)}%`,
                             backgroundColor: item.totalVendas >= item.meta ? '#07593f' : '#f38a4c'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Meta da Loja (se configurado como referência) */}
+                  {settings?.comissao_modelo_calculo === 'faixas_meta' && item.faixaRef !== 'vendedor' && item.metaLoja > 0 && (
+                    <div className="mt-3 p-4 rounded-lg" style={{ backgroundColor: '#FAF8F5' }}>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm font-medium text-gray-700">
+                          Meta da Filial (Loja {item.vendedor.loja}): R$ {item.metaLoja.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (Faturamento: R$ {item.faturamentoLoja.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                        </p>
+                        <Badge
+                          className={item.percentualMetaLoja >= 100 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}
+                        >
+                          {item.percentualMetaLoja.toFixed(0)}% atingido
+                        </Badge>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="h-2 rounded-full transition-all"
+                          style={{
+                            width: `${Math.min(item.percentualMetaLoja, 100)}%`,
+                            backgroundColor: item.percentualMetaLoja >= 100 ? '#07593f' : '#f38a4c'
                           }}
                         />
                       </div>

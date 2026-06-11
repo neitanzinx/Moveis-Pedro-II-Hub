@@ -416,6 +416,9 @@ export default function ColaboradoresTab() {
                                     Contrato
                                 </th>
                                 <th className="text-left px-4 py-3 font-semibold hidden lg:table-cell">
+                                    Salário Base
+                                </th>
+                                <th className="text-left px-4 py-3 font-semibold hidden lg:table-cell">
                                     Admissão
                                 </th>
                                 <th className="text-left px-4 py-3 font-semibold hidden xl:table-cell">
@@ -428,7 +431,7 @@ export default function ColaboradoresTab() {
                         <tbody>
                             {colaboradoresFiltrados.length === 0 ? (
                                 <tr>
-                                    <td colSpan={7} className="text-center py-14">
+                                    <td colSpan={8} className="text-center py-14">
                                         <Users className="w-12 h-12 mx-auto mb-3 text-gray-200" />
                                         <p className="text-gray-400 mb-3">
                                             Nenhum colaborador encontrado
@@ -523,7 +526,9 @@ export default function ColaboradoresTab() {
                                                     <span className="text-gray-300">—</span>
                                                 )}
                                             </td>
-
+                                            <td className="px-4 py-3 hidden lg:table-cell">
+                                              {colaborador.salario_base ? colaborador.salario_base.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : "—"}
+                                            </td>
                                             {/* Admissão */}
                                             <td className="px-4 py-3 hidden lg:table-cell text-gray-600">
                                                 {admissao || (

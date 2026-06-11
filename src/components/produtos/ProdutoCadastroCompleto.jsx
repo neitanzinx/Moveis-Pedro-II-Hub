@@ -649,8 +649,9 @@ export default function ProdutoCadastroCompleto({
 
         setUploadingImages(true);
         try {
-            const uploadPromises = files.map(file => base44.storage.uploadFile(file));
-            const urls = await Promise.all(uploadPromises);
+            const uploadPromises = files.map(file => base44.integrations.Core.UploadFile({ file }));
+            const results = await Promise.all(uploadPromises);
+            const urls = results.map(r => r.file_url);
             setFormData(prev => ({
                 ...prev,
                 fotos: [...prev.fotos, ...urls]
@@ -898,7 +899,39 @@ export default function ProdutoCadastroCompleto({
                     {/* Conteúdo scrollável */}
                     <div className="flex-1 overflow-y-auto px-6 py-4 bg-gray-50/30">
                         {activeView === 'ficha' && (
-                            <fieldset disabled={readOnly} className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+                            <div className="animate-in fade-in slide-in-from-bottom-2 space-y-6">
+                                {readOnly && formData.fotos?.length > 0 && (
+                                    <div className="w-full rounded-2xl overflow-hidden bg-white shadow-md border border-gray-100">
+                                        <div className="w-full h-[400px] bg-gray-50/50 flex items-center justify-center relative">
+                                            <img 
+                                                src={formData.fotos[0]} 
+                                                alt="Foto principal" 
+                                                className="max-w-full max-h-full object-contain p-4 drop-shadow-md"
+                                            />
+                                            <div className="absolute top-4 left-4">
+                                                <Badge className="bg-green-600 hover:bg-green-700 text-white font-bold px-3 py-1 text-xs shadow-sm">
+                                                    Foto Principal
+                                                </Badge>
+                                            </div>
+                                        </div>
+                                        {formData.fotos.length > 1 && (
+                                            <div className="flex gap-3 p-4 overflow-x-auto bg-white border-t border-gray-100 no-scrollbar">
+                                                {formData.fotos.map((foto, idx) => (
+                                                    <div key={idx} className="flex-shrink-0 w-24 h-24 rounded-lg overflow-hidden border-2 border-transparent hover:border-green-500 transition-all cursor-pointer bg-gray-50">
+                                                        <img src={foto} className="w-full h-full object-cover" alt={`Foto ${idx+1}`} />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                {readOnly && (!formData.fotos || formData.fotos.length === 0) && (
+                                    <div className="w-full h-40 bg-gray-50 border-2 border-dashed border-gray-200 rounded-2xl flex flex-col items-center justify-center text-gray-400 shadow-sm">
+                                        <ImageIcon className="w-12 h-12 mb-3 text-gray-300" />
+                                        <p className="font-medium text-gray-500">Nenhuma foto cadastrada para este produto</p>
+                                    </div>
+                                )}
+                                <fieldset disabled={readOnly} className="space-y-6">
                                 <Card id="secao-identificacao" className="scroll-mt-4">
                                     <CardHeader>
                                         <CardTitle className="text-base flex items-center gap-2">
@@ -1662,10 +1695,11 @@ export default function ProdutoCadastroCompleto({
                                     </CardContent>
                                 </Card>
 
-                                <Card id="secao-fotos" className="scroll-mt-4">
-                                    <CardHeader>
-                                        <CardTitle className="text-base flex items-center gap-2">
-                                            <ImageIcon className="w-4 h-4 text-amber-600" />
+                                {!readOnly && (
+                                    <Card id="secao-fotos" className="scroll-mt-4">
+                                        <CardHeader>
+                                            <CardTitle className="text-base flex items-center gap-2">
+                                                <ImageIcon className="w-4 h-4 text-amber-600" />
                                             Fotos do Produto
                                         </CardTitle>
                                     </CardHeader>
@@ -1719,6 +1753,7 @@ export default function ProdutoCadastroCompleto({
                                                         <img src={foto} className="w-full h-full object-cover" alt="" />
                                                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                                                             <Button
+                                                                type="button"
                                                                 variant="destructive"
                                                                 size="icon"
                                                                 className="h-8 w-8"
@@ -1726,6 +1761,24 @@ export default function ProdutoCadastroCompleto({
                                                             >
                                                                 <Trash2 className="w-4 h-4" />
                                                             </Button>
+                                                            {index > 0 && (
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="secondary"
+                                                                    size="sm"
+                                                                    className="h-8 text-xs font-bold"
+                                                                    onClick={() => {
+                                                                        setFormData(prev => {
+                                                                            const newFotos = [...prev.fotos];
+                                                                            const [moved] = newFotos.splice(index, 1);
+                                                                            newFotos.unshift(moved);
+                                                                            return { ...prev, fotos: newFotos };
+                                                                        });
+                                                                    }}
+                                                                >
+                                                                    Tornar Principal
+                                                                </Button>
+                                                            )}
                                                         </div>
                                                         {index === 0 && (
                                                             <div className="absolute top-2 left-2 px-2 py-0.5 bg-green-500 text-white text-[10px] font-bold rounded shadow-sm">
@@ -1738,7 +1791,9 @@ export default function ProdutoCadastroCompleto({
                                         )}
                                     </CardContent>
                                 </Card>
+                                )}
                             </fieldset>
+                        </div>
                         )}
 
                         {/* SEÇÃO: HISTÓRICO */}

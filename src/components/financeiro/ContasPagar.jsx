@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Search, Users, ShoppingCart, TrendingUp, CheckCircle2 } from "lucide-react";
 import { filtrarFolhasPorMes, normalizeTipo } from "@/services/financeiroAggregation";
+import { calcularFolhaCompleta } from "@/utils/calculosTrabalhistas";
 
 const fmt = (v) =>
   Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -14,6 +15,7 @@ const FOLHA_STATUS = {
   Gerado:    { bg: "bg-yellow-100 dark:bg-yellow-900/30", text: "text-yellow-700 dark:text-yellow-400" },
   Pago:      { bg: "bg-green-100 dark:bg-green-900/30",  text: "text-green-700 dark:text-green-400" },
   Cancelado: { bg: "bg-gray-100 dark:bg-neutral-700",    text: "text-gray-500" },
+  Estimativa: { bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-700 dark:text-amber-400" },
 };
 
 const COMISSAO_STATUS = {
@@ -40,7 +42,7 @@ function isDespesaPendente(lancamento) {
 }
 
 // ─── Aba: Folha de Pagamento ─────────────────────────────────────────────────
-function FolhaTab({ folhas, mesAno, isLoading }) {
+function FolhaTab({ folhas, mesAno, isLoading, colaboradores = [] }) {
   const [busca, setBusca] = useState("");
 
   const folhasMes = useMemo(
@@ -48,15 +50,60 @@ function FolhaTab({ folhas, mesAno, isLoading }) {
     [folhas, mesAno]
   );
 
-  const filtradas = useMemo(() => {
-    if (!busca) return folhasMes;
-    const t = busca.toLowerCase();
-    return folhasMes.filter((f) => f.colaborador_nome?.toLowerCase().includes(t));
-  }, [folhasMes, busca]);
+  // Estimativa a partir dos colaboradores quando não há folhas geradas
+  const folhasEstimadas = useMemo(() => {
+    if (folhasMes.length > 0) return [];
+    const colabAtivos = colaboradores.filter(c => c.status === 'Ativo' && Number(c.salario_base) > 0);
+    return colabAtivos.map(c => {
+      const calc = calcularFolhaCompleta(c);
+      return {
+        id: `est-${c.id}`,
+        colaborador_nome: c.nome_completo,
+        salario_bruto: calc.salario_bruto,
+        inss: calc.inss,
+        irrf: calc.irrf,
+        fgts: calc.fgts,
+        vale_transporte: calc.vale_transporte,
+        outros_descontos: calc.outros_descontos,
+        salario_liquido: calc.salario_liquido,
+        status: 'Estimativa',
+        data_pagamento: null,
+      };
+    });
+  }, [folhasMes, colaboradores]);
 
-  const totalBruto = folhasMes.reduce((s, f) => s + (f.salario_bruto || 0), 0);
-  const totalLiquido = folhasMes.reduce((s, f) => s + (f.salario_liquido || 0), 0);
-  const totalFGTS = folhasMes.reduce((s, f) => s + (f.fgts || 0), 0);
+  const dadosExibir = folhasMes.length > 0 ? folhasMes : folhasEstimadas;
+  const isEstimativa = folhasMes.length === 0 && folhasEstimadas.length > 0;
+
+  const filtradas = useMemo(() => {
+    if (!busca) return dadosExibir;
+    const t = busca.toLowerCase();
+    return dadosExibir.filter((f) => f.colaborador_nome?.toLowerCase().includes(t));
+  }, [dadosExibir, busca]);
+
+  const totalBruto = dadosExibir.reduce((s, f) => s + (f.salario_bruto || 0), 0);
+  const totalFGTS = dadosExibir.reduce((s, f) => s + (f.fgts || 0), 0);
+
+  const totalLiquidoPendente = useMemo(() => {
+    return dadosExibir.reduce((s, f) => {
+      if (f.status === 'Pago' || f.status === 'Cancelado') return s;
+      if (f.status === 'Estimativa') return s + (f.salario_liquido || 0);
+
+      const colab = colaboradores.find(c => c.nome_completo === f.colaborador_nome || c.id === f.colaborador_id);
+      const recebeVale = colab?.recebe_vale === true;
+      const valorDiaPagamento = Number(colab?.valor_dia_pagamento) || 0;
+      const valorDiaVale = Number(colab?.valor_dia_vale) || 0;
+      const temDistribuicao = recebeVale && (valorDiaPagamento + valorDiaVale) > 0;
+
+      if (temDistribuicao) {
+        const salPendente = f.salario_pago === true ? 0 : valorDiaPagamento;
+        const valePendente = f.vale_pago === true ? 0 : valorDiaVale;
+        return s + salPendente + valePendente;
+      } else {
+        return s + (f.salario_pago === true ? 0 : (f.salario_liquido || 0));
+      }
+    }, 0);
+  }, [dadosExibir, colaboradores]);
 
   if (isLoading) {
     return (
@@ -73,14 +120,14 @@ function FolhaTab({ folhas, mesAno, isLoading }) {
           <CardContent className="pt-4 pb-3">
             <p className="text-xs text-gray-500 uppercase tracking-wide">Salário Bruto</p>
             <p className="text-xl font-bold text-gray-800 dark:text-gray-200">R$ {fmt(totalBruto)}</p>
-            <p className="text-xs text-gray-400">{folhasMes.length} colaborador(es)</p>
+            <p className="text-xs text-gray-400">{dadosExibir.length} colaborador(es){isEstimativa ? " (estimativa)" : ""}</p>
           </CardContent>
         </Card>
         <Card className="border-0 shadow-md">
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">Salário Líquido</p>
-            <p className="text-xl font-bold text-red-600">R$ {fmt(totalLiquido)}</p>
-            <p className="text-xs text-gray-400">A desembolsar</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Salário Líquido (A pagar)</p>
+            <p className="text-xl font-bold text-red-600">R$ {fmt(totalLiquidoPendente)}</p>
+            <p className="text-xs text-gray-400">Total pendente no mês</p>
           </CardContent>
         </Card>
         <Card className="border-0 shadow-md">
@@ -102,12 +149,18 @@ function FolhaTab({ folhas, mesAno, isLoading }) {
         />
       </div>
 
+      {isEstimativa && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+          <strong>Valores estimados.</strong> A folha deste mês ainda não foi gerada no módulo de RH. Os valores abaixo são calculados automaticamente com base no salário dos colaboradores ativos.
+        </div>
+      )}
+
       {filtradas.length === 0 ? (
         <div className="text-center py-8 text-gray-400">
           <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
-          {folhasMes.length === 0
-            ? "Nenhuma folha gerada para este mês."
-            : "Nenhum resultado para a busca."}
+          {busca
+            ? "Nenhum resultado para a busca."
+            : "Nenhuma folha gerada e nenhum colaborador com salário cadastrado."}
         </div>
       ) : (
         <Card className="border-0 shadow-md">
@@ -127,18 +180,88 @@ function FolhaTab({ folhas, mesAno, isLoading }) {
               <TableBody>
                 {filtradas.map((f) => {
                   const descontos = (f.inss || 0) + (f.irrf || 0) + (f.vale_transporte || 0) + (f.outros_descontos || 0);
+
+                  // Determinar se o pagamento é parcelado
+                  const colab = colaboradores.find(c => c.nome_completo === f.colaborador_nome || c.id === f.colaborador_id);
+                  const recebeVale = colab?.recebe_vale === true;
+                  const valorDiaPagamento = Number(colab?.valor_dia_pagamento) || 0;
+                  const valorDiaVale = Number(colab?.valor_dia_vale) || 0;
+                  const temDistribuicao = recebeVale && (valorDiaPagamento + valorDiaVale) > 0;
+
+                  let valorPendente = 0;
+                  let statusLabel = f.status;
+
+                  if (f.status === 'Pago') {
+                    valorPendente = 0;
+                  } else if (f.status === 'Cancelado') {
+                    valorPendente = 0;
+                  } else if (f.status === 'Estimativa') {
+                    valorPendente = f.salario_liquido;
+                  } else { // 'Gerado'
+                    if (temDistribuicao) {
+                      const salPendente = f.salario_pago === true ? 0 : valorDiaPagamento;
+                      const valePendente = f.vale_pago === true ? 0 : valorDiaVale;
+                      valorPendente = salPendente + valePendente;
+                      
+                      if (f.salario_pago === true && f.vale_pago === true) {
+                        statusLabel = "Pago";
+                      } else if (f.salario_pago === true || f.vale_pago === true) {
+                        statusLabel = "Parcial";
+                      }
+                    } else {
+                      valorPendente = f.salario_pago === true ? 0 : f.salario_liquido;
+                      if (f.salario_pago === true) {
+                        statusLabel = "Pago";
+                      }
+                    }
+                  }
+
                   return (
                     <TableRow key={f.id} className="text-sm hover:bg-gray-50 dark:hover:bg-neutral-800">
-                      <TableCell className="font-medium">{f.colaborador_nome || "—"}</TableCell>
+                      <TableCell className="font-medium">
+                        <p className="font-medium text-gray-800 dark:text-gray-200">{f.colaborador_nome || "—"}</p>
+                        {temDistribuicao && (
+                          <span className="text-[10px] text-gray-400 block mt-0.5">
+                            Divisão: Dia {colab.dia_pagamento || 5} (R$ {fmt(valorDiaPagamento)}) / Dia {colab.dia_vale || 20} (R$ {fmt(valorDiaVale)})
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell>R$ {fmt(f.salario_bruto)}</TableCell>
                       <TableCell className="text-red-500">– R$ {fmt(descontos)}</TableCell>
-                      <TableCell className="font-semibold text-red-600">R$ {fmt(f.salario_liquido)}</TableCell>
+                      <TableCell>
+                        <p className="font-semibold text-gray-700 dark:text-gray-300">R$ {fmt(f.salario_liquido)}</p>
+                        {valorPendente < f.salario_liquido && valorPendente > 0 && (
+                          <span className="text-[10px] text-orange-500 font-medium block">
+                            Pendente: R$ {fmt(valorPendente)}
+                          </span>
+                        )}
+                        {valorPendente === 0 && f.status !== 'Estimativa' && (
+                          <span className="text-[10px] text-green-600 font-medium block">
+                            Totalmente Pago
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-orange-500">R$ {fmt(f.fgts)}</TableCell>
-                      <TableCell><StatusBadge status={f.status} mapa={FOLHA_STATUS} /></TableCell>
+                      <TableCell>
+                        <StatusBadge status={statusLabel} mapa={{ ...FOLHA_STATUS, Parcial: { bg: "bg-indigo-100 dark:bg-indigo-900/30", text: "text-indigo-700 dark:text-indigo-400" } }} />
+                      </TableCell>
                       <TableCell className="text-gray-400 text-xs">
-                        {f.data_pagamento
-                          ? new Date(f.data_pagamento + "T00:00:00").toLocaleDateString("pt-BR")
-                          : "—"}
+                        {f.status === 'Pago' && f.data_pagamento ? (
+                          new Date(f.data_pagamento + "T00:00:00").toLocaleDateString("pt-BR")
+                        ) : temDistribuicao ? (
+                          <div className="space-y-0.5 text-[10px]">
+                            <p className={f.salario_pago ? "text-green-600" : "text-gray-400"}>
+                              Salário: {f.salario_pago ? `Pago em ${f.data_pagamento_salario ? new Date(f.data_pagamento_salario + "T00:00:00").toLocaleDateString("pt-BR") : '—'}` : 'Pendente'}
+                            </p>
+                            <p className={f.vale_pago ? "text-green-600" : "text-gray-400"}>
+                              Vale: {f.vale_pago ? `Pago em ${f.data_pagamento_vale ? new Date(f.data_pagamento_vale + "T00:00:00").toLocaleDateString("pt-BR") : '—'}` : 'Pendente'}
+                            </p>
+                          </div>
+                        ) : f.salario_pago ? (
+                          `Pago em ${f.data_pagamento_salario ? new Date(f.data_pagamento_salario + "T00:00:00").toLocaleDateString("pt-BR") : '—'}`
+                        ) : (
+                          "Pendente"
+                        )}
                       </TableCell>
                     </TableRow>
                   );
@@ -652,6 +775,7 @@ export default function ContasPagar({
   comissoes = [],
   contasPagarCompras = [],
   lancamentos = [],
+  colaboradores = [],
   mesAno,
   isLoadingFolha = false,
   isLoadingComissoes = false,
@@ -660,10 +784,26 @@ export default function ContasPagar({
 }) {
   const [activeTab, setActiveTab] = useState("folha");
 
-  const totalFolhaMes = useMemo(
-    () => filtrarFolhasPorMes(folhas, mesAno).reduce((s, f) => s + (f.salario_liquido || 0), 0),
-    [folhas, mesAno]
-  );
+  const totalFolhaMesPendente = useMemo(() => {
+    const folhasMes = filtrarFolhasPorMes(folhas, mesAno);
+    return folhasMes.reduce((s, f) => {
+      if (f.status === 'Pago' || f.status === 'Cancelado') return s;
+
+      const colab = colaboradores.find(c => c.nome_completo === f.colaborador_nome || c.id === f.colaborador_id);
+      const recebeVale = colab?.recebe_vale === true;
+      const valorDiaPagamento = Number(colab?.valor_dia_pagamento) || 0;
+      const valorDiaVale = Number(colab?.valor_dia_vale) || 0;
+      const temDistribuicao = recebeVale && (valorDiaPagamento + valorDiaVale) > 0;
+
+      if (temDistribuicao) {
+        const salPendente = f.salario_pago === true ? 0 : valorDiaPagamento;
+        const valePendente = f.vale_pago === true ? 0 : valorDiaVale;
+        return s + salPendente + valePendente;
+      } else {
+        return s + (f.salario_pago === true ? 0 : (f.salario_liquido || 0));
+      }
+    }, 0);
+  }, [folhas, colaboradores, mesAno]);
 
   const totalComissoesMes = useMemo(() => {
     if (!Array.isArray(comissoes)) return 0;
@@ -686,7 +826,32 @@ export default function ContasPagar({
       .reduce((sum, lanc) => sum + Math.abs(Number(lanc.valor || 0)), 0);
   }, [lancamentos]);
 
-  const grandTotal = totalFolhaMes + totalComissoesMes + totalComprasPendentes + totalDespesasPendentes;
+  // Estimativa de folha a partir dos colaboradores ativos
+  const folhaEstimada = useMemo(() => {
+    const colabAtivos = colaboradores.filter(c => c.status === 'Ativo' && Number(c.salario_base) > 0);
+    if (colabAtivos.length === 0) return { total: 0, count: 0, itens: [] };
+    const itens = colabAtivos.map(c => {
+      const calc = calcularFolhaCompleta(c);
+      return {
+        id: `est-${c.id}`,
+        colaborador_nome: c.nome_completo,
+        salario_bruto: calc.salario_bruto,
+        inss: calc.inss,
+        fgts: calc.fgts,
+        vale_transporte: calc.vale_transporte,
+        salario_liquido: calc.salario_liquido,
+        status: 'Estimativa',
+      };
+    });
+    const total = itens.reduce((s, f) => s + (f.salario_liquido || 0), 0);
+    return { total, count: colabAtivos.length, itens };
+  }, [colaboradores]);
+
+  const folhasMes = useMemo(() => filtrarFolhasPorMes(folhas, mesAno), [folhas, mesAno]);
+  const temFolhaGerada = folhasMes.length > 0;
+  const totalFolhaEfetivo = temFolhaGerada ? totalFolhaMesPendente : folhaEstimada.total;
+
+  const grandTotal = totalFolhaEfetivo + totalComissoesMes + totalComprasPendentes + totalDespesasPendentes;
   const isLoadingPagas = isLoadingFolha || isLoadingComissoes || isLoadingCompras || isLoadingLancamentos;
 
   return (
@@ -702,8 +867,11 @@ export default function ContasPagar({
         </Card>
         <Card className="border-0 shadow-md">
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">Folha</p>
-            <p className="text-xl font-bold text-gray-700 dark:text-gray-200">R$ {fmt(totalFolhaMes)}</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wide">{temFolhaGerada ? "Folha" : "Folha (est.)"}</p>
+            <p className="text-xl font-bold text-gray-700 dark:text-gray-200">R$ {fmt(totalFolhaEfetivo)}</p>
+            {!temFolhaGerada && folhaEstimada.count > 0 && (
+              <p className="text-xs text-amber-500">{folhaEstimada.count} colaborador(es)</p>
+            )}
           </CardContent>
         </Card>
         <Card className="border-0 shadow-md">
@@ -752,7 +920,7 @@ export default function ContasPagar({
         </TabsList>
 
         <TabsContent value="folha">
-          <FolhaTab folhas={folhas} mesAno={mesAno} isLoading={isLoadingFolha} />
+          <FolhaTab folhas={folhas} mesAno={mesAno} isLoading={isLoadingFolha} colaboradores={colaboradores} />
         </TabsContent>
         <TabsContent value="comissoes">
           <ComissoesTab comissoes={comissoes} mesAno={mesAno} isLoading={isLoadingComissoes} />

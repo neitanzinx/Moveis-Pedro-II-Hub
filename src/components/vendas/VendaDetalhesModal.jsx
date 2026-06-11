@@ -51,6 +51,13 @@ export function VendaDetalhesModal({ venda, isOpen, onClose, entregas = [], mont
     const entregaAtual = resumoLogistico.entregaPrincipal;
     const fotosEntrega = getEntregaFotos(entregaAtual);
 
+    const totalDescontosItens = (venda.itens || []).reduce((acc, item) => acc + Number(item.desconto_item_valor || 0), 0);
+    const subtotalBruto = (venda.itens || []).reduce((acc, item) => {
+        const price = Number(item.preco_original || item.preco_unitario || item.valor_unitario || 0);
+        return acc + (price * Number(item.quantidade || 1));
+    }, 0);
+    const descontoGlobal = Number(venda.desconto || venda.valor_desconto || 0);
+
     const getStatusBadge = (status) => {
         const statusMap = {
             'pago': { color: 'bg-emerald-500', label: 'Pago' },
@@ -151,25 +158,52 @@ export function VendaDetalhesModal({ venda, isOpen, onClose, entregas = [], mont
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {resumoLogistico.itensDetalhados.map((item, idx) => (
-                                            <TableRow key={idx}>
-                                                <TableCell className="font-medium text-sm">
-                                                    {buildProductDisplayName(item.produto_nome, item.modelo_referencia)}
-                                                    {item.variacao_nome && (
-                                                        <span className="text-xs text-muted-foreground block font-normal">
-                                                            {item.variacao_nome}
+                                        {resumoLogistico.itensDetalhados.map((item, idx) => {
+                                            const temDescontoItem = (item.desconto_item_percent || 0) > 0 || (item.desconto_item_valor || 0) > 0;
+                                            const unitPrice = Number(item.valor_unitario || item.preco_unitario || 0);
+                                            const originalPrice = item.preco_original || (unitPrice + Number(item.desconto_item_valor || 0) / Number(item.quantidade || 1));
+                                            const subtotalOriginal = originalPrice * Number(item.quantidade || 1);
+                                            const subtotalComDesconto = Number(item.quantidade || 0) * unitPrice;
+                                            
+                                            return (
+                                                <TableRow key={idx}>
+                                                    <TableCell className="font-medium text-sm">
+                                                        {buildProductDisplayName(item.produto_nome, item.modelo_referencia)}
+                                                        {item.variacao_nome && (
+                                                            <span className="text-xs text-muted-foreground block font-normal">
+                                                                {item.variacao_nome}
+                                                            </span>
+                                                        )}
+                                                        {temDescontoItem && (
+                                                            <span className="text-xs text-emerald-600 font-semibold block mt-0.5">
+                                                                ✂ {item.desconto_item_percent ? `Desconto ${item.desconto_item_percent}%` : 'Desconto'}: -{formatCurrency(item.desconto_item_valor)}
+                                                            </span>
+                                                        )}
+                                                    </TableCell>
+                                                    <TableCell className="text-xs text-muted-foreground">{item.entregaLabel || '-'}</TableCell>
+                                                    <TableCell className="text-xs text-muted-foreground">{item.montagemLabel || '-'}</TableCell>
+                                                    <TableCell className="text-center">{item.quantidade}</TableCell>
+                                                    <TableCell className="text-right text-xs">
+                                                        {temDescontoItem && originalPrice > unitPrice && (
+                                                            <span className="text-[10px] text-muted-foreground line-through block">
+                                                                {formatCurrency(originalPrice)}
+                                                            </span>
+                                                        )}
+                                                        <span className="font-medium">{formatCurrency(unitPrice)}</span>
+                                                    </TableCell>
+                                                    <TableCell className="text-right font-semibold">
+                                                        {temDescontoItem && subtotalOriginal > subtotalComDesconto && (
+                                                            <span className="text-xs text-muted-foreground line-through block font-normal">
+                                                                {formatCurrency(subtotalOriginal)}
+                                                            </span>
+                                                        )}
+                                                        <span className={temDescontoItem ? "text-emerald-700" : ""}>
+                                                            {formatCurrency(item.subtotal || subtotalComDesconto)}
                                                         </span>
-                                                    )}
-                                                </TableCell>
-                                                <TableCell className="text-xs text-muted-foreground">{item.entregaLabel || '-'}</TableCell>
-                                                <TableCell className="text-xs text-muted-foreground">{item.montagemLabel || '-'}</TableCell>
-                                                <TableCell className="text-center">{item.quantidade}</TableCell>
-                                                <TableCell className="text-right">{formatCurrency(item.valor_unitario || item.preco_unitario)}</TableCell>
-                                                <TableCell className="text-right font-semibold">
-                                                    {formatCurrency((item.quantidade || 0) * (item.valor_unitario || item.preco_unitario || 0))}
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
                                     </TableBody>
                                 </Table>
                             </div>
@@ -184,27 +218,44 @@ export function VendaDetalhesModal({ venda, isOpen, onClose, entregas = [], mont
                                     Financeiro
                                 </h3>
                                 <div className="space-y-3 bg-muted/20 p-4 rounded-xl border">
-                                    <div className="flex justify-between text-sm">
-                                        <span className="text-muted-foreground">Subtotal</span>
-                                        <span>{formatCurrency(venda.valor_subtotal || venda.valor_total)}</span>
-                                    </div>
-                                    {venda.valor_desconto > 0 && (
-                                        <div className="flex justify-between text-sm text-emerald-600">
-                                            <span>Desconto</span>
-                                            <span>-{formatCurrency(venda.valor_desconto)}</span>
-                                        </div>
-                                    )}
-                                    {venda.valor_frete > 0 && (
-                                        <div className="flex justify-between text-sm">
-                                            <span>Frete</span>
-                                            <span>{formatCurrency(venda.valor_frete)}</span>
-                                        </div>
-                                    )}
-                                    <div className="flex justify-between pt-2 border-t font-bold text-lg text-primary">
-                                        <span>Total</span>
-                                        <span>{formatCurrency(venda.valor_total)}</span>
-                                    </div>
-                                    <div className="flex justify-between text-sm">
+                                     {/* Subtotal bruto se houver qualquer desconto */}
+                                     {(totalDescontosItens > 0 || descontoGlobal > 0) ? (
+                                         <div className="flex justify-between text-sm">
+                                             <span className="text-muted-foreground">Subtotal bruto</span>
+                                             <span>{formatCurrency(subtotalBruto)}</span>
+                                         </div>
+                                     ) : (
+                                         <div className="flex justify-between text-sm">
+                                             <span className="text-muted-foreground">Subtotal</span>
+                                             <span>{formatCurrency(venda.valor_subtotal || subtotalBruto)}</span>
+                                         </div>
+                                     )}
+                                     
+                                     {totalDescontosItens > 0 && (
+                                         <div className="flex justify-between text-sm text-emerald-600 font-medium">
+                                             <span>Descontos em produtos</span>
+                                             <span>-{formatCurrency(totalDescontosItens)}</span>
+                                         </div>
+                                     )}
+                                     
+                                     {descontoGlobal > 0 && (
+                                         <div className="flex justify-between text-sm text-emerald-600 font-medium">
+                                             <span>Desconto negociável</span>
+                                             <span>-{formatCurrency(descontoGlobal)}</span>
+                                         </div>
+                                     )}
+                                     
+                                     {venda.valor_frete > 0 && (
+                                         <div className="flex justify-between text-sm">
+                                             <span>Frete</span>
+                                             <span>{formatCurrency(venda.valor_frete)}</span>
+                                         </div>
+                                     )}
+                                     <div className="flex justify-between pt-2 border-t font-bold text-lg text-primary">
+                                         <span>Total</span>
+                                         <span>{formatCurrency(venda.valor_total)}</span>
+                                     </div>
+                                    <div className="flex justify-between text-sm pt-2 border-t mt-2">
                                         <span className="text-muted-foreground">Status</span>
                                         <span className={financeiro.isPaid ? 'text-emerald-700 font-semibold' : 'text-amber-700 font-semibold'}>
                                             {financeiro.displayStatus}

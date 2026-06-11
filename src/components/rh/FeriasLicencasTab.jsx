@@ -123,7 +123,7 @@ export default function FeriasLicencasTab() {
                     <CardContent className="p-4">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-xs text-gray-500">Em Gozo de Férias</p>
+                                <p className="text-xs text-gray-500">Em Férias</p>
                                 <p className="text-2xl font-bold" style={{ color: '#07593f' }}>{feriasEmGozo.length}</p>
                             </div>
                             <Umbrella className="w-8 h-8 opacity-50" style={{ color: '#07593f' }} />
