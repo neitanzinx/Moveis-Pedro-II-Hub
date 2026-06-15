@@ -35,7 +35,7 @@ export const CARGOS = [
         color: '#ea580c',
         bgColor: '#fff7ed',
         description: 'Gerencia todas as lojas',
-        permissions: ['Acesso completo de todas lojas', 'Aprovar devolucoes', 'Ver relatorios gerais', 'Gerenciar todas equipes'],
+        permissions: ['Acesso completo de todas lojas', 'Aprovar devolucoes', 'Ver relatorios gerais', 'Gerenciar todas equipes', 'Gerenciar estoque'],
         requiresStore: false,
         canRegister: false,
         mobileAppOnly: false

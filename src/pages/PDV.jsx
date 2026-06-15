@@ -37,7 +37,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import { adicionarDias, obterDataLocalString } from "@/utils/dateUtils";
 import { formatarNome, formatarEndereco } from "@/utils/formatters";
-import { getProductTotalStock, resolveStockField } from "@/utils/stockUtils";
+import { getProductTotalStock, resolveStockField, getVarianteEstoque, atualizarEstoqueVariante } from "@/utils/stockUtils";
 import { buildProductDisplayName, stripInternalProductPrefixes } from "@/utils/productReference";
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -1026,7 +1026,10 @@ export default function PDV() {
         cor: produto.cor || '',
         tecido: produto.tecido || produto.material || '',
         tamanho: produto.tamanho || '',
-        fabricante: produto.fabricante || produto.marca || fornecedorResolvido.fornecedor_nome || ''
+        fabricante: produto.fabricante || produto.marca || fornecedorResolvido.fornecedor_nome || '',
+        // Variante (novo padrão Base + Variantes)
+        variante_id: produto.variante_id || null,
+        variante_sku: produto.variante_sku || null
       }];
     });
   };
@@ -1713,6 +1716,18 @@ export default function PDV() {
 
         return medirDuracaoEtapa('atualizar estoque', () =>
           Promise.all(itensComProduto.map(async (item) => {
+            // --- Novo padrão: estoque por variante ---
+            if (item.variante_id && lojaId) {
+              const estoqueAtual = await getVarianteEstoque(supabase, item.variante_id, lojaId);
+              const novaQtd = estoqueAtual - Number(item.quantidade || 0);
+              const resultado = await atualizarEstoqueVariante(supabase, item.variante_id, lojaId, novaQtd);
+              if (!resultado.success) {
+                console.warn('[PDV] Erro ao atualizar estoque da variante:', resultado.error);
+              }
+              return resultado;
+            }
+
+            // --- Legado: estoque nos campos estoque_* da tabela produtos ---
             const prod = await base44.entities.Produto.getById(item.produto_id);
             if (!prod) return null;
 

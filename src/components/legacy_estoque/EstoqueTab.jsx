@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import GeradorEtiquetasModal from "./GeradorEtiquetasModal";
 import { useLojas } from "@/hooks/useLojas";
 import { obterCampoEstoqueDaLoja } from "@/constants/productConstants";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function EstoqueTab({ user }) {
   const { data: lojasAtivas = [] } = useLojas();
@@ -219,10 +220,12 @@ export default function EstoqueTab({ user }) {
     }
   });
 
+  const { can } = useAuth();
   const isAdmin = user?.cargo === 'Administrador';
   const isManager = user?.cargo === 'Gerente';
   const isWarehouse = user?.cargo === 'Estoque';
-  const canEdit = isAdmin || isManager || isWarehouse;
+  const isGerenteGeral = user?.cargo === 'Gerente Geral';
+  const canEdit = isAdmin || isManager || isWarehouse || isGerenteGeral || can('manage_estoque');
 
   // Flatten pages to get all loaded products
   const flatProdutos = useMemo(

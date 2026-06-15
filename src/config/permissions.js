@@ -42,7 +42,7 @@ export const ROLE_RULES = {
   'Gerente Geral': {
     can: [
       'view_dashboard', 'view_dashboard_gerente', 'view_vendas', 'manage_vendas', 'cancel_vendas',
-      'view_estoque', 'view_clientes', 'manage_clientes',
+      'view_estoque', 'manage_estoque', 'view_clientes', 'manage_clientes',
       'view_entregas', 'manage_entregas', 'view_assistencia', 'manage_assistencia',
       'view_financeiro', 'view_relatorios', 'view_rh',
       'view_orcamentos', 'create_vendas', 'view_produtos', 'manage_produtos', 'view_catalogo',

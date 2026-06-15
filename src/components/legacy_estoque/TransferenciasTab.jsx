@@ -6,6 +6,8 @@ import { Plus, ArrowRight, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import TransferenciaModal from "./TransferenciaModal";
+import { useAuth } from "@/hooks/useAuth";
+
 
 export default function TransferenciasTab({ user }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -143,9 +145,12 @@ export default function TransferenciasTab({ user }) {
     }
   };
 
+  const { can } = useAuth();
   const isAdmin = user?.cargo === 'Administrador';
   const isManager = user?.cargo === 'Gerente';
   const isWarehouse = user?.cargo === 'Estoque';
+  const isGerenteGeral = user?.cargo === 'Gerente Geral';
+  const canManage = isAdmin || isManager || isWarehouse || isGerenteGeral || can('manage_estoque');
 
   const statusColors = {
     "Solicitada": { bg: "#FEF3C7", text: "#92400E", border: "#FCD34D" },
@@ -160,7 +165,7 @@ export default function TransferenciasTab({ user }) {
         <p style={{ color: '#8B8B8B' }}>
           {transferencias.length} transferência(s) registrada(s)
         </p>
-        {(isAdmin || isManager || isWarehouse) && (
+        {canManage && (
           <Button
             onClick={() => {
               setEditingTransferencia(null);
@@ -205,7 +210,7 @@ export default function TransferenciasTab({ user }) {
                       Solicitada em {new Date(transferencia.data_solicitacao).toLocaleDateString('pt-BR')}
                     </p>
                   </div>
-                  {transferencia.status === 'Em Trânsito' && (isAdmin || isManager || isWarehouse) && (
+                  {transferencia.status === 'Em Trânsito' && canManage && (
                     <Button
                       size="sm"
                       onClick={() => handleConfirmarRecebimento(transferencia)}

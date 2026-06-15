@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
+
 import { base44, supabase } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -124,9 +126,14 @@ export default function InventarioTab({ user }) {
     setModoContagem(true);
   };
 
+  const { can } = useAuth();
   const isAdmin = user?.cargo === 'Administrador';
   const isManager = user?.cargo === 'Gerente';
   const isWarehouse = user?.cargo === 'Estoque';
+  const isGerenteGeral = user?.cargo === 'Gerente Geral';
+  const canManage = isAdmin || isManager || isWarehouse || isGerenteGeral || can('manage_estoque');
+  const canApprove = isAdmin || isManager || isGerenteGeral;
+
 
   const statusColors = {
     "Em Andamento": { bg: "#FEF3C7", text: "#92400E", icon: "🔄" },
@@ -175,7 +182,7 @@ export default function InventarioTab({ user }) {
         <p style={{ color: '#8B8B8B' }}>
           {inventarios.length} inventário(s) registrado(s)
         </p>
-        {(isAdmin || isManager || isWarehouse) && (
+        {canManage && (
           <div className="flex gap-2">
             <Button
               onClick={() => setModoCargaInicial(true)}
@@ -253,7 +260,7 @@ export default function InventarioTab({ user }) {
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    {inventario.status === 'Em Andamento' && (isAdmin || isManager || isWarehouse) && (
+                    {inventario.status === 'Em Andamento' && canManage && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -264,7 +271,7 @@ export default function InventarioTab({ user }) {
                         Continuar
                       </Button>
                     )}
-                    {inventario.status === 'Concluído' && (isAdmin || isManager) && (
+                    {inventario.status === 'Concluído' && canApprove && (
                       <Button
                         size="sm"
                         onClick={() => handleAprovar(inventario)}

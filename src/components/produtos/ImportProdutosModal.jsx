@@ -756,193 +756,239 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
             console.warn('[Import] Erro ao processar fornecedores:', err);
         }
 
-        const total = groupedProducts.length;
+        // ========================================
+        // AGRUPAR POR PRODUTO BASE
+        // ========================================
+        const gruposMap = new Map();
+        for (const item of groupedProducts) {
+            const chave = [
+                normalizeFornecedor(item.fornecedor_nome),
+                String(item.nome || '').trim().toLowerCase(),
+                String(item.modelo_referencia || '').trim().toLowerCase()
+            ].join('|||');
+
+            if (!gruposMap.has(chave)) {
+                gruposMap.set(chave, { base: item, variantes: [] });
+            }
+            gruposMap.get(chave).variantes.push(item);
+        }
+
+        console.log(`[Import] ${groupedProducts.length} variações agrupadas em ${gruposMap.size} produtos base`);
+
+        const totalGrupos = gruposMap.size;
+        let processados = 0;
         let imported = 0;
         let skipped = 0;
         let failed = 0;
         const failedProducts = [];
-        const codigosProcessados = new Set(produtosExistentes.keys());
+        const orgId = organization?.id || '00000000-0000-0000-0000-000000000001';
 
-        // Processamento paralelo (workers) para acelerar múltiplas gravações
-        // Limite conservador para evitar saturação de conexão durante importações massivas
-        const CONCURRENCY_LIMIT = 4;
+        for (const [chaveGrupo, grupo] of gruposMap.entries()) {
+            if (cancelImportRef.current) break;
 
-        const worker = async () => {
-            while (currentIndex < groupedProducts.length) {
-                if (cancelImportRef.current) break;
+            const { base, variantes } = grupo;
 
-                const index = currentIndex++;
-                const product = groupedProducts[index];
-                let codigoBarrasFinal = String(product?.codigo_barras || '').trim();
+            // Atualizar o array de exibição em tempo real
+            setCurrentlyProcessing(prev => {
+                const next = [base.nome, ...prev].slice(0, 3);
+                return next;
+            });
 
-                // Atualizar o array de exibição em tempo real (mantém max 3)
-                setCurrentlyProcessing(prev => {
-                    const next = [product.nome, ...prev].slice(0, 3);
-                    return next;
-                });
+            try {
+                // Detecta categoria e ambiente automaticamente se não fornecidos
+                const detected = detectProductKeywordSuggestion(base.nome, { returnDefault: true });
+                const categoria = base.categoria || detected.categoriaSuggestion;
+                const ambiente = base.ambiente || detected.ambienteSuggestion;
 
-                try {
-                    // Constroi nome único concatenando variações
-                    let nomeUnico = product.nome;
-                    const variaveisNome = [];
-                    if (product.cor) variaveisNome.push(product.cor);
-                    if (product.modelos_tecidos) variaveisNome.push(product.modelos_tecidos);
-                    if (product.tamanho) variaveisNome.push(product.tamanho);
-                    if (product.dimensao_extra) variaveisNome.push(product.dimensao_extra);
+                // ========================================
+                // a. UPSERT PRODUTO BASE (sem cor/tecido no nome)
+                // ========================================
+                const produtoBaseData = {
+                    nome: base.nome, // Nome cru, sem cor/tecido
+                    categoria: categoria,
+                    ambiente: ambiente,
+                    fornecedor_nome: base.fornecedor_nome || '',
+                    fornecedor_id: fornecedoresMap[normalizeFornecedor(base.fornecedor_nome)] || null,
+                    modelo_referencia: base.modelo_referencia || '',
+                    material: base.material || '',
+                    tipo_entrega_padrao: 'desmontado',
+                    largura: base.largura || null,
+                    altura: base.altura || null,
+                    profundidade: base.profundidade || null,
+                    preco_custo: base.preco_custo || 0,
+                    preco_venda: base.preco_venda || calcularPrecoFinalImportacao(base) || 0,
+                    impostos_percentual: sanitizeNumeric52(base.impostos_percentual, 0),
+                    frete_custo: base.frete_custo || 0,
+                    ipi_percentual: sanitizeNumeric52(base.ipi_percentual, 0),
+                    markup_grupo1_prontos: sanitizeNumeric52(base.markup_grupo1_prontos, 0),
+                    markup_grupo2_montagem: sanitizeNumeric52(base.markup_grupo2_montagem, 0),
+                    markup_grupo3_lustre: sanitizeNumeric52(base.markup_grupo3_lustre, 0),
+                    markup_aplicado: sanitizeNumeric52(base.markup_aplicado, 0),
+                    desconto_max_vendedor: sanitizeNumeric52(base.desconto_max_vendedor, 5),
+                    desconto_max_gerencial: sanitizeNumeric52(base.desconto_max_gerencial, 15),
+                    requer_montagem: base.requer_montagem || false,
+                    montagem_terceirizado: base.montagem_terceirizado || false,
+                    variacoes: [],
+                    fotos: [],
+                    ativo: true,
+                    is_parent: false,
+                    parent_id: null,
+                    organization_id: orgId
+                };
 
-                    if (variaveisNome.length > 0) {
-                        nomeUnico = `${product.nome} - ${variaveisNome.join(' ')}`;
-                    }
+                // Gera codigo_barras para o produto base (sem variação)
+                const rawSkuBase = base.codigo_barras || generateSKU(base.fornecedor_nome, base.modelo_referencia);
+                produtoBaseData.codigo_barras = String(rawSkuBase || '').trim() || `SKU-${Date.now()}`;
 
-                    // Gera SKU único e DETERMINÍSTICO
-                    const rawSku = product.codigo_barras || generateSKU(product.fornecedor_nome, product.modelo_referencia, product.cor, product.modelos_tecidos);
-                    let sku = String(rawSku || '').trim() || `SKU-${Date.now()}-${index}`;
-                    codigoBarrasFinal = sku;
-                    let skuNormalizado = normalizeCodigo(sku);
+                const { data: upsertedProdutos, error: produtoError } = await withRetry(async () =>
+                    supabase
+                        .from('produtos')
+                        .upsert(produtoBaseData, { onConflict: 'modelo_referencia,organization_id' })
+                        .select('id')
+                );
 
-                    // Para itens sem código explícito no CSV, evita colisão entre produtos diferentes
-                    // adicionando sufixo determinístico do nome apenas quando necessário.
-                    if (!product.codigo_barras && skuNormalizado && codigosProcessados.has(skuNormalizado)) {
-                        const nomeToken = buildVariationToken(product.nome, 'ITEM');
-                        sku = `${sku}-${nomeToken}`;
-                        skuNormalizado = normalizeCodigo(sku);
-                    }
-
-                    if (skuNormalizado && codigosProcessados.has(skuNormalizado)) {
-                        skipped++;
-                        setProgress(Math.round(((imported + skipped + failed) / total) * 100));
-                        continue;
-                    }
-
-                    if (skuNormalizado) {
-                        codigosProcessados.add(skuNormalizado);
-                    }
-
-                    // Detecta categoria e ambiente automaticamente se não fornecidos
-                    const detected = detectProductKeywordSuggestion(product.nome, { returnDefault: true });
-                    const categoria = product.categoria || detected.categoriaSuggestion;
-                    const ambiente = product.ambiente || detected.ambienteSuggestion;
-
-                    const produtoData = {
-                        codigo_barras: sku,
-                        nome: nomeUnico,
-                        categoria: categoria,
-                        ambiente: ambiente,
-                        fornecedor_nome: product.fornecedor_nome || '',
-                        fornecedor_id: fornecedoresMap[normalizeFornecedor(product.fornecedor_nome)] || null,
-                        modelo_referencia: product.modelo_referencia || '',
-                        material: product.material || '',
-
-                        cor: product.cor || null,
-                        cor_hex: product.cor ? getColorHex(product.cor) : null,
-                        tipo_entrega_padrao: 'desmontado',
-
-                        largura: product.largura || null,
-                        altura: product.altura || null,
-                        profundidade: product.profundidade || null,
-
-                        preco_custo: product.preco_custo || 0,
-                        preco_venda: product.preco_venda || calcularPrecoFinalImportacao(product) || 0,
-
-                        impostos_percentual: sanitizeNumeric52(product.impostos_percentual, 0),
-                        frete_custo: product.frete_custo || 0,
-                        ipi_percentual: sanitizeNumeric52(product.ipi_percentual, 0),
-                        markup_grupo1_prontos: sanitizeNumeric52(product.markup_grupo1_prontos, 0),
-                        markup_grupo2_montagem: sanitizeNumeric52(product.markup_grupo2_montagem, 0),
-                        markup_grupo3_lustre: sanitizeNumeric52(product.markup_grupo3_lustre, 0),
-                        markup_aplicado: sanitizeNumeric52(product.markup_aplicado, 0),
-                        desconto_max_vendedor: sanitizeNumeric52(product.desconto_max_vendedor, 5),
-                        desconto_max_gerencial: sanitizeNumeric52(product.desconto_max_gerencial, 15),
-                        requer_montagem: product.requer_montagem || false,
-                        montagem_terceirizado: product.montagem_terceirizado || false,
-
-                        variacoes: [],
-                        fotos: [],
-                        ativo: true,
-                        is_parent: false,
-                        parent_id: null,
-                        organization_id: organization?.id || '00000000-0000-0000-0000-000000000001'
-                    };
-
-                    let resultado;
-                    try {
-                        resultado = await withRetry(async () => base44.entities.Produto.create(produtoData));
-                    } catch (createErr) {
-                        // Se outro processo criou o SKU entre o preload e o create, apenas marca como pulado
-                        if (createErr?.code === '23505' || String(createErr?.message || '').toLowerCase().includes('duplicate')) {
-                            skipped++;
-                            continue;
-                        }
-                        throw createErr;
-                    }
-
-                    try {
-                        if (resultado && resultado.id) {
-                            await base44.entities.HistoricoPrecos?.create?.({
-                                organization_id: organization?.id || '00000000-0000-0000-0000-000000000001',
-                                produto_id: resultado.id,
-                                preco_antigo: 0,
-                                preco_novo: produtoData.preco_venda,
-                                tipo: 'venda',
-                                motivo: `Importação Smart - ${file?.name || 'arquivo'}`,
-                                usuario_nome: user?.nome || 'Sistema'
-                            });
-                        }
-                    } catch (histErr) {
-                        console.warn('[Import] Não foi possível registrar histórico de preços:', histErr);
-                    }
-
-                    imported++;
-                } catch (err) {
-                    console.error('Erro ao importar:', product.nome, {
-                        code: err?.code,
-                        message: err?.message,
-                        details: err?.details,
-                        hint: err?.hint,
-                        payload: {
-                            codigo_barras_original: product.codigo_barras,
-                            codigo_barras_final: codigoBarrasFinal,
-                            fornecedor_nome: product.fornecedor_nome,
-                            modelo_referencia: product.modelo_referencia,
-                            cor: product.cor,
-                            modelos_tecidos: product.modelos_tecidos
-                        },
-                        raw: err
-                    });
-                    failed++;
-                    failedProducts.push(product.nome);
+                if (produtoError) {
+                    throw produtoError;
                 }
 
-                setProgress(Math.round(((imported + skipped + failed) / total) * 100));
+                const produtoBaseId = upsertedProdutos?.[0]?.id;
+                if (!produtoBaseId) {
+                    throw new Error('Não foi possível obter o ID do produto base após upsert');
+                }
 
-                // Pequeno delay para evitar sobrecarregar o Supabase e o navegador
-                await sleep(90);
+                console.log(`[Import] Produto base "${base.nome}" → id: ${produtoBaseId}`);
+
+                // ========================================
+                // b. PARA CADA VARIANTE: upsert cor, tecido, produto_variante
+                // ========================================
+                for (const variante of variantes) {
+                    if (cancelImportRef.current) break;
+
+                    let corId = null;
+                    let tecidoId = null;
+
+                    // Upsert COR
+                    if (variante.cor && variante.cor.trim()) {
+                        const corNome = variante.cor.trim();
+                        const corHex = getColorHex(corNome) || null;
+
+                        const { data: upsertedCor, error: corError } = await withRetry(async () =>
+                            supabase
+                                .from('cores')
+                                .upsert(
+                                    { nome: corNome, hex: corHex, organization_id: orgId },
+                                    { onConflict: 'nome,organization_id' }
+                                )
+                                .select('id')
+                        );
+
+                        if (corError) {
+                            console.warn('[Import] Erro ao upsert cor:', corNome, corError);
+                        } else {
+                            corId = upsertedCor?.[0]?.id || null;
+                        }
+                    }
+
+                    // Upsert TECIDO
+                    if (variante.modelos_tecidos && variante.modelos_tecidos.trim()) {
+                        const tecidoNome = variante.modelos_tecidos.trim();
+
+                        const { data: upsertedTecido, error: tecidoError } = await withRetry(async () =>
+                            supabase
+                                .from('tecidos')
+                                .upsert(
+                                    { nome: tecidoNome, organization_id: orgId },
+                                    { onConflict: 'nome,organization_id' }
+                                )
+                                .select('id')
+                        );
+
+                        if (tecidoError) {
+                            console.warn('[Import] Erro ao upsert tecido:', tecidoNome, tecidoError);
+                        } else {
+                            tecidoId = upsertedTecido?.[0]?.id || null;
+                        }
+                    }
+
+                    // Montar SKU
+                    const skuPartes = [base.modelo_referencia || base.nome];
+                    if (variante.cor) skuPartes.push(variante.cor);
+                    if (variante.modelos_tecidos) skuPartes.push(variante.modelos_tecidos);
+                    const sku = skuPartes.join('-').toUpperCase()
+                        .replace(/\s+/g, '-').replace(/[^A-Z0-9-]/g, '').slice(0, 60);
+
+                    // Upsert PRODUTO_VARIANTE
+                    const varianteData = {
+                        produto_id: produtoBaseId,
+                        cor_id: corId,
+                        tecido_id: tecidoId,
+                        sku,
+                        preco_venda: variante.preco_venda || base.preco_venda || 0,
+                        ativo: true,
+                        organization_id: orgId
+                    };
+
+                    const { error: varianteError } = await withRetry(async () =>
+                        supabase
+                            .from('produto_variantes')
+                            .upsert(varianteData, { onConflict: 'sku,organization_id' })
+                    );
+
+                    if (varianteError) {
+                        console.warn(`[Import] Erro ao upsert variante SKU=${sku}:`, varianteError);
+                    }
+                }
+
+                // Registrar histórico de preços para o produto base
+                try {
+                    await base44.entities.HistoricoPrecos?.create?.({
+                        organization_id: orgId,
+                        produto_id: produtoBaseId,
+                        preco_antigo: 0,
+                        preco_novo: produtoBaseData.preco_venda,
+                        tipo: 'venda',
+                        motivo: `Importação Smart - ${file?.name || 'arquivo'}`,
+                        usuario_nome: user?.nome || 'Sistema'
+                    });
+                } catch (histErr) {
+                    console.warn('[Import] Não foi possível registrar histórico de preços:', histErr);
+                }
+
+                imported++;
+            } catch (err) {
+                console.error('[Import] Erro ao importar grupo:', base.nome, {
+                    code: err?.code,
+                    message: err?.message,
+                    details: err?.details,
+                    hint: err?.hint,
+                    raw: err
+                });
+                failed++;
+                failedProducts.push(base.nome);
             }
-        };
 
-        // Iniciar os workers em paralelo
-        let currentIndex = 0;
-        const workers = Array(Math.min(CONCURRENCY_LIMIT, groupedProducts.length))
-            .fill(0)
-            .map(() => worker());
+            processados++;
+            setProgress(Math.round((processados / totalGrupos) * 100));
 
-        await Promise.all(workers);
+            // Pequeno delay para evitar sobrecarregar o Supabase
+            await sleep(50);
+        }
 
         if (cancelImportRef.current) {
-            toast.warning(`Importação cancelada. ${imported} importados, ${skipped} pulados de ${total}.`);
+            toast.warning(`Importação cancelada. ${imported} importados de ${totalGrupos}.`);
         }
 
         setImporting(false);
 
         if (failed === 0) {
-            toast.success(`${imported} produto(s) importados e ${skipped} pulado(s) por já existirem.`);
+            toast.success(`${imported} produto(s) base importados com suas variantes.`);
             onSuccess?.();
             handleClose();
         } else {
             const errorMsg = failedProducts.length <= 3
                 ? failedProducts.join(', ')
                 : `${failedProducts.slice(0, 3).join(', ')} e mais ${failedProducts.length - 3} itens. Veja o console para detalhes.`;
-            toast.warning(`${imported} importados, ${skipped} pulados. Falharam ${failed}: ${errorMsg}`, { duration: 10000 });
+            toast.warning(`${imported} importados. Falharam ${failed}: ${errorMsg}`, { duration: 10000 });
         }
     };
 

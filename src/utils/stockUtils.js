@@ -71,3 +71,93 @@ export function getProductTotalStock(produto) {
         return total + (Number(produto?.[field]) || 0);
     }, 0);
 }
+
+// ========================================
+// Funções de estoque por VARIANTE (novo padrão Base + Variantes)
+// ========================================
+
+/**
+ * Consulta o estoque de uma variante em uma loja específica.
+ * Retorna a quantidade disponível (0 se não encontrado).
+ *
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} varianteId - UUID da produto_variante
+ * @param {string} lojaId - UUID da loja
+ * @returns {Promise<number>}
+ */
+export async function getVarianteEstoque(supabase, varianteId, lojaId) {
+    if (!varianteId || !lojaId) return 0;
+
+    const { data, error } = await supabase
+        .from('estoque')
+        .select('quantidade')
+        .eq('variante_id', varianteId)
+        .eq('loja_id', lojaId)
+        .maybeSingle();
+
+    if (error) {
+        console.error('[stockUtils] Erro ao consultar estoque da variante:', error);
+        return 0;
+    }
+
+    return Number(data?.quantidade || 0);
+}
+
+/**
+ * Atualiza (upsert) o estoque de uma variante em uma loja específica.
+ *
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} varianteId - UUID da produto_variante
+ * @param {string} lojaId - UUID da loja
+ * @param {number} novaQuantidade - Nova quantidade em estoque
+ * @param {string} [organizationId] - UUID da organization
+ * @returns {Promise<{success: boolean, error?: any}>}
+ */
+export async function atualizarEstoqueVariante(supabase, varianteId, lojaId, novaQuantidade, organizationId) {
+    if (!varianteId || !lojaId) {
+        return { success: false, error: 'variante_id e loja_id são obrigatórios' };
+    }
+
+    const { error } = await supabase
+        .from('estoque')
+        .upsert(
+            {
+                variante_id: varianteId,
+                loja_id: lojaId,
+                quantidade: Math.max(0, Number(novaQuantidade) || 0),
+                organization_id: organizationId || null
+            },
+            { onConflict: 'variante_id,loja_id' }
+        );
+
+    if (error) {
+        console.error('[stockUtils] Erro ao atualizar estoque da variante:', error);
+        return { success: false, error };
+    }
+
+    return { success: true };
+}
+
+/**
+ * Soma o estoque total de uma variante em TODAS as lojas.
+ * Útil para exibir disponibilidade geral na busca de produtos.
+ *
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} varianteId - UUID da produto_variante
+ * @returns {Promise<number>}
+ */
+export async function getEstoqueTotalVariante(supabase, varianteId) {
+    if (!varianteId) return 0;
+
+    const { data, error } = await supabase
+        .from('estoque')
+        .select('quantidade')
+        .eq('variante_id', varianteId);
+
+    if (error) {
+        console.error('[stockUtils] Erro ao somar estoque total da variante:', error);
+        return 0;
+    }
+
+    return (data || []).reduce((sum, row) => sum + (Number(row.quantidade) || 0), 0);
+}

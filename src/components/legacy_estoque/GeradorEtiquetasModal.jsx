@@ -34,6 +34,7 @@ export default function GeradorEtiquetasModal({
         produtosPreSelecionados.map(p => ({ produto: p, quantidade: 1 }))
     );
 
+    const [layoutOption, setLayoutOption] = useState("1/4");
     const [logoOption, setLogoOption] = useState("default");
     const [logoCustomizadaUrl, setLogoCustomizadaUrl] = useState("");
     const [isSavingLogo, setIsSavingLogo] = useState(false);
@@ -200,10 +201,10 @@ export default function GeradorEtiquetasModal({
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2 text-xl">
                             <Printer className="w-5 h-5 text-gray-700" />
-                            Gerador de Etiquetas (1/4 A4)
+                            Gerador de Etiquetas
                         </DialogTitle>
                         <DialogDescription>
-                            Adicione produtos à lista e defina a quantidade desejada. A impressão será em tamanho A6.
+                            Adicione produtos à lista, defina o tamanho da folha e a quantidade desejada.
                         </DialogDescription>
                     </DialogHeader>
                 </div>
@@ -324,6 +325,61 @@ export default function GeradorEtiquetasModal({
                             )}
                         </div>
 
+                        {/* Configuração do Tamanho da Etiqueta */}
+                        <div className="border rounded-lg bg-white p-4 shadow-sm space-y-3">
+                            <h3 className="font-semibold text-sm text-gray-700 flex items-center gap-2">
+                                <Printer className="w-4 h-4 text-green-600" />
+                                Tamanho da Etiqueta
+                            </h3>
+                            
+                            <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-lg text-xs font-medium">
+                                <button
+                                    type="button"
+                                    onClick={() => setLayoutOption("1/4")}
+                                    className={`py-2 px-3 rounded-md transition-all text-center ${
+                                        layoutOption === "1/4"
+                                            ? "bg-white shadow text-gray-900 font-semibold"
+                                            : "text-gray-500 hover:text-gray-900"
+                                    }`}
+                                >
+                                    1/4 da Folha (Retrato)
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setLayoutOption("1/6")}
+                                    className={`py-2 px-3 rounded-md transition-all text-center ${
+                                        layoutOption === "1/6"
+                                            ? "bg-white shadow text-gray-900 font-semibold"
+                                            : "text-gray-500 hover:text-gray-900"
+                                    }`}
+                                >
+                                    1/6 da Folha (Paisagem)
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setLayoutOption("1/2")}
+                                    className={`py-2 px-3 rounded-md transition-all text-center ${
+                                        layoutOption === "1/2"
+                                            ? "bg-white shadow text-gray-900 font-semibold"
+                                            : "text-gray-500 hover:text-gray-900"
+                                    }`}
+                                >
+                                    1/2 da Folha (Retrato)
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setLayoutOption("inteira")}
+                                    className={`py-2 px-3 rounded-md transition-all text-center ${
+                                        layoutOption === "inteira"
+                                            ? "bg-white shadow text-gray-900 font-semibold"
+                                            : "text-gray-500 hover:text-gray-900"
+                                    }`}
+                                >
+                                    Folha Inteira (Retrato)
+                                </button>
+                            </div>
+                        </div>
+
                         {/* Lista de Selecionados */}
                         <div className="flex-1 flex flex-col">
                             <h3 className="font-semibold text-sm text-gray-700 mb-3 flex justify-between">
@@ -392,12 +448,14 @@ export default function GeradorEtiquetasModal({
                     <div className="w-full md:w-1/2 bg-gray-200/50 p-6 flex flex-col relative">
                         <h3 className="font-semibold text-sm text-gray-700 mb-3 flex items-center gap-2">
                             Preview da Impressão
-                            <span className="text-xs font-normal text-gray-500">(1 página = 4 etiquetas)</span>
+                            <span className="text-xs font-normal text-gray-500">
+                                (1 página = {layoutOption === "1/6" ? 6 : layoutOption === "1/4" ? 4 : layoutOption === "1/2" ? 2 : 1} etiqueta{layoutOption === "inteira" ? "" : "s"})
+                            </span>
                         </h3>
 
                         <ScrollArea className="flex-1 h-[450px] border border-gray-300 rounded-md bg-gray-100 shadow-inner overflow-hidden relative">
                             {produtosImpressao.length > 0 ? (
-                                <div className="scale-[0.4] origin-top-left translate-x-4 translate-y-4 w-[210mm] pointer-events-none">
+                                <div className={`${layoutOption === "1/6" ? "scale-[0.3]" : "scale-[0.4]"} origin-top-left translate-x-4 translate-y-4 ${layoutOption === "1/6" ? "w-[297mm]" : "w-[210mm]"} pointer-events-none`}>
                                     {/* Renderizamos o componente invisível que será pescado pelo react-to-print,
                         e o mesmo componente visualmente apenas para preview */}
                                     <div className="bg-white shadow">
@@ -406,6 +464,7 @@ export default function GeradorEtiquetasModal({
                                             produtos={produtosImpressao} 
                                             logoOption={logoOption}
                                             logoCustomizadaUrl={logoCustomizadaUrl}
+                                            layout={layoutOption}
                                         />
                                     </div>
                                 </div>
@@ -424,6 +483,7 @@ export default function GeradorEtiquetasModal({
                                 produtos={produtosImpressao}
                                 logoOption={logoOption}
                                 logoCustomizadaUrl={logoCustomizadaUrl}
+                                layout={layoutOption}
                             />
                         </div>
                     </div>
