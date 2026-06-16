@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Loader2, Plus, Trash2, Search, Cake, MapPin, Truck, Calendar, Ban, Check, ChevronsUpDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { RestricaoCheckbox } from "@/components/ui/restricao-checkbox";
 
 const ESTADOS_BRASIL = [
   { uf: "AC", nome: "Acre" },
@@ -800,7 +801,7 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
                   Marque os dias em que o cliente <strong>NÃO PODE</strong> receber entregas:
                 </p>
 
-                <div className="flex flex-wrap gap-2 mb-4">
+                <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 mb-4">
                   {[
                     { dia: 0, nome: 'Dom' },
                     { dia: 1, nome: 'Seg' },
@@ -812,46 +813,45 @@ export default function ClienteModal({ isOpen, onClose, onSave, cliente, isLoadi
                   ].map(({ dia, nome }) => {
                     const bloqueado = formData.dias_bloqueados_entrega?.includes(dia);
                     return (
-                      <button
+                      <RestricaoCheckbox
                         key={dia}
-                        type="button"
-                        onClick={() => {
+                        label={nome}
+                        checked={bloqueado}
+                        isBlockedMode={true}
+                        onCheckedChange={(checked) => {
                           const atual = formData.dias_bloqueados_entrega || [];
-                          const novo = bloqueado
-                            ? atual.filter(d => d !== dia)
-                            : [...atual, dia];
+                          const novo = checked
+                            ? [...atual, dia]
+                            : atual.filter(d => d !== dia);
                           setFormData({ ...formData, dias_bloqueados_entrega: novo });
                         }}
-                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${bloqueado
-                          ? 'bg-red-100 text-red-700 border-2 border-red-300'
-                          : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:border-gray-300'
-                          }`}
-                      >
-                        {bloqueado && <Ban className="w-3 h-3 inline mr-1" />}
-                        {nome}
-                      </button>
+                      />
                     );
                   })}
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center gap-4">
                   <Label className="text-sm text-red-700 font-bold">Turno que NÃO pode receber (Bloqueado):</Label>
-                  <Select
-                    value={formData.turno_bloqueado_entrega || "nenhum"}
-                    onValueChange={(value) => setFormData({
-                      ...formData,
-                      turno_bloqueado_entrega: value === "nenhum" ? "" : value
+                  <div className="flex gap-4">
+                    {['Manhã', 'Tarde'].map((turno) => {
+                      const value = turno === 'Manhã' ? 'manha' : 'tarde';
+                      const bloqueado = formData.turno_bloqueado_entrega === value;
+                      return (
+                        <RestricaoCheckbox
+                          key={turno}
+                          label={turno}
+                          checked={bloqueado}
+                          isBlockedMode={true}
+                          onCheckedChange={(checked) => {
+                            setFormData({
+                              ...formData,
+                              turno_bloqueado_entrega: checked ? value : ""
+                            });
+                          }}
+                        />
+                      );
                     })}
-                  >
-                    <SelectTrigger className="w-40">
-                      <SelectValue placeholder="Nenhum" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="nenhum">Nenhum</SelectItem>
-                      <SelectItem value="manha">Manhã</SelectItem>
-                      <SelectItem value="tarde">Tarde</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  </div>
                 </div>
 
                 {(formData.dias_bloqueados_entrega?.length > 0 || formData.turno_bloqueado_entrega) && (

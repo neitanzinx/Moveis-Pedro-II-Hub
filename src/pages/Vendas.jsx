@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { RestricaoCheckbox } from "@/components/ui/restricao-checkbox";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { abrirNotaPedidoPDF } from "../components/vendas/NotaPedidoPDF";
 import { useAuth } from "@/hooks/useAuth";
@@ -1863,25 +1864,21 @@ export default function Vendas() {
                     <div className="grid gap-4 py-4">
                         <div className="space-y-3">
                             <Label>Dias da Semana Permitidos</Label>
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-4 gap-2">
                                 {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((dia, idx) => (
-                                    <div key={idx} className="flex items-center space-x-2">
-                                        <Checkbox
-                                            id={`venda-dia-${idx}`}
-                                            checked={preferenciasTemp.dias?.includes(idx)}
-                                            onCheckedChange={(checked) => {
-                                                setPreferenciasTemp(prev => ({
-                                                    ...prev,
-                                                    dias: checked
-                                                        ? [...(prev.dias || []), idx]
-                                                        : (prev.dias || []).filter(d => d !== idx)
-                                                }));
-                                            }}
-                                        />
-                                        <label htmlFor={`venda-dia-${idx}`} className="text-sm font-medium leading-none cursor-pointer">
-                                            {dia}
-                                        </label>
-                                    </div>
+                                    <RestricaoCheckbox
+                                        key={idx}
+                                        label={dia}
+                                        checked={preferenciasTemp.dias?.includes(idx)}
+                                        onCheckedChange={(checked) => {
+                                            setPreferenciasTemp(prev => ({
+                                                ...prev,
+                                                dias: checked
+                                                    ? [...(prev.dias || []), idx]
+                                                    : (prev.dias || []).filter(d => d !== idx)
+                                            }));
+                                        }}
+                                    />
                                 ))}
                             </div>
                         </div>
@@ -1889,24 +1886,30 @@ export default function Vendas() {
                         <div className="space-y-3">
                             <Label>Turnos Permitidos</Label>
                             <div className="grid grid-cols-2 gap-2">
-                                {['Manhã', 'Tarde', 'Comercial'].map((turno) => (
-                                    <div key={turno} className="flex items-center space-x-2">
-                                        <Checkbox
-                                            id={`venda-turno-${turno}`}
-                                            checked={preferenciasTemp.turnos?.includes(turno)}
-                                            onCheckedChange={(checked) => {
-                                                setPreferenciasTemp(prev => ({
+                                {['Manhã', 'Tarde'].map((turno) => (
+                                    <RestricaoCheckbox
+                                        key={turno}
+                                        label={turno}
+                                        checked={preferenciasTemp.turnos?.includes(turno)}
+                                        onCheckedChange={(checked) => {
+                                            setPreferenciasTemp(prev => {
+                                                let newTurnos = checked
+                                                    ? [...(prev.turnos || []), turno]
+                                                    : (prev.turnos || []).filter(t => t !== turno);
+                                                if (newTurnos.includes('Manhã') && newTurnos.includes('Tarde')) {
+                                                    if (!newTurnos.includes('Comercial')) {
+                                                        newTurnos.push('Comercial');
+                                                    }
+                                                } else {
+                                                    newTurnos = newTurnos.filter(t => t !== 'Comercial');
+                                                }
+                                                return {
                                                     ...prev,
-                                                    turnos: checked
-                                                        ? [...(prev.turnos || []), turno]
-                                                        : (prev.turnos || []).filter(t => t !== turno)
-                                                }));
-                                            }}
-                                        />
-                                        <label htmlFor={`venda-turno-${turno}`} className="text-sm font-medium leading-none cursor-pointer">
-                                            {turno}
-                                        </label>
-                                    </div>
+                                                    turnos: newTurnos
+                                                };
+                                            });
+                                        }}
+                                    />
                                 ))}
                             </div>
                         </div>

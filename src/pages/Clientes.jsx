@@ -600,12 +600,20 @@ export default function Clientes() {
                 if (idsUnicos.length > 0) {
                   // 3. Executa Update (Endereço + Preferências)
 
-                  // Monta objeto de preferências para a entrega
-                  // Garante array de números únicos para dias
-                  const diasUnicos = [...new Set((cleanData.dias_bloqueados_entrega || []).map(d => Number(d)))];
+                  // Monta objeto de preferências para a entrega (invertendo bloqueados em permitidos)
+                  const diasBloqueados = (cleanData.dias_bloqueados_entrega || []).map(d => Number(d));
+                  const diasPermitidos = [0, 1, 2, 3, 4, 5, 6].filter(d => !diasBloqueados.includes(d));
+                  
+                  let turnosPermitidos = ['Manhã', 'Tarde', 'Comercial'];
+                  if (cleanData.turno_bloqueado_entrega === 'manha') {
+                    turnosPermitidos = ['Tarde'];
+                  } else if (cleanData.turno_bloqueado_entrega === 'tarde') {
+                    turnosPermitidos = ['Manhã'];
+                  }
+
                   const novasPreferencias = {
-                    dias: diasUnicos,
-                    turnos: cleanData.turno_bloqueado_entrega ? [cleanData.turno_bloqueado_entrega] : [],
+                    dias: diasPermitidos,
+                    turnos: turnosPermitidos,
                     obs: cleanData.observacoes || ""
                   };
                   const { error: syncError, count } = await supabase

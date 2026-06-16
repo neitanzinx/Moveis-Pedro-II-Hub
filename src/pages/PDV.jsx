@@ -43,6 +43,7 @@ import { buildProductDisplayName, stripInternalProductPrefixes } from "@/utils/p
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import { RestricaoCheckbox } from "@/components/ui/restricao-checkbox";
 
 // Chaves para persistência
 const PDV_STATE_KEY = 'pdv_state';
@@ -291,26 +292,7 @@ const enriquecerItensEncomendaComFornecedor = (itens = [], produtos = [], fornec
     };
   });
 
-// Componente de checkbox personalizado para Restrições
-const RestricaoCheckbox = ({ checked, onCheckedChange, label }) => (
-  <div
-    className="flex items-center space-x-2 cursor-pointer select-none group"
-    onClick={() => onCheckedChange(!checked)}
-  >
-    <div className={`
-      w-5 h-5 rounded flex items-center justify-center border transition-all shrink-0
-      ${checked
-        ? 'bg-green-600 border-green-600 text-white'
-        : 'bg-white border-gray-300 text-gray-400 group-hover:border-red-400 group-hover:text-red-400'
-      }
-    `}>
-      {checked ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
-    </div>
-    <span className="text-sm font-medium leading-none text-gray-700 dark:text-gray-300">
-      {label}
-    </span>
-  </div>
-);
+// RestricaoCheckbox imported from components/ui/restricao-checkbox
 
 export default function PDV() {
   const { user } = useAuth();
@@ -1667,8 +1649,8 @@ export default function PDV() {
       pagamento_na_entrega: pagamentoEntrega.ativo,
       valor_pagamento_entrega: pagamentoEntrega.ativo ? pagamentoEntrega.valor : 0,
       forma_pagamento_entrega: formaPagamentoEntregaStr,
-      prazo_entrega: configVenda.prazo,
-      status: restante <= 0 ? "Pago" : "Pagamento Pendente",
+      prazo_entrega: todosRetiram ? "Retirado na loja" : configVenda.prazo,
+      status: restante <= 0 ? (todosRetiram ? "Pago & Retirado" : "Pago") : "Pagamento Pendente",
       observacoes: observacoes,
       cupom_codigo: cupomAplicado?.codigo || null,
       cupom_desconto: cupomAplicado ? desconto : 0,
@@ -2263,7 +2245,6 @@ export default function PDV() {
                               </SelectItem>
                             );
                           })}
-                          <SelectItem value="Retirado na loja">Retirado na loja</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -2396,18 +2377,28 @@ export default function PDV() {
                       <div className="space-y-3">
                         <Label>Turnos Permitidos</Label>
                         <div className="grid grid-cols-2 gap-2">
-                          {['Manhã', 'Tarde', 'Comercial'].map((turno) => (
+                          {['Manhã', 'Tarde'].map((turno) => (
                             <RestricaoCheckbox
                               key={turno}
                               label={turno}
                               checked={preferenciasEntrega.turnos.includes(turno)}
                               onCheckedChange={(checked) => {
-                                setPreferenciasEntrega(prev => ({
-                                  ...prev,
-                                  turnos: checked
+                                setPreferenciasEntrega(prev => {
+                                  let newTurnos = checked
                                     ? [...prev.turnos, turno]
-                                    : prev.turnos.filter(t => t !== turno)
-                                }));
+                                    : prev.turnos.filter(t => t !== turno);
+                                  if (newTurnos.includes('Manhã') && newTurnos.includes('Tarde')) {
+                                    if (!newTurnos.includes('Comercial')) {
+                                      newTurnos.push('Comercial');
+                                    }
+                                  } else {
+                                    newTurnos = newTurnos.filter(t => t !== 'Comercial');
+                                  }
+                                  return {
+                                    ...prev,
+                                    turnos: newTurnos
+                                  };
+                                });
                               }}
                             />
                           ))}

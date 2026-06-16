@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
+import { supabase } from "@/lib/supabase";
 import { formatarNome, formatarTelefone, formatarEndereco } from "@/utils/formatters";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { obterDataLocalString, formatarDataExibicao } from "@/utils/dateUtils";
@@ -134,6 +135,15 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
     queryKey: ['lojas'],
     queryFn: () => base44.entities.Loja.list('nome'),
     select: (data) => data.filter(l => l.ativa),
+  });
+
+  const { data: prazos = [] } = useQuery({
+    queryKey: ['prazos_entrega'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('prazos_entrega').select('*');
+      if (error) throw error;
+      return data || [];
+    }
   });
 
   // Fetch users for resolving seller names
@@ -1201,8 +1211,21 @@ _Móveis Pedro II - ${vendaData.loja}_`;
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="15 dias">15 dias</SelectItem>
-                    <SelectItem value="45 dias">45 dias</SelectItem>
+                    {prazos.length === 0 ? (
+                      <SelectItem value="15 dias úteis" disabled>Carregando...</SelectItem>
+                    ) : (
+                      prazos.map(p => {
+                        const label = `${p.quantidade_dias} dias ${p.tipo_dias === 'uteis' ? 'úteis' : 'corridos'}`;
+                        return (
+                          <SelectItem key={p.id} value={label}>
+                            {p.titulo} ({label})
+                          </SelectItem>
+                        );
+                      })
+                    )}
+                    {formData.prazo_entrega === "Retirado na loja" && (
+                      <SelectItem value="Retirado na loja" disabled>Retirado na loja</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -1210,7 +1233,15 @@ _Móveis Pedro II - ${vendaData.loja}_`;
                 <Label htmlFor="status">Status *</Label>
                 <Select
                   value={formData.status}
-                  onValueChange={(value) => setFormData({ ...formData, status: value })}
+                  onValueChange={(value) => {
+                    const newFormData = { ...formData, status: value };
+                    if (value === "Pago & Retirado") {
+                      newFormData.prazo_entrega = "Retirado na loja";
+                    } else if (formData.prazo_entrega === "Retirado na loja") {
+                      newFormData.prazo_entrega = "15 dias úteis";
+                    }
+                    setFormData(newFormData);
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue />

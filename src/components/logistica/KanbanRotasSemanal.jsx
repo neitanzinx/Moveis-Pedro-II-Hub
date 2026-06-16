@@ -72,7 +72,24 @@ function SlotTurno({ turno, caminhaoId, dataAtual, entregas, vendas, onClickEntr
           const normalize = (str) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
           const turnoSlotNorm = normalize(turno.id);
 
-          if (!turnos.some(t => normalize(t) === turnoSlotNorm)) {
+          const hasManha = turnos.some(t => normalize(t) === 'manha');
+          const hasTarde = turnos.some(t => normalize(t) === 'tarde');
+          const hasComercial = turnos.some(t => normalize(t) === 'comercial');
+
+          let isAllowed = false;
+          if (hasComercial) {
+            isAllowed = true;
+          } else {
+            if (turnoSlotNorm === 'comercial') {
+              isAllowed = hasManha && hasTarde;
+            } else if (turnoSlotNorm === 'manha') {
+              isAllowed = hasManha;
+            } else if (turnoSlotNorm === 'tarde') {
+              isAllowed = hasTarde;
+            }
+          }
+
+          if (!isAllowed) {
             return true;
           }
         }
@@ -121,7 +138,24 @@ function SlotTurno({ turno, caminhaoId, dataAtual, entregas, vendas, onClickEntr
         const normalize = (str) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         const turnoSlotNorm = normalize(turno.id);
 
-        if (!turnos.some(t => normalize(t) === turnoSlotNorm)) {
+        const hasManha = turnos.some(t => normalize(t) === 'manha');
+        const hasTarde = turnos.some(t => normalize(t) === 'tarde');
+        const hasComercial = turnos.some(t => normalize(t) === 'comercial');
+
+        let isAllowed = false;
+        if (hasComercial) {
+          isAllowed = true;
+        } else {
+          if (turnoSlotNorm === 'comercial') {
+            isAllowed = hasManha && hasTarde;
+          } else if (turnoSlotNorm === 'manha') {
+            isAllowed = hasManha;
+          } else if (turnoSlotNorm === 'tarde') {
+            isAllowed = hasTarde;
+          }
+        }
+
+        if (!isAllowed) {
           return true;
         }
       }
@@ -791,7 +825,24 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
           const normalize = (str) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
           const turnoTargetNorm = normalize(turno);
 
-          if (!turnos.some(t => normalize(t) === turnoTargetNorm)) {
+          const hasManha = turnos.some(t => normalize(t) === 'manha');
+          const hasTarde = turnos.some(t => normalize(t) === 'tarde');
+          const hasComercial = turnos.some(t => normalize(t) === 'comercial');
+
+          let isAllowed = false;
+          if (hasComercial) {
+            isAllowed = true;
+          } else {
+            if (turnoTargetNorm === 'comercial') {
+              isAllowed = hasManha && hasTarde;
+            } else if (turnoTargetNorm === 'manha') {
+              isAllowed = hasManha;
+            } else if (turnoTargetNorm === 'tarde') {
+              isAllowed = hasTarde;
+            }
+          }
+
+          if (!isAllowed) {
             toast.error(`BLOQUEADO: Turno não permitido pelo Cliente`, {
               description: `O cliente só permite receber no turno: ${turnos.join(', ')}.`,
               duration: 4000

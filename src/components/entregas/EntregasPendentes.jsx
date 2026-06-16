@@ -7,7 +7,8 @@ import { Printer, Calendar, MapPin, User, Phone, CheckCircle, Clock, AlertTriang
 import { format, differenceInDays, addDays } from "date-fns";
 import { base44 } from "@/api/base44Client";
 import { EMPRESA } from "@/config/empresa";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -26,6 +27,15 @@ export default function EntregasPendentes({ entregas, vendas, clientes }) {
   const [novaDataLimite, setNovaDataLimite] = useState("");
 
   const queryClient = useQueryClient();
+
+  const { data: prazosConfig = [] } = useQuery({
+    queryKey: ['prazos_entrega'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('prazos_entrega').select('*');
+      if (error) throw error;
+      return data || [];
+    }
+  });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => base44.entities.Entrega.update(id, data),
@@ -494,9 +504,21 @@ export default function EntregasPendentes({ entregas, vendas, clientes }) {
                   <SelectValue placeholder="Selecione um prazo..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="15 dias úteis">15 dias úteis</SelectItem>
-                  <SelectItem value="45 dias úteis">45 dias úteis</SelectItem>
-                  <SelectItem value="Retirado na loja">Retirado na loja</SelectItem>
+                  {prazosConfig.length === 0 ? (
+                    <SelectItem value="15 dias úteis" disabled>Carregando...</SelectItem>
+                  ) : (
+                    prazosConfig.map(p => {
+                      const label = `${p.quantidade_dias} dias ${p.tipo_dias === 'uteis' ? 'úteis' : 'corridos'}`;
+                      return (
+                        <SelectItem key={p.id} value={label}>
+                          {label}
+                        </SelectItem>
+                      );
+                    })
+                  )}
+                  {novoPrazo === "Retirado na loja" && (
+                    <SelectItem value="Retirado na loja" disabled>Retirado na loja</SelectItem>
+                  )}
                   <SelectItem value="Customizado">Customizado</SelectItem>
                 </SelectContent>
               </Select>

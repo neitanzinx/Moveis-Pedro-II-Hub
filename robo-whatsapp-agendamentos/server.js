@@ -1337,7 +1337,7 @@ Qualquer dúvida, estamos à disposição! 🧡💚`;
             nome: nome || 'Cliente',
             pedido: pedido || '-',
             produtos: produtos || 'Consulte sua nota de pedido',
-            prazo: prazo ? `${prazo} úteis` : 'A confirmar'
+            prazo: prazo ? (prazo.toLowerCase().includes('dia') ? prazo : `${prazo} úteis`) : 'A confirmar'
         }
     );
 
