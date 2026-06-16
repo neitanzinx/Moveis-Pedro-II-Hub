@@ -652,7 +652,7 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
     }
   };
 
-  const criarLancamentosFinanceirosAprovacao = async () => {
+  const criarLancamentosFinanceirosAprovacao = async (devolucaoObj = devolucao) => {
     const lancamentosIds = [];
     const valorDevolvido = Number(formData.valor_devolvido || 0);
     const valorDiferenca = Number(formData.valor_diferenca || 0);
@@ -690,9 +690,9 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
         status: 'Pendente',
         observacao: `Justificativa financeira: ${String(formData.justificativa_financeira || '').trim()}. Destino do estoque: ${formData.destino_estoque}.`,
         venda_id: formData.venda_id,
-        devolucao_id: devolucao?.id || null,
+        devolucao_id: devolucaoObj?.id || null,
         origem_tipo: 'devolucao',
-        origem_id: devolucao?.id || null,
+        origem_id: devolucaoObj?.id || null,
         origem_ref: formData.numero_pedido || null,
         organization_id: DEFAULT_ORGANIZATION_ID,
       });
@@ -716,9 +716,9 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
         forma_pagamento: pagamentosDiferenca[0]?.forma_pagamento || 'Diversos',
         observacao: `Diferença paga na troca via ${resumoPagamentos || 'N/A'}. Justificativa: ${String(formData.justificativa_financeira || '').trim() || 'N/A'}`,
         venda_id: formData.venda_id,
-        devolucao_id: devolucao?.id || null,
+        devolucao_id: devolucaoObj?.id || null,
         origem_tipo: 'devolucao_troca',
-        origem_id: devolucao?.id || null,
+        origem_id: devolucaoObj?.id || null,
         origem_ref: formData.numero_pedido || null,
         organization_id: DEFAULT_ORGANIZATION_ID,
       });
@@ -739,9 +739,9 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
         forma_pagamento: 'Dinheiro',
         observacao: `Valor a ser devolvido ao cliente ${formData.cliente_nome} referente à troca do pedido ${formData.numero_pedido}.`,
         venda_id: formData.venda_id,
-        devolucao_id: devolucao?.id || null,
+        devolucao_id: devolucaoObj?.id || null,
         origem_tipo: 'devolucao_troca_troco',
-        origem_id: devolucao?.id || null,
+        origem_id: devolucaoObj?.id || null,
         origem_ref: formData.numero_pedido || null,
         organization_id: DEFAULT_ORGANIZATION_ID,
       });
@@ -751,45 +751,33 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
     return lancamentosIds;
   };
 
-  const handleSavePendente = async () => {
-    validarDadosBase();
-
-    const recalculo = recomputarValores(formData.itens_devolvidos, formData.itens_troca);
-    const payload = {
-      ...formData,
-      ...recalculo,
-      status: devolucao?.status === 'Rejeitada' ? 'Rejeitada' : 'Pendente',
-      organization_id: formData.organization_id || DEFAULT_ORGANIZATION_ID
-    };
-
-    await onSave(payload);
-  };
-
-  const handleApprove = async () => {
-    if (!devolucao) {
-      alert('Salve a devolução como pendente antes de aprovar.');
-      return;
-    }
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     if (submitLockRef.current) return;
-
     submitLockRef.current = true;
     setIsApproving(true);
 
     try {
-      const devolucaoAtual = await base44.entities.Devolucao.read(devolucao.id);
-      if (!devolucaoAtual) {
-        throw new Error('Devolução não encontrada para aprovação.');
-      }
-      if (devolucaoAtual.status === 'Aprovada' || devolucaoAtual.status === 'Processada') {
-        throw new Error('Essa devolução já foi aprovada/processada anteriormente.');
-      }
-
       validarDadosBase();
       validarFinanceiroAprovacao();
 
-      const recalculo = recomputarValores(formData.itens_devolvidos, formData.itens_troca, true);
+      let currentDevolucao = devolucao;
+
+      // 1. Salvar ou criar a devolução inicialmente como Pendente para obter o ID
+      if (!currentDevolucao) {
+        const recalculo = recomputarValores(formData.itens_devolvidos, formData.itens_troca);
+        const payload = {
+          ...formData,
+          ...recalculo,
+          status: 'Pendente',
+          organization_id: formData.organization_id || DEFAULT_ORGANIZATION_ID
+        };
+        currentDevolucao = await onSave(payload);
+      }
+
+      // 2. Executar as ações de aprovação (estoque e financeiro)
       await atualizarEstoqueAprovacao();
-      const lancamentosIds = await criarLancamentosFinanceirosAprovacao();
+      const lancamentosIds = await criarLancamentosFinanceirosAprovacao(currentDevolucao);
 
       if (formData.tipo === 'Troca' && valorDiferenca < 0 && formData.destino_troco === 'credito_loja') {
         const trocoEmCredito = Math.abs(valorDiferenca);
@@ -804,14 +792,15 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
           } catch (creditErr) {
             console.warn('Erro ao registrar crédito no cliente:', creditErr);
           }
-        } else {
-          console.warn('cliente_id não encontrado na venda; crédito não foi registrado no cadastro.');
         }
       }
 
+      // 3. Atualizar a devolução para o status Aprovada final
+      const recalculoAprovado = recomputarValores(formData.itens_devolvidos, formData.itens_troca, true);
       const updatedData = {
         ...formData,
-        ...recalculo,
+        ...recalculoAprovado,
+        id: currentDevolucao.id,
         pagamento_diferenca_ativo: valorDiferenca > 0,
         pagamento_diferenca_valor: valorDiferenca > 0 ? valorDiferenca : 0,
         status: 'Aprovada',
@@ -826,35 +815,12 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
 
       await onSave(updatedData);
     } catch (error) {
-      alert(error?.message || 'Erro ao aprovar devolução.');
-      console.error('Erro ao aprovar devolução:', error);
+      alert(error?.message || 'Erro ao processar devolução.');
+      console.error('Erro ao processar devolução:', error);
     } finally {
       submitLockRef.current = false;
       setIsApproving(false);
     }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (submitLockRef.current) return;
-    submitLockRef.current = true;
-
-    try {
-      await handleSavePendente();
-    } catch (error) {
-      alert(error?.message || 'Erro ao salvar devolução.');
-      console.error('Erro ao salvar devolução:', error);
-    } finally {
-      submitLockRef.current = false;
-    }
-  };
-
-  const handleReject = async () => {
-    const updatedData = {
-      ...formData,
-      status: 'Rejeitada'
-    };
-    await onSave(updatedData);
   };
 
   const formContent = (
@@ -1334,45 +1300,19 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
               Cancelar
             </Button>
 
-            {devolucao && canApprove && devolucao.status === 'Pendente' && (
-              <>
-                <Button
-                  type="button"
-                  onClick={handleReject}
-                  variant="destructive"
-                  disabled={isLoading || isApproving}
-                >
-                  Rejeitar
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleApprove}
-                  disabled={isLoading || isApproving || (formData.tipo === 'Troca' && valorDiferenca > 0 && (!formData.forma_pagamento_diferenca || validacaoPagamentoDiferenca.restante > 0)) || (formData.tipo === 'Troca' && valorDiferenca < 0 && !formData.destino_troco)}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  {isApproving ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Aprovando...
-                    </>
-                  ) : 'Aprovar'}
-                </Button>
-              </>
-            )}
-
             {(!devolucao || devolucao.status === 'Pendente' || devolucao.status === 'Rejeitada') && (
               <Button
                 type="submit"
                 disabled={isLoading || isApproving || !formData.venda_id || formData.itens_devolvidos.length === 0 || (formData.tipo === 'Troca' && valorDiferenca > 0 && !formData.forma_pagamento_diferenca) || (formData.tipo === 'Troca' && valorDiferenca < 0 && !formData.destino_troco)}
                 style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
               >
-                {isLoading ? (
+                {isLoading || isApproving ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Salvando...
+                    Processando...
                   </>
                 ) : (
-                  devolucao ? "Salvar Pendente" : "Criar Devolução"
+                  devolucao ? "Salvar" : "Criar Devolução"
                 )}
               </Button>
             )}
