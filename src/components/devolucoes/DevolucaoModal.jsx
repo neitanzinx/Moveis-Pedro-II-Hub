@@ -31,7 +31,7 @@ import {
   PAYMENT_METHOD_OPTIONS_DELIVERY,
 } from "@/services/paymentOrchestrator";
 
-export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, devolucoes, vendas, produtos, fornecedores, isLoading }) {
+export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, devolucoes, vendas, produtos, fornecedores, isLoading, noDialog }) {
 const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
 
   const { user } = useAuth();
@@ -857,16 +857,15 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
     await onSave(updatedData);
   };
 
-  return (
-    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle style={{ color: '#07593f' }}>
-            {devolucao ? "Detalhes da Devolução/Troca" : "Nova Devolução/Troca"}
-          </DialogTitle>
-        </DialogHeader>
+  const formContent = (
+    <>
+      <DialogHeader>
+        <DialogTitle style={{ color: '#07593f' }}>
+          {devolucao ? "Detalhes da Devolução/Troca" : "Nova Devolução/Troca"}
+        </DialogTitle>
+      </DialogHeader>
 
-        <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit}>
           <div className="space-y-6">
             <div className="grid md:grid-cols-2 gap-4">
               <div>
@@ -1379,7 +1378,22 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
             )}
           </DialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
-  );
+      </>
+    );
+
+    if (noDialog) {
+      return (
+        <div className="w-full">
+          {formContent}
+        </div>
+      );
+    }
+
+    return (
+      <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          {formContent}
+        </DialogContent>
+      </Dialog>
+    );
 }

@@ -79,7 +79,7 @@ export default function Dashboard() {
 
         // Filtro de Data
         if (!v?.data_venda) return false;
-        const d = new Date(v.data_venda);
+        const d = new Date(v.data_venda + 'T12:00:00');
         return !isNaN(d.getTime()) && d >= limite;
       });
 
@@ -105,7 +105,7 @@ export default function Dashboard() {
         if (isVendaCancelada(v)) return false;
         if (v?.responsavel_id !== user.id && v?.created_by !== user.email) return false;
         if (!v?.data_venda) return false;
-        const d = new Date(v.data_venda);
+        const d = new Date(v.data_venda + 'T12:00:00');
         return !isNaN(d.getTime()) && d >= limiteAnt && d < limite;
       });
 
@@ -116,7 +116,7 @@ export default function Dashboard() {
       // 4. Gráfico
       const vendasMap = {};
       vendasFiltradas.forEach(v => {
-        const d = new Date(v.data_venda);
+        const d = new Date(v.data_venda + 'T12:00:00');
         if (!isNaN(d.getTime())) {
           // Usar chave YYYY-MM-DD para garantir a ordenação correta das datas
           const ano = d.getFullYear();

@@ -251,6 +251,7 @@ export default function MontadorExterno() {
         staleTime: 1000 * 60 * 5 // 5 minutos de cache
     });
 
+
     const getVendaInfo = (vendaId) => {
         if (!vendaId || !vendas?.length) return { vendedor: 'Lojista', data: '-' };
         const idBusca = String(vendaId);
@@ -258,7 +259,7 @@ export default function MontadorExterno() {
         if (!venda) return { vendedor: 'Lojista', data: '-' };
         return {
             vendedor: venda.responsavel_nome || 'Lojista',
-            data: venda.data_venda ? new Date(venda.data_venda).toLocaleDateString('pt-BR') : '-'
+            data: venda.data_venda ? new Date(venda.data_venda + 'T12:00:00').toLocaleDateString('pt-BR') : '-'
         };
     };
 

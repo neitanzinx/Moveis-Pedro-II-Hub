@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import {
     Dialog,
@@ -13,11 +13,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Plus, Trash2, Upload, X, FileText, Image, HardHat } from "lucide-react";
+import { Loader2, Plus, Trash2, Upload, X, FileText, Image, HardHat, Search } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { AlertCircle } from "lucide-react";
+import DevolucaoModal from "../devolucoes/DevolucaoModal";
 
 const TIPOS_ASSISTENCIA = [
     { value: "Devolução", label: "Devolução", color: "bg-red-100 text-red-800" },
@@ -44,6 +45,130 @@ const PRIORIDADE_OPTIONS = [
     { value: "Urgente", label: "Urgente", color: "bg-red-100 text-red-700" }
 ];
 
+function SeletorProdutoTroca({ value, initialLabel, onSelect }) {
+    const [searchTerm, setSearchTerm] = useState(initialLabel || "");
+    const [results, setResults] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [isOpen, setIsOpen] = useState(false);
+    const containerRef = useRef(null);
+
+    // Fetch products on search term change
+    useEffect(() => {
+        if (!searchTerm || value) {
+            setResults([]);
+            return;
+        }
+
+        const delayDebounce = setTimeout(async () => {
+            setLoading(true);
+            try {
+                const { data } = await base44.entities.Produto.search({
+                    search: searchTerm,
+                    limit: 10
+                });
+                setResults(data || []);
+                setIsOpen(true);
+            } catch (err) {
+                console.error("Erro ao buscar produtos:", err);
+            } finally {
+                setLoading(false);
+            }
+        }, 300);
+
+        return () => clearTimeout(delayDebounce);
+    }, [searchTerm, value]);
+
+    // Close results when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (containerRef.current && !containerRef.current.contains(e.target)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const handleClear = () => {
+        setSearchTerm("");
+        setResults([]);
+        onSelect(null);
+        setIsOpen(false);
+    };
+
+    return (
+        <div ref={containerRef} className="relative w-full">
+            {value ? (
+                <div className="flex items-center justify-between border rounded px-3 py-1.5 bg-gray-50 text-xs">
+                    <span className="font-medium truncate flex-1">{searchTerm}</span>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 ml-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                        onClick={handleClear}
+                    >
+                        <X className="w-3.5 h-3.5" />
+                    </Button>
+                </div>
+            ) : (
+                <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                    <Input
+                        placeholder="Digite nome, código ou referência do produto..."
+                        value={searchTerm}
+                        onChange={(e) => {
+                            setSearchTerm(e.target.value);
+                            setIsOpen(true);
+                        }}
+                        className="pl-8 text-xs h-8"
+                    />
+                    {loading && (
+                        <Loader2 className="absolute right-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />
+                    )}
+                </div>
+            )}
+
+            {isOpen && !value && searchTerm && (
+                <div className="absolute left-0 right-0 z-50 mt-1 max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
+                    {loading && results.length === 0 && (
+                        <div className="p-3 text-center text-xs text-gray-500">Buscando...</div>
+                    )}
+                    {!loading && results.length === 0 && (
+                        <div className="p-3 text-center text-xs text-gray-500">Nenhum produto encontrado</div>
+                    )}
+                    {results.map((p) => (
+                        <div
+                            key={p.id}
+                            className="p-2 hover:bg-gray-100 cursor-pointer flex justify-between items-center text-xs border-b border-gray-50 last:border-b-0"
+                            onClick={() => {
+                                onSelect(p);
+                                setSearchTerm(p.nome);
+                                setIsOpen(false);
+                            }}
+                        >
+                            <div className="flex-1 min-w-0 pr-2">
+                                <p className="font-semibold text-gray-800 truncate">{p.nome}</p>
+                                <p className="text-[10px] text-gray-500 truncate">
+                                    Ref: {p.modelo_referencia || 'N/A'} | Categoria: {p.categoria || 'Outra'}
+                                </p>
+                            </div>
+                            <div className="text-right shrink-0">
+                                <p className="font-bold text-green-700">
+                                    R$ {p.preco_venda?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </p>
+                                <p className="text-[10px] text-gray-500">
+                                    Estoque: {p.quantidade_estoque || 0} un
+                                </p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function AssistenciaTecnicaModal({
     isOpen,
     onClose,
@@ -51,14 +176,19 @@ export default function AssistenciaTecnicaModal({
     assistencia,
     initialValues,
     vendas = [],
-    isLoading
+    produtos = [],
+    fornecedores = [],
+    isLoading,
+    devolucoes = [],
+    onSaveDevolucao,
+    savingDevolucao
 }) {
     const getDefaultFormData = () => ({
         venda_id: "",
         numero_pedido: "",
         cliente_nome: "",
         cliente_telefone: "",
-        tipo: "Devolução",
+        tipo: "Conserto",
         data_abertura: new Date().toISOString().split('T')[0],
         data_resolucao: "",
         descricao_problema: "",
@@ -88,7 +218,12 @@ export default function AssistenciaTecnicaModal({
         if (assistencia) {
             setFormData({
                 ...assistencia,
-                itens_envolvidos: assistencia.itens_envolvidos || [],
+                itens_envolvidos: (assistencia.itens_envolvidos || []).map(i => ({
+                    ...i,
+                    produto_sai_id: i.produto_sai_id || i.produto_id,
+                    produto_sai_nome: i.produto_sai_nome || i.produto_nome,
+                    produto_sai_quantidade: i.produto_sai_quantidade || i.quantidade
+                })),
                 arquivos: assistencia.arquivos || []
             });
             const venda = vendas.find(v => v.id === assistencia.venda_id);
@@ -101,7 +236,12 @@ export default function AssistenciaTecnicaModal({
             setFormData({
                 ...getDefaultFormData(),
                 ...prefill,
-                itens_envolvidos: prefill.itens_envolvidos || [],
+                itens_envolvidos: (prefill.itens_envolvidos || []).map(i => ({
+                    ...i,
+                    produto_sai_id: i.produto_sai_id || i.produto_id,
+                    produto_sai_nome: i.produto_sai_nome || i.produto_nome,
+                    produto_sai_quantidade: i.produto_sai_quantidade || i.quantidade
+                })),
                 arquivos: prefill.arquivos || [],
                 responsabilidade_montador: autoResponsabilidade || prefill.responsabilidade_montador || false,
                 montador_usuario_id: prefill.montador_usuario_id || null
@@ -165,7 +305,10 @@ export default function AssistenciaTecnicaModal({
                 produto_id: item.produto_id,
                 produto_nome: item.produto_nome,
                 quantidade: item.quantidade,
-                problema: ""
+                problema: "",
+                produto_sai_id: item.produto_id,
+                produto_sai_nome: item.produto_nome,
+                produto_sai_quantidade: item.quantidade
             }]
         });
     };
@@ -242,13 +385,28 @@ export default function AssistenciaTecnicaModal({
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle style={{ color: '#07593f' }}>
-                        {assistencia ? "Editar Assistência Técnica" : "Nova Assistência Técnica"}
-                    </DialogTitle>
-                </DialogHeader>
+                {formData.tipo === 'Devolução' || formData.tipo === 'Troca' ? (
+                    <DevolucaoModal
+                        noDialog={true}
+                        isOpen={isOpen}
+                        onClose={onClose}
+                        onSave={onSaveDevolucao}
+                        devolucao={assistencia && assistencia.itemType === 'devolucao' ? assistencia : { tipo: formData.tipo, status: "Pendente" }}
+                        devolucoes={devolucoes}
+                        vendas={vendas}
+                        produtos={produtos}
+                        fornecedores={fornecedores}
+                        isLoading={savingDevolucao}
+                    />
+                ) : (
+                    <>
+                        <DialogHeader>
+                            <DialogTitle style={{ color: '#07593f' }}>
+                                {assistencia ? "Editar Assistência Técnica" : "Nova Assistência Técnica"}
+                            </DialogTitle>
+                        </DialogHeader>
 
-                <form onSubmit={handleSubmit}>
+                        <form onSubmit={handleSubmit}>
                     <div className="space-y-6">
                         {/* Seleção do Pedido */}
                         <div className="grid md:grid-cols-2 gap-4">
@@ -291,7 +449,9 @@ export default function AssistenciaTecnicaModal({
                                 <Label>Tipo de Assistência *</Label>
                                 <Select
                                     value={formData.tipo}
-                                    onValueChange={(value) => setFormData({ ...formData, tipo: value })}
+                                    onValueChange={(value) => {
+                                        setFormData({ ...formData, tipo: value });
+                                    }}
                                 >
                                     <SelectTrigger>
                                         <SelectValue />
@@ -431,6 +591,17 @@ export default function AssistenciaTecnicaModal({
                             />
                         </div>
 
+                        {/* Solução Aplicada */}
+                        <div>
+                            <Label>Solução Aplicada</Label>
+                            <Textarea
+                                value={formData.solucao_aplicada}
+                                onChange={(e) => setFormData({ ...formData, solucao_aplicada: e.target.value })}
+                                placeholder="Descreva a solução aplicada para resolver o problema..."
+                                rows={3}
+                            />
+                        </div>
+
                         {/* Itens Envolvidos */}
                         {vendaSelecionada && vendaSelecionada.itens && (
                             <div className="border rounded-lg p-4" style={{ borderColor: '#E5E0D8' }}>
@@ -472,29 +643,73 @@ export default function AssistenciaTecnicaModal({
                                 </h4>
                                 <div className="space-y-3">
                                     {formData.itens_envolvidos.map((item, index) => (
-                                        <div key={index} className="flex items-start gap-3 p-3 bg-green-50 rounded">
-                                            <div className="flex-1">
-                                                <p className="font-medium">{item.produto_nome}</p>
-                                                <Input
-                                                    placeholder="Descreva o problema específico deste item..."
-                                                    value={item.problema}
-                                                    onChange={(e) => {
-                                                        const novosItens = [...formData.itens_envolvidos];
-                                                        novosItens[index].problema = e.target.value;
-                                                        setFormData({ ...formData, itens_envolvidos: novosItens });
-                                                    }}
-                                                    className="mt-2"
-                                                />
+                                        <div key={index} className="flex flex-col gap-3 p-3 bg-green-50 rounded border border-green-200">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="flex-1">
+                                                    <p className="font-medium text-green-950">{item.produto_nome}</p>
+                                                    <Input
+                                                        placeholder="Descreva o problema específico deste item..."
+                                                        value={item.problema}
+                                                        onChange={(e) => {
+                                                            const novosItens = [...formData.itens_envolvidos];
+                                                            novosItens[index].problema = e.target.value;
+                                                            setFormData({ ...formData, itens_envolvidos: novosItens });
+                                                        }}
+                                                        className="mt-2"
+                                                    />
+                                                </div>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => removerItem(index)}
+                                                    className="text-red-600 hover:text-red-800 hover:bg-red-50 flex-shrink-0"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </Button>
                                             </div>
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => removerItem(index)}
-                                                className="text-red-600"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </Button>
+
+                                            {/* Se for troca, selecionar o item que sai */}
+                                            {formData.tipo === 'Troca' && (
+                                                <div className="p-3 bg-white border border-dashed border-green-200 rounded-lg space-y-2">
+                                                    <Label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
+                                                        Item que Sai (Novo Produto entregue ao Cliente)
+                                                    </Label>
+                                                    <div className="flex flex-col sm:flex-row gap-2">
+                                                        <div className="flex-1">
+                                                                                           <SeletorProdutoTroca
+                                                                value={item.produto_sai_id}
+                                                                initialLabel={item.produto_sai_nome}
+                                                                onSelect={(prod) => {
+                                                                    const novosItens = [...formData.itens_envolvidos];
+                                                                    if (prod) {
+                                                                        novosItens[index].produto_sai_id = prod.id;
+                                                                        novosItens[index].produto_sai_nome = prod.nome;
+                                                                    } else {
+                                                                        novosItens[index].produto_sai_id = null;
+                                                                        novosItens[index].produto_sai_nome = "";
+                                                                    }
+                                                                    setFormData({ ...formData, itens_envolvidos: novosItens });
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        <div className="w-full sm:w-24">
+                                                            <Input
+                                                                type="number"
+                                                                min="1"
+                                                                value={item.produto_sai_quantidade || item.quantidade}
+                                                                onChange={(e) => {
+                                                                    const novosItens = [...formData.itens_envolvidos];
+                                                                    novosItens[index].produto_sai_quantidade = Math.max(1, parseInt(e.target.value) || 1);
+                                                                    setFormData({ ...formData, itens_envolvidos: novosItens });
+                                                                }}
+                                                                placeholder="Qtd"
+                                                                className="w-full text-xs"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -580,16 +795,6 @@ export default function AssistenciaTecnicaModal({
                             </div>
                         </div>
 
-                        {/* Solução Aplicada */}
-                        <div>
-                            <Label>Solução Aplicada</Label>
-                            <Textarea
-                                value={formData.solucao_aplicada}
-                                onChange={(e) => setFormData({ ...formData, solucao_aplicada: e.target.value })}
-                                placeholder="Descreva a solução aplicada para resolver o problema..."
-                                rows={3}
-                            />
-                        </div>
 
                         {/* Data de Resolução */}
                         {formData.status === "Concluída" && (
@@ -634,7 +839,9 @@ export default function AssistenciaTecnicaModal({
                             )}
                         </Button>
                     </DialogFooter>
-                </form>
+                        </form>
+                    </>
+                )}
             </DialogContent>
         </Dialog>
     );

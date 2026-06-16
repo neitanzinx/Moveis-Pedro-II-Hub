@@ -235,7 +235,9 @@ if (typeof window !== 'undefined') {
 // PDF PARA O CLIENTE (limpo e elegante)
 export function gerarNotaPedidoHTML(venda, cliente, vendedor, lojaInfo) {
   const logoSrc = getLogoSrc();
-  const dataVenda = new Date(venda.data_venda).toLocaleDateString('pt-BR');
+  const dataVenda = venda.data_venda
+    ? new Date(venda.data_venda.includes('T') ? venda.data_venda : venda.data_venda + 'T12:00:00').toLocaleDateString('pt-BR')
+    : new Date().toLocaleDateString('pt-BR');
 
   const enderecoCompleto = obterEnderecoEntregaPedido(venda, cliente);
   const pontoReferencia = obterPontoReferenciaPedido(venda, cliente);

@@ -690,7 +690,7 @@ export default function DashboardGerente() {
             // Filtro de período
             if (!v.data_venda) return false;
             const dataVendaStr = v.data_venda.split('T')[0];
-            const d = new Date(v.data_venda);
+            const d = new Date(v.data_venda + 'T12:00:00');
             d.setHours(0, 0, 0, 0);
 
             switch (periodo) {
@@ -729,7 +729,7 @@ export default function DashboardGerente() {
             if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
-            const d = new Date(v.data_venda);
+            const d = new Date(v.data_venda + 'T12:00:00');
             return d.getMonth() === hoje.getMonth() && d.getFullYear() === hoje.getFullYear();
         });
     }, [vendas, lojaAtiva]);
@@ -780,7 +780,7 @@ export default function DashboardGerente() {
             if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
-            const d = new Date(v.data_venda);
+            const d = new Date(v.data_venda + 'T12:00:00');
             d.setHours(0, 0, 0, 0);
             return d.getTime() === semanaPassada.getTime();
         });
@@ -812,7 +812,7 @@ export default function DashboardGerente() {
             if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
-            const d = new Date(v.data_venda);
+            const d = new Date(v.data_venda + 'T12:00:00');
             return d >= mesAnoPassado && d <= fimMesAnoPassado;
         });
 
@@ -849,7 +849,7 @@ export default function DashboardGerente() {
             if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
-            const d = new Date(v.data_venda);
+            const d = new Date(v.data_venda + 'T12:00:00');
             return d >= mesAnterior && d <= fimMesAnterior;
         });
 
@@ -1004,7 +1004,7 @@ export default function DashboardGerente() {
             if (v.itens && Array.isArray(v.itens)) {
                 v.itens.forEach(item => {
                     const prodId = item.produto_id || item.id;
-                    const dataVenda = new Date(v.data_venda);
+                    const dataVenda = new Date(v.data_venda + 'T12:00:00');
                     if (!produtosComVendas[prodId] || dataVenda > produtosComVendas[prodId]) {
                         produtosComVendas[prodId] = dataVenda;
                     }
@@ -1183,7 +1183,7 @@ export default function DashboardGerente() {
             if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
-            const d = new Date(v.data_venda);
+            const d = new Date(v.data_venda + 'T12:00:00');
             return d >= mesAnterior && d <= fimMesAnterior;
         });
 
@@ -1251,7 +1251,7 @@ export default function DashboardGerente() {
                 }
                 vendasAnt.forEach(v => {
                     if (v.data_venda) {
-                        const dAnt = new Date(v.data_venda).getDate();
+                        const dAnt = new Date(v.data_venda + 'T12:00:00').getDate();
                         if (graficoMapAnt[dAnt] !== undefined) {
                             graficoMapAnt[dAnt] += v.valor_total || 0;
                         }
@@ -1385,7 +1385,7 @@ export default function DashboardGerente() {
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return;
             if (!v.data_venda) return;
 
-            const dVal = new Date(v.data_venda);
+            const dVal = new Date(v.data_venda + 'T12:00:00');
             if (dVal < dataInicio || dVal > hoje) return;
 
             const chave = pAgrupamento === 'dia'
@@ -1824,7 +1824,7 @@ export default function DashboardGerente() {
                                                                     <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
                                                                         <span className="flex items-center gap-1">
                                                                             <Calendar className="w-3 h-3" />
-                                                                            {pedido.data_venda ? new Date(pedido.data_venda).toLocaleDateString('pt-BR') : '-'}
+                                                                            {pedido.data_venda ? new Date(pedido.data_venda + 'T12:00:00').toLocaleDateString('pt-BR') : '-'}
                                                                         </span>
                                                                         <span>{formatarMoeda(pedido.valor_total || 0)}</span>
                                                                         {entregaAssociada && (
@@ -1978,7 +1978,7 @@ export default function DashboardGerente() {
                                                                 </div>
                                                                 <p className="text-gray-800 mt-1 font-medium">{pedido.cliente_nome || 'Cliente'}</p>
                                                                 <p className="text-xs text-gray-600 mt-1">
-                                                                    {pedido.data_venda ? new Date(pedido.data_venda).toLocaleDateString('pt-BR') : '-'}
+                                                                    {pedido.data_venda ? new Date(pedido.data_venda + 'T12:00:00').toLocaleDateString('pt-BR') : '-'}
                                                                     {' • '}Vendedor: {pedido.responsavel_nome || pedido.vendedor_nome || '-'}
                                                                 </p>
                                                             </div>
@@ -3739,7 +3739,7 @@ export default function DashboardGerente() {
                                             <TableRow key={v.id}>
                                                 <TableCell className="font-medium">#{v.numero_pedido || v.id}</TableCell>
                                                 <TableCell>{v.cliente_nome}</TableCell>
-                                                <TableCell>{new Date(v.data_venda).toLocaleDateString('pt-BR')}</TableCell>
+                                                <TableCell>{v.data_venda ? new Date(v.data_venda + 'T12:00:00').toLocaleDateString('pt-BR') : '-'}</TableCell>
                                                 <TableCell>{v.loja}</TableCell>
                                             </TableRow>
                                         ))}

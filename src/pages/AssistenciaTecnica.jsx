@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { base44, supabase } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
@@ -16,6 +16,7 @@ import AssistenciaTecnicaModal from "../components/assistencia/AssistenciaTecnic
 import SelecionarLojaReposicaoModal from "../components/assistencia/SelecionarLojaReposicaoModal";
 import { abrirAssistenciaTecnicaPDF } from "../components/assistencia/AssistenciaTecnicaPDF";
 import { toast } from "sonner";
+import DevolucaoModal from "../components/devolucoes/DevolucaoModal";
 
 const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000001';
 const TIPOS_COM_REPOSICAO = ['Troca', 'Peça Faltante'];
@@ -58,19 +59,25 @@ export default function AssistenciaTecnica() {
     const queryClient = useQueryClient();
 
     // Queries
-    const { data: assistencias = [], isLoading } = useQuery({
+    // Devolution module states
+    const [isDevolucaoModalOpen, setIsDevolucaoModalOpen] = useState(false);
+    const [editingDevolucao, setEditingDevolucao] = useState(null);
+    const [savingDevolucao, setSavingDevolucao] = useState(false);
+
+    // Queries
+    const { data: assistencias = [], isLoading: isLoadingAssistencias } = useQuery({
         queryKey: ['assistencias'],
         queryFn: () => base44.entities.AssistenciaTecnica.list('-created_at')
+    });
+
+    const { data: devolucoes = [], isLoading: isLoadingDevolucoes } = useQuery({
+        queryKey: ['devolucoes'],
+        queryFn: () => base44.entities.Devolucao.list('-created_date')
     });
 
     const { data: vendas = [] } = useQuery({
         queryKey: ['vendas'],
         queryFn: () => base44.entities.Venda.list('-data_venda')
-    });
-
-    const { data: produtos = [] } = useQuery({
-        queryKey: ['produtos'],
-        queryFn: () => base44.entities.Produto.list()
     });
 
     const { data: lojas = [] } = useQuery({
@@ -82,6 +89,19 @@ export default function AssistenciaTecnica() {
         queryKey: ['clientes'],
         queryFn: () => base44.entities.Cliente.list()
     });
+
+    const { data: fornecedores = [] } = useQuery({
+        queryKey: ['fornecedores'],
+        queryFn: () => base44.entities.Fornecedor.list()
+    });
+
+    const { data: produtos = [] } = useQuery({
+        queryKey: ['produtos'],
+        queryFn: () => base44.entities.Produto.list('nome'),
+        enabled: isModalOpen
+    });
+
+    const isLoading = isLoadingAssistencias || isLoadingDevolucoes;
 
     // ==============================================
     // FUNÇÃO PRINCIPAL DE SAVE COM INTEGRAÇÕES
@@ -200,9 +220,16 @@ export default function AssistenciaTecnica() {
                 // 5. INTEGRAÇÃO ESTOQUE - Devolver itens ao estoque quando for Devolução
                 if (formData.tipo === 'Devolução' && formData.itens_envolvidos?.length > 0) {
                     for (const item of formData.itens_envolvidos) {
-                        const produto = produtos.find(p => p.id === item.produto_id);
-                        if (produto) {
-                            try {
+                        try {
+                            const { data: produto, error } = await supabase
+                                .from('produtos')
+                                .select('*')
+                                .eq('id', item.produto_id)
+                                .single();
+
+                            if (error) throw error;
+
+                            if (produto) {
                                 // Sincronização Global (PDV)
                                 await base44.entities.Produto.update(produto.id, {
                                     quantidade_estoque: (produto.quantidade_estoque || 0) + item.quantidade,
@@ -219,9 +246,9 @@ export default function AssistenciaTecnica() {
                                 });
 
                                 console.log('✅ Estoque sincronizado (Global + Local):', item.produto_nome, '+', item.quantidade);
-                            } catch (err) {
-                                console.error('Erro ao atualizar estoque sincronizado:', err);
                             }
+                        } catch (err) {
+                            console.error('Erro ao atualizar estoque sincronizado:', err);
                         }
                     }
                 }
@@ -233,7 +260,11 @@ export default function AssistenciaTecnica() {
                     ).then(list => list.find(a => a.numero_pedido === formData.numero_pedido));
 
                     for (const item of formData.itens_envolvidos) {
-                        const lojaInfo = selecaoLojas[item.produto_id];
+                        const prodSaiId = item.produto_sai_id || item.produto_id;
+                        const prodSaiNome = item.produto_sai_nome || item.produto_nome;
+                        const prodSaiQtd = item.produto_sai_quantidade || item.quantidade;
+
+                        const lojaInfo = selecaoLojas[prodSaiId] || selecaoLojas[item.produto_id];
                         if (!lojaInfo) continue;
 
                         try {
@@ -241,12 +272,12 @@ export default function AssistenciaTecnica() {
                             const { data: estoqueRows } = await supabase
                                 .from('estoque_loja')
                                 .select('id, quantidade')
-                                .eq('produto_id', item.produto_id)
+                                .eq('produto_id', prodSaiId)
                                 .eq('loja_id', lojaInfo.loja_id)
                                 .maybeSingle();
 
                             const qtdAtual = estoqueRows?.quantidade ?? 0;
-                            const qtdNova = Math.max(0, qtdAtual - item.quantidade);
+                            const qtdNova = Math.max(0, qtdAtual - prodSaiQtd);
 
                             if (estoqueRows?.id) {
                                 // b) Decrementar estoque_loja
@@ -260,7 +291,7 @@ export default function AssistenciaTecnica() {
                             const { data: todasLojas } = await supabase
                                 .from('estoque_loja')
                                 .select('quantidade')
-                                .eq('produto_id', item.produto_id);
+                                .eq('produto_id', prodSaiId);
 
                             const totalEstoque = (todasLojas || []).reduce(
                                 (sum, row) => sum + (row.quantidade || 0), 0
@@ -269,14 +300,14 @@ export default function AssistenciaTecnica() {
                             await supabase
                                 .from('produtos')
                                 .update({ quantidade_estoque: totalEstoque })
-                                .eq('id', item.produto_id);
+                                .eq('id', prodSaiId);
 
                             // d) Registrar movimentação de auditoria
                             await supabase.from('movimentacoes_estoque').insert({
-                                produto_id: item.produto_id,
+                                produto_id: prodSaiId,
                                 evento_tipo: 'assistencia_troca',
                                 modulo_origem: 'assistencia',
-                                quantidade: item.quantidade,
+                                quantidade: prodSaiQtd,
                                 estoque_antes_total: qtdAtual,
                                 estoque_depois_total: qtdNova,
                                 loja_origem: lojaInfo.loja_nome,
@@ -290,9 +321,9 @@ export default function AssistenciaTecnica() {
                             await base44.entities.SolicitacaoReposicao.create({
                                 assistencia_id: assistenciaSalva?.id || null,
                                 numero_assistencia: formData.numero_pedido,
-                                produto_id: item.produto_id,
-                                produto_nome: item.produto_nome,
-                                quantidade: item.quantidade,
+                                produto_id: prodSaiId,
+                                produto_nome: prodSaiNome,
+                                quantidade: prodSaiQtd,
                                 loja_id: lojaInfo.loja_id,
                                 loja_nome: lojaInfo.loja_nome,
                                 status: 'Pendente',
@@ -300,9 +331,9 @@ export default function AssistenciaTecnica() {
                                 tenant_id: DEFAULT_TENANT_ID
                             });
 
-                            console.log('✅ Reposição criada e estoque decrementado:', item.produto_nome, 'loja:', lojaInfo.loja_nome);
+                            console.log('✅ Reposição criada e estoque decrementado:', prodSaiNome, 'loja:', lojaInfo.loja_nome);
                         } catch (err) {
-                            console.error('Erro ao processar reposição para item:', item.produto_nome, err);
+                            console.error('Erro ao processar reposição para item:', prodSaiNome, err);
                         }
                     }
 
@@ -333,18 +364,121 @@ export default function AssistenciaTecnica() {
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assistencias'] })
     });
 
-    // Filtering
-    const filtered = assistencias.filter(a => {
-        const matchesSearch =
-            a.numero_pedido?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            a.cliente_nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            a.descricao_problema?.toLowerCase().includes(searchTerm.toLowerCase());
-
-        const matchesTipo = filterTipo === "todos" || a.tipo === filterTipo;
-        const matchesStatus = filterStatus === "todos" || a.status === filterStatus;
-
-        return matchesSearch && matchesTipo && matchesStatus;
+    // Devolution mutations
+    const createDevolucaoMutation = useMutation({
+        mutationFn: (data) => base44.entities.Devolucao.create(data),
+        onSuccess: async () => {
+            await invalidateRelatedData();
+            setIsModalOpen(false);
+            setEditingAssistencia(null);
+            toast.success("Devolução/Troca criada com sucesso!");
+        }
     });
+
+    const updateDevolucaoMutation = useMutation({
+        mutationFn: ({ id, data }) => base44.entities.Devolucao.update(id, data),
+        onSuccess: async () => {
+            await invalidateRelatedData();
+            setIsModalOpen(false);
+            setEditingAssistencia(null);
+            toast.success("Devolução/Troca atualizada com sucesso!");
+        }
+    });
+
+    const deleteDevolucaoMutation = useMutation({
+        mutationFn: (id) => base44.entities.Devolucao.delete(id),
+        onSuccess: async () => {
+            await invalidateRelatedData();
+            toast.success("Devolução/Troca excluída com sucesso!");
+        }
+    });
+
+    const invalidateRelatedData = async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['devolucoes'] }),
+            queryClient.invalidateQueries({ queryKey: ['produtos'] }),
+            queryClient.invalidateQueries({ queryKey: ['vendas'] }),
+            queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] }),
+            queryClient.invalidateQueries({ queryKey: ['movimentacoes-estoque'] }),
+            queryClient.invalidateQueries({ queryKey: ['assistencias'] })
+        ]);
+    };
+
+    const handleSaveDevolucao = async (data) => {
+        setSavingDevolucao(true);
+        const performSave = async (payload) => {
+            if (editingAssistencia && editingAssistencia.id) {
+                return updateDevolucaoMutation.mutateAsync({ id: editingAssistencia.id, data: payload });
+            }
+            return createDevolucaoMutation.mutateAsync(payload);
+        };
+
+        try {
+            await performSave(data);
+        } catch (error) {
+            const msg = String(error?.message || '').toLowerCase();
+            if (!msg.includes('column') || !msg.includes('does not exist')) {
+                toast.error("Erro ao salvar devolução");
+                throw error;
+            }
+
+            const payloadCompat = { ...data };
+            delete payloadCompat.financeiro_tipo;
+            delete payloadCompat.justificativa_financeira;
+            delete payloadCompat.destino_estoque;
+            delete payloadCompat.cliente_nome;
+            delete payloadCompat.financeiro_lancamento_id;
+            delete payloadCompat.financeiro_lancamentos_ids;
+            delete payloadCompat.processado_por;
+            delete payloadCompat.data_processamento;
+            delete payloadCompat.organization_id;
+
+            await performSave(payloadCompat);
+        } finally {
+            setSavingDevolucao(false);
+        }
+    };
+
+    const handleDeleteDevolucao = (id) => {
+        if (window.confirm("Tem certeza que deseja excluir esta devolução/troca? Esta ação não pode ser desfeita.")) {
+            deleteDevolucaoMutation.mutate(id);
+        }
+    };
+
+    // Combine lists into a unifiedList
+    const unifiedList = useMemo(() => {
+        const mappedAssistencias = assistencias.map(a => ({
+            ...a,
+            itemType: 'assistencia',
+            dateForSort: new Date(a.data_abertura || a.created_at)
+        }));
+
+        const mappedDevolucoes = devolucoes.map(d => ({
+            ...d,
+            itemType: 'devolucao',
+            descricao_problema: d.observacoes || `Itens: ${(d.itens_devolvidos || []).map(i => i.produto_nome).join(', ')}`,
+            prioridade: 'Normal',
+            data_abertura: d.data_devolucao,
+            dateForSort: new Date(d.data_devolucao || d.created_at)
+        }));
+
+        return [...mappedAssistencias, ...mappedDevolucoes].sort((a, b) => b.dateForSort - a.dateForSort);
+    }, [assistencias, devolucoes]);
+
+    // Filtering
+    const filtered = useMemo(() => {
+        return unifiedList.filter(item => {
+            const matchesSearch =
+                item.numero_pedido?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                item.cliente_nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                item.descricao_problema?.toLowerCase().includes(searchTerm.toLowerCase());
+
+            const matchesTipo = filterTipo === "todos" || item.tipo === filterTipo;
+            const matchesStatus = filterStatus === "todos" || item.status === filterStatus;
+
+            return matchesSearch && matchesTipo && matchesStatus;
+        });
+    }, [unifiedList, searchTerm, filterTipo, filterStatus]);
 
     // Statistics
     const stats = {
@@ -362,12 +496,25 @@ export default function AssistenciaTecnica() {
         }
     };
 
-    const getTipoBadge = (tipo) => {
+    const getTipoBadge = (tipo, itemType) => {
+        if (itemType === 'devolucao') {
+            const color = tipo === 'Troca' ? 'bg-orange-100 text-orange-800 border-orange-200' : 'bg-red-100 text-red-800 border-red-200';
+            return <Badge className={`${color} border px-2 py-0.5 text-[10px] uppercase tracking-wider`}>{tipo}</Badge>;
+        }
         const config = TIPOS_ASSISTENCIA.find(t => t.value === tipo) || TIPOS_ASSISTENCIA[5];
         return <Badge className={`${config.color} border px-2 py-0.5 text-[10px] uppercase tracking-wider`}>{tipo}</Badge>;
     };
 
-    const getStatusBadge = (status) => {
+    const getStatusBadge = (status, itemType) => {
+        if (itemType === 'devolucao') {
+            const styles = {
+                "Aprovada": "bg-green-100 text-green-800 border-green-200",
+                "Pendente": "bg-yellow-100 text-yellow-800 border-yellow-200",
+                "Rejeitada": "bg-red-100 text-red-800 border-red-200",
+                "Processada": "bg-blue-100 text-blue-800 border-blue-200"
+            };
+            return <Badge className={`${styles[status] || "bg-gray-100 text-gray-800"} border px-2 py-0.5 text-[10px] uppercase tracking-wider`}>{status}</Badge>;
+        }
         const config = STATUS_OPTIONS.find(s => s.value === status) || STATUS_OPTIONS[0];
         return <Badge className={`${config.color} border px-2 py-0.5 text-[10px] uppercase tracking-wider`}>{status}</Badge>;
     };
@@ -377,7 +524,7 @@ export default function AssistenciaTecnica() {
         return <Badge className={`${config.color} border px-2 py-0.5 text-[10px] uppercase tracking-wider`}>{prioridade}</Badge>;
     };
 
-    const handleImprimir = (assistencia) => {
+    const handleImprimir = async (assistencia) => {
         const venda = vendas.find(v => String(v.id) === String(assistencia.venda_id)) || null;
         const clienteCompleto = venda
             ? (clientes.find(c => c.id === venda.cliente_id) || {
@@ -392,7 +539,27 @@ export default function AssistenciaTecnica() {
             ? lojas.find(l => String(l.nome).trim().toLowerCase() === String(venda.loja || '').trim().toLowerCase()) || null
             : null;
 
-        abrirAssistenciaTecnicaPDF(assistencia, venda, clienteCompleto, lojaInfo, produtos);
+        // Fetch only the specific products involved in this assistance request
+        const productIds = [
+            ...new Set(
+                (assistencia.itens_envolvidos || []).flatMap(i => [i.produto_id, i.produto_sai_id].filter(Boolean))
+            )
+        ];
+
+        let involvedProducts = [];
+        if (productIds.length > 0) {
+            try {
+                const { data } = await supabase
+                    .from('produtos')
+                    .select('*')
+                    .in('id', productIds);
+                involvedProducts = data || [];
+            } catch (err) {
+                console.error("Erro ao carregar produtos envolvidos para o PDF:", err);
+            }
+        }
+
+        abrirAssistenciaTecnicaPDF(assistencia, venda, clienteCompleto, lojaInfo, involvedProducts);
     };
 
     return (
@@ -560,42 +727,64 @@ export default function AssistenciaTecnica() {
                             </TableRow>
                         ) : (
                             filtered.map(a => (
-                                <TableRow key={a.id} className={a.prioridade === 'Urgente' && a.status !== 'Concluída' ? 'bg-red-50' : ''}>
+                                <TableRow key={`${a.itemType}-${a.id}`} className={a.prioridade === 'Urgente' && a.status !== 'Concluída' ? 'bg-red-50' : ''}>
                                     <TableCell className="font-medium">#{a.numero_pedido}</TableCell>
                                     <TableCell>{a.cliente_nome}</TableCell>
-                                    <TableCell>{getTipoBadge(a.tipo)}</TableCell>
+                                    <TableCell>{getTipoBadge(a.tipo, a.itemType)}</TableCell>
                                     <TableCell className="max-w-[200px] truncate text-sm text-gray-600">
                                         {a.descricao_problema}
                                     </TableCell>
-                                    <TableCell>{getPrioridadeBadge(a.prioridade)}</TableCell>
-                                    <TableCell>{getStatusBadge(a.status)}</TableCell>
+                                    <TableCell>{a.itemType === 'devolucao' ? '-' : getPrioridadeBadge(a.prioridade)}</TableCell>
+                                    <TableCell>{getStatusBadge(a.status, a.itemType)}</TableCell>
                                     <TableCell className="text-sm text-gray-500">
-                                        {new Date(a.data_abertura).toLocaleDateString('pt-BR')}
+                                        {new Date(a.itemType === 'devolucao' ? a.data_devolucao : a.data_abertura).toLocaleDateString('pt-BR')}
                                     </TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex justify-end gap-2">
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() => handleImprimir(a)}
-                                                title="Imprimir assistência"
-                                            >
-                                                <FileText className="w-4 h-4 text-green-700" />
-                                            </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() => { setEditingAssistencia(a); setIsModalOpen(true); }}
-                                            >
-                                                <Edit className="w-4 h-4 text-blue-600" />
-                                            </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() => handleDelete(a.id)}
-                                            >
-                                                <Trash2 className="w-4 h-4 text-red-600" />
-                                            </Button>
+                                            {a.itemType === 'assistencia' ? (
+                                                <>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        onClick={() => handleImprimir(a)}
+                                                        title="Imprimir assistência"
+                                                    >
+                                                        <FileText className="w-4 h-4 text-green-700" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        onClick={() => { setEditingAssistencia(a); setIsModalOpen(true); }}
+                                                    >
+                                                        <Edit className="w-4 h-4 text-blue-600" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        onClick={() => handleDelete(a.id)}
+                                                    >
+                                                        <Trash2 className="w-4 h-4 text-red-600" />
+                                                    </Button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        onClick={() => { setEditingAssistencia(a); setIsModalOpen(true); }}
+                                                    >
+                                                        <Edit className="w-4 h-4 text-blue-600" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        disabled={a.status === 'Aprovada'}
+                                                        onClick={() => handleDeleteDevolucao(a.id)}
+                                                    >
+                                                        <Trash2 className="w-4 h-4 text-red-600" />
+                                                    </Button>
+                                                </>
+                                            )}
                                         </div>
                                     </TableCell>
                                 </TableRow>
@@ -612,6 +801,11 @@ export default function AssistenciaTecnica() {
                 onSave={handleSave}
                 assistencia={editingAssistencia}
                 vendas={vendas}
+                produtos={produtos}
+                fornecedores={fornecedores}
+                devolucoes={devolucoes}
+                onSaveDevolucao={handleSaveDevolucao}
+                savingDevolucao={savingDevolucao}
                 isLoading={saving}
             />
 
@@ -620,7 +814,11 @@ export default function AssistenciaTecnica() {
                 isOpen={isReposicaoModalOpen}
                 onClose={handleCancelarReposicao}
                 onConfirm={handleConfirmarReposicao}
-                itens={reposicaoPendente?.formData?.itens_envolvidos || []}
+                itens={(reposicaoPendente?.formData?.itens_envolvidos || []).map(item => ({
+                    produto_id: item.produto_sai_id || item.produto_id,
+                    produto_nome: item.produto_sai_nome || item.produto_nome,
+                    quantidade: item.produto_sai_quantidade || item.quantidade
+                }))}
                 lojas={lojas}
             />
         </div>

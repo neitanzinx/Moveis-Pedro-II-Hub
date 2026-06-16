@@ -57,7 +57,7 @@ export function formatarDataExibicao(dateStr) {
         const [year, month, day] = dateStr.split('-');
         return `${day}/${month}/${year}`;
     }
-    const cleanDate = typeof dateStr === 'string' ? dateStr.replace(/-/g, '/') : dateStr;
+    const cleanDate = typeof dateStr === 'string' && !dateStr.includes('T') ? dateStr.replace(/-/g, '/') : dateStr;
     const d = new Date(cleanDate);
     if (isNaN(d.getTime())) return '';
     const day = String(d.getDate()).padStart(2, '0');

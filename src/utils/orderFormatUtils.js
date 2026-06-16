@@ -59,8 +59,9 @@ export function formatarBlocoAssistenciaItem(item) {
  * @returns {string}
  */
 export function gerarTextoPedidoOperacional(oc, itens = [], user = {}, lojaName = '') {
-  const dataFormatada = oc.created_at || oc.data_pedido
-    ? new Date(oc.created_at || oc.data_pedido).toLocaleDateString('pt-BR')
+  const rawDate = oc.created_at || oc.data_pedido;
+  const dataFormatada = rawDate
+    ? new Date(rawDate.includes('T') ? rawDate : rawDate + 'T12:00:00').toLocaleDateString('pt-BR')
     : new Date().toLocaleDateString('pt-BR');
 
   const metadata = oc.metadata || {};
@@ -119,11 +120,18 @@ export function gerarTextoPedidoOperacional(oc, itens = [], user = {}, lojaName 
  */
 export function gerarTextoPedido(pedidoData, fornecedores = []) {
     const fornecedor = fornecedores.find(f => f.id === pedidoData.fornecedor_id);
+    const parseDateSafe = (d) => {
+        if (!d) return null;
+        if (typeof d === 'string') {
+            return new Date(d.includes('T') ? d : d + 'T12:00:00');
+        }
+        return new Date(d);
+    };
     const dataFormatada = pedidoData.data_pedido
-        ? format(new Date(pedidoData.data_pedido), 'dd/MM/yyyy')
+        ? format(parseDateSafe(pedidoData.data_pedido), 'dd/MM/yyyy')
         : 'Não informada';
     const previsaoFormatada = pedidoData.data_previsao_entrega
-        ? format(new Date(pedidoData.data_previsao_entrega), 'dd/MM/yyyy')
+        ? format(parseDateSafe(pedidoData.data_previsao_entrega), 'dd/MM/yyyy')
         : 'A combinar';
 
     let texto = `*PEDIDO DE COMPRA*\n`;

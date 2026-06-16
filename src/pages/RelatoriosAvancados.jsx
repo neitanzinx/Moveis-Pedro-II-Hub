@@ -34,6 +34,18 @@ import {
   calcularDRESerieMensal12Meses,
 } from "@/services/financeiroAggregation";
 
+const parseDateSafe = (val) => {
+  if (!val) return new Date();
+  if (val instanceof Date) return val;
+  const str = String(val);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return new Date(str + 'T12:00:00');
+  }
+  const d = new Date(str);
+  if (isNaN(d.getTime())) return new Date();
+  return d;
+};
+
 const COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#f97316'];
 const GRADIENT_COLORS = {
   green: ['#10b981', '#059669'],
@@ -219,7 +231,7 @@ export default function RelatoriosAvancados() {
 
   const vendasFiltradas = useMemo(() => {
     return vendas.filter(v => {
-      const dataVenda = new Date(v.data_venda);
+      const dataVenda = parseDateSafe(v.data_venda);
       const dataInicio = new Date(filtros.dataInicio);
       const dataFim = new Date(filtros.dataFim);
       dataFim.setHours(23, 59, 59);
@@ -251,7 +263,7 @@ export default function RelatoriosAvancados() {
   const vendasPorDia = useMemo(() => {
     const map = {};
     vendasFiltradas.forEach(v => {
-      const data = new Date(v.data_venda).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+      const data = parseDateSafe(v.data_venda).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
       if (!map[data]) map[data] = { data, quantidade: 0, valor: 0 };
       map[data].quantidade++;
       map[data].valor += v.valor_total || 0;
@@ -589,7 +601,7 @@ export default function RelatoriosAvancados() {
     // Group receivables by expected date
     const recebiveis30 = vendas
       .filter(v => {
-        const prazo = v.prazo_entrega ? new Date(v.prazo_entrega) : new Date(v.data_venda);
+        const prazo = v.prazo_entrega ? parseDateSafe(v.prazo_entrega) : parseDateSafe(v.data_venda);
         return prazo <= projecao30 && (v.valor_restante || 0) > 0;
       })
       .reduce((sum, v) => sum + (v.valor_restante || 0), 0);
@@ -628,7 +640,7 @@ export default function RelatoriosAvancados() {
 
       const entradas = vendas
         .filter(v => {
-          const prazo = v.prazo_entrega ? new Date(v.prazo_entrega) : new Date(v.data_venda);
+          const prazo = v.prazo_entrega ? parseDateSafe(v.prazo_entrega) : parseDateSafe(v.data_venda);
           return prazo >= semanaInicio && prazo < semanaFim && (v.valor_restante || 0) > 0;
         })
         .reduce((sum, v) => sum + (v.valor_restante || 0), 0);
@@ -815,7 +827,7 @@ export default function RelatoriosAvancados() {
   const dataFimAnterior = new Date(filtros.dataInicio);
 
   const vendasPeriodoAnterior = vendas.filter(v => {
-    const dataVenda = new Date(v.data_venda);
+    const dataVenda = parseDateSafe(v.data_venda);
     return dataVenda >= dataInicioAnterior && dataVenda < dataFimAnterior;
   });
 
@@ -839,7 +851,7 @@ export default function RelatoriosAvancados() {
         if (u && u.full_name) vendedorNome = u.full_name;
       }
       return [
-        new Date(v.data_venda).toLocaleDateString('pt-BR'),
+        parseDateSafe(v.data_venda).toLocaleDateString('pt-BR'),
         v.numero_pedido || '',
         v.cliente_nome || '',
         vendedorNome,
@@ -2096,7 +2108,7 @@ export default function RelatoriosAvancados() {
                       <SelectContent>
                         {vendasFiltradas.slice(0, 50).map(v => (
                           <SelectItem key={v.id} value={v.id.toString()}>
-                            {v.numero_pedido} - {v.cliente_nome} ({new Date(v.data_venda).toLocaleDateString('pt-BR')})
+                            {v.numero_pedido} - {v.cliente_nome} ({parseDateSafe(v.data_venda).toLocaleDateString('pt-BR')})
                           </SelectItem>
                         ))}
                       </SelectContent>

@@ -84,6 +84,7 @@ export default function Vendas() {
     const [clienteParaNfe, setClienteParaNfe] = useState(null);
     const [selectedVendaDetalhes, setSelectedVendaDetalhes] = useState(null);
     const [isDetalhesModalOpen, setIsDetalhesModalOpen] = useState(false);
+    const [modalAcoesVenda, setModalAcoesVenda] = useState(null);
     const [modalPagamentoVenda, setModalPagamentoVenda] = useState(null);
     const [pagamentoForm, setPagamentoForm] = useState({
         pagamentos: [],
@@ -1295,7 +1296,7 @@ export default function Vendas() {
                                         </TableHead>
                                     )}
                                     {renderSortableHeader('Pedido', 'pedido', 'w-[100px]')}
-                                    {renderSortableHeader('Cliente', 'cliente')}
+                                    {renderSortableHeader('Cliente', 'cliente', 'min-w-[220px]')}
                                     {renderSortableHeader('Data', 'data')}
                                     {renderSortableHeader('Total', 'total')}
                                     <TableHead>Produtos</TableHead>
@@ -1408,7 +1409,7 @@ export default function Vendas() {
                                                 </TableCell>
                                             )}
                                             <TableCell className="font-medium">#{venda.numero_pedido}</TableCell>
-                                            <TableCell>
+                                            <TableCell className="min-w-[220px]">
                                                 <div className="flex flex-col">
                                                     <span className="font-medium text-gray-900 dark:text-white">{formatarNome(venda.cliente_nome)}</span>
                                                     <span className="text-xs text-gray-500">{formatarTelefone(venda.cliente_telefone)}</span>
@@ -1471,196 +1472,14 @@ export default function Vendas() {
                                                     financeiro={financeiro}
                                                 />
                                             </TableCell>
-                                            <TableCell className="text-right">
-                                                <div className="flex justify-end gap-2">
-                                                    {/* Botão Emitir NFe */}
-                                                    {financeiro.isPaid && can('manage_vendas') && (
-                                                        venda.nfe_emitida ? (
-                                                            <Badge className="bg-green-100 text-green-800 border-green-200">
-                                                                <CheckCircle className="w-3 h-3 mr-1" />
-                                                                NFe {venda.nfe_numero}
-                                                            </Badge>
-                                                        ) : (
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    abrirModalNfe(venda);
-                                                                }}
-                                                                title="Emitir NFe"
-                                                            >
-                                                                <Receipt className="w-4 h-4 text-green-600" />
-                                                            </Button>
-                                                        )
-                                                    )}
-
-                                                    {canManagePayments && financeiro.valorRestante > MONEY_EPSILON && !isVendaCancelada(venda) && (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                abrirModalPagamento(venda);
-                                                            }}
-                                                            title="Atualizar Pagamento"
-                                                        >
-                                                            <CreditCard className="w-4 h-4 text-emerald-600" />
-                                                        </Button>
-                                                    )}
-
-                                                    <Button variant="ghost" size="icon" onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        const clienteCompleto = clientes.find(c => c.id === venda.cliente_id) || { nome_completo: venda.cliente_nome, telefone: venda.cliente_telefone };
-
-                                                        // Resolver nome do vendedor
-                                                        let nomeVendedor = venda.responsavel_nome;
-                                                        if (venda.responsavel_id) {
-                                                            const u = users.find(user => user.id === venda.responsavel_id);
-                                                            if (u && u.full_name) nomeVendedor = u.full_name;
-                                                        }
-                                                        const lojaInfoPdf1 = lojasAtivas.find(l => String(l.nome).trim().toLowerCase() === String(venda.loja || '').trim().toLowerCase()) || null;
-                                                        abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name, lojaInfoPdf1);
-                                                    }}>
-                                                        <FileText className="w-4 h-4 text-blue-600" />
-                                                    </Button>
-
-                                                    {/* Botão de Cancelar */}
-                                                    {canCancelVendas && !isVendaCancelada(venda) && (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleCancelarVenda(venda);
-                                                            }}
-                                                            disabled={cancelarVendaMutation.isPending}
-                                                            title="Cancelar Venda"
-                                                        >
-                                                            <XCircle className="w-4 h-4 text-orange-600" />
-                                                        </Button>
-                                                    )}
-
-                                                    {/* Botão de Reagendamento (Vendedor solicita) */}
-                                                    {(() => {
-                                                        const entregaAgendada = entregas.find(e => e.numero_pedido === venda.numero_pedido && e.data_agendada && e.status !== 'Entregue');
-                                                        if (entregaAgendada) {
-                                                            return (
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        setModalReagendamento({
-                                                                            vendaId: venda.id,
-                                                                            entregaId: entregaAgendada.id,
-                                                                            dataAgendada: entregaAgendada.data_agendada,
-                                                                            turno: entregaAgendada.turno
-                                                                        });
-                                                                        setMotivoReagendamento("");
-                                                                    }}
-                                                                    title="Solicitar Reagendamento (Cliente não pode receber)"
-                                                                >
-                                                                    <CalendarX className="w-4 h-4 text-red-500" />
-                                                                </Button>
-                                                            );
-                                                        }
-                                                        return null;
-                                                    })()}
-
-                                                    {canManageDeliveryStatus && (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                abrirModalStatusEntrega(venda);
-                                                            }}
-                                                            title="Alterar Status da Entrega"
-                                                        >
-                                                            <Truck className="w-4 h-4 text-sky-600" />
-                                                        </Button>
-                                                    )}
-
-                                                    {/* Botão de Liberar Entrega (Vendedor libera se estiver aguardando) */}
-                                                    {(() => {
-                                                        const entregaAguardando = (entregas || []).find(e =>
-                                                            e.numero_pedido === venda.numero_pedido &&
-                                                            e.status === 'Aguardando Liberação'
-                                                        );
-
-                                                        // Apenas o vendedor da venda ou admin pode liberar
-                                                        const podeLiberar = user?.cargo === 'Administrador' || venda.responsavel_id === user?.id;
-
-                                                        if (entregaAguardando && podeLiberar) {
-                                                            return (
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    onClick={() => {
-                                                                        setModalLiberarEntrega({
-                                                                            entregaId: entregaAguardando.id,
-                                                                            pedido: venda.numero_pedido
-                                                                        });
-                                                                    }}
-                                                                    disabled={liberarEntregaMutation.isPending}
-                                                                    title="Liberar para Entrega"
-                                                                >
-                                                                    <Unlock className="w-4 h-4 text-amber-600" />
-                                                                </Button>
-                                                            );
-                                                        }
-                                                        return null;
-                                                    })()}
-
-                                                    {/* Botão de Preferências de Entrega */}
-                                                    {(() => {
-                                                        const entrega = entregas.find(e => e.numero_pedido === venda.numero_pedido && e.status !== 'Entregue');
-                                                        if (entrega) {
-                                                            return (
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    onClick={() => {
-                                                                        const prefs = entrega.preferencias_entrega || { dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" };
-                                                                        setPreferenciasTemp(prefs);
-                                                                        setModalPreferencias({ entregaId: entrega.id });
-                                                                    }}
-                                                                    title="Preferências de Entrega / Restrições"
-                                                                >
-                                                                    <Settings className="w-4 h-4 text-gray-500" />
-                                                                </Button>
-                                                            );
-                                                        }
-                                                        return null;
-                                                    })()}
-
-                                                    {/* Botão de Transferir Montagem (Wrench com seta) */}
-                                                    {(() => {
-                                                        // Verificar se tem itens de montagem INTERNA pendentes
-                                                        const itensInternosPendentes = montagens.some(m =>
-                                                            m.venda_id === venda.id &&
-                                                            m.tipo_montagem === 'interna' &&
-                                                            m.status !== 'concluida'
-                                                        );
-
-                                                        if (itensInternosPendentes) {
-                                                            return (
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    onClick={() => setModalTransferencia(venda)}
-                                                                    title="Transferir Montagem para Externo"
-                                                                >
-                                                                    <div className="relative">
-                                                                        <ArrowRightLeft className="w-5 h-5 text-orange-600" />
-                                                                    </div>
-                                                                </Button>
-                                                            );
-                                                        }
-                                                        return null;
-                                                    })()}
-                                                </div>
+                                            <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setModalAcoesVenda(venda)}
+                                                >
+                                                    Ações
+                                                </Button>
                                             </TableCell>
                                         </TableRow>
                                     )})
@@ -1689,7 +1508,7 @@ export default function Vendas() {
                             <TableHeader className="bg-gray-50 dark:bg-neutral-950">
                                 <TableRow>
                                     {renderSortableHeader('Pedido', 'pedido', 'w-[100px]')}
-                                    {renderSortableHeader('Cliente', 'cliente')}
+                                    {renderSortableHeader('Cliente', 'cliente', 'min-w-[220px]')}
                                     {renderSortableHeader('Data', 'data')}
                                     {renderSortableHeader('Total', 'total')}
                                     <TableHead>Produtos</TableHead>
@@ -1726,7 +1545,7 @@ export default function Vendas() {
                                             }}
                                         >
                                             <TableCell className="font-medium">#{venda.numero_pedido}</TableCell>
-                                            <TableCell>
+                                            <TableCell className="min-w-[220px]">
                                                 <div className="flex flex-col">
                                                     <span className="font-medium text-gray-900 dark:text-white">{formatarNome(venda.cliente_nome)}</span>
                                                     <span className="text-xs text-gray-500">{formatarTelefone(venda.cliente_telefone)}</span>
@@ -1773,22 +1592,14 @@ export default function Vendas() {
                                                     Cancelado
                                                 </Badge>
                                             </TableCell>
-                                            <TableCell className="text-right">
-                                                <div className="flex justify-end gap-2">
-                                                    <Button variant="ghost" size="icon" onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        const clienteCompleto = clientes.find(c => c.id === venda.cliente_id) || { nome_completo: venda.cliente_nome, telefone: venda.cliente_telefone };
-                                                        let nomeVendedor = venda.responsavel_nome;
-                                                        if (venda.responsavel_id) {
-                                                            const u = users.find(user => user.id === venda.responsavel_id);
-                                                            if (u && u.full_name) nomeVendedor = u.full_name;
-                                                        }
-                                                        const lojaInfoPdf2 = lojasAtivas.find(l => String(l.nome).trim().toLowerCase() === String(venda.loja || '').trim().toLowerCase()) || null;
-                                                        abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name, lojaInfoPdf2);
-                                                    }}>
-                                                        <FileText className="w-4 h-4 text-blue-600" />
-                                                    </Button>
-                                                </div>
+                                            <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setModalAcoesVenda(venda)}
+                                                >
+                                                    Ações
+                                                </Button>
                                             </TableCell>
                                         </TableRow>
                                     ))
@@ -2345,6 +2156,216 @@ export default function Vendas() {
                 venda={modalTransferencia}
                 user={user}
             />
+
+            {/* Modal de Ações da Venda */}
+            <Dialog open={!!modalAcoesVenda} onOpenChange={(open) => !open && setModalAcoesVenda(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Settings className="w-5 h-5 text-gray-500" />
+                            Ações do Pedido #{modalAcoesVenda?.numero_pedido}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Selecione uma ação para o cliente <strong>{modalAcoesVenda ? formatarNome(modalAcoesVenda.cliente_nome) : ""}</strong>.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-2 py-4">
+                        {modalAcoesVenda && (() => {
+                            const venda = modalAcoesVenda;
+                            const financeiro = venda.financeiro || getVendaFinanceiro(venda, { entregas, lancamentos });
+                            const entregaAgendada = entregas.find(e => e.numero_pedido === venda.numero_pedido && e.data_agendada && e.status !== 'Entregue');
+                            const entregaAguardando = (entregas || []).find(e =>
+                                e.numero_pedido === venda.numero_pedido &&
+                                e.status === 'Aguardando Liberação'
+                            );
+                            const podeLiberar = user?.cargo === 'Administrador' || venda.responsavel_id === user?.id;
+                            const entrega = entregas.find(e => e.numero_pedido === venda.numero_pedido && e.status !== 'Entregue');
+                            const itensInternosPendentes = montagens.some(m =>
+                                m.venda_id === venda.id &&
+                                m.tipo_montagem === 'interna' &&
+                                m.status !== 'concluida'
+                            );
+
+                            return (
+                                <>
+                                    {/* Nota do Pedido PDF - Sempre disponível */}
+                                    <Button
+                                        variant="outline"
+                                        className="justify-start gap-2 h-11 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/20"
+                                        onClick={() => {
+                                            const clienteCompleto = clientes.find(c => c.id === venda.cliente_id) || { nome_completo: venda.cliente_nome, telefone: venda.cliente_telefone };
+                                            let nomeVendedor = venda.responsavel_nome;
+                                            if (venda.responsavel_id) {
+                                                const u = users.find(user => user.id === venda.responsavel_id);
+                                                if (u && u.full_name) nomeVendedor = u.full_name;
+                                            }
+                                            const lojaInfoPdf = lojasAtivas.find(l => String(l.nome).trim().toLowerCase() === String(venda.loja || '').trim().toLowerCase()) || null;
+                                            abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name, lojaInfoPdf);
+                                            setModalAcoesVenda(null);
+                                        }}
+                                    >
+                                        <FileText className="w-4 h-4" />
+                                        Visualizar Nota do Pedido (PDF)
+                                    </Button>
+
+                                    {/* Atualizar Pagamento */}
+                                    {canManagePayments && financeiro.valorRestante > MONEY_EPSILON && !isVendaCancelada(venda) && (
+                                        <Button
+                                            variant="outline"
+                                            className="justify-start gap-2 h-11 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                                            onClick={() => {
+                                                abrirModalPagamento(venda);
+                                                setModalAcoesVenda(null);
+                                            }}
+                                        >
+                                            <CreditCard className="w-4 h-4" />
+                                            Registrar/Atualizar Pagamento
+                                        </Button>
+                                    )}
+
+                                    {/* Emitir NFe */}
+                                    {financeiro.isPaid && can('manage_vendas') && (
+                                        venda.nfe_emitida ? (
+                                            <div className="flex items-center justify-between px-3 py-2 border rounded-md text-sm text-green-800 bg-green-50 dark:bg-green-950/20 dark:text-green-300">
+                                                <span className="flex items-center gap-2">
+                                                    <CheckCircle className="w-4 h-4" />
+                                                    Nota Fiscal Eletrônica emitida
+                                                </span>
+                                                <Badge className="bg-green-100 text-green-800 border-green-200">
+                                                    NFe {venda.nfe_numero}
+                                                </Badge>
+                                            </div>
+                                        ) : (
+                                            <Button
+                                                variant="outline"
+                                                className="justify-start gap-2 h-11 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950/20"
+                                                onClick={() => {
+                                                    abrirModalNfe(venda);
+                                                    setModalAcoesVenda(null);
+                                                }}
+                                            >
+                                                <Receipt className="w-4 h-4" />
+                                                Emitir Nota Fiscal (NFe)
+                                            </Button>
+                                        )
+                                    )}
+
+                                    {/* Alterar Status da Entrega */}
+                                    {canManageDeliveryStatus && (
+                                        <Button
+                                            variant="outline"
+                                            className="justify-start gap-2 h-11 text-sky-600 hover:text-sky-700 hover:bg-sky-50 dark:hover:bg-sky-950/20"
+                                            onClick={() => {
+                                                abrirModalStatusEntrega(venda);
+                                                setModalAcoesVenda(null);
+                                            }}
+                                        >
+                                            <Truck className="w-4 h-4" />
+                                            Alterar Status da Entrega
+                                        </Button>
+                                    )}
+
+                                    {/* Liberar Entrega */}
+                                    {entregaAguardando && podeLiberar && (
+                                        <Button
+                                            variant="outline"
+                                            className="justify-start gap-2 h-11 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/20"
+                                            onClick={() => {
+                                                setModalLiberarEntrega({
+                                                    entregaId: entregaAguardando.id,
+                                                    pedido: venda.numero_pedido
+                                                });
+                                                setModalAcoesVenda(null);
+                                            }}
+                                        >
+                                            <Unlock className="w-4 h-4" />
+                                            Liberar Entrega para Logística
+                                        </Button>
+                                    )}
+
+                                    {/* Preferências de Entrega */}
+                                    {entrega && (
+                                        <Button
+                                            variant="outline"
+                                            className="justify-start gap-2 h-11 text-gray-600 hover:text-gray-700 hover:bg-gray-50 dark:hover:bg-neutral-800"
+                                            onClick={() => {
+                                                const prefs = entrega.preferencias_entrega || { dias: [0, 1, 2, 3, 4, 5, 6], turnos: ['Manhã', 'Tarde', 'Comercial'], obs: "" };
+                                                setPreferenciasTemp(prefs);
+                                                setModalPreferencias({ entregaId: entrega.id });
+                                                setModalAcoesVenda(null);
+                                            }}
+                                        >
+                                            <Settings className="w-4 h-4" />
+                                            Preferências / Restrições de Entrega
+                                        </Button>
+                                    )}
+
+                                    {/* Solicitar Reagendamento */}
+                                    {entregaAgendada && (
+                                        <Button
+                                            variant="outline"
+                                            className="justify-start gap-2 h-11 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
+                                            onClick={() => {
+                                                setModalReagendamento({
+                                                    vendaId: venda.id,
+                                                    entregaId: entregaAgendada.id,
+                                                    dataAgendada: entregaAgendada.data_agendada,
+                                                    turno: entregaAgendada.turno
+                                                });
+                                                setMotivoReagendamento("");
+                                                setModalAcoesVenda(null);
+                                            }}
+                                        >
+                                            <CalendarX className="w-4 h-4" />
+                                            Solicitar Reagendamento
+                                        </Button>
+                                    )}
+
+                                    {/* Transferir Montagem */}
+                                    {itensInternosPendentes && (
+                                        <Button
+                                            variant="outline"
+                                            className="justify-start gap-2 h-11 text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/20"
+                                            onClick={() => {
+                                                setModalTransferencia(venda);
+                                                setModalAcoesVenda(null);
+                                            }}
+                                        >
+                                            <ArrowRightLeft className="w-4 h-4" />
+                                            Transferir Montagem para Externo
+                                        </Button>
+                                    )}
+
+                                    {/* Separador */}
+                                    {canCancelVendas && !isVendaCancelada(venda) && (
+                                        <div className="border-t my-1 dark:border-neutral-800" />
+                                    )}
+
+                                    {/* Cancelar Venda */}
+                                    {canCancelVendas && !isVendaCancelada(venda) && (
+                                        <Button
+                                            variant="destructive"
+                                            className="justify-start gap-2 h-11"
+                                            onClick={() => {
+                                                handleCancelarVenda(venda);
+                                                setModalAcoesVenda(null);
+                                            }}
+                                        >
+                                            <XCircle className="w-4 h-4" />
+                                            Cancelar Venda
+                                        </Button>
+                                    )}
+                                </>
+                            );
+                        })()}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setModalAcoesVenda(null)}>
+                            Fechar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div >
     );
 }

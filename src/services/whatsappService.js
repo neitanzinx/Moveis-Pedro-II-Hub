@@ -148,7 +148,7 @@ export const whatsappService = {
 Seu agendamento de montagem foi confirmado!
 
 *Pedido:* #${montagem.numero_pedido}
-*Data:* ${new Date(montagem.data_montagem).toLocaleDateString('pt-BR')}
+*Data:* ${montagem.data_montagem ? new Date(montagem.data_montagem.includes('T') ? montagem.data_montagem : montagem.data_montagem + 'T12:00:00').toLocaleDateString('pt-BR') : '-'}
 *Horário:* ${montagem.horario_montagem}
 *Montador:* ${montador.nome}
 

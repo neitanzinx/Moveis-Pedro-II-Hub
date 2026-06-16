@@ -182,6 +182,16 @@ const enriquecerItemAssistencia = (itemAssistencia, venda, produtos = []) => {
   };
 };
 
+const obterDetalhesProdutoSai = (itemAssistencia, produtos = []) => {
+  const produtoId = itemAssistencia.produto_sai_id || itemAssistencia.produto_id;
+  const produto = produtos.find((p) => String(p.id) === String(produtoId)) || null;
+  return {
+    nome: itemAssistencia.produto_sai_nome || (produto ? produto.nome : itemAssistencia.produto_nome),
+    quantidade: itemAssistencia.produto_sai_quantidade || itemAssistencia.quantidade || 1,
+    produtoCatalogo: produto
+  };
+};
+
 const formatarData = (data) => {
   if (!data) return '-';
   try {
@@ -214,33 +224,135 @@ export function gerarAssistenciaTecnicaHTML(assistencia, venda, cliente, lojaInf
     enriquecerItemAssistencia(item, venda, produtos)
   );
 
-  const itensHTML = itensEnriquecidos.length > 0
-    ? itensEnriquecidos.map((item) => {
-      const detalhes = obterDetalhesItem(item, item.produtoCatalogo);
-      const specs = [
-        `Cor: ${detalhes.cor}`,
-        `Tecido: ${detalhes.tecido}`,
-        `Tamanho: ${detalhes.tamanho}`,
-        `Fabricante: ${detalhes.fabricante}`
-      ];
-      if (detalhes.gtin && detalhes.gtin !== '-') specs.push(`GTIN: ${detalhes.gtin}`);
-      if (detalhes.sku && detalhes.sku !== '-') specs.push(`SKU: ${detalhes.sku}`);
-      if (detalhes.volumes && detalhes.volumes !== '-') specs.push(`Volumes: ${detalhes.volumes}`);
+  const isTroca = assistencia.tipo === 'Troca';
+  let itensHTML = '';
 
-      return `
-        <tr>
-          <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5;">
-            <div style="font-weight: 600; color: #1f2937;">${limparNomeProduto(item.produto_nome)}</div>
-            <div style="margin-top: 3px; font-size: 11px; color: #6b7280; line-height: 1.45;">
-              ${specs.join(' | ')}
-            </div>
-            ${item.problema ? `<div style="margin-top: 5px; font-size: 11px; color: #b45309; background: #fffbeb; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #f59e0b;"><strong>Problema do item:</strong> ${item.problema}</div>` : ''}
-          </td>
-          <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: center;">${item.quantidade}</td>
-        </tr>
-      `;
-    }).join('')
-    : `<tr><td colspan="2" style="padding: 12px; text-align: center; color: #6b7280; font-size: 11px;">Nenhum item selecionado do pedido</td></tr>`;
+  if (isTroca) {
+    const itensEntraHTML = itensEnriquecidos.length > 0
+      ? itensEnriquecidos.map((item) => {
+        const detalhes = obterDetalhesItem(item, item.produtoCatalogo);
+        const specs = [
+          `Cor: ${detalhes.cor}`,
+          `Tecido: ${detalhes.tecido}`,
+          `Tamanho: ${detalhes.tamanho}`,
+          `Fabricante: ${detalhes.fabricante}`
+        ];
+        if (detalhes.gtin && detalhes.gtin !== '-') specs.push(`GTIN: ${detalhes.gtin}`);
+        if (detalhes.sku && detalhes.sku !== '-') specs.push(`SKU: ${detalhes.sku}`);
+        if (detalhes.volumes && detalhes.volumes !== '-') specs.push(`Volumes: ${detalhes.volumes}`);
+
+        return `
+          <tr>
+            <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5;">
+              <div style="font-weight: 600; color: #c2410c;">${limparNomeProduto(item.produto_nome)}</div>
+              <div style="margin-top: 3px; font-size: 11px; color: #6b7280; line-height: 1.45;">
+                ${specs.join(' | ')}
+              </div>
+              ${item.problema ? `<div style="margin-top: 5px; font-size: 11px; color: #b45309; background: #fffbeb; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #f59e0b;"><strong>Problema do item:</strong> ${item.problema}</div>` : ''}
+            </td>
+            <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: center;">${item.quantidade}</td>
+          </tr>
+        `;
+      }).join('')
+      : `<tr><td colspan="2" style="padding: 12px; text-align: center; color: #6b7280; font-size: 11px;">Nenhum item selecionado</td></tr>`;
+
+    const itensSaiHTML = (assistencia.itens_envolvidos || []).length > 0
+      ? (assistencia.itens_envolvidos || []).map((item) => {
+        const saiInfo = obterDetalhesProdutoSai(item, produtos);
+        const detalhes = obterDetalhesItem({}, saiInfo.produtoCatalogo);
+        const specs = [];
+        if (detalhes.cor && detalhes.cor !== '-') specs.push(`Cor: ${detalhes.cor}`);
+        if (detalhes.tecido && detalhes.tecido !== '-') specs.push(`Tecido: ${detalhes.tecido}`);
+        if (detalhes.tamanho && detalhes.tamanho !== '-') specs.push(`Tamanho: ${detalhes.tamanho}`);
+        if (detalhes.fabricante && detalhes.fabricante !== '-') specs.push(`Fabricante: ${detalhes.fabricante}`);
+        if (detalhes.volumes && detalhes.volumes !== '-') specs.push(`Volumes: ${detalhes.volumes}`);
+
+        return `
+          <tr>
+            <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5;">
+              <div style="font-weight: 600; color: #07593f;">${limparNomeProduto(saiInfo.nome)}</div>
+              ${specs.length > 0 ? `<div style="margin-top: 3px; font-size: 11px; color: #6b7280; line-height: 1.45;">${specs.join(' | ')}</div>` : ''}
+            </td>
+            <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: center;">${saiInfo.quantidade}</td>
+          </tr>
+        `;
+      }).join('')
+      : `<tr><td colspan="2" style="padding: 12px; text-align: center; color: #6b7280; font-size: 11px;">Nenhum item de saída selecionado</td></tr>`;
+
+    itensHTML = `
+      <div style="margin-bottom: 15px;">
+        <div class="section-title" style="color: #c2410c; border-bottom: 1px solid #fed7aa; padding-bottom: 4px; font-weight: bold; font-size: 11px;">Produtos que ENTRAN (Devolução do Cliente)</div>
+        <table>
+          <thead>
+            <tr style="background: #c2410c;">
+              <th style="color: white;">Produto e Características</th>
+              <th style="text-align:center;width:60px;color:white;">Qtd</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itensEntraHTML}
+          </tbody>
+        </table>
+      </div>
+      <div style="margin-top: 15px;">
+        <div class="section-title" style="color: #07593f; border-bottom: 1px solid #a7f3d0; padding-bottom: 4px; font-weight: bold; font-size: 11px;">Produtos que SAEM (Nova Entrega ao Cliente)</div>
+        <table>
+          <thead>
+            <tr style="background: #07593f;">
+              <th style="color: white;">Produto e Características</th>
+              <th style="text-align:center;width:60px;color:white;">Qtd</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itensSaiHTML}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } else {
+    const rows = itensEnriquecidos.length > 0
+      ? itensEnriquecidos.map((item) => {
+        const detalhes = obterDetalhesItem(item, item.produtoCatalogo);
+        const specs = [
+          `Cor: ${detalhes.cor}`,
+          `Tecido: ${detalhes.tecido}`,
+          `Tamanho: ${detalhes.tamanho}`,
+          `Fabricante: ${detalhes.fabricante}`
+        ];
+        if (detalhes.gtin && detalhes.gtin !== '-') specs.push(`GTIN: ${detalhes.gtin}`);
+        if (detalhes.sku && detalhes.sku !== '-') specs.push(`SKU: ${detalhes.sku}`);
+        if (detalhes.volumes && detalhes.volumes !== '-') specs.push(`Volumes: ${detalhes.volumes}`);
+
+        return `
+          <tr>
+            <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5;">
+              <div style="font-weight: 600; color: #1f2937;">${limparNomeProduto(item.produto_nome)}</div>
+              <div style="margin-top: 3px; font-size: 11px; color: #6b7280; line-height: 1.45;">
+                ${specs.join(' | ')}
+              </div>
+              ${item.problema ? `<div style="margin-top: 5px; font-size: 11px; color: #b45309; background: #fffbeb; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #f59e0b;"><strong>Problema do item:</strong> ${item.problema}</div>` : ''}
+            </td>
+            <td style="padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: center;">${item.quantidade}</td>
+          </tr>
+        `;
+      }).join('')
+      : `<tr><td colspan="2" style="padding: 12px; text-align: center; color: #6b7280; font-size: 11px;">Nenhum item selecionado do pedido</td></tr>`;
+
+    itensHTML = `
+      <div class="section">
+        <div class="section-title">Itens Selecionados do Pedido</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Produto e Características</th>
+              <th style="text-align:center;width:60px;">Qtd</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
 
   const historicoHTML = (assistencia.historico || []).length > 0
     ? (assistencia.historico || []).map((h) => `
@@ -374,24 +486,11 @@ export function gerarAssistenciaTecnicaHTML(assistencia, venda, cliente, lojaInf
       </div>
 
       <div class="section">
-        <div class="section-title">Itens Selecionados do Pedido</div>
-        <table>
-          <thead>
-            <tr>
-              <th>Produto e Características</th>
-              <th style="text-align:center;width:60px;">Qtd</th>
-            </tr>
-          </thead>
-          <tbody>${itensHTML}</tbody>
-        </table>
+        <div class="section-title">Solução Aplicada</div>
+        <div class="solucao-box">${assistencia.solucao_aplicada || '-'}</div>
       </div>
 
-      ${assistencia.solucao_aplicada ? `
-        <div class="section">
-          <div class="section-title">Solução Aplicada</div>
-          <div class="solucao-box">${assistencia.solucao_aplicada}</div>
-        </div>
-      ` : ''}
+      ${itensHTML}
 
       ${(Number(assistencia.valor_devolvido) > 0 || Number(assistencia.valor_cobrado) > 0) ? `
         <div class="valores-row">
