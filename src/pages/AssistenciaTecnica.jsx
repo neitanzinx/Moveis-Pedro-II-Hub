@@ -10,10 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import {
     Plus, Search, Trash2, Edit, Loader2, Wrench,
-    AlertCircle, Clock, CheckCircle, Package, Filter, Link as LinkIcon
+    AlertCircle, Clock, CheckCircle, Package, Filter, Link as LinkIcon, FileText
 } from "lucide-react";
 import AssistenciaTecnicaModal from "../components/assistencia/AssistenciaTecnicaModal";
 import SelecionarLojaReposicaoModal from "../components/assistencia/SelecionarLojaReposicaoModal";
+import { abrirAssistenciaTecnicaPDF } from "../components/assistencia/AssistenciaTecnicaPDF";
 import { toast } from "sonner";
 
 const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000001';
@@ -75,6 +76,11 @@ export default function AssistenciaTecnica() {
     const { data: lojas = [] } = useQuery({
         queryKey: ['lojas'],
         queryFn: () => base44.entities.Loja.list('nome')
+    });
+
+    const { data: clientes = [] } = useQuery({
+        queryKey: ['clientes'],
+        queryFn: () => base44.entities.Cliente.list()
     });
 
     // ==============================================
@@ -371,6 +377,24 @@ export default function AssistenciaTecnica() {
         return <Badge className={`${config.color} border px-2 py-0.5 text-[10px] uppercase tracking-wider`}>{prioridade}</Badge>;
     };
 
+    const handleImprimir = (assistencia) => {
+        const venda = vendas.find(v => String(v.id) === String(assistencia.venda_id)) || null;
+        const clienteCompleto = venda
+            ? (clientes.find(c => c.id === venda.cliente_id) || {
+                nome_completo: assistencia.cliente_nome,
+                telefone: assistencia.cliente_telefone
+            })
+            : {
+                nome_completo: assistencia.cliente_nome,
+                telefone: assistencia.cliente_telefone
+            };
+        const lojaInfo = venda
+            ? lojas.find(l => String(l.nome).trim().toLowerCase() === String(venda.loja || '').trim().toLowerCase()) || null
+            : null;
+
+        abrirAssistenciaTecnicaPDF(assistencia, venda, clienteCompleto, lojaInfo, produtos);
+    };
+
     return (
         <div className="max-w-7xl mx-auto space-y-6">
 
@@ -550,6 +574,14 @@ export default function AssistenciaTecnica() {
                                     </TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex justify-end gap-2">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => handleImprimir(a)}
+                                                title="Imprimir assistência"
+                                            >
+                                                <FileText className="w-4 h-4 text-green-700" />
+                                            </Button>
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
