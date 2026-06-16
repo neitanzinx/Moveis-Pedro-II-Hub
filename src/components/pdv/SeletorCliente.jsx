@@ -12,6 +12,7 @@ import { User, UserPlus, Search, X, Check, MapPin, Loader2, Truck, ChevronDown, 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/hooks/useAuth";
+import { canEditCliente } from "@/config/permissions";
 import ClienteModal from "../clientes/ClienteModal";
 import { toast } from "sonner";
 
@@ -209,7 +210,8 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
   const [buscandoCep, setBuscandoCep] = useState(false);
   const [buscandoCepEntrega, setBuscandoCepEntrega] = useState(false);
   const queryClient = useQueryClient();
-  const { getUserLoja, can } = useAuth();
+  const { user, getUserLoja, can } = useAuth();
+  const canEditClienteRecord = (cliente) => canEditCliente(user, cliente, can);
 
   const criarClienteMutation = useMutation({
     mutationFn: (data) => {
@@ -272,6 +274,11 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
 
   const handleSaveEditedCliente = async (data) => {
     try {
+      if (!canEditClienteRecord(clienteSelecionado)) {
+        toast.error("Você não tem permissão para editar este cliente.");
+        return;
+      }
+
       const cleanData = { ...data };
       // Remove campos vazios e arrays vazios para evitar erro no supabase
       if (!cleanData.contatos || cleanData.contatos.length === 0) delete cleanData.contatos;
@@ -392,7 +399,7 @@ export default function SeletorCliente({ clienteSelecionado, setClienteSeleciona
           >
             <X className="w-3 h-3" />
           </Button>
-          {can('manage_clientes') && (
+          {canEditClienteRecord(clienteSelecionado) && (
             <Button
               variant="ghost"
               size="icon"

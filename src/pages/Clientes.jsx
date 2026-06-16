@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import { formatarTelefone, formatarCPF, formatarNome, formatarEndereco, capitalizar } from "@/utils/formatters";
 import { useAuth } from "@/hooks/useAuth";
+import { canEditCliente } from "@/config/permissions";
 
 // Helper para exibir badge do tier baseado em coroas
 const getTierBadge = (cliente) => {
@@ -43,8 +44,9 @@ export default function Clientes() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
 
-  const { can } = useAuth();
+  const { user, can } = useAuth();
   const canManageClientes = can('manage_clientes');
+  const canEditClienteRecord = (cliente) => canEditCliente(user, cliente, can);
 
   const { data: clientes = [], isLoading } = useQuery({ queryKey: ['clientes'], queryFn: () => base44.entities.Cliente.list('-created_date') });
 
@@ -55,7 +57,7 @@ export default function Clientes() {
 
     if (highlightId && clientes.length > 0 && !isLoading) {
       const clienteToEdit = clientes.find(c => String(c.id) === String(highlightId));
-      if (clienteToEdit) {
+      if (clienteToEdit && canEditClienteRecord(clienteToEdit)) {
         setPendingReturnUrl(returnUrl ? decodeURIComponent(returnUrl) : null);
         setEditingCliente(clienteToEdit);
         setIsModalOpen(true);
@@ -439,7 +441,7 @@ export default function Clientes() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        {canManageClientes && (
+                        {canEditClienteRecord(cliente) && (
                           <Button
                             variant="ghost"
                             size="icon"
@@ -510,6 +512,10 @@ export default function Clientes() {
             if (!cleanData.data_nascimento) delete cleanData.data_nascimento;
 
             if (editingCliente) {
+              if (!canEditClienteRecord(editingCliente)) {
+                toast.error("Você não tem permissão para editar este cliente.");
+                return;
+              }
               await base44.entities.Cliente.update(editingCliente.id, cleanData);
 
               // --- SYNC MANUAL DE ENTREGAS PENDENTES ---

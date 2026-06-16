@@ -403,6 +403,25 @@ export function userCan(user, permission) {
   return permissions.includes(permission);
 }
 
+/** Verifica se o registro pertence ao usuario (created_by, vendedor_id, etc.) */
+export function isRecordOwner(user, record, fields = ['created_by']) {
+  if (!user || !record) return false;
+
+  return fields.some((field) => {
+    const value = record[field];
+    if (!value) return false;
+    return value === user.id || value === user.email;
+  });
+}
+
+/** Gerentes editam todos; vendedores apenas clientes que criaram */
+export function canEditCliente(user, cliente, canFn) {
+  if (!user || !cliente || typeof canFn !== 'function') return false;
+  if (canFn('manage_clientes')) return true;
+  if (!canFn('create_clientes')) return false;
+  return isRecordOwner(user, cliente);
+}
+
 /**
  * Retorna os itens de menu visiveis para um usuario
  * @param {Object} user - Usuario

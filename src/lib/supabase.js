@@ -193,7 +193,20 @@ const createHandler = (tableName) => ({
         return allData;
     },
     create: async (data) => {
-        const { data: created, error } = await supabase.from(tableName).insert(data).select().single();
+        const payload = { ...data };
+
+        if (tableName === 'clientes' && !payload.created_by) {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session?.user?.id) {
+                    payload.created_by = session.user.id;
+                }
+            } catch (e) {
+                console.warn('[Supabase] Não foi possível definir created_by do cliente:', e);
+            }
+        }
+
+        const { data: created, error } = await supabase.from(tableName).insert(payload).select().single();
         if (error) {
             console.error(`Erro Supabase (Criar em ${tableName}):`, error);
             throw error;
