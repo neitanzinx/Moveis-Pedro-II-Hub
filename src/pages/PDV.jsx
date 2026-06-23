@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSidebar } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/useAuth";
+import { useTenant } from "@/contexts/TenantContext";
 
 // Componentes
 import BuscaProdutoAvancada from "../components/vendas/BuscaProdutoAvancada";
@@ -296,6 +297,7 @@ const enriquecerItensEncomendaComFornecedor = (itens = [], produtos = [], fornec
 
 export default function PDV() {
   const { user } = useAuth();
+  const { conferenciaCaixaEnabled } = useTenant();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { state: sidebarState, isMobile } = useSidebar();
@@ -1690,38 +1692,62 @@ export default function PDV() {
     try {
       atualizarProgressoPedido('Salvando venda...', 18);
       const vendaCriada = await medirDuracaoEtapa('criar venda', () =>
-        criarVendaMutation.mutateAsync(vendaData)
+        criarVendaMutation.mutateAsync({
+          ...vendaData,
+          // Marcar como aguardando conferência se o módulo estiver ativo
+          // (exceto se for "pagar na entrega", que não precisa de conferência)
+          ...(conferenciaCaixaEnabled && !pagamentoEntrega.ativo
+            ? { conferencia_caixa_status: 'aguardando' }
+            : {})
+        })
       );
 
+      // ─── SE MÓDULO DE CONFERÊNCIA ATIVO: parar aqui ───
+      // Entrega, montagens e lançamentos financeiros só são criados APÓS a conferência
+      // Função de atualização de estoque declarada aqui para uso nos dois fluxos
       const atualizarEstoqueVenda = async () => {
         const itensComProduto = itens.filter(item => !!item.produto_id);
-
         return medirDuracaoEtapa('atualizar estoque', () =>
           Promise.all(itensComProduto.map(async (item) => {
-            // --- Novo padrão: estoque por variante ---
             if (item.variante_id && lojaId) {
               const estoqueAtual = await getVarianteEstoque(supabase, item.variante_id, lojaId);
               const novaQtd = estoqueAtual - Number(item.quantidade || 0);
               const resultado = await atualizarEstoqueVariante(supabase, item.variante_id, lojaId, novaQtd);
-              if (!resultado.success) {
-                console.warn('[PDV] Erro ao atualizar estoque da variante:', resultado.error);
-              }
+              if (!resultado.success) console.warn('[PDV] Erro ao atualizar estoque da variante:', resultado.error);
               return resultado;
             }
-
-            // --- Legado: estoque nos campos estoque_* da tabela produtos ---
             const prod = await base44.entities.Produto.getById(item.produto_id);
             if (!prod) return null;
-
             const campoOrigem = item?.origem_estoque_campo || resolveStockField(configVenda.loja);
             const estoqueOrigemAtual = Number(prod?.[campoOrigem] || 0);
             const estoqueLocalAposVenda = estoqueOrigemAtual - Number(item.quantidade || 0);
             const updates = montarAtualizacaoEstoqueProdutoPorCampo(prod, estoqueLocalAposVenda, campoOrigem);
-
             return base44.entities.Produto.update(prod.id, updates);
           }))
         );
       };
+
+      if (conferenciaCaixaEnabled && !pagamentoEntrega.ativo) {
+        // Ainda atualizamos estoque (já comprometido)
+        atualizarProgressoPedido('Atualizando estoque...', 80);
+        await atualizarEstoqueVenda();
+
+        atualizarProgressoPedido('Atualizando paineis...', 90);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['vendas'] }),
+          queryClient.invalidateQueries({ queryKey: ['produtos'] }),
+        ]);
+
+        atualizarProgressoPedido('Preparando impressao...', 96);
+        preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name, lojaAtivaPDV || null);
+
+        toast.success("Venda criada! Aguardando conferência de caixa para liberar entrega e lançamentos.");
+        resetForm();
+        return;
+      }
+
+      // ─── FLUXO NORMAL (sem conferência de caixa) ───
+      // atualizarEstoqueVenda já declarada acima (compartilhada com o bloco de conferência)
 
       // Calcular prazo de entrega com base na configuração
       const prazoSelecionado = encontrarPrazoConfigurado(prazosConfig, configVenda.prazo);

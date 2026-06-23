@@ -24,6 +24,7 @@ import { getZapApiUrl } from '../../utils/zapApiUrl';
 import { CARGOS, getCargoConfig } from "@/config/cargos";
 import { useLojas } from "@/hooks/useLojas";
 import { toast } from "sonner";
+import CargosMultiSelect from "./CargosMultiSelect";
 
 import { supabase, supabaseUrl, supabaseKey } from "@/lib/supabase";
 
@@ -50,13 +51,14 @@ export default function GestaoFuncionarios({ currentUser }) {
     const { data: users = [], isLoading } = useQuery({
         queryKey: ['funcionarios-gestao'],
         queryFn: async () => {
-            const allUsers = await base44.entities.User.list('-ultimo_login'); // Ordenar por ultimo login se possivel
-            // Filtrar apenas usuários que são funcionários (não clientes)
-            return allUsers.filter(u =>
-                u.status_aprovacao === 'Aprovado' &&
-                u.cargo &&
-                !['Cliente'].includes(u.cargo)
-            );
+            const allUsers = await base44.entities.User.list('-ultimo_login');
+            // Funcionários: tem cargo legado OU tem cargos[], excluindo clientes puros
+            return allUsers.filter(u => {
+                if (u.status_aprovacao !== 'Aprovado') return false;
+                const hasCargos = Array.isArray(u.cargos) && u.cargos.length > 0;
+                const hasLegacyCargo = u.cargo && !['Cliente'].includes(u.cargo);
+                return hasCargos || hasLegacyCargo;
+            });
         }
     });
 
@@ -64,6 +66,18 @@ export default function GestaoFuncionarios({ currentUser }) {
         queryKey: ['colaboradores'],
         queryFn: () => base44.entities.Colaborador.list('-created_at')
     });
+
+    // Cargos customizados do banco (para exibir no CargosMultiSelect)
+    const { data: rolePermissions = [] } = useQuery({
+        queryKey: ['role_permissions'],
+        queryFn: () => base44.entities.RolePermission.list()
+    });
+    const customCargos = useMemo(() =>
+        rolePermissions
+            .filter(r => r.is_custom)
+            .map(r => ({ value: r.cargo, label: r.label || r.cargo, color: r.color || '#6b7280' })),
+        [rolePermissions]
+    );
 
     // [FEATURE] Real-time updates
     React.useEffect(() => {
@@ -194,14 +208,14 @@ export default function GestaoFuncionarios({ currentUser }) {
             await base44.entities.User.update(userId, updates);
 
             // 2. Sync with Colaborador if exists
-            if (updates.cargo || updates.full_name) {
+            if (updates.cargo || updates.cargos || updates.full_name) {
                 try {
-                    // Fetch list to find colab with this user_id
                     const cols = await base44.entities.Colaborador.list();
                     const colab = cols.find(c => c.user_id === userId);
                     if (colab) {
                         await base44.entities.Colaborador.update(colab.id, {
                             cargo: updates.cargo || colab.cargo,
+                            cargos: updates.cargos || colab.cargos,
                             nome_completo: updates.full_name || colab.nome_completo
                         });
                     }
@@ -224,13 +238,14 @@ export default function GestaoFuncionarios({ currentUser }) {
     // Mutation para deletar usuário
     const deleteUserMutation = useMutation({
         mutationFn: async (userId) => {
-            await base44.entities.User.delete(userId);
+            const { error } = await supabase.rpc('delete_user_from_auth', { user_id: userId });
+            if (error) throw error;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['funcionarios-gestao'] });
             toast.success("Funcionário removido!");
         },
-        onError: () => toast.error("Erro ao remover funcionário")
+        onError: (error) => toast.error("Erro ao remover funcionário: " + error.message)
     });
 
     const linkColaboradorMutation = useMutation({
@@ -292,7 +307,12 @@ export default function GestaoFuncionarios({ currentUser }) {
         if (filterStatus === 'inactive') matchesStatus = user.ativo === false;
 
         let matchesCargo = true;
-        if (filterCargo !== 'all') matchesCargo = user.cargo === filterCargo;
+        if (filterCargo !== 'all') {
+            const userCargos = Array.isArray(user.cargos) && user.cargos.length > 0
+                ? user.cargos
+                : (user.cargo ? [user.cargo] : []);
+            matchesCargo = userCargos.includes(filterCargo);
+        }
 
         return matchesSearch && matchesStatus && matchesCargo;
     });
@@ -312,9 +332,14 @@ export default function GestaoFuncionarios({ currentUser }) {
         setGeneratedMatricula(null);
         setShowPassword(false);
         if (type === 'edit' || type === 'cargo') {
+            // Normaliza cargos[]: usa array existente ou converte cargo legado
+            const cargosNorm = Array.isArray(user.cargos) && user.cargos.length > 0
+                ? user.cargos
+                : (user.cargo ? [user.cargo] : []);
             setEditData({
                 full_name: user.full_name || '',
-                cargo: user.cargo || '',
+                cargos: cargosNorm,
+                cargo: user.cargo || '',        // mantido para compatibilidade no editCargoConfig
                 loja: user.loja || '',
                 is_vendedor: user.is_vendedor || false,
                 meta_mensal: user.meta_mensal || 0
@@ -326,8 +351,8 @@ export default function GestaoFuncionarios({ currentUser }) {
         }
     };
 
-    // Config do cargo selecionado no modal de edição rápida
-    const editCargoConfig = editData?.cargo ? getCargoConfig(editData.cargo) : null;
+    // Config do cargo principal (primeiro do array) para exibição de info no modal
+    const editCargoConfig = editData?.cargos?.length > 0 ? getCargoConfig(editData.cargos[0]) : null;
 
     const handleCloseModal = () => {
         setModalType(null);
@@ -341,13 +366,18 @@ export default function GestaoFuncionarios({ currentUser }) {
 
     const handleSaveEdit = () => {
         if (!selectedUser || !editData) return;
-        const cargoConfig = getCargoConfig(editData.cargo);
+        const cargos = editData.cargos || [];
+        const primaryCargo = cargos[0] || '';
+        const primaryCargoConfig = primaryCargo ? getCargoConfig(primaryCargo) : null;
+        // Qualquer cargo no array que exige loja?
+        const anyRequiresStore = cargos.some(c => getCargoConfig(c)?.requiresStore);
         updateUserMutation.mutate({
             userId: selectedUser.id,
             updates: {
-                full_name: editData.full_name,
-                cargo: editData.cargo,
-                loja: cargoConfig?.requiresStore ? editData.loja : null,
+                full_name:   editData.full_name,
+                cargos:      cargos,
+                cargo:       primaryCargo,          // campo legado = primeiro cargo
+                loja:        anyRequiresStore ? editData.loja : null,
                 is_vendedor: editData.is_vendedor,
                 meta_mensal: editData.is_vendedor ? parseFloat(editData.meta_mensal) || 0 : 0
             }
@@ -526,7 +556,12 @@ export default function GestaoFuncionarios({ currentUser }) {
                             </TableHeader>
                             <TableBody>
                                 {filteredUsers.map((user) => {
-                                    const cargoConfig = getCargoConfig(user.cargo);
+                                    // Normaliza cargos para exibição
+                                    const userCargos = Array.isArray(user.cargos) && user.cargos.length > 0
+                                        ? user.cargos
+                                        : (user.cargo ? [user.cargo] : []);
+                                    const primaryCargo = userCargos[0];
+                                    const primaryCargoConfig = primaryCargo ? getCargoConfig(primaryCargo) : null;
                                     const colaboradorVinculado = getLinkedColaborador(user.id);
                                     return (
                                         <TableRow key={user.id}>
@@ -535,8 +570,8 @@ export default function GestaoFuncionarios({ currentUser }) {
                                                     <div
                                                         className="w-10 h-10 rounded-full flex items-center justify-center font-semibold"
                                                         style={{
-                                                            backgroundColor: cargoConfig?.bgColor || '#f3f4f6',
-                                                            color: cargoConfig?.color || '#6b7280'
+                                                            backgroundColor: primaryCargoConfig?.bgColor || '#f3f4f6',
+                                                            color: primaryCargoConfig?.color || '#6b7280'
                                                         }}
                                                     >
                                                         {user.full_name?.charAt(0).toUpperCase() || 'U'}
@@ -552,20 +587,33 @@ export default function GestaoFuncionarios({ currentUser }) {
                                             </TableCell>
                                             <TableCell>
                                                 <div className="space-y-1">
-                                                    {cargoConfig ? (
-                                                        <Badge
-                                                            style={{
-                                                                backgroundColor: `${cargoConfig.color}15`,
-                                                                color: cargoConfig.color,
-                                                                border: `1px solid ${cargoConfig.color}40`
-                                                            }}
-                                                        >
-                                                            {createElement(cargoConfig.icon, { className: "w-3 h-3 mr-1" })}
-                                                            {cargoConfig.label}
-                                                        </Badge>
-                                                    ) : (
-                                                        <Badge variant="outline">{user.cargo || 'N/A'}</Badge>
-                                                    )}
+                                                    {/* Exibe até 2 badges de cargo + "..." se tiver mais */}
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {userCargos.slice(0, 2).map(cargoVal => {
+                                                            const cfg = getCargoConfig(cargoVal);
+                                                            return cfg ? (
+                                                                <Badge
+                                                                    key={cargoVal}
+                                                                    className="text-xs"
+                                                                    style={{
+                                                                        backgroundColor: `${cfg.color}15`,
+                                                                        color: cfg.color,
+                                                                        border: `1px solid ${cfg.color}40`
+                                                                    }}
+                                                                >
+                                                                    {createElement(cfg.icon, { className: "w-3 h-3 mr-1" })}
+                                                                    {cfg.label}
+                                                                </Badge>
+                                                            ) : (
+                                                                <Badge key={cargoVal} variant="outline" className="text-xs">{cargoVal}</Badge>
+                                                            );
+                                                        })}
+                                                        {userCargos.length > 2 && (
+                                                            <Badge variant="outline" className="text-xs text-gray-500">
+                                                                +{userCargos.length - 2}
+                                                            </Badge>
+                                                        )}
+                                                    </div>
                                                     {user.loja && (
                                                         <div className="flex items-center gap-1 text-xs text-gray-500">
                                                             <Store className="w-3 h-3" />
@@ -975,43 +1023,29 @@ export default function GestaoFuncionarios({ currentUser }) {
                 </DialogContent>
             </Dialog>
 
-            {/* Modal: Alterar Cargo Rápido */}
+            {/* Modal: Alterar Cargo (múltiplos cargos) */}
             <Dialog open={modalType === 'cargo'} onOpenChange={handleCloseModal}>
-                <DialogContent className="max-w-md">
+                <DialogContent className="max-w-lg">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <Shield className="w-5 h-5 text-green-700" />
-                            Alterar Cargo
+                            Alterar Cargos
                         </DialogTitle>
                         <DialogDescription>
-                            Alterar cargo de {selectedUser?.full_name}
+                            Selecione um ou mais cargos para {selectedUser?.full_name}.
+                            O primeiro cargo da lista será o principal.
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="py-4 space-y-4">
-                        <div className="space-y-2">
-                            <Label>Novo Cargo</Label>
-                            <Select
-                                value={editData?.cargo}
-                                onValueChange={(val) => setEditData({ ...editData, cargo: val })}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Selecione o cargo" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {CARGOS.filter(c => c.value !== 'Pendente Definição').map(c => (
-                                        <SelectItem key={c.value} value={c.value}>
-                                            <div className="flex items-center gap-2">
-                                                {createElement(c.icon, { className: "w-4 h-4" })}
-                                                {c.label}
-                                            </div>
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
+                    <div className="py-2 space-y-4">
+                        <CargosMultiSelect
+                            value={editData?.cargos || []}
+                            onChange={(cargos) => setEditData(prev => ({ ...prev, cargos }))}
+                            extraCargos={customCargos}
+                        />
 
-                        {editCargoConfig?.requiresStore && (
+                        {/* Loja: exibe se qualquer cargo selecionado exigir loja */}
+                        {editData?.cargos?.some(c => getCargoConfig(c)?.requiresStore) && (
                             <div className="space-y-2">
                                 <Label>Loja</Label>
                                 <Select
@@ -1036,7 +1070,7 @@ export default function GestaoFuncionarios({ currentUser }) {
                                 checked={editData?.is_vendedor}
                                 onCheckedChange={(val) => setEditData({ ...editData, is_vendedor: val })}
                             />
-                            <Label htmlFor="is_vendedor_quick" className="text-sm cursor-pointer">Definir como Vendedor</Label>
+                            <Label htmlFor="is_vendedor_quick" className="text-sm cursor-pointer">Atua como Vendedor (comissões)</Label>
                         </div>
                     </div>
 
@@ -1044,11 +1078,11 @@ export default function GestaoFuncionarios({ currentUser }) {
                         <Button variant="outline" onClick={handleCloseModal}>Cancelar</Button>
                         <Button
                             onClick={handleSaveEdit}
-                            disabled={updateUserMutation.isPending}
+                            disabled={updateUserMutation.isPending || !editData?.cargos?.length}
                             className="bg-green-700 hover:bg-green-800"
                         >
                             {updateUserMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                            Salvar Alteração
+                            Salvar Cargos
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -1056,7 +1090,7 @@ export default function GestaoFuncionarios({ currentUser }) {
 
             {/* Modal: Editar Funcionário */}
             <Dialog open={modalType === 'edit'} onOpenChange={handleCloseModal}>
-                <DialogContent className="max-w-md">
+                <DialogContent className="max-w-lg">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <Edit className="w-5 h-5 text-blue-600" />
@@ -1065,7 +1099,7 @@ export default function GestaoFuncionarios({ currentUser }) {
                     </DialogHeader>
 
                     {editData && (
-                        <div className="space-y-4 py-4">
+                        <div className="space-y-4 py-4 overflow-y-auto max-h-[70vh] pr-1">
                             <div>
                                 <Label>Nome Completo</Label>
                                 <Input
@@ -1080,25 +1114,20 @@ export default function GestaoFuncionarios({ currentUser }) {
                             </div>
 
                             <div>
-                                <Label>Cargo</Label>
-                                <Select
-                                    value={editData.cargo}
-                                    onValueChange={(v) => setEditData({
-                                        ...editData,
-                                        cargo: v,
-                                        is_vendedor: v === 'Vendedor' ? true : editData.is_vendedor
-                                    })}
-                                >
-                                    <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                    <SelectContent>
-                                        {CARGOS.filter(c => c.value !== 'Pendente Definição').map(c => (
-                                            <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <Label className="mb-2 block">Cargos</Label>
+                                <CargosMultiSelect
+                                    value={editData.cargos || []}
+                                    onChange={(cargos) => setEditData(prev => ({
+                                        ...prev,
+                                        cargos,
+                                        is_vendedor: cargos.includes('Vendedor') ? true : prev.is_vendedor
+                                    }))}
+                                    extraCargos={customCargos}
+                                />
                             </div>
 
-                            {editCargoConfig?.requiresStore && (
+                            {/* Loja: exibe se qualquer cargo selecionado exigir loja */}
+                            {editData.cargos?.some(c => getCargoConfig(c)?.requiresStore) && (
                                 <div>
                                     <Label>Loja</Label>
                                     <Select
@@ -1137,16 +1166,6 @@ export default function GestaoFuncionarios({ currentUser }) {
                                     </div>
                                 )}
                             </div>
-
-                            {editCargoConfig && (
-                                <Alert style={{ backgroundColor: editCargoConfig.bgColor }}>
-                                    <Shield className="h-4 w-4" style={{ color: editCargoConfig.color }} />
-                                    <AlertDescription>
-                                        <strong>Permissões do Cargo: </strong>
-                                        {editCargoConfig.permissions.join(', ')}
-                                    </AlertDescription>
-                                </Alert>
-                            )}
                         </div>
                     )}
 
@@ -1154,7 +1173,7 @@ export default function GestaoFuncionarios({ currentUser }) {
                         <Button variant="outline" onClick={handleCloseModal}>Cancelar</Button>
                         <Button
                             onClick={handleSaveEdit}
-                            disabled={updateUserMutation.isPending}
+                            disabled={updateUserMutation.isPending || !editData?.cargos?.length}
                             className="bg-blue-600 hover:bg-blue-700"
                         >
                             {updateUserMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}

@@ -19,6 +19,81 @@ const fetchSafe = async (fn) => {
   }
 };
 
+const parseDateSafe = (val) => {
+  if (!val) return new Date();
+  if (val instanceof Date) return val;
+  const str = String(val);
+  const ymdMatch = str.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (ymdMatch) {
+    return new Date(ymdMatch[1] + 'T12:00:00');
+  }
+  const d = new Date(str);
+  if (isNaN(d.getTime())) return new Date();
+  return d;
+};
+
+const ChartTooltip = ({ active, payload, label, assistencias = [] }) => {
+  if (!active || !payload || !payload.length) return null;
+
+  const dataPoint = payload[0].payload;
+  const vendasList = dataPoint?.vendasList || [];
+
+  // Helper para cálculo líquido de uma venda específica
+  const getValoresVenda = (v) => {
+    const assistencia = assistencias.find(a =>
+      a.numero_pedido === v.numero_pedido &&
+      a.status === 'Concluída' &&
+      (a.tipo === 'Devolução' || a.tipo === 'Troca')
+    );
+    const bruto = Number(v.valor_total) || 0;
+    const liquido = bruto - (Number(assistencia?.valor_devolvido) || 0);
+    return { bruto, liquido };
+  };
+
+  const totalBruto = vendasList.reduce((sum, v) => sum + getValoresVenda(v).bruto, 0);
+  const totalLiquido = vendasList.reduce((sum, v) => sum + getValoresVenda(v).liquido, 0);
+
+  return (
+    <div className="bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md p-4 rounded-xl shadow-xl border border-gray-100 dark:border-neutral-800 text-xs text-gray-800 dark:text-gray-200 max-w-sm space-y-3 pointer-events-none">
+      <div className="border-b border-gray-100 dark:border-neutral-800 pb-2">
+        <p className="font-bold text-sm text-gray-900 dark:text-white">Data: {dataPoint.dia || dataPoint.diaFormatado || label}</p>
+        <p className="text-[10px] text-gray-500">{vendasList.length} {vendasList.length === 1 ? 'venda realizada' : 'vendas realizadas'}</p>
+      </div>
+
+      {vendasList.length > 0 && (
+        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+          {vendasList.map((v, i) => {
+            const { bruto, liquido } = getValoresVenda(v);
+            return (
+              <div key={i} className="flex flex-col border-b border-gray-50 dark:border-neutral-800/40 pb-1.5 last:border-0 last:pb-0">
+                <div className="flex justify-between items-center gap-2">
+                  <span className="font-semibold text-blue-600 dark:text-blue-400">#{v.numero_pedido || v.id}</span>
+                  <span className="text-[10px] text-gray-500 truncate max-w-[120px]">{v.cliente_nome || 'Cliente não informado'}</span>
+                </div>
+                <div className="flex justify-between text-[10px] text-gray-600 dark:text-gray-400 mt-0.5">
+                  <span>Bruto: R$ {bruto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  <span className="font-medium text-green-600 dark:text-green-400">Líq: R$ {liquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="border-t border-gray-100 dark:border-neutral-800 pt-2 space-y-1 text-[11px] font-bold">
+        <div className="flex justify-between text-gray-600 dark:text-gray-400">
+          <span>Total Bruto:</span>
+          <span>R$ {totalBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+        </div>
+        <div className="flex justify-between text-gray-900 dark:text-white">
+          <span>Total Líquido:</span>
+          <span className="text-green-600 dark:text-green-400">R$ {totalLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function Dashboard() {
   const auth = useAuth();
 
@@ -46,6 +121,12 @@ export default function Dashboard() {
     enabled: !!user
   });
 
+  const { data: assistencias = [] } = useQuery({
+    queryKey: ['assistencias'],
+    queryFn: () => fetchSafe(() => base44.entities.AssistenciaTecnica.list()),
+    enabled: !!user
+  });
+
   // useMemo calcula os dados apenas quando vendas/clientes/user mudam
   const dados = useMemo(() => {
     const result = {
@@ -64,6 +145,7 @@ export default function Dashboard() {
     try {
       const dias = parseInt(periodo) || 30;
       const limite = new Date();
+      limite.setHours(0, 0, 0, 0);
       limite.setDate(limite.getDate() - dias);
 
       // 1. Filtragem Segura
@@ -79,7 +161,7 @@ export default function Dashboard() {
 
         // Filtro de Data
         if (!v?.data_venda) return false;
-        const d = new Date(v.data_venda + 'T12:00:00');
+        const d = parseDateSafe(v.data_venda);
         return !isNaN(d.getTime()) && d >= limite;
       });
 
@@ -92,7 +174,7 @@ export default function Dashboard() {
         // Apenas clientes criados por este usuário
         if (c?.created_by !== user.email) return false;
         if (!c?.created_date) return false;
-        const d = new Date(c.created_date);
+        const d = parseDateSafe(c.created_date);
         return !isNaN(d.getTime()) && d >= limite;
       });
       result.novosClientes = clientesFiltrados.length;
@@ -105,7 +187,7 @@ export default function Dashboard() {
         if (isVendaCancelada(v)) return false;
         if (v?.responsavel_id !== user.id && v?.created_by !== user.email) return false;
         if (!v?.data_venda) return false;
-        const d = new Date(v.data_venda + 'T12:00:00');
+        const d = parseDateSafe(v.data_venda);
         return !isNaN(d.getTime()) && d >= limiteAnt && d < limite;
       });
 
@@ -116,7 +198,7 @@ export default function Dashboard() {
       // 4. Gráfico
       const vendasMap = {};
       vendasFiltradas.forEach(v => {
-        const d = new Date(v.data_venda + 'T12:00:00');
+        const d = parseDateSafe(v.data_venda);
         if (!isNaN(d.getTime())) {
           // Usar chave YYYY-MM-DD para garantir a ordenação correta das datas
           const ano = d.getFullYear();
@@ -126,9 +208,10 @@ export default function Dashboard() {
           
           const dia = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
           if (!vendasMap[chaveOrdenacao]) {
-            vendasMap[chaveOrdenacao] = { dia, valor: 0 };
+            vendasMap[chaveOrdenacao] = { dia, valor: 0, vendasList: [] };
           }
           vendasMap[chaveOrdenacao].valor += (Number(v.valor_total) || 0);
+          vendasMap[chaveOrdenacao].vendasList.push(v);
         }
       });
 
@@ -198,8 +281,11 @@ export default function Dashboard() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="7">Últimos 7 dias</SelectItem>
+              <SelectItem value="15">Últimos 15 dias</SelectItem>
               <SelectItem value="30">Últimos 30 dias</SelectItem>
               <SelectItem value="90">Últimos 3 meses</SelectItem>
+              <SelectItem value="180">Últimos 6 meses</SelectItem>
+              <SelectItem value="365">Último 1 ano</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -261,10 +347,7 @@ export default function Dashboard() {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                     <XAxis dataKey="dia" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#888' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#888' }} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                      formatter={(val) => [`R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'Valor']}
-                    />
+                    <Tooltip content={<ChartTooltip assistencias={assistencias} />} />
                     <Area type="monotone" dataKey="valor" stroke="#059669" strokeWidth={2} fillOpacity={1} fill="url(#colorFat)" />
                   </AreaChart>
                 </ResponsiveContainer>

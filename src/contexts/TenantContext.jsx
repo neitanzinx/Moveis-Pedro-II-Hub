@@ -29,6 +29,7 @@ const DEFAULT_SETTINGS = {
     comissao_faixa_referencia: 'vendedor',
     comissao_meta_minima_loja_percentual: 0,
     compras_aprovacao_automatica: ['a_vista'],
+    conferencia_caixa_enabled: false,
     modulos_ativos: {
         montagem: true,
         assistencia_tecnica: true,
@@ -156,6 +157,8 @@ export function TenantProvider({ children, organizationId }) {
         isModuleActive,
         getJurosParcela,
         refreshTenant: loadTenantData,
+        // Flag de Conferência de Caixa
+        conferenciaCaixaEnabled: settings?.conferencia_caixa_enabled === true,
         // Helpers para branding
         brandName: organization?.name || DEFAULT_ORGANIZATION.name,
         brandLogo: organization?.logo_url || DEFAULT_ORGANIZATION.logo_url,
@@ -185,6 +188,7 @@ export function useTenant() {
             isModuleActive: () => true,
             getJurosParcela: () => 0,
             refreshTenant: () => { },
+            conferenciaCaixaEnabled: false,
             brandName: DEFAULT_ORGANIZATION.name,
             brandLogo: DEFAULT_ORGANIZATION.logo_url,
             primaryColor: DEFAULT_ORGANIZATION.primary_color,

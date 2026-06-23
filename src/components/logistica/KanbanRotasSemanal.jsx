@@ -1037,11 +1037,11 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
         <div className="h-full flex flex-col gap-4 p-4 rounded-2xl bg-gray-50">
 
           {/* --- TRIAGEM + AGUARDANDO --- */}
-          <div className="flex gap-3 h-[250px] flex-shrink-0">
+          <div className="flex gap-3 h-[250px] flex-shrink-0 w-full min-w-0">
             {/* Triagem */}
             <Card
               ref={setTriagemRef}
-              className={`flex-1 flex flex-col border-0 transition-all shadow-sm ${isOverTriagem ? 'bg-blue-100 ring-4 ring-blue-400' : 'bg-white/80 backdrop-blur'}`}
+              className={`flex-1 flex flex-col border-0 transition-all shadow-sm w-full min-w-0 ${isOverTriagem ? 'bg-blue-100 ring-4 ring-blue-400' : 'bg-white/80 backdrop-blur'}`}
             >
               <div className="px-3 py-2 border-b flex justify-between items-center bg-white/50 rounded-t-xl gap-4">
                 <div className="flex items-center gap-2 flex-shrink-0">

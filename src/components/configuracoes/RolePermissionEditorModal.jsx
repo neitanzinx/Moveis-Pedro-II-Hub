@@ -238,8 +238,8 @@ export default function RolePermissionEditorModal({
                         </div>
 
                         {/* Permissions grouped by category */}
-                        <ScrollArea className="flex-1 min-h-0">
-                            <div className="space-y-3 pr-2">
+                        <div className="flex-1 min-h-0 overflow-y-auto pr-2">
+                            <div className="space-y-3">
                                 {Object.entries(catalogByCategory).map(([category, items]) => {
                                     const catConfig   = PERMISSION_CATEGORIES.find(c => c.key === category);
                                     const expanded    = isCategoryExpanded(category);
@@ -321,7 +321,7 @@ export default function RolePermissionEditorModal({
                                     </p>
                                 )}
                             </div>
-                        </ScrollArea>
+                        </div>
                     </>
                 )}
 

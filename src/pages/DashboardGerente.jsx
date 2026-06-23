@@ -13,14 +13,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
+import { useTenant } from "@/contexts/TenantContext";
 import SolicitacoesCadastroWidget from "@/components/dashboard/SolicitacoesCadastroWidget";
 import ControleMontadoresWidget from "@/components/dashboard/ControleMontadoresWidget";
 import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
 import AcoesVendedoresWidget from "@/components/dashboard/AcoesVendedoresWidget";
+import PainelConferenciaCaixa from "@/components/conferencia/PainelConferenciaCaixa";
 import { toast } from "sonner";
 import { formatarMoeda } from "@/utils/formatters";
-import { isVendaCancelada } from "@/utils/vendaStatus";
+import { isVendaCancelada, getVendaFinanceiro } from "@/utils/vendaStatus";
+import { VendaDetalhesModal } from "@/components/vendas/VendaDetalhesModal";
+import { MONEY_EPSILON, toMoneyNumber } from "@/utils/deliveryPayment";
+import { isInstallmentPaymentMethod, validatePaymentSplit } from "@/services/paymentOrchestrator";
+import { findCategoriaByNames } from "@/lib/financeiroRecorrencia";
 import {
     DollarSign,
     ShoppingCart,
@@ -59,7 +66,8 @@ import {
     FileText,
     Filter,
     Tag,
-    X
+    X,
+    ShieldCheck
 } from "lucide-react";
 import {
     AreaChart,
@@ -79,6 +87,97 @@ import {
     Pie,
     Legend
 } from 'recharts';
+
+const parseDateSafe = (val) => {
+    if (!val) return new Date();
+    if (val instanceof Date) return val;
+    const str = String(val);
+    const ymdMatch = str.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (ymdMatch) {
+        return new Date(ymdMatch[1] + 'T12:00:00');
+    }
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return new Date();
+    return d;
+};
+
+const SALES_PAYMENT_OPTIONS = [
+    'Dinheiro',
+    'PIX',
+    'Cartão de Crédito',
+    'Cartão de Débito',
+    'Boleto',
+    'Transferência Bancária',
+    'Outros'
+];
+
+const createEmptyPagamentoItem = (defaults = {}) => ({
+    forma_pagamento: defaults.forma_pagamento || '',
+    valor: defaults.valor || '',
+    parcelas: defaults.parcelas || 1,
+});
+
+const ChartTooltip = ({ active, payload, label, assistencias = [] }) => {
+  if (!active || !payload || !payload.length) return null;
+
+  const dataPoint = payload[0].payload;
+  const vendasList = dataPoint?.vendasList || [];
+
+  // Helper para cálculo líquido de uma venda específica
+  const getValoresVenda = (v) => {
+    const assistencia = assistencias.find(a =>
+      a.numero_pedido === v.numero_pedido &&
+      a.status === 'Concluída' &&
+      (a.tipo === 'Devolução' || a.tipo === 'Troca')
+    );
+    const bruto = Number(v.valor_total) || 0;
+    const liquido = bruto - (Number(assistencia?.valor_devolvido) || 0);
+    return { bruto, liquido };
+  };
+
+  const totalBruto = vendasList.reduce((sum, v) => sum + getValoresVenda(v).bruto, 0);
+  const totalLiquido = vendasList.reduce((sum, v) => sum + getValoresVenda(v).liquido, 0);
+
+  return (
+    <div className="bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md p-4 rounded-xl shadow-xl border border-gray-100 dark:border-neutral-800 text-xs text-gray-800 dark:text-gray-200 max-w-sm space-y-3 pointer-events-none">
+      <div className="border-b border-gray-100 dark:border-neutral-800 pb-2">
+        <p className="font-bold text-sm text-gray-900 dark:text-white">Data: {dataPoint.dia || dataPoint.diaFormatado || label}</p>
+        <p className="text-[10px] text-gray-500">{vendasList.length} {vendasList.length === 1 ? 'venda realizada' : 'vendas realizadas'}</p>
+      </div>
+
+      {vendasList.length > 0 && (
+        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+          {vendasList.map((v, i) => {
+            const { bruto, liquido } = getValoresVenda(v);
+            return (
+              <div key={i} className="flex flex-col border-b border-gray-50 dark:border-neutral-800/40 pb-1.5 last:border-0 last:pb-0">
+                <div className="flex justify-between items-center gap-2">
+                  <span className="font-semibold text-blue-600 dark:text-blue-400">#{v.numero_pedido || v.id}</span>
+                  <span className="text-[10px] text-gray-500 truncate max-w-[120px]">{v.cliente_nome || 'Cliente não informado'}</span>
+                </div>
+                <div className="flex justify-between text-[10px] text-gray-600 dark:text-gray-400 mt-0.5">
+                  <span>Bruto: R$ {bruto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  <span className="font-medium text-green-600 dark:text-green-400">Líq: R$ {liquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="border-t border-gray-100 dark:border-neutral-800 pt-2 space-y-1 text-[11px] font-bold">
+        <div className="flex justify-between text-gray-600 dark:text-gray-400">
+          <span>Total Bruto:</span>
+          <span>R$ {totalBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+        </div>
+        <div className="flex justify-between text-gray-900 dark:text-white">
+          <span>Total Líquido:</span>
+          <span className="text-green-600 dark:text-green-400">R$ {totalLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // Sub-componente para linha de margem negociável por loja
 function MargemLojaRow({ loja, salvando, onSave }) {
@@ -323,7 +422,9 @@ function DescontoProdutoLojaRow({ loja, salvando, excecoes = [], produtos = [], 
 }
 
 export default function DashboardGerente() {
+    const hojeIso = new Date().toLocaleDateString('en-CA');
     const { user, isGerente, filterData } = useAuth();
+    const { conferenciaCaixaEnabled } = useTenant();
     const queryClient = useQueryClient();
     const [periodo, setPeriodo] = useState('mes');
     const [lojaFiltro, setLojaFiltro] = useState('');
@@ -372,6 +473,17 @@ export default function DashboardGerente() {
 
     // Estado para modal de pendências
     const [pendenciasModalOpen, setPendenciasModalOpen] = useState(false);
+
+    // Estados para detalhes da venda e pagamentos
+    const [selectedVendaDetalhes, setSelectedVendaDetalhes] = useState(null);
+    const [isDetalhesModalOpen, setIsDetalhesModalOpen] = useState(false);
+    const [modalPagamentoVenda, setModalPagamentoVenda] = useState(null);
+    const [pagamentoForm, setPagamentoForm] = useState({
+        pagamentos: [],
+        data_pagamento: new Date().toISOString().slice(0, 10),
+        observacao: ""
+    });
+    const [novoPagamentoItem, setNovoPagamentoItem] = useState({ forma_pagamento: '', valor: '', parcelas: 1 });
 
 
     // Estados para Giro de Estoque
@@ -478,6 +590,18 @@ export default function DashboardGerente() {
     const { data: descontoExcecoes = [], refetch: refetchDescontoExcecoes } = useQuery({
         queryKey: ['desconto-produto-excecoes-gerente'],
         queryFn: () => base44.entities.DescontoProdutoExcecao.list(),
+        enabled: !!user
+    });
+
+    const { data: categoriasFinanceiras = [] } = useQuery({
+        queryKey: ['categorias-financeiras'],
+        queryFn: () => base44.entities.CategoriaFinanceira.list('nome'),
+        enabled: !!user
+    });
+
+    const { data: lancamentos = [] } = useQuery({
+        queryKey: ['lancamentos-financeiros'],
+        queryFn: () => base44.entities.LancamentoFinanceiro.list(),
         enabled: !!user
     });
 
@@ -649,6 +773,282 @@ export default function DashboardGerente() {
         }
     });
 
+    const formatarValorMonetarioInput = (value) => {
+        const digitsOnly = String(value ?? "").replace(/\D/g, "");
+        if (!digitsOnly) return "";
+
+        const valorNumerico = Number(digitsOnly) / 100;
+        return valorNumerico.toLocaleString('pt-BR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        });
+    };
+
+    const registrarPagamentoVenda = async ({ venda, valorRecebido, formaPagamento, dataPagamento, observacao }) => {
+        if (!venda?.id) throw new Error('Venda inválida para registrar pagamento.');
+        if (isVendaCancelada(venda)) throw new Error('Não é possível registrar pagamento em venda cancelada.');
+
+        const financeiroAtual = venda.financeiro || getVendaFinanceiro(venda, { entregas, lancamentos });
+        const saldoAtual = Math.max(toMoneyNumber(financeiroAtual.valorRestante), 0);
+        const totalVenda = Math.max(toMoneyNumber(financeiroAtual.total || venda.valor_total), 0);
+        const valorPagoAtual = Math.max(toMoneyNumber(financeiroAtual.valorPago || venda.valor_pago), 0);
+
+        const rawPayments = Array.isArray(valorRecebido)
+            ? valorRecebido
+            : [{ forma_pagamento: formaPagamento, valor: valorRecebido, parcelas: 1 }];
+
+        const paymentValidation = validatePaymentSplit({
+            total: saldoAtual,
+            payments: rawPayments.map((payment) => ({
+                ...payment,
+                valor: toMoneyNumber(payment?.valor),
+                parcelas: Number(payment?.parcelas || 1),
+            })),
+        });
+
+        if (!paymentValidation.ok) {
+            throw new Error(paymentValidation.errors[0] || 'Não foi possível validar os pagamentos informados.');
+        }
+
+        const novosPagamentos = paymentValidation.pagamentos;
+        const valorRecebidoNum = paymentValidation.totalPago;
+
+        if (valorRecebidoNum <= MONEY_EPSILON) {
+            throw new Error('Informe um valor de pagamento maior que zero.');
+        }
+
+        const novoValorPago = Math.min(totalVenda, valorPagoAtual + valorRecebidoNum);
+        const novoValorRestante = Math.max(totalVenda - novoValorPago, 0);
+        const quitada = novoValorRestante <= MONEY_EPSILON;
+        const statusVenda = quitada ? 'Pago' : 'Pagamento Pendente';
+        const pagamentosExistentes = Array.isArray(venda.pagamentos) ? venda.pagamentos : [];
+        const pagamentosAtualizados = [...pagamentosExistentes, ...novosPagamentos];
+        const formaPagamentoResumo = pagamentosAtualizados.length === 1
+            ? pagamentosAtualizados[0].forma_pagamento
+            : 'Múltiplos';
+
+        const vendaUpdatePayload = {
+            valor_pago: novoValorPago,
+            valor_restante: novoValorRestante,
+            status: statusVenda,
+            forma_pagamento: formaPagamentoResumo,
+            pagamentos: pagamentosAtualizados,
+            pagamento_entrega_observacao: observacao || null,
+        };
+
+        try {
+            await base44.entities.Venda.update(venda.id, vendaUpdatePayload);
+        } catch (error) {
+            const mensagem = String(error?.message || '').toLowerCase();
+            const colunaAusente = mensagem.includes('pagamento_entrega_observacao') && mensagem.includes('schema cache');
+
+            if (!colunaAusente) {
+                throw error;
+            }
+
+            const { pagamento_entrega_observacao, ...fallbackPayload } = vendaUpdatePayload;
+            await base44.entities.Venda.update(venda.id, fallbackPayload);
+        }
+
+        const categoriaRecebimento = findCategoriaByNames(categoriasFinanceiras, [
+            'Recebimento de Parcela',
+            'Venda de Produtos',
+            'Vendas',
+        ]);
+
+        for (const pagamento of novosPagamentos) {
+            const descricaoParcelas = pagamento.parcelas > 1 ? ` (${pagamento.parcelas}x)` : '';
+            await base44.entities.LancamentoFinanceiro.create({
+                descricao: `Pagamento na loja - Venda #${venda.numero_pedido} - ${pagamento.forma_pagamento}${descricaoParcelas}`,
+                valor: pagamento.valor,
+                tipo: 'receita',
+                data_lancamento: dataPagamento,
+                data_vencimento: dataPagamento,
+                pago: true,
+                categoria_id: categoriaRecebimento?.id || null,
+                categoria_nome: categoriaRecebimento?.nome || 'Recebimento de Parcela',
+                forma_pagamento: pagamento.forma_pagamento,
+                status: 'Pago',
+                observacao: observacao || 'Pagamento antecipado registrado na listagem de vendas.',
+                venda_id: venda.id,
+                numero_pedido: venda.numero_pedido,
+            });
+        }
+
+        if (quitada) {
+            const pendentesVenda = (lancamentos || []).filter((l) =>
+                l.venda_id === venda.id &&
+                String(l.tipo || '').toLowerCase() === 'receita' &&
+                String(l.status || '').toLowerCase() === 'pendente'
+            );
+
+            for (const lancamento of pendentesVenda) {
+                await base44.entities.LancamentoFinanceiro.update(lancamento.id, {
+                    status: 'Pago',
+                    pago: true,
+                    data_lancamento_real: dataPagamento,
+                    observacao: `${lancamento.observacao || ''} [Quitado na loja antes da entrega]`.trim(),
+                });
+            }
+        }
+
+        return { valorRecebidoNum, novoValorRestante, quitada };
+    };
+
+    const registrarPagamentoMutation = useMutation({
+        mutationFn: registrarPagamentoVenda,
+        onSuccess: ({ valorRecebidoNum, novoValorRestante, quitada }) => {
+            queryClient.invalidateQueries({ queryKey: ['vendas-gerente'] });
+            queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
+            queryClient.invalidateQueries({ queryKey: ['entregas-gerente'] });
+            queryClient.invalidateQueries({ queryKey: ['vendas-financeiro'] });
+
+            toast.success(
+                `Pagamento de R$ ${valorRecebidoNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} registrado. ${quitada ? 'Venda quitada.' : `Saldo restante: R$ ${novoValorRestante.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`}`
+            );
+            setModalPagamentoVenda(null);
+            setPagamentoForm({
+                pagamentos: [],
+                data_pagamento: new Date().toISOString().slice(0, 10),
+                observacao: ""
+            });
+            setNovoPagamentoItem(createEmptyPagamentoItem({ forma_pagamento: 'PIX' }));
+        },
+        onError: (error) => {
+            toast.error(error?.message || 'Não foi possível registrar o pagamento.');
+        }
+    });
+
+    const abrirModalPagamento = (venda) => {
+        const financeiro = venda.financeiro || getVendaFinanceiro(venda, { entregas, lancamentos });
+        const saldoAtual = Math.max(toMoneyNumber(financeiro.valorRestante), 0);
+        const formaPagamentoPadrao = venda.forma_pagamento_entrega || venda.forma_pagamento || 'PIX';
+
+        setPagamentoForm({
+            pagamentos: [],
+            data_pagamento: new Date().toISOString().slice(0, 10),
+            observacao: ""
+        });
+        setNovoPagamentoItem(createEmptyPagamentoItem({
+            forma_pagamento: formaPagamentoPadrao,
+            valor: saldoAtual > 0 ? formatarValorMonetarioInput(saldoAtual.toFixed(2)) : '',
+        }));
+        setModalPagamentoVenda(venda);
+    };
+
+    const saldoModalPagamento = modalPagamentoVenda
+        ? Math.max(
+            toMoneyNumber((modalPagamentoVenda.financeiro || getVendaFinanceiro(modalPagamentoVenda, { entregas, lancamentos })).valorRestante),
+            0
+        )
+        : 0;
+
+    const totalPagamentoInformado = pagamentoForm.pagamentos.reduce((total, pagamento) => total + toMoneyNumber(pagamento.valor), 0);
+    const saldoAposSplit = Math.max(saldoModalPagamento - totalPagamentoInformado, 0);
+
+    const adicionarPagamentoAoModal = () => {
+        const pagamentosCandidatos = [
+            ...pagamentoForm.pagamentos,
+            {
+                ...novoPagamentoItem,
+                valor: toMoneyNumber(novoPagamentoItem.valor),
+                parcelas: Number(novoPagamentoItem.parcelas || 1),
+            }
+        ];
+
+        const validation = validatePaymentSplit({
+            total: saldoModalPagamento,
+            payments: pagamentosCandidatos,
+        });
+
+        if (!validation.ok) {
+            toast.error(validation.errors[0] || 'Não foi possível adicionar essa forma de pagamento.');
+            return;
+        }
+
+        setPagamentoForm((prev) => ({
+            ...prev,
+            pagamentos: validation.pagamentos,
+        }));
+        const saldoRestanteAtualizado = Math.max(saldoModalPagamento - validation.totalPago, 0);
+        setNovoPagamentoItem(createEmptyPagamentoItem({
+            forma_pagamento: novoPagamentoItem.forma_pagamento || 'PIX',
+            valor: saldoRestanteAtualizado > 0 ? formatarValorMonetarioInput(saldoRestanteAtualizado.toFixed(2)) : '',
+        }));
+    };
+
+    const removerPagamentoDoModal = (index) => {
+        setPagamentoForm((prev) => ({
+            ...prev,
+            pagamentos: prev.pagamentos.filter((_, itemIndex) => itemIndex !== index),
+        }));
+    };
+
+    const confirmarPagamentoAntecipado = () => {
+        if (!modalPagamentoVenda) return;
+
+        if (!pagamentoForm.pagamentos.length) {
+            toast.error('Adicione pelo menos uma forma de pagamento.');
+            return;
+        }
+
+        registrarPagamentoMutation.mutate({
+            venda: modalPagamentoVenda,
+            valorRecebido: pagamentoForm.pagamentos,
+            dataPagamento: pagamentoForm.data_pagamento,
+            observacao: pagamentoForm.observacao,
+        });
+    };
+
+    const handleVerDetalhes = (vendaId) => {
+        const venda = vendas.find(v => v.id === vendaId);
+        if (venda) {
+            setSelectedVendaDetalhes(venda);
+            setIsDetalhesModalOpen(true);
+        } else {
+            toast.error("Pedido não encontrado.");
+        }
+    };
+
+    const getEntregaPendenciaMotivo = (e, hojeIso) => {
+        if (!e.data_agendada || e.status === 'Pendente') {
+            return "Aguardando agendamento";
+        }
+        const parsedDate = parseDateSafe(e.data_agendada);
+        const dataAgendadaStr = parsedDate.toISOString().split('T')[0];
+        if (dataAgendadaStr < hojeIso) {
+            return `Entrega em atraso (era ${parsedDate.toLocaleDateString('pt-BR')})`;
+        }
+        if (e.status === 'Agendada') {
+            return `Agendada para ${parsedDate.toLocaleDateString('pt-BR')}`;
+        }
+        if (e.status === 'Em Rota' || e.status === 'Em Transito') {
+            return "Em rota de entrega";
+        }
+        return `Status: ${e.status}`;
+    };
+
+    const getMontagemPendenciaMotivo = (m, hojeIso) => {
+        if (!m.data_agendada || m.status === 'Pendente') {
+            return "Aguardando agendamento";
+        }
+        const parsedDate = parseDateSafe(m.data_agendada);
+        const dataAgendadaStr = parsedDate.toISOString().split('T')[0];
+        const isAtrasada = dataAgendadaStr < hojeIso;
+        const semMontador = !m.montador_nome && !m.montador_id;
+        
+        if (isAtrasada) {
+            return `Montagem em atraso (era ${parsedDate.toLocaleDateString('pt-BR')})`;
+        }
+        if (semMontador) {
+            return "Aguardando atribuição de montador";
+        }
+        if (m.status === 'Agendada') {
+            return `Agendada para ${parsedDate.toLocaleDateString('pt-BR')}`;
+        }
+        return `Status: ${m.status}`;
+    };
+
     // Tokens filtrados por loja
     const tokensFiltrados = useMemo(() => {
         return tokens.filter(t => {
@@ -690,7 +1090,7 @@ export default function DashboardGerente() {
             // Filtro de período
             if (!v.data_venda) return false;
             const dataVendaStr = v.data_venda.split('T')[0];
-            const d = new Date(v.data_venda + 'T12:00:00');
+            const d = parseDateSafe(v.data_venda);
             d.setHours(0, 0, 0, 0);
 
             switch (periodo) {
@@ -729,7 +1129,7 @@ export default function DashboardGerente() {
             if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
-            const d = new Date(v.data_venda + 'T12:00:00');
+            const d = parseDateSafe(v.data_venda);
             return d.getMonth() === hoje.getMonth() && d.getFullYear() === hoje.getFullYear();
         });
     }, [vendas, lojaAtiva]);
@@ -780,7 +1180,7 @@ export default function DashboardGerente() {
             if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
-            const d = new Date(v.data_venda + 'T12:00:00');
+            const d = parseDateSafe(v.data_venda);
             d.setHours(0, 0, 0, 0);
             return d.getTime() === semanaPassada.getTime();
         });
@@ -812,7 +1212,7 @@ export default function DashboardGerente() {
             if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
-            const d = new Date(v.data_venda + 'T12:00:00');
+            const d = parseDateSafe(v.data_venda);
             return d >= mesAnoPassado && d <= fimMesAnoPassado;
         });
 
@@ -849,7 +1249,7 @@ export default function DashboardGerente() {
             if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
-            const d = new Date(v.data_venda + 'T12:00:00');
+            const d = parseDateSafe(v.data_venda);
             return d >= mesAnterior && d <= fimMesAnterior;
         });
 
@@ -1004,7 +1404,7 @@ export default function DashboardGerente() {
             if (v.itens && Array.isArray(v.itens)) {
                 v.itens.forEach(item => {
                     const prodId = item.produto_id || item.id;
-                    const dataVenda = new Date(v.data_venda + 'T12:00:00');
+                    const dataVenda = parseDateSafe(v.data_venda);
                     if (!produtosComVendas[prodId] || dataVenda > produtosComVendas[prodId]) {
                         produtosComVendas[prodId] = dataVenda;
                     }
@@ -1089,28 +1489,31 @@ export default function DashboardGerente() {
     const pendencias = useMemo(() => {
         // Entregas pendentes
         const entregasPendentes = entregas.filter(e => {
+            const vendaAssociada = vendas.find(v => v.id === e.venda_id);
+            if (isVendaCancelada(vendaAssociada)) return false;
             if (lojaAtiva !== 'todas') {
-                // Precisa filtrar por loja através da venda associada
-                const vendaAssociada = vendas.find(v => v.id === e.venda_id);
                 if (vendaAssociada?.loja !== lojaAtiva) return false;
             }
-            return e.status !== 'Entregue' && !isVendaCancelada(e?.status);
+            const statusNorm = String(e.status || '').trim().toLowerCase();
+            return !['entregue', 'retirado', 'cancelada', 'cancelado'].includes(statusNorm);
         });
 
         // Montagens pendentes
         const montagensPendentes = montagens.filter(m => {
+            const vendaAssociada = vendas.find(v => v.id === m.venda_id);
+            if (isVendaCancelada(vendaAssociada)) return false;
             if (lojaAtiva !== 'todas') {
-                const vendaAssociada = vendas.find(v => v.id === m.venda_id);
                 if (vendaAssociada?.loja !== lojaAtiva) return false;
             }
-            return m.status !== 'Concluída' && !isVendaCancelada(m?.status);
+            const statusNorm = String(m.status || '').trim().toLowerCase();
+            return !['concluída', 'concluida', 'cancelado', 'cancelada'].includes(statusNorm);
         });
 
         // Pagamentos em aberto
         const pagamentosAbertos = vendas.filter(v => {
             if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
-            return (v.valor_restante || 0) > 0;
+            return (v.valor_restante || 0) > 0.01;
         });
 
         // Triagem pendente
@@ -1183,7 +1586,7 @@ export default function DashboardGerente() {
             if (isVendaCancelada(v)) return false;
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return false;
             if (!v.data_venda) return false;
-            const d = new Date(v.data_venda + 'T12:00:00');
+            const d = parseDateSafe(v.data_venda);
             return d >= mesAnterior && d <= fimMesAnterior;
         });
 
@@ -1231,13 +1634,14 @@ export default function DashboardGerente() {
                 for (let d = new Date(hoje.getFullYear(), hoje.getMonth(), 1); d <= hoje; d.setDate(d.getDate() + 1)) {
                     const dia = d.toISOString().split('T')[0];
                     const diaNum = d.getDate();
-                    graficoMap[dia] = { dia, diaNum, total: 0, label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) };
+                    graficoMap[dia] = { dia, diaNum, total: 0, label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), vendasList: [] };
                 }
 
                 vendedor.vendasDetalhadas.forEach(v => {
                     const dia = v.data_venda.split('T')[0];
                     if (graficoMap[dia]) {
                         graficoMap[dia].total += v.valor_total || 0;
+                        graficoMap[dia].vendasList.push(v);
                     }
                 });
 
@@ -1251,7 +1655,7 @@ export default function DashboardGerente() {
                 }
                 vendasAnt.forEach(v => {
                     if (v.data_venda) {
-                        const dAnt = new Date(v.data_venda + 'T12:00:00').getDate();
+                        const dAnt = parseDateSafe(v.data_venda).getDate();
                         if (graficoMapAnt[dAnt] !== undefined) {
                             graficoMapAnt[dAnt] += v.valor_total || 0;
                         }
@@ -1368,14 +1772,14 @@ export default function DashboardGerente() {
         if (pAgrupamento === 'dia') {
             for (let d = new Date(dataInicio); d <= hoje; d.setDate(d.getDate() + 1)) {
                 const dia = d.toISOString().split('T')[0];
-                agrupado[dia] = { dia, total: 0, label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) };
+                agrupado[dia] = { dia, total: 0, label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), vendasList: [] };
             }
         } else {
             // Grupar por mês (2 anos)
             for (let d = new Date(dataInicio); d <= hoje; d.setMonth(d.getMonth() + 1)) {
                 const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
                 const label = d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
-                agrupado[mes] = { mes, total: 0, label: label.charAt(0).toUpperCase() + label.slice(1) };
+                agrupado[mes] = { mes, total: 0, label: label.charAt(0).toUpperCase() + label.slice(1), vendasList: [] };
             }
         }
 
@@ -1385,7 +1789,7 @@ export default function DashboardGerente() {
             if (lojaAtiva !== 'todas' && v.loja !== lojaAtiva) return;
             if (!v.data_venda) return;
 
-            const dVal = new Date(v.data_venda + 'T12:00:00');
+            const dVal = parseDateSafe(v.data_venda);
             if (dVal < dataInicio || dVal > hoje) return;
 
             const chave = pAgrupamento === 'dia'
@@ -1394,6 +1798,7 @@ export default function DashboardGerente() {
 
             if (agrupado[chave]) {
                 agrupado[chave].total += v.valor_total || 0;
+                agrupado[chave].vendasList.push(v);
             }
         });
 
@@ -1516,7 +1921,7 @@ export default function DashboardGerente() {
 
     const formatarData = (data) => {
         if (!data) return "-";
-        return new Date(data.split('T')[0] + 'T12:00:00').toLocaleDateString('pt-BR');
+        return parseDateSafe(data).toLocaleDateString('pt-BR');
     };
 
     const loading = loadingVendas || loadingEntregas || loadingMontagens;
@@ -1760,6 +2165,15 @@ export default function DashboardGerente() {
                                     </Badge>
                                 )}
                             </TabsTrigger>
+                            {conferenciaCaixaEnabled && (
+                                <TabsTrigger
+                                    value="conferencia-caixa"
+                                    className="gap-2 px-6 py-2.5 rounded-full text-sm font-medium transition-all data-[state=active]:bg-white data-[state=active]:text-amber-600 data-[state=active]:shadow-sm dark:data-[state=active]:bg-gray-700 dark:data-[state=active]:text-amber-400"
+                                >
+                                    <ShieldCheck className="w-4 h-4" />
+                                    Conferência
+                                </TabsTrigger>
+                            )}
                         </TabsList>
                     </div>
 
@@ -1769,6 +2183,13 @@ export default function DashboardGerente() {
                             <p>Visão completa em tempo real</p>
                         </div>
                     </TabsContent>
+
+                    {/* Tab: Conferência de Caixa */}
+                    {conferenciaCaixaEnabled && (
+                        <TabsContent value="conferencia-caixa" className="m-0">
+                            <PainelConferenciaCaixa />
+                        </TabsContent>
+                    )}
 
                     {/* Tab: Pesquisa de Pedido */}
                     <TabsContent value="pesquisa-pedido" className="m-0">
@@ -1824,7 +2245,7 @@ export default function DashboardGerente() {
                                                                     <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
                                                                         <span className="flex items-center gap-1">
                                                                             <Calendar className="w-3 h-3" />
-                                                                            {pedido.data_venda ? new Date(pedido.data_venda + 'T12:00:00').toLocaleDateString('pt-BR') : '-'}
+                                                                            {pedido.data_venda ? parseDateSafe(pedido.data_venda).toLocaleDateString('pt-BR') : '-'}
                                                                         </span>
                                                                         <span>{formatarMoeda(pedido.valor_total || 0)}</span>
                                                                         {entregaAssociada && (
@@ -1925,7 +2346,7 @@ export default function DashboardGerente() {
                                                                 </div>
                                                                 <div className="text-right text-sm pl-4 border-l border-gray-100 ml-4">
                                                                     <p className="font-medium text-gray-900">
-                                                                        {entrega.data_agendada ? new Date(entrega.data_agendada.split('T')[0] + 'T12:00:00').toLocaleDateString('pt-BR') : '-'}
+                                                                        {entrega.data_agendada ? parseDateSafe(entrega.data_agendada).toLocaleDateString('pt-BR') : '-'}
                                                                     </p>
                                                                     <p className="text-xs text-gray-500 capitalize">{entrega.turno || ''}</p>
                                                                 </div>
@@ -1978,7 +2399,7 @@ export default function DashboardGerente() {
                                                                 </div>
                                                                 <p className="text-gray-800 mt-1 font-medium">{pedido.cliente_nome || 'Cliente'}</p>
                                                                 <p className="text-xs text-gray-600 mt-1">
-                                                                    {pedido.data_venda ? new Date(pedido.data_venda + 'T12:00:00').toLocaleDateString('pt-BR') : '-'}
+                                                                    {pedido.data_venda ? parseDateSafe(pedido.data_venda).toLocaleDateString('pt-BR') : '-'}
                                                                     {' • '}Vendedor: {pedido.responsavel_nome || pedido.vendedor_nome || '-'}
                                                                 </p>
                                                             </div>
@@ -2156,12 +2577,7 @@ export default function DashboardGerente() {
                                             axisLine={false}
                                             tickLine={false}
                                         />
-                                        <Tooltip
-                                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                            cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }}
-                                            formatter={(value) => [formatarMoeda(value), '']}
-                                            labelFormatter={(label) => `Data: ${label}`}
-                                        />
+                                        <Tooltip content={<ChartTooltip assistencias={assistencias} />} />
                                         {kpis.metaValor > 0 && (
                                             <ReferenceLine
                                                 y={kpis.metaValor}
@@ -2536,15 +2952,7 @@ export default function DashboardGerente() {
                                                                 </linearGradient>
                                                             </defs>
                                                             <XAxis dataKey="dia" hide />
-                                                            <Tooltip
-                                                                contentStyle={{ borderRadius: '12px', fontSize: '11px', padding: '6px 10px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                                                formatter={(value) => [formatarMoeda(value), 'Total']}
-                                                                labelFormatter={(label) => {
-                                                                    if (typeof label !== 'string') return `Dia ${label}`;
-                                                                    return `Dia ${label.split('-')[2] || label}`;
-                                                                }}
-                                                                cursor={{ stroke: '#9CA3AF', strokeWidth: 1, strokeDasharray: '4 4' }}
-                                                            />
+                                                            <Tooltip content={<ChartTooltip assistencias={assistencias} />} />
                                                             {v.metaDiaria > 0 && (
                                                                 <ReferenceLine
                                                                     y={v.metaDiaria}
@@ -3637,15 +4045,23 @@ export default function DashboardGerente() {
                                             <TableHead>Data</TableHead>
                                             <TableHead>Cliente</TableHead>
                                             <TableHead>Endereço</TableHead>
+                                            <TableHead>Pendência</TableHead>
                                             <TableHead>Status</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                         {pendencias.entregas.map(e => (
-                                            <TableRow key={e.id}>
-                                                <TableCell>{e.data_agendada ? new Date(e.data_agendada).toLocaleDateString('pt-BR') : 'Sem data'}</TableCell>
-                                                <TableCell>{e.cliente_nome}</TableCell>
+                                            <TableRow 
+                                                key={e.id}
+                                                onClick={() => handleVerDetalhes(e.venda_id)}
+                                                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                            >
+                                                <TableCell>{e.data_agendada ? parseDateSafe(e.data_agendada).toLocaleDateString('pt-BR') : 'Sem data'}</TableCell>
+                                                <TableCell className="font-medium">{e.cliente_nome}</TableCell>
                                                 <TableCell className="max-w-xs truncate" title={e.endereco}>{e.endereco}</TableCell>
+                                                <TableCell className="text-sm text-amber-700 font-medium">
+                                                    {getEntregaPendenciaMotivo(e, hojeIso)}
+                                                </TableCell>
                                                 <TableCell>
                                                     <Badge variant={e.status === 'Atrasada' ? 'destructive' : 'outline'}>{e.status}</Badge>
                                                 </TableCell>
@@ -3669,15 +4085,23 @@ export default function DashboardGerente() {
                                             <TableHead>Data</TableHead>
                                             <TableHead>Cliente</TableHead>
                                             <TableHead>Montador</TableHead>
+                                            <TableHead>Pendência</TableHead>
                                             <TableHead>Status</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                         {pendencias.montagens.map(m => (
-                                            <TableRow key={m.id}>
-                                                <TableCell>{m.data_agendada ? new Date(m.data_agendada).toLocaleDateString('pt-BR') : 'Sem data'}</TableCell>
-                                                <TableCell>{m.cliente_nome}</TableCell>
+                                            <TableRow 
+                                                key={m.id}
+                                                onClick={() => handleVerDetalhes(m.venda_id)}
+                                                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                            >
+                                                <TableCell>{m.data_agendada ? parseDateSafe(m.data_agendada).toLocaleDateString('pt-BR') : 'Sem data'}</TableCell>
+                                                <TableCell className="font-medium">{m.cliente_nome}</TableCell>
                                                 <TableCell>{m.montador_nome || 'Não atribuído'}</TableCell>
+                                                <TableCell className="text-sm text-amber-700 font-medium">
+                                                    {getMontagemPendenciaMotivo(m, hojeIso)}
+                                                </TableCell>
                                                 <TableCell>
                                                     <Badge variant={m.status === 'Atrasada' ? 'destructive' : 'outline'}>{m.status}</Badge>
                                                 </TableCell>
@@ -3702,15 +4126,46 @@ export default function DashboardGerente() {
                                             <TableHead>Cliente</TableHead>
                                             <TableHead>Valor Total</TableHead>
                                             <TableHead>Restante</TableHead>
+                                            <TableHead>Pendência</TableHead>
+                                            <TableHead className="text-right">Ação</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                         {pendencias.pagamentos.map(v => (
-                                            <TableRow key={v.id}>
-                                                <TableCell className="font-medium">#{v.numero_pedido || v.id}</TableCell>
+                                            <TableRow 
+                                                key={v.id}
+                                                onClick={() => handleVerDetalhes(v.id)}
+                                                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                            >
+                                                <TableCell className="font-bold">#{v.numero_pedido || v.id}</TableCell>
                                                 <TableCell>{v.cliente_nome}</TableCell>
                                                 <TableCell>{formatarMoeda(v.valor_total)}</TableCell>
                                                 <TableCell className="text-red-600 font-bold">{formatarMoeda(v.valor_restante)}</TableCell>
+                                                <TableCell className="text-sm">
+                                                    {v.pagamento_restante_entrega ? (
+                                                        <Badge variant="outline" className="border-amber-600 text-amber-700 bg-amber-50">
+                                                            Pago na entrega {v.forma_pagamento_entrega ? `(${v.forma_pagamento_entrega})` : ''}
+                                                        </Badge>
+                                                    ) : (
+                                                        <Badge variant="outline" className="border-red-400 text-red-600 bg-red-50">
+                                                            Pendente na loja
+                                                        </Badge>
+                                                    )}
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 h-8 px-2"
+                                                        onClick={(evt) => {
+                                                            evt.stopPropagation();
+                                                            abrirModalPagamento(v);
+                                                        }}
+                                                    >
+                                                        <CreditCard className="w-4 h-4 mr-1" />
+                                                        Receber
+                                                    </Button>
+                                                </TableCell>
                                             </TableRow>
                                         ))}
                                     </TableBody>
@@ -3732,15 +4187,23 @@ export default function DashboardGerente() {
                                             <TableHead>Cliente</TableHead>
                                             <TableHead>Data Venda</TableHead>
                                             <TableHead>Loja</TableHead>
+                                            <TableHead>Pendência</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                         {pendencias.triagem.map(v => (
-                                            <TableRow key={v.id}>
-                                                <TableCell className="font-medium">#{v.numero_pedido || v.id}</TableCell>
+                                            <TableRow 
+                                                key={v.id}
+                                                onClick={() => handleVerDetalhes(v.id)}
+                                                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                            >
+                                                <TableCell className="font-bold">#{v.numero_pedido || v.id}</TableCell>
                                                 <TableCell>{v.cliente_nome}</TableCell>
-                                                <TableCell>{v.data_venda ? new Date(v.data_venda + 'T12:00:00').toLocaleDateString('pt-BR') : '-'}</TableCell>
+                                                <TableCell>{v.data_venda ? parseDateSafe(v.data_venda).toLocaleDateString('pt-BR') : '-'}</TableCell>
                                                 <TableCell>{v.loja}</TableCell>
+                                                <TableCell className="text-sm text-amber-700 font-medium">
+                                                    Aguardando triagem logística
+                                                </TableCell>
                                             </TableRow>
                                         ))}
                                     </TableBody>
@@ -3750,6 +4213,151 @@ export default function DashboardGerente() {
                     </Tabs>
                     <DialogFooter className="mt-4">
                         <Button variant="outline" onClick={() => setPendenciasModalOpen(false)}>Fechar</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal de Detalhes da Venda */}
+            <VendaDetalhesModal
+                isOpen={isDetalhesModalOpen}
+                onClose={() => setIsDetalhesModalOpen(false)}
+                venda={selectedVendaDetalhes}
+                entregas={entregas}
+                montagens={montagens}
+                lancamentos={lancamentos}
+            />
+
+            {/* Modal de Atualizar Pagamento */}
+            <Dialog open={!!modalPagamentoVenda} onOpenChange={(open) => !open && setModalPagamentoVenda(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-emerald-700">
+                            <CreditCard className="w-5 h-5" />
+                            Atualizar Pagamento
+                        </DialogTitle>
+                        <DialogDescription>
+                            Registre pagamento na loja para o pedido #{modalPagamentoVenda?.numero_pedido}.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="rounded-lg border bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                            Saldo atual: <strong>R$ {saldoModalPagamento.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                        </div>
+
+                        <div className="rounded-lg border p-3 space-y-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-[1.4fr,1fr,auto] gap-3 items-end">
+                                <div className="space-y-2">
+                                    <Label>Forma de pagamento</Label>
+                                    <Select
+                                        value={novoPagamentoItem.forma_pagamento}
+                                        onValueChange={(value) => setNovoPagamentoItem((prev) => ({ ...prev, forma_pagamento: value, parcelas: 1 }))}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Selecione" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {SALES_PAYMENT_OPTIONS.map((forma) => (
+                                                <SelectItem key={forma} value={forma}>{forma}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label>Valor</Label>
+                                    <Input
+                                        type="text"
+                                        inputMode="numeric"
+                                        value={novoPagamentoItem.valor}
+                                        onChange={(e) => setNovoPagamentoItem((prev) => ({
+                                            ...prev,
+                                            valor: formatarValorMonetarioInput(e.target.value)
+                                        }))}
+                                        placeholder="0,00"
+                                    />
+                                </div>
+
+                                <Button type="button" onClick={adicionarPagamentoAoModal}>
+                                    <Plus className="w-4 h-4 mr-2" />
+                                    Adicionar
+                                </Button>
+                            </div>
+
+                            {isInstallmentPaymentMethod(novoPagamentoItem.forma_pagamento) && (
+                                <div className="space-y-2">
+                                    <Label>Parcelas</Label>
+                                    <Select
+                                        value={String(novoPagamentoItem.parcelas || 1)}
+                                        onValueChange={(value) => setNovoPagamentoItem((prev) => ({ ...prev, parcelas: Number(value) }))}
+                                    >
+                                        <SelectTrigger className="sm:max-w-[180px]">
+                                            <SelectValue placeholder="1x" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Array.from({ length: 12 }).map((_, index) => (
+                                                <SelectItem key={index + 1} value={String(index + 1)}>{index + 1}x</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
+
+                            <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground flex items-center justify-between gap-3">
+                                <span>Total informado: <strong>R$ {totalPagamentoInformado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                                <span>Restante no modal: <strong>R$ {saldoAposSplit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                            </div>
+
+                            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                {pagamentoForm.pagamentos.length === 0 ? (
+                                    <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground text-center">
+                                        Nenhuma forma adicionada ainda.
+                                    </div>
+                                ) : pagamentoForm.pagamentos.map((pagamento, index) => (
+                                    <div key={`${pagamento.forma_pagamento}-${index}`} className="flex items-center justify-between rounded-md border px-3 py-2 gap-3">
+                                        <div>
+                                            <p className="text-sm font-medium">{pagamento.forma_pagamento}{pagamento.parcelas > 1 ? ` (${pagamento.parcelas}x)` : ''}</p>
+                                            <p className="text-xs text-muted-foreground">R$ {toMoneyNumber(pagamento.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                        </div>
+                                        <Button type="button" variant="ghost" size="sm" onClick={() => removerPagamentoDoModal(index)}>
+                                            Remover
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Data do pagamento</Label>
+                            <Input
+                                type="date"
+                                value={pagamentoForm.data_pagamento}
+                                onChange={(e) => setPagamentoForm((prev) => ({ ...prev, data_pagamento: e.target.value }))}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Observação</Label>
+                            <Textarea
+                                rows={3}
+                                placeholder="Ex: Cliente antecipou pagamento na loja."
+                                value={pagamentoForm.observacao}
+                                onChange={(e) => setPagamentoForm((prev) => ({ ...prev, observacao: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setModalPagamentoVenda(null)}>
+                            Cancelar
+                        </Button>
+                        <Button
+                            onClick={confirmarPagamentoAntecipado}
+                            disabled={registrarPagamentoMutation.isPending}
+                            className="bg-emerald-600 hover:bg-emerald-700"
+                        >
+                            {registrarPagamentoMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                            Confirmar Pagamento
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

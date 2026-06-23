@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, AlertTriangle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck, ClipboardList, Info, CalendarX, Settings, ArrowRightLeft, Unlock, ArrowUpDown, ArrowUp, ArrowDown, Percent } from "lucide-react";
+import { Plus, Search, Filter, FileText, Loader2, Archive, ShoppingCart, Receipt, CheckCircle, XCircle, AlertTriangle, MessageCircle, CreditCard, Link2, Truck, Package, Wrench, Clock, MapPin, UserCheck, ClipboardList, Info, CalendarX, Settings, ArrowRightLeft, Unlock, ArrowUpDown, ArrowUp, ArrowDown, Percent, Edit2, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -21,17 +21,20 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { abrirNotaPedidoPDF } from "../components/vendas/NotaPedidoPDF";
 import { useAuth } from "@/hooks/useAuth";
 import { useLojas } from "@/hooks/useLojas";
+import { useTenant } from "@/contexts/TenantContext";
 import { useConfirm } from "@/hooks/useConfirm";
 import ArquivoTab from "../components/vendas/ArquivoTab";
 import EmitirNFeModal from "../components/vendas/EmitirNFeModal";
 import TransferirMontagemModal from "../components/vendas/TransferirMontagemModal";
 import { VendaDetalhesModal } from "@/components/vendas/VendaDetalhesModal";
+import EdicaoPedidoModal from "@/components/conferencia/EdicaoPedidoModal";
 import { getVendaFinanceiro, getVendaResumoLogistico, isStatusCancelado, isVendaCancelada } from "@/utils/vendaStatus";
 import { buildProductDisplayName } from "@/utils/productReference";
 import { MONEY_EPSILON, toMoneyNumber } from "@/utils/deliveryPayment";
 import { formatarDataExibicao, obterDataLocalString } from "@/utils/dateUtils";
 import { isInstallmentPaymentMethod, validatePaymentSplit } from "@/services/paymentOrchestrator";
 import { findCategoriaByNames } from "@/lib/financeiroRecorrencia";
+import { isAguardandoConferencia } from "@/services/conferenciaCaixaService";
 
 const STATUS_ENTREGA_OPTIONS = [
     'Aguardando Liberação',
@@ -143,11 +146,16 @@ export default function Vendas() {
 
     // Hook de Autenticação e Controle de Acesso
     const { user, filterData, can, getUserLoja } = useAuth();
+    const { conferenciaCaixaEnabled } = useTenant();
     const canCancelVendas = can('cancel_vendas');
     const canManagePayments = can('manage_financeiro') || can('manage_vendas');
     const canManageVendas = can('manage_vendas');
     const canManageDeliveryStatus = can('manage_entregas') || canManageVendas;
     const canUseBulkActions = user?.cargo === 'Administrador' || user?.cargo === 'Gerente Geral' || canManageDeliveryStatus;
+
+    // Estado para modal de edição de pedido antes da conferência
+    const [edicaoPedidoVenda, setEdicaoPedidoVenda] = useState(null);
+    const [isEdicaoPedidoOpen, setIsEdicaoPedidoOpen] = useState(false);
 
 
     const { data: vendas = [], isLoading } = useQuery({
@@ -736,7 +744,12 @@ export default function Vendas() {
     // 2. Filtros de Busca e Status da Tela (exclui cancelados da aba principal)
     const filtered = vendasComResumo.filter(v => {
         if (isVendaCancelada(v)) return false;
-        if (statusFilter !== 'all' && v.financeiro.displayStatus !== statusFilter) return false;
+        if (statusFilter === 'aguardando_conferencia') {
+            // Filtro especial: apenas aguardando conferência de caixa
+            if (!isAguardandoConferencia(v)) return false;
+        } else {
+            if (statusFilter !== 'all' && v.financeiro.displayStatus !== statusFilter) return false;
+        }
         if (search && !v.cliente_nome?.toLowerCase().includes(search.toLowerCase()) && !v.numero_pedido?.includes(search)) return false;
         return true;
     });
@@ -1227,7 +1240,7 @@ export default function Vendas() {
                             />
                         </div>
                         <Select value={statusFilter} onValueChange={setStatusFilter}>
-                            <SelectTrigger className="w-[200px] border-gray-200 dark:border-neutral-700">
+                            <SelectTrigger className="w-[220px] border-gray-200 dark:border-neutral-700">
                                 <div className="flex items-center gap-2 text-gray-500">
                                     <Filter className="w-4 h-4" />
                                     <SelectValue placeholder="Status" />
@@ -1237,6 +1250,14 @@ export default function Vendas() {
                                 <SelectItem value="all">Todos os status</SelectItem>
                                 <SelectItem value="Pagamento Pendente">Pendente</SelectItem>
                                 <SelectItem value="Pago">Pago</SelectItem>
+                                {conferenciaCaixaEnabled && (
+                                    <SelectItem value="aguardando_conferencia">
+                                        <div className="flex items-center gap-2">
+                                            <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+                                            Aguardando Conferência
+                                        </div>
+                                    </SelectItem>
+                                )}
                             </SelectContent>
                         </Select>
                     </div>
@@ -1462,7 +1483,22 @@ export default function Vendas() {
                                                 </span>
                                             </TableCell>
                                             <TableCell>
-                                                <StatusBadge status={financeiro.displayStatus} />
+                                                <div className="flex flex-col gap-1">
+                                                    <StatusBadge status={financeiro.displayStatus} />
+                                                    {isAguardandoConferencia(venda) && (
+                                                        venda.conferencia_caixa_status === 'devolvido' ? (
+                                                            <Badge className="text-[10px] h-5 px-1.5 bg-orange-100 text-orange-700 border-orange-200 border font-medium w-fit flex items-center gap-1">
+                                                                <AlertTriangle className="w-3 h-3" />
+                                                                Devolvido
+                                                            </Badge>
+                                                        ) : (
+                                                            <Badge className="text-[10px] h-5 px-1.5 bg-amber-100 text-amber-700 border-amber-200 border font-medium w-fit flex items-center gap-1">
+                                                                <ShieldCheck className="w-3.5 h-3.5" />
+                                                                Ag. Conferência
+                                                            </Badge>
+                                                        )
+                                                    )}
+                                                </div>
                                             </TableCell>
 
                                             <TableCell>
@@ -1474,13 +1510,32 @@ export default function Vendas() {
                                                 />
                                             </TableCell>
                                             <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => setModalAcoesVenda(venda)}
-                                                >
-                                                    Ações
-                                                </Button>
+                                                <div className="flex items-center justify-end gap-2">
+                                                    {/* Botão de edição para pedidos aguardando conferência */}
+                                                    {conferenciaCaixaEnabled && isAguardandoConferencia(venda) && (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                                                            title="Editar pedido antes da conferência"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setEdicaoPedidoVenda(venda);
+                                                                setIsEdicaoPedidoOpen(true);
+                                                            }}
+                                                        >
+                                                            <Edit2 className="w-3.5 h-3.5 mr-1" />
+                                                            Editar
+                                                        </Button>
+                                                    )}
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => setModalAcoesVenda(venda)}
+                                                    >
+                                                        Ações
+                                                    </Button>
+                                                </div>
                                             </TableCell>
                                         </TableRow>
                                     )})
@@ -2369,6 +2424,19 @@ export default function Vendas() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Modal de Edição de Pedido (Pré-Conferência) */}
+            <EdicaoPedidoModal
+                open={isEdicaoPedidoOpen}
+                onClose={() => {
+                    setIsEdicaoPedidoOpen(false);
+                    setEdicaoPedidoVenda(null);
+                }}
+                venda={edicaoPedidoVenda}
+                onSalvar={() => {
+                    queryClient.invalidateQueries({ queryKey: ['vendas'] });
+                }}
+            />
         </div >
     );
 }

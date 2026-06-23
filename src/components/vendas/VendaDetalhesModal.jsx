@@ -24,7 +24,9 @@ import {
     Truck,
     Wrench,
     Store,
-    FileText
+    FileText,
+    AlertTriangle,
+    ShieldCheck
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -94,6 +96,21 @@ export function VendaDetalhesModal({ venda, isOpen, onClose, entregas = [], mont
                         </div>
                         <div className="flex flex-col items-end gap-2">
                             {getStatusBadge(financeiro.displayStatus)}
+                            {venda.conferencia_caixa_status === 'aguardando' && (
+                                <Badge className="bg-amber-100 text-amber-700 border-amber-200 border text-[10px] flex items-center gap-1 font-semibold uppercase tracking-wider">
+                                    <ShieldCheck className="h-3 w-3" /> Aguardando Caixa
+                                </Badge>
+                            )}
+                            {venda.conferencia_caixa_status === 'devolvido' && (
+                                <Badge className="bg-orange-100 text-orange-700 border-orange-200 border text-[10px] flex items-center gap-1 font-semibold uppercase tracking-wider">
+                                    <AlertTriangle className="h-3 w-3" /> Devolvido
+                                </Badge>
+                            )}
+                            {venda.conferencia_caixa_status === 'aprovado' && (
+                                <Badge className="bg-green-100 text-green-700 border-green-200 border text-[10px] flex items-center gap-1 font-semibold uppercase tracking-wider">
+                                    <ShieldCheck className="h-3 w-3" /> Conferido
+                                </Badge>
+                            )}
                             {(venda.vendedor_nome || venda.responsavel_nome) && (
                                 <span className="text-xs font-medium text-muted-foreground">
                                     Vendedor: {venda.vendedor_nome || venda.responsavel_nome}
@@ -394,6 +411,47 @@ export function VendaDetalhesModal({ venda, isOpen, onClose, entregas = [], mont
                                         </h3>
                                         <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-100 text-sm text-amber-900 italic">
                                             {venda.observacoes}
+                                        </div>
+                                    </section>
+                                )}
+
+                                {venda.conferencia_caixa_status === 'devolvido' && venda.conferencia_caixa_observacao && (
+                                    <section>
+                                        <h3 className="text-lg font-semibold flex items-center gap-2 mb-4 text-orange-700">
+                                            <AlertTriangle className="h-5 w-5" />
+                                            Devolvido pelo Caixa
+                                        </h3>
+                                        <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-sm text-orange-950">
+                                            <p className="font-semibold text-xs text-orange-800 uppercase tracking-wider mb-1">Motivo da Devolução</p>
+                                            <p className="italic">"{venda.conferencia_caixa_observacao}"</p>
+                                            {venda.conferencia_caixa_por && (
+                                                <p className="text-[10px] text-orange-500 mt-2 font-medium">
+                                                    Por: {venda.conferencia_caixa_por} {venda.conferencia_caixa_at ? `em ${format(new Date(venda.conferencia_caixa_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}` : ''}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </section>
+                                )}
+
+                                {venda.conferencia_caixa_status === 'aprovado' && (
+                                    <section>
+                                        <h3 className="text-lg font-semibold flex items-center gap-2 mb-4 text-green-700">
+                                            <ShieldCheck className="h-5 w-5" />
+                                            Conferência de Caixa Realizada
+                                        </h3>
+                                        <div className="bg-green-50 p-4 rounded-xl border border-green-100 text-sm text-green-950">
+                                            <p className="font-semibold text-xs text-green-800 uppercase tracking-wider mb-1">Status</p>
+                                            <p>O pagamento deste pedido foi conferido e aprovado pelo caixa.</p>
+                                            {venda.conferencia_caixa_observacao && (
+                                                <p className="mt-2 text-xs italic text-green-800">
+                                                    Observação: "{venda.conferencia_caixa_observacao}"
+                                                </p>
+                                            )}
+                                            {venda.conferencia_caixa_por && (
+                                                <p className="text-[10px] text-green-600 mt-2 font-medium">
+                                                    Por: {venda.conferencia_caixa_por} {venda.conferencia_caixa_at ? `em ${format(new Date(venda.conferencia_caixa_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}` : ''}
+                                                </p>
+                                            )}
                                         </div>
                                     </section>
                                 )}
