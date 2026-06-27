@@ -1965,7 +1965,7 @@ export default function DashboardGerente() {
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                         <Target className="w-7 h-7 text-green-600" />
-                        Dashboard do Gerente
+                        Dashboard Gerencial
                     </h1>
                     <p className="text-gray-500 dark:text-gray-400 mt-1">
                         Visão operacional da loja em tempo real

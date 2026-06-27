@@ -185,7 +185,7 @@ Abertura de chamados para Trocas, Devoluções ou Reparos.
 **Acesso Principal:** Administradores
 
 ### **Dashboards**
-*   **Dashboard do Gerente:** Visão operacional (vendas do dia, metas, tokens).
+*   **Dashboard do Gerente:** Dashboard gerencial (vendas do dia, metas, tokens).
 *   **Dashboard BI:** Visão estratégica (Ticket Médio, Vendas por Hora, Curva ABC).
 
 ### **Configurações**

@@ -37,6 +37,10 @@ export default function RecorrentesManager({ lancamentos }) {
     try {
       const hoje = new Date();
       const hojeIso = hoje.toISOString().slice(0, 10);
+      // Gerar lançamentos até 90 dias no futuro para que apareçam em Vencimentos Próximos
+      const limiteData = new Date(hoje);
+      limiteData.setDate(limiteData.getDate() + 90);
+      const limiteIso = limiteData.toISOString().slice(0, 10);
       const recorrentes = lancamentos.filter(l => l.recorrente === true);
       
       let gerados = 0;
@@ -58,8 +62,8 @@ export default function RecorrentesManager({ lancamentos }) {
           continue;
         }
 
-        // Gerar todos os lançamentos pendentes até hoje
-        while (competencia && competencia <= hojeIso) {
+        // Gerar todos os lançamentos pendentes até o limite futuro (hoje + 90 dias)
+        while (competencia && competencia <= limiteIso) {
           // Verificar se já existe
           if (!isRecurringOccurrenceDuplicate(lanc, competencia, lancamentosAtualizados)) {
             const origemRef = buildRecurringOccurrenceKey(lanc.id, competencia);

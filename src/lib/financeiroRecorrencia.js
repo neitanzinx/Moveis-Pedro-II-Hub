@@ -149,6 +149,10 @@ export function isLancamentoSugestaoRecorrencia(lancamento) {
   if (!lancamento?.data_vencimento) return false;
   if (lancamento?.recorrente) return false;
   if (lancamento?.origem_automatica || lancamento?.origem_automática) return false;
+  // Lançamentos gerados automaticamente pelo RecorrentesManager têm origem_tipo='recorrencia'
+  if (lancamento?.origem_tipo === 'recorrencia') return false;
+  // Lançamentos com origem_ref são filhos de recorrentes
+  if (lancamento?.origem_ref) return false;
 
   const tipo = normalizeFinanceiroText(lancamento?.tipo);
   const status = normalizeFinanceiroText(lancamento?.status);

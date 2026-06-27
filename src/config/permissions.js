@@ -176,7 +176,7 @@ export function getHighestScope(scopes = []) {
 export const PERMISSION_CATALOG = [
   // Dashboard
   { code: 'view_dashboard',         label: 'Ver Dashboard Pessoal',              category: 'Dashboard',   description: 'Painel principal com métricas do próprio usuário' },
-  { code: 'view_dashboard_gerente', label: 'Ver Visão Operacional (Gerente)',     category: 'Dashboard',   description: 'Painel operacional com métricas da loja ou empresa' },
+  { code: 'view_dashboard_gerente', label: 'Ver Painel Gerencial',     category: 'Dashboard',   description: 'Painel operacional com métricas da loja ou empresa' },
 
   // Vendas
   { code: 'create_vendas',  label: 'Criar Vendas / PDV',     category: 'Vendas', description: 'Registrar novas vendas e usar o PDV' },
@@ -296,7 +296,7 @@ export const PERMISSION_CATEGORIES = [
 // NOTA: A propriedade 'module' indica qual feature flag controla a visibilidade do item
 export const MENU_ITEMS = [
   { title: "Meu Painel", url: "/admin/Dashboard", icon: LayoutDashboard, permission: 'view_dashboard', section: "Principal" },
-  { title: "Visão Operacional (Gerente)", url: "/admin/DashboardGerente", icon: Target, permission: 'view_dashboard_gerente', section: "Principal" },
+  { title: "Painel Gerencial", url: "/admin/DashboardGerente", icon: Target, permission: 'view_dashboard_gerente', section: "Principal" },
   { title: "PDV", url: "/admin/PDV", icon: CreditCard, permission: 'create_vendas', section: "Principal" },
 
   { title: "Vendas", url: "/admin/Vendas", icon: ShoppingCart, permission: 'view_vendas', section: "Vendas" },

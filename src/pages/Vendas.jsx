@@ -1193,21 +1193,6 @@ export default function Vendas() {
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Vendas</h1>
                     <p className="text-sm text-gray-500">Gerencie suas vendas e pedidos</p>
                 </div>
-
-                {/* Só mostra botão se puder criar vendas */}
-                {can('create_vendas') && (
-                    <Button
-                        onClick={() => navigate('/admin/PDV')}
-                        className="group w-10 hover:w-44 focus-visible:w-44 overflow-hidden border border-green-200 bg-green-100 text-green-800 hover:bg-green-200 shadow-none transition-all duration-300"
-                        title="Aplicar desconto"
-                        aria-label="Aplicar desconto"
-                    >
-                        <Percent className="h-4 w-4 shrink-0" />
-                        <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-300 group-hover:max-w-[120px] group-hover:opacity-100 group-focus-visible:max-w-[120px] group-focus-visible:opacity-100">
-                            Aplicar desconto
-                        </span>
-                    </Button>
-                )}
             </div>
 
             {/* Sistema de Abas */}

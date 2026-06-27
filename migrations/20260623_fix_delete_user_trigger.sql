@@ -1,8 +1,23 @@
 -- Migration: fix_delete_user_trigger
 -- Objetivo: Evitar deadlock e loop de trigger infinito ao deletar usuários,
 -- e expor a função de deleção segura via RPC.
+-- 1. Criar índices nas colunas de chaves estrangeiras para evitar "statement timeout"
+-- ao executar os 14 comandos de UPDATE durante a deleção do usuário.
+CREATE INDEX IF NOT EXISTS idx_colaboradores_user_id ON public.colaboradores(user_id);
+CREATE INDEX IF NOT EXISTS idx_clientes_created_by ON public.clientes(created_by);
+CREATE INDEX IF NOT EXISTS idx_vendas_responsavel_id ON public.vendas(responsavel_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON public.audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_notificacoes_destinatario_id ON public.notificacoes(destinatario_id);
+CREATE INDEX IF NOT EXISTS idx_mensagens_chat_remetente_id ON public.mensagens_chat(remetente_id);
+CREATE INDEX IF NOT EXISTS idx_assistencias_tecnicas_responsavel_id ON public.assistencias_tecnicas(responsavel_id);
+CREATE INDEX IF NOT EXISTS idx_avaliacoes_desempenho_avaliador_id ON public.avaliacoes_desempenho(avaliador_id);
+CREATE INDEX IF NOT EXISTS idx_documentos_rh_uploaded_by ON public.documentos_rh(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_licencas_aprovado_por ON public.licencas(aprovado_por);
+CREATE INDEX IF NOT EXISTS idx_ferias_aprovado_por ON public.ferias(aprovado_por);
+CREATE INDEX IF NOT EXISTS idx_vagas_responsavel_id ON public.vagas(responsavel_id);
+CREATE INDEX IF NOT EXISTS idx_candidatos_entrevistador_id ON public.candidatos(entrevistador_id);
 
--- 1. Recriar a função de trigger com proteção EXISTS para evitar loop recursivo
+-- 2. Recriar a função de trigger com proteção EXISTS para evitar loop recursivo
 CREATE OR REPLACE FUNCTION auto_delete_user_from_auth()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -28,7 +43,7 @@ CREATE TRIGGER trigger_delete_user_from_auth
   FOR EACH ROW
   EXECUTE FUNCTION auto_delete_user_from_auth();
 
--- 3. Garantir a função SQL RPC para deleção de usuário pelo administrador
+-- 4. Garantir a função SQL RPC para deleção de usuário pelo administrador
 CREATE OR REPLACE FUNCTION delete_user_from_auth(user_id uuid)
 RETURNS void
 LANGUAGE plpgsql
@@ -102,19 +117,15 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN NULL;
   END;
 
-  BEGIN
-    UPDATE public.role_permissions SET updated_by = NULL WHERE updated_by = delete_user_from_auth.user_id;
-  EXCEPTION WHEN OTHERS THEN NULL;
-  END;
 
   -- 2. Deletar da tabela auth.users (isso deleta do Auth e propaga via cascade para public_users)
   DELETE FROM auth.users WHERE id = delete_user_from_auth.user_id;
 END;
 $$;
 
--- 4. Garantir permissões de execução para a função RPC
+-- 5. Garantir permissões de execução para a função RPC
 GRANT EXECUTE ON FUNCTION delete_user_from_auth(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION delete_user_from_auth(uuid) TO service_role;
 
--- 5. Recarregar o cache de schema do PostgREST
+-- 6. Recarregar o cache de schema do PostgREST
 NOTIFY pgrst, reload schema;

@@ -22,7 +22,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { useLojas } from "@/hooks/useLojas";
 import { resolveStockField } from "@/utils/stockUtils";
 import BuscaProdutoAvancada from "@/components/vendas/BuscaProdutoAvancada";
-import PainelPagamento from "@/components/pdv/PainelPagamento";
 import {
   isInstallmentPaymentMethod,
   normalizePaymentItem,
@@ -31,176 +30,8 @@ import {
   PAYMENT_METHOD_OPTIONS_DELIVERY,
 } from "@/services/paymentOrchestrator";
 
-export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, devolucoes, vendas, produtos, fornecedores, isLoading, noDialog }) {
+export default function DevolucaoModal({ isOpen, onClose, onSave, devolucao, vendas, produtos, isLoading }) {
 const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
-
-  const { user } = useAuth();
-  const { data: lojasData = [] } = useLojas();
-  const submitLockRef = useRef(false);
-
-  const createInitialFormData = () => ({
-    venda_id: "",
-    numero_pedido: "",
-    cliente_nome: "",
-    data_devolucao: new Date().toISOString().split('T')[0],
-    tipo: "Devolução",
-    itens_devolvidos: [],
-    itens_troca: [],
-    valor_devolvido: 0,
-    valor_diferenca: 0,
-    status: "Pendente",
-    observacoes: "",
-    destino_estoque: "",
-    destino_troco: "",
-    justificativa_financeira: "",
-    forma_pagamento_diferenca: "",
-    pagamento_diferenca_parcelas: 1,
-    pagamento_diferenca_valor: 0,
-    pagamento_diferenca_ativo: false,
-    pagamentos_diferenca: [],
-    organization_id: DEFAULT_ORGANIZATION_ID,
-  });
-
-  const [formData, setFormData] = useState(createInitialFormData());
-  const [vendaSelecionada, setVendaSelecionada] = useState(null);
-  const [entregue, setEntregue] = useState(false);
-  const [verificandoEntrega, setVerificandoEntrega] = useState(false);
-  const [canApprove, setCanApprove] = useState(false);
-  const [isApproving, setIsApproving] = useState(false);
-  const [valorEditadoManual, setValorEditadoManual] = useState(false);
-  const [produtoTrocaSelecionadoId, setProdutoTrocaSelecionadoId] = useState("");
-  const [quantidadeTrocaInput, setQuantidadeTrocaInput] = useState(1);
-  const [buscaVenda, setBuscaVenda] = useState("");
-  const [openVendaBusca, setOpenVendaBusca] = useState(false);
-  const [novoPagamentoDiferenca, setNovoPagamentoDiferenca] = useState({ forma: "", valor: "", parcelas: 1 });
-
-  // Estados para PainelPagamento na Devolução
-  const [descontoDiferenca, setDescontoDiferenca] = useState(0);
-  const [observacoesDiferenca, setObservacoesDiferenca] = useState("");
-  const [pagamentoEntregaDiferenca, setPagamentoEntregaDiferenca] = useState({ ativo: false, valor: 0, forma: '', parcelas: 1 });
-  const [cupomAplicadoDiferenca, setCupomAplicadoDiferenca] = useState(null);
-  const [tokenGerencialDiferenca, setTokenGerencialDiferenca] = useState(null);
-  const [margemDescontoDiferenca, setMargemDescontoDiferenca] = useState(0);
-
-  // Permissões de aprovação baseadas no role do usuário
-  useEffect(() => {
-    const cargo = user?.cargo || user?.role || '';
-    setCanApprove(cargo === 'Administrador' || cargo === 'Gerente' || cargo === 'admin' || cargo === 'manager');
-  }, [user]);
-
-  // Lojas disponíveis como destino de estoque
-  const lojasDestino = useMemo(() => {
-    return lojasData.map(l => l.nome).filter(Boolean);
-  }, [lojasData]);
-
-  // Vendas disponíveis para seleção (apenas com status de entregue ou finalizadas)
-  const vendasParaSelecao = useMemo(() => {
-    return (vendas || []).filter(v =>
-      v.status === 'Entregue' ||
-      v.status === 'Finalizada' ||
-      v.status === 'Pago' ||
-      v.status === 'Aprovada'
-    );
-  }, [vendas]);
-
-  // Filtragem das vendas baseada na busca digitada
-  const vendasFiltradasBusca = useMemo(() => {
-    const termo = String(buscaVenda || '').trim().toLowerCase();
-    if (termo.length < 2) return [];
-    return (vendas || []).filter(v =>
-      String(v.numero_pedido || '').toLowerCase().includes(termo) ||
-      String(v.cliente_nome || '').toLowerCase().includes(termo)
-    ).slice(0, 20);
-  }, [vendas, buscaVenda]);
-
-  // Itens da venda selecionada
-  const itensVendaSelecionada = useMemo(() => {
-    if (!vendaSelecionada) return [];
-    return Array.isArray(vendaSelecionada.itens)
-      ? vendaSelecionada.itens
-      : Array.isArray(vendaSelecionada.itens_venda)
-        ? vendaSelecionada.itens_venda
-        : [];
-  }, [vendaSelecionada]);
-
-  // Produtos disponíveis para troca (com estoque > 0)
-  const getEstoqueDisponivelProduto = (produto) => {
-    if (!produto) return 0;
-
-    const estoqueCampos = Object.entries(produto)
-      .filter(([key, value]) => key.startsWith('estoque_') && typeof value !== 'object')
-      .map(([, value]) => Number(value || 0))
-      .filter((value) => Number.isFinite(value));
-
-    const estoquePrincipal = Number(produto.quantidade_estoque || 0);
-    const estoqueBase = estoqueCampos.length > 0
-      ? Math.max(estoquePrincipal, ...estoqueCampos)
-      : estoquePrincipal;
-    const reservado = Number(produto.quantidade_reservada || 0);
-
-    return Math.max(0, estoqueBase - reservado);
-  };
-
-  // Produtos disponíveis para troca
-  const produtosTrocaDisponiveis = useMemo(() => {
-    return (produtos || [])
-      .filter((p) => p.ativo !== false)
-      .sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR', { sensitivity: 'base' }));
-  }, [produtos]);
-
-  // Valor da diferença da troca (derivado do formData)
-  const valorDiferenca = Number(formData.valor_diferenca || 0);
-
-  // Pagamentos da diferença (derivado do formData)
-  const pagamentosDiferenca = useMemo(() => {
-    return Array.isArray(formData.pagamentos_diferenca) ? formData.pagamentos_diferenca : [];
-  }, [formData.pagamentos_diferenca]);
-
-  // Validação dos pagamentos da diferença
-  const validacaoPagamentoDiferenca = useMemo(() => {
-    const totalPago = pagamentosDiferenca.reduce((acc, p) => acc + Number(p.valor || 0), 0);
-    const acrescimos = pagamentosDiferenca.reduce((acc, p) => acc + Number(p.acrescimo || 0), 0);
-    const subtotal = valorDiferenca + acrescimos;
-    const total = Math.max(0, subtotal - descontoDiferenca);
-    const pago = totalPago + (pagamentoEntregaDiferenca.ativo ? pagamentoEntregaDiferenca.valor : 0);
-    const restante = Math.max(0, total - pago);
-    
-    const errors = [];
-    if (restante > 0.009) {
-      errors.push(`Faltam R$ ${restante.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} para cobrir a diferença.`);
-    }
-    return {
-      ok: errors.length === 0,
-      totalPago,
-      restante,
-      errors,
-    };
-  }, [pagamentosDiferenca, valorDiferenca, descontoDiferenca, pagamentoEntregaDiferenca]);
-
-  const valoresPainelDiferenca = useMemo(() => {
-    const acrescimos = pagamentosDiferenca.reduce((acc, p) => acc + Number(p.acrescimo || 0), 0);
-    const subtotal = valorDiferenca + acrescimos;
-    const total = Math.max(0, subtotal - descontoDiferenca);
-    const pago = pagamentosDiferenca.reduce((acc, p) => acc + Number(p.valor || 0), 0);
-    const restante = Math.max(0, total - pago);
-    return { subtotal, total, pago, restante };
-  }, [valorDiferenca, descontoDiferenca, pagamentosDiferenca]);
-
-  // Calcula quantidade já devolvida de um produto em outras devoluções da mesma venda
-  const getQuantidadeJaDevolvida = (vendaId, produtoId) => {
-    if (!vendaId || !produtoId) return 0;
-    return (devolucoes || [])
-      .filter(d =>
-        d.venda_id === vendaId &&
-        d.status !== 'Rejeitada' &&
-        (!devolucao || d.id !== devolucao.id)
-      )
-      .reduce((acc, d) => {
-        const itens = Array.isArray(d.itens_devolvidos) ? d.itens_devolvidos : [];
-        const item = itens.find(i => i.produto_id === produtoId);
-        return acc + Number(item?.quantidade || 0);
-      }, 0);
-  };
 
   const getQuantidadeMaximaDevolucao = (item) => {
     const vendida = Number(item?.quantidade || 0);
@@ -287,10 +118,7 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
   useEffect(() => {
     if (valorDiferenca <= 0 && pagamentosDiferenca.length > 0) {
       setFormData((prev) => ({ ...prev, pagamentos_diferenca: [] }));
-      setDescontoDiferenca(0);
-      setCupomAplicadoDiferenca(null);
-      setTokenGerencialDiferenca(null);
-      setPagamentoEntregaDiferenca({ ativo: false, valor: 0, forma: '', parcelas: 1 });
+      setNovoPagamentoDiferenca({ forma: "", valor: "", parcelas: 1 });
     }
   }, [valorDiferenca, pagamentosDiferenca.length]);
 
@@ -417,8 +245,7 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
   const adicionarItemTroca = () => {
     if (!produtoTrocaSelecionadoId) return;
 
-    const produto = produtosTrocaDisponiveis.find((p) => p.id === produtoTrocaSelecionadoId)
-      || (produtos || []).find((p) => p.id === produtoTrocaSelecionadoId);
+    const produto = (produtos || []).find((p) => p.id === produtoTrocaSelecionadoId);
     if (!produto) return;
 
     const quantidade = Math.max(1, Number(quantidadeTrocaInput || 1));
@@ -471,19 +298,31 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
     });
   };
 
-  const adicionarPagamentoPainel = (pagamento) => {
-    setFormData((prev) => ({
-      ...prev,
-      pagamentos_diferenca: [...prev.pagamentos_diferenca, pagamento],
-      pagamento_diferenca_ativo: true
-    }));
+  const adicionarPagamentoDiferenca = () => {
+    const valorInformado = Number(String(novoPagamentoDiferenca.valor || '').replace(',', '.'));
+    const formaSelecionada = String(novoPagamentoDiferenca.forma || '').trim();
+    const parcelas = Math.max(1, Number(novoPagamentoDiferenca.parcelas || 1));
+
+    if (!formaSelecionada || !Number.isFinite(valorInformado) || valorInformado <= 0) return;
+
+    const formaResolvida = formaSelecionada === 'Crédito'
+      ? (parcelas > 1 ? 'Crédito Parcelado' : 'Crédito 1x')
+      : formaSelecionada;
+
+    const proximoPagamento = normalizePaymentItem({
+      forma_pagamento: formaResolvida,
+      valor: valorInformado,
+      parcelas,
+    }, pagamentosDiferenca.length + 1);
+
+    const nextPagamentos = [...pagamentosDiferenca, proximoPagamento];
+    setFormData((prev) => ({ ...prev, pagamentos_diferenca: nextPagamentos, pagamento_diferenca_ativo: true }));
+    setNovoPagamentoDiferenca({ forma: '', valor: '', parcelas: 1 });
   };
 
-  const removerPagamentoPainel = (index) => {
-    setFormData((prev) => ({
-      ...prev,
-      pagamentos_diferenca: prev.pagamentos_diferenca.filter((_, i) => i !== index)
-    }));
+  const removerPagamentoDiferenca = (index) => {
+    const nextPagamentos = pagamentosDiferenca.filter((_, i) => i !== index);
+    setFormData((prev) => ({ ...prev, pagamentos_diferenca: nextPagamentos }));
   };
 
   const vendaSelecionadaLabel = useMemo(() => {
@@ -493,10 +332,8 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
   }, [formData.venda_id, vendaSelecionada, vendasParaSelecao]);
 
   const produtoTrocaSelecionado = useMemo(() => {
-    return produtosTrocaDisponiveis.find((p) => p.id === produtoTrocaSelecionadoId)
-      || (produtos || []).find((p) => p.id === produtoTrocaSelecionadoId)
-      || null;
-  }, [produtoTrocaSelecionadoId, produtosTrocaDisponiveis, produtos]);
+    return produtosTrocaDisponiveis.find((p) => p.id === produtoTrocaSelecionadoId) || null;
+  }, [produtoTrocaSelecionadoId, produtosTrocaDisponiveis]);
 
   const validarDadosBase = () => {
     if (!formData.venda_id) {
@@ -618,15 +455,9 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
           throw new Error(`Estoque insuficiente para o item de troca ${item.produto_nome}.`);
         }
 
-        const updates = {
+        await base44.entities.Produto.update(produto.id, {
           quantidade_estoque: estoqueAntes - quantidade
-        };
-
-        if (campoDestino && Object.prototype.hasOwnProperty.call(produto, campoDestino)) {
-          updates[campoDestino] = Math.max(0, Number(produto[campoDestino] || 0) - quantidade);
-        }
-
-        await base44.entities.Produto.update(produto.id, updates);
+        });
 
         try {
           await supabase.from('movimentacoes_estoque').insert({
@@ -652,7 +483,7 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
     }
   };
 
-  const criarLancamentosFinanceirosAprovacao = async (devolucaoObj = devolucao) => {
+  const criarLancamentosFinanceirosAprovacao = async () => {
     const lancamentosIds = [];
     const valorDevolvido = Number(formData.valor_devolvido || 0);
     const valorDiferenca = Number(formData.valor_diferenca || 0);
@@ -690,9 +521,9 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
         status: 'Pendente',
         observacao: `Justificativa financeira: ${String(formData.justificativa_financeira || '').trim()}. Destino do estoque: ${formData.destino_estoque}.`,
         venda_id: formData.venda_id,
-        devolucao_id: devolucaoObj?.id || null,
+        devolucao_id: devolucao?.id || null,
         origem_tipo: 'devolucao',
-        origem_id: devolucaoObj?.id || null,
+        origem_id: devolucao?.id || null,
         origem_ref: formData.numero_pedido || null,
         organization_id: DEFAULT_ORGANIZATION_ID,
       });
@@ -716,9 +547,9 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
         forma_pagamento: pagamentosDiferenca[0]?.forma_pagamento || 'Diversos',
         observacao: `Diferença paga na troca via ${resumoPagamentos || 'N/A'}. Justificativa: ${String(formData.justificativa_financeira || '').trim() || 'N/A'}`,
         venda_id: formData.venda_id,
-        devolucao_id: devolucaoObj?.id || null,
+        devolucao_id: devolucao?.id || null,
         origem_tipo: 'devolucao_troca',
-        origem_id: devolucaoObj?.id || null,
+        origem_id: devolucao?.id || null,
         origem_ref: formData.numero_pedido || null,
         organization_id: DEFAULT_ORGANIZATION_ID,
       });
@@ -739,9 +570,9 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
         forma_pagamento: 'Dinheiro',
         observacao: `Valor a ser devolvido ao cliente ${formData.cliente_nome} referente à troca do pedido ${formData.numero_pedido}.`,
         venda_id: formData.venda_id,
-        devolucao_id: devolucaoObj?.id || null,
+        devolucao_id: devolucao?.id || null,
         origem_tipo: 'devolucao_troca_troco',
-        origem_id: devolucaoObj?.id || null,
+        origem_id: devolucao?.id || null,
         origem_ref: formData.numero_pedido || null,
         organization_id: DEFAULT_ORGANIZATION_ID,
       });
@@ -751,33 +582,45 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
     return lancamentosIds;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSavePendente = async () => {
+    validarDadosBase();
+
+    const recalculo = recomputarValores(formData.itens_devolvidos, formData.itens_troca);
+    const payload = {
+      ...formData,
+      ...recalculo,
+      status: devolucao?.status === 'Rejeitada' ? 'Rejeitada' : 'Pendente',
+      organization_id: formData.organization_id || DEFAULT_ORGANIZATION_ID
+    };
+
+    await onSave(payload);
+  };
+
+  const handleApprove = async () => {
+    if (!devolucao) {
+      alert('Salve a devolução como pendente antes de aprovar.');
+      return;
+    }
     if (submitLockRef.current) return;
+
     submitLockRef.current = true;
     setIsApproving(true);
 
     try {
+      const devolucaoAtual = await base44.entities.Devolucao.read(devolucao.id);
+      if (!devolucaoAtual) {
+        throw new Error('Devolução não encontrada para aprovação.');
+      }
+      if (devolucaoAtual.status === 'Aprovada' || devolucaoAtual.status === 'Processada') {
+        throw new Error('Essa devolução já foi aprovada/processada anteriormente.');
+      }
+
       validarDadosBase();
       validarFinanceiroAprovacao();
 
-      let currentDevolucao = devolucao;
-
-      // 1. Salvar ou criar a devolução inicialmente como Pendente para obter o ID
-      if (!currentDevolucao) {
-        const recalculo = recomputarValores(formData.itens_devolvidos, formData.itens_troca);
-        const payload = {
-          ...formData,
-          ...recalculo,
-          status: 'Pendente',
-          organization_id: formData.organization_id || DEFAULT_ORGANIZATION_ID
-        };
-        currentDevolucao = await onSave(payload);
-      }
-
-      // 2. Executar as ações de aprovação (estoque e financeiro)
+      const recalculo = recomputarValores(formData.itens_devolvidos, formData.itens_troca, true);
       await atualizarEstoqueAprovacao();
-      const lancamentosIds = await criarLancamentosFinanceirosAprovacao(currentDevolucao);
+      const lancamentosIds = await criarLancamentosFinanceirosAprovacao();
 
       if (formData.tipo === 'Troca' && valorDiferenca < 0 && formData.destino_troco === 'credito_loja') {
         const trocoEmCredito = Math.abs(valorDiferenca);
@@ -792,15 +635,14 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
           } catch (creditErr) {
             console.warn('Erro ao registrar crédito no cliente:', creditErr);
           }
+        } else {
+          console.warn('cliente_id não encontrado na venda; crédito não foi registrado no cadastro.');
         }
       }
 
-      // 3. Atualizar a devolução para o status Aprovada final
-      const recalculoAprovado = recomputarValores(formData.itens_devolvidos, formData.itens_troca, true);
       const updatedData = {
         ...formData,
-        ...recalculoAprovado,
-        id: currentDevolucao.id,
+        ...recalculo,
         pagamento_diferenca_ativo: valorDiferenca > 0,
         pagamento_diferenca_valor: valorDiferenca > 0 ? valorDiferenca : 0,
         status: 'Aprovada',
@@ -815,23 +657,47 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
 
       await onSave(updatedData);
     } catch (error) {
-      alert(error?.message || 'Erro ao processar devolução.');
-      console.error('Erro ao processar devolução:', error);
+      alert(error?.message || 'Erro ao aprovar devolução.');
+      console.error('Erro ao aprovar devolução:', error);
     } finally {
       submitLockRef.current = false;
       setIsApproving(false);
     }
   };
 
-  const formContent = (
-    <>
-      <DialogHeader>
-        <DialogTitle style={{ color: '#07593f' }}>
-          {devolucao ? "Detalhes da Devolução/Troca" : "Nova Devolução/Troca"}
-        </DialogTitle>
-      </DialogHeader>
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (submitLockRef.current) return;
+    submitLockRef.current = true;
 
-      <form onSubmit={handleSubmit}>
+    try {
+      await handleSavePendente();
+    } catch (error) {
+      alert(error?.message || 'Erro ao salvar devolução.');
+      console.error('Erro ao salvar devolução:', error);
+    } finally {
+      submitLockRef.current = false;
+    }
+  };
+
+  const handleReject = async () => {
+    const updatedData = {
+      ...formData,
+      status: 'Rejeitada'
+    };
+    await onSave(updatedData);
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle style={{ color: '#07593f' }}>
+            {devolucao ? "Detalhes da Devolução/Troca" : "Nova Devolução/Troca"}
+          </DialogTitle>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit}>
           <div className="space-y-6">
             <div className="grid md:grid-cols-2 gap-4">
               <div>
@@ -1039,7 +905,7 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
                         <p className="text-xs text-gray-600 mt-1">
                           Fornecedor: {produtoTrocaSelecionado.fornecedor_nome || 'Nao informado'}
                           {' | '}Categoria: {produtoTrocaSelecionado.categoria || 'Outros'}
-                          {' | '}Estoque: {getEstoqueDisponivelProduto(produtoTrocaSelecionado)}
+                          {' | '}Estoque: {Math.max(0, Number(produtoTrocaSelecionado.quantidade_estoque || 0) - Number(produtoTrocaSelecionado.quantidade_reservada || 0))}
                         </p>
                       </div>
                     )}
@@ -1097,52 +963,134 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
                 )}
 
                     {formData.tipo === 'Troca' && valorDiferenca > 0 && (
-                      <div className="border rounded-xl p-0 overflow-hidden" style={{ borderColor: '#3b82f6' }}>
-                        <div className="bg-blue-50/50 p-4 border-b border-blue-100">
-                          <h4 className="font-semibold" style={{ color: '#07593f' }}>
-                            Pagamento da diferença
-                          </h4>
-                          <p className="text-xs text-blue-800 mt-1">
-                            O cliente ficou com um item mais caro. Registre como a diferença de R$ {valorDiferenca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} será paga.
-                          </p>
-                        </div>
-                        
-                        <div className="p-4 bg-gray-50/30">
-                          <PainelPagamento
-                            valores={valoresPainelDiferenca}
-                            pagamentos={pagamentosDiferenca}
-                            onAddPagamento={adicionarPagamentoPainel}
-                            onRemovePagamento={removerPagamentoPainel}
-                            desconto={descontoDiferenca}
-                            setDesconto={setDescontoDiferenca}
-                            observacoes={observacoesDiferenca}
-                            setObservacoes={setObservacoesDiferenca}
-                            pagamentoEntrega={pagamentoEntregaDiferenca}
-                            setPagamentoEntrega={setPagamentoEntregaDiferenca}
-                            cupomAplicado={cupomAplicadoDiferenca}
-                            setCupomAplicado={setCupomAplicadoDiferenca}
-                            tokenGerencial={tokenGerencialDiferenca}
-                            setTokenGerencial={setTokenGerencialDiferenca}
-                            margemNegociavel={0}
-                            onDescontoMargemChange={setMargemDescontoDiferenca}
-                            disabled={devolucao && devolucao.status !== 'Pendente' && devolucao.status !== 'Rejeitada'}
-                            cliente={vendaSelecionada ? { 
-                              nome_completo: vendaSelecionada.cliente_nome,
-                              saldo_credito: 0 
-                            } : null}
-                            itensCount={formData.itens_troca.length}
-                            prazo="Imediato"
-                            hideActions={true}
-                          />
+                      <div className="border rounded-lg p-4" style={{ borderColor: '#3b82f6' }}>
+                        <h4 className="font-semibold mb-3" style={{ color: '#07593f' }}>
+                          Pagamento da diferença
+                        </h4>
 
-                          {!validacaoPagamentoDiferenca.ok && validacaoPagamentoDiferenca.errors.length > 0 && (
-                            <Alert className="mt-4 border-amber-200 bg-amber-50">
-                              <AlertDescription className="text-amber-800 text-sm font-medium">
-                                {validacaoPagamentoDiferenca.errors[0]}
-                              </AlertDescription>
-                            </Alert>
-                          )}
+                        <Alert className="mb-4 border-orange-200 bg-orange-50 text-orange-900">
+                          <AlertDescription>
+                            O cliente ficou com um item mais caro. Registre aqui como a diferença de R$ {valorDiferenca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} foi paga.
+                          </AlertDescription>
+                        </Alert>
+
+                        <div className="grid md:grid-cols-[1fr,140px] gap-2">
+                          <div>
+                            <Label htmlFor="forma_pagamento_diferenca">Forma de pagamento da diferença *</Label>
+                            <Select
+                              value={formData.forma_pagamento_diferenca || ''}
+                              onValueChange={(value) => setFormData((prev) => ({
+                                ...prev,
+                                forma_pagamento_diferenca: value,
+                                pagamento_diferenca_ativo: true,
+                                pagamento_diferenca_parcelas: value.includes('Crédito') ? Math.max(1, Number(prev.pagamento_diferenca_parcelas || 1)) : 1,
+                                pagamento_diferenca_valor: valorDiferenca
+                              }))}
+                              disabled={devolucao && devolucao.status !== 'Pendente' && devolucao.status !== 'Rejeitada'}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione a forma de pagamento" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PAYMENT_METHOD_OPTIONS_DELIVERY.map((method) => (
+                                  <SelectItem key={method} value={method}>{method}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="valor_diferenca_pagamento">Valor</Label>
+                            <Input
+                              id="valor_diferenca_pagamento"
+                              value={valorDiferenca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              disabled
+                            />
+                          </div>
                         </div>
+
+                        {String(formData.forma_pagamento_diferenca || '').includes('Crédito') && (
+                          <div className="mt-3 w-full md:w-44">
+                            <Label htmlFor="pagamento_diferenca_parcelas">Parcelas *</Label>
+                            <Select
+                              value={String(formData.pagamento_diferenca_parcelas || 1)}
+                              onValueChange={(value) => setFormData((prev) => ({
+                                ...prev,
+                                pagamento_diferenca_parcelas: Number(value),
+                                pagamento_diferenca_ativo: true,
+                                pagamento_diferenca_valor: valorDiferenca
+                              }))}
+                              disabled={devolucao && devolucao.status !== 'Pendente' && devolucao.status !== 'Rejeitada'}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="1x" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Array.from({ length: 12 }).map((_, i) => (
+                                  <SelectItem key={i + 1} value={String(i + 1)}>{i + 1}x</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+
+                        <div className="mt-3">
+                          <Label htmlFor="pagamento_diferenca_observacao">Observação do pagamento</Label>
+                          <Textarea
+                            id="pagamento_diferenca_observacao"
+                            value={formData.pagamento_diferenca_observacao || ''}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, pagamento_diferenca_observacao: e.target.value, pagamento_diferenca_ativo: true }))}
+                            rows={2}
+                            placeholder="Ex: pago via Pix no ato, parcela no cartão, etc."
+                            disabled={devolucao && devolucao.status !== 'Pendente' && devolucao.status !== 'Rejeitada'}
+                          />
+                        </div>
+
+                        <div className="mt-3 flex gap-2 flex-wrap">
+                          <Button
+                            type="button"
+                            onClick={adicionarPagamentoDiferenca}
+                            disabled={devolucao && devolucao.status !== 'Pendente' && devolucao.status !== 'Rejeitada'}
+                            style={{ backgroundColor: '#07593f' }}
+                          >
+                            <Plus className="w-4 h-4 mr-1" />
+                            Adicionar pagamento
+                          </Button>
+                        </div>
+
+                        {pagamentosDiferenca.length > 0 && (
+                          <div className="space-y-2 mt-4">
+                            {pagamentosDiferenca.map((pagamento, index) => (
+                              <div key={`${pagamento.attempt_id || index}`} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
+                                <div>
+                                  <p className="font-medium text-sm">{pagamento.forma_pagamento}</p>
+                                  {pagamento.parcelas > 1 && <p className="text-xs text-blue-600">{pagamento.parcelas}x</p>}
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <span className="font-semibold">R$ {Number(pagamento.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-red-600"
+                                    onClick={() => removerPagamentoDiferenca(index)}
+                                    disabled={devolucao && devolucao.status !== 'Pendente' && devolucao.status !== 'Rejeitada'}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {!validacaoPagamentoDiferenca.ok && validacaoPagamentoDiferenca.errors.length > 0 && (
+                          <Alert className="mt-4 border-amber-200 bg-amber-50">
+                            <AlertDescription className="text-amber-800 text-sm">
+                              {validacaoPagamentoDiferenca.errors[0]}
+                            </AlertDescription>
+                          </Alert>
+                        )}
                       </div>
                     )}
               </>
@@ -1248,7 +1196,129 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
                 />
               </div>
             </div>
+      {formData.tipo === 'Troca' && valorDiferenca > 0 && (
+        <div className="border rounded-lg p-4" style={{ borderColor: '#3b82f6' }}>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <h4 className="font-semibold" style={{ color: '#07593f' }}>
+                Pagamento da diferença
+              </h4>
+              <p className="text-xs text-gray-500">
+                A troca gerou uma diferença de R$ {valorDiferenca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}. Registre aqui como o cliente pagou.
+              </p>
+            </div>
+            <div className="text-right text-xs">
+              <p className="text-gray-500">Pago</p>
+              <p className="font-semibold text-green-700">R$ {validacaoPagamentoDiferenca.totalPago.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+              <p className="text-gray-500">Restante</p>
+              <p className={`font-semibold ${validacaoPagamentoDiferenca.restante > 0 ? 'text-red-600' : 'text-green-700'}`}>
+                R$ {validacaoPagamentoDiferenca.restante.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
+            </div>
+          </div>
 
+          <div className="grid md:grid-cols-2 gap-3">
+            <div>
+              <Label>Forma de pagamento</Label>
+              <Select
+                value={novoPagamentoDiferenca.forma}
+                onValueChange={(value) => setNovoPagamentoDiferenca((prev) => ({ ...prev, forma: value }))}
+                disabled={devolucao && devolucao.status !== 'Pendente' && devolucao.status !== 'Rejeitada'}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a forma" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAYMENT_METHOD_OPTIONS.map((method) => (
+                    <SelectItem key={method} value={method}>{method}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label>Valor do pagamento</Label>
+              <Input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={novoPagamentoDiferenca.valor}
+                onChange={(e) => setNovoPagamentoDiferenca((prev) => ({ ...prev, valor: e.target.value }))}
+                disabled={devolucao && devolucao.status !== 'Pendente' && devolucao.status !== 'Rejeitada'}
+                placeholder={`Até R$ ${valorDiferenca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+              />
+            </div>
+          </div>
+
+          {isInstallmentPaymentMethod(novoPagamentoDiferenca.forma) && (
+            <div className="mt-3 max-w-[160px]">
+              <Label>Parcelas</Label>
+              <Select
+                value={String(novoPagamentoDiferenca.parcelas || 1)}
+                onValueChange={(value) => setNovoPagamentoDiferenca((prev) => ({ ...prev, parcelas: Number(value) }))}
+                disabled={devolucao && devolucao.status !== 'Pendente' && devolucao.status !== 'Rejeitada'}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="1x" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 12 }).map((_, index) => (
+                    <SelectItem key={index + 1} value={String(index + 1)}>
+                      {index + 1}x
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <div className="mt-3">
+            <Button
+              type="button"
+              onClick={adicionarPagamentoDiferenca}
+              disabled={devolucao && devolucao.status !== 'Pendente' && devolucao.status !== 'Rejeitada'}
+              style={{ backgroundColor: '#07593f' }}
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              Adicionar pagamento
+            </Button>
+          </div>
+
+          {pagamentosDiferenca.length > 0 && (
+            <div className="space-y-2 mt-4">
+              {pagamentosDiferenca.map((pagamento, index) => (
+                <div key={`${pagamento.attempt_id || index}`} className="flex justify-between items-center p-3 bg-gray-50 rounded border">
+                  <div>
+                    <p className="font-medium text-sm">{pagamento.forma_pagamento}</p>
+                    {pagamento.parcelas > 1 && <p className="text-xs text-blue-600">{pagamento.parcelas}x</p>}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-semibold">R$ {Number(pagamento.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-red-600"
+                      onClick={() => removerPagamentoDiferenca(index)}
+                      disabled={devolucao && devolucao.status !== 'Pendente' && devolucao.status !== 'Rejeitada'}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!validacaoPagamentoDiferenca.ok && validacaoPagamentoDiferenca.errors.length > 0 && (
+            <Alert className="mt-4 border-amber-200 bg-amber-50">
+              <AlertDescription className="text-amber-800 text-sm">
+                {validacaoPagamentoDiferenca.errors[0]}
+              </AlertDescription>
+            </Alert>
+          )}
+        </div>
+      )}
 
             {formData.tipo === 'Troca' && valorDiferenca < 0 && (
               <div className="border rounded-lg p-4" style={{ borderColor: '#6366f1' }}>
@@ -1300,40 +1370,51 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
               Cancelar
             </Button>
 
+            {devolucao && canApprove && devolucao.status === 'Pendente' && (
+              <>
+                <Button
+                  type="button"
+                  onClick={handleReject}
+                  variant="destructive"
+                  disabled={isLoading || isApproving}
+                >
+                  Rejeitar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleApprove}
+                  disabled={isLoading || isApproving || (formData.tipo === 'Troca' && valorDiferenca > 0 && (!formData.forma_pagamento_diferenca || validacaoPagamentoDiferenca.restante > 0)) || (formData.tipo === 'Troca' && valorDiferenca < 0 && !formData.destino_troco)}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {isApproving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Aprovando...
+                    </>
+                  ) : 'Aprovar'}
+                </Button>
+              </>
+            )}
+
             {(!devolucao || devolucao.status === 'Pendente' || devolucao.status === 'Rejeitada') && (
               <Button
                 type="submit"
                 disabled={isLoading || isApproving || !formData.venda_id || formData.itens_devolvidos.length === 0 || (formData.tipo === 'Troca' && valorDiferenca > 0 && !formData.forma_pagamento_diferenca) || (formData.tipo === 'Troca' && valorDiferenca < 0 && !formData.destino_troco)}
                 style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}
               >
-                {isLoading || isApproving ? (
+                {isLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Processando...
+                    Salvando...
                   </>
                 ) : (
-                  devolucao ? "Salvar" : "Criar Devolução"
+                  devolucao ? "Salvar Pendente" : "Criar Devolução"
                 )}
               </Button>
             )}
           </DialogFooter>
         </form>
-      </>
-    );
-
-    if (noDialog) {
-      return (
-        <div className="w-full">
-          {formContent}
-        </div>
-      );
-    }
-
-    return (
-      <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          {formContent}
-        </DialogContent>
-      </Dialog>
-    );
+      </DialogContent>
+    </Dialog>
+  );
 }
