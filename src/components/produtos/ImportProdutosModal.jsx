@@ -914,21 +914,31 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         }
 
         // ========================================
-        // FASE 3: HISTÓRICO DE PREÇOS (fire-and-forget, em paralelo)
+        // FASE 3: HISTÓRICO DE PREÇOS (Em lotes para evitar ERR_INSUFFICIENT_RESOURCES)
         // ========================================
-        const historicoPromises = produtoIds.map(produtoId =>
-            base44.entities.HistoricoPrecos?.create?.({
-                organization_id: orgId,
-                produto_id: produtoId,
-                preco_antigo: 0,
-                preco_novo: 0,
-                tipo: 'venda',
-                motivo: `Importação Smart - ${file?.name || 'arquivo'}`,
-                usuario_nome: user?.nome || 'Sistema'
-            }).catch(err => console.warn('[Import] Histórico de preços falhou:', err))
-        );
+        const historicos = produtoIds.map(produtoId => ({
+            organization_id: orgId,
+            produto_id: produtoId,
+            preco_antigo: 0,
+            preco_novo: 0,
+            tipo: 'venda',
+            motivo: `Importação Smart - ${file?.name || 'arquivo'}`,
+            usuario_nome: user?.nome || 'Sistema'
+        }));
 
-        await Promise.allSettled(historicoPromises);
+        const HISTORICO_BATCH_SIZE = 500;
+        for (let i = 0; i < historicos.length; i += HISTORICO_BATCH_SIZE) {
+            const chunk = historicos.slice(i, i + HISTORICO_BATCH_SIZE);
+            try {
+                const { error: histErr } = await supabase
+                    .from('historico_precos')
+                    .insert(chunk);
+                if (histErr) throw histErr;
+            } catch (err) {
+                console.warn('[Import] Histórico de preços (batch) falhou:', err);
+            }
+        }
+
         setProgress(100);
 
         if (cancelImportRef.current) {
