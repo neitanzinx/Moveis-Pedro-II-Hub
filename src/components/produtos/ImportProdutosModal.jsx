@@ -786,13 +786,30 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
             const rawSku = item.codigo_barras || generateSKU(item.fornecedor_nome, item.modelo_referencia, item.cor, item.modelos_tecidos);
             const codigoBarras = String(rawSku || '').trim() || `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 
+            // Gerar modelo_referencia único por variação para evitar conflito de UNIQUE CONSTRAINT
+            // Regra: modelo_referencia base + sufixo de cor/tecido (quando existir variação)
+            const modeloBase = (item.modelo_referencia || '').trim();
+            const variationSuffix = buildVariationSuffix(item.cor, item.modelos_tecidos);
+            let modeloUnico;
+            if (modeloBase && variationSuffix) {
+                // Ex: "ALT-SF3" + cor "Cinza" + tecido "Suede" → "ALT-SF3-CINZA-SUEDE"
+                modeloUnico = `${modeloBase}-${variationSuffix}`;
+            } else if (modeloBase) {
+                // Sem variação — usa o modelo como está
+                modeloUnico = modeloBase;
+            } else {
+                // Referência vazia: gera fallback a partir do SKU para evitar colisão
+                // de múltiplos produtos sem referência na mesma importação
+                modeloUnico = codigoBarras;
+            }
+
             todosOsProdutos.push({
                 nome: item.nome,
                 categoria,
                 ambiente,
                 fornecedor_nome: item.fornecedor_nome || '',
                 fornecedor_id: fornecedoresMap[normalizeFornecedor(item.fornecedor_nome)] || null,
-                modelo_referencia: item.modelo_referencia || '',
+                modelo_referencia: modeloUnico,
                 material: item.material || '',
                 tipo_entrega_padrao: 'desmontado',
                 largura: item.largura || null,

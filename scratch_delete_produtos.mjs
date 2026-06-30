@@ -28,7 +28,7 @@ async function main() {
   const { error: delErr, count: deleted } = await supabase
     .from('produtos')
     .delete({ count: 'exact' })
-    .neq('id', '00000000-0000-0000-0000-000000000000');
+    .neq('id', 0);
 
   if (delErr) {
     console.error('Erro ao deletar:', delErr);
