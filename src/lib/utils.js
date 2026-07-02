@@ -12,13 +12,27 @@ export function cn(...inputs) {
  */
 export function normSearch(str) {
   if (str == null) return '';
-  return String(str)
+  let normalized = String(str)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[-/|_.]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
+
+  // Normalize feminine color adjectives to masculine to allow gender-insensitive search
+  normalized = normalized
+    .replace(/\bpreta\b/g, 'preto')
+    .replace(/\bbranca\b/g, 'branco')
+    .replace(/\bamarela\b/g, 'amarelo')
+    .replace(/\bvermelha\b/g, 'vermelho')
+    .replace(/\broxa\b/g, 'roxo')
+    .replace(/\bcastanha\b/g, 'castanho')
+    .replace(/\bclara\b/g, 'claro')
+    .replace(/\bescura\b/g, 'escuro')
+    .replace(/\bmadeirada\b/g, 'madeirado');
+
+  return normalized;
 } 
 
 function normalizeComparableValue(value) {

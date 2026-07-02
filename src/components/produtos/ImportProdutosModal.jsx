@@ -270,7 +270,12 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
     }, [lojas]);
 
     const buildVariationToken = (value, fallback = '') => {
-        const token = String(value || '').substring(0, 10).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const token = String(value || '')
+            .substring(0, 30)
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
         return token || fallback;
     };
 
