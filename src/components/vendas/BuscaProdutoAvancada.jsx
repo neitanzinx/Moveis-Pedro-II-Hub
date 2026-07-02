@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useDeferredValue } from "react";
 import { normSearch } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,11 +12,13 @@ import { base44 } from "@/api/base44Client";
 import { supabase } from "@/lib/supabase";
 import { useQueryClient } from "@tanstack/react-query";
 import ProdutoCadastroCompleto from "@/components/produtos/ProdutoCadastroCompleto";
+import { getProductStockFields } from "@/utils/stockUtils";
 
 export default function BuscaProdutoAvancada(props) {
   const { produtos, onSelectProduto, onEditProduto, fornecedores = [] } = props;
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [showResults, setShowResults] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -55,6 +57,33 @@ export default function BuscaProdutoAvancada(props) {
     const reservado = Number(produto.quantidade_reservada || 0);
 
     return Math.max(0, estoqueBase - reservado);
+  };
+
+  const renderEstoqueBages = (produto) => {
+    const stockFields = getProductStockFields(produto);
+    const nonZeroFields = stockFields.filter(f => (produto[f] || 0) > 0);
+    
+    if (nonZeroFields.length === 0) return null;
+
+    return (
+      <div className="flex flex-wrap justify-end gap-1 max-w-[180px] mt-0.5">
+        {nonZeroFields.map(field => {
+          const val = produto[field];
+          let name = field === 'estoque_cd' ? 'CD' :
+                     field === 'estoque_mostruario_mega_store' ? 'Mega' :
+                     field === 'estoque_mostruario_centro' ? 'Centro' :
+                     field === 'estoque_mostruario_ponte_branca' ? 'P.Branca' :
+                     field === 'estoque_mostruario_futura' ? 'Futura' :
+                     field.replace('estoque_mostruario_', '').replace('estoque_', '').substring(0,8);
+                     
+          return (
+            <Badge key={field} variant="outline" className="font-mono text-[9px] border-gray-200 text-gray-600 px-1 py-0 h-4 flex items-center" title={field}>
+              {name}: <strong className="ml-1 text-gray-800">{val}</strong>
+            </Badge>
+          );
+        })}
+      </div>
+    );
   };
 
   // Fechar resultados ao clicar fora
@@ -247,43 +276,67 @@ export default function BuscaProdutoAvancada(props) {
   const mostrarTecidos = variantesProduto && tecidosDisponiveis.length > 0 && !tecidoSelecionado;
   const mostrarCores = variantesProduto && tecidoSelecionado && coresDisponiveis.length > 0;
 
-  // Filtrar e pontuar produtos
-  const searchTokens = normSearch(searchTerm).split(/\s+/).filter(t => t.length > 0);
-  const scoredProdutos = searchTokens.length === 0 ? [] : produtos
-    .filter((p) => p.ativo !== false)
-    .map(p => {
-      const camposBusca = [
-        p.id,
-        p.nome,
-        p.modelo_referencia,
-        p.codigo_barras,
-        p.sku,
-        p.gtin,
-        p.ean,
-        p.ncm,
-        p.categoria,
-        p.ambiente,
-        p.material,
-        p.cor,
-        p.marca,
-        p.fornecedor_nome,
-        p.descricao,
-        p.descricao_completa,
-        p.observacoes,
-        p.largura,
-        p.altura,
-        p.profundidade,
-      ]
-        .filter(Boolean).map(normSearch).join(' ');
-      const matches = searchTokens.filter(token => camposBusca.includes(token)).length;
-      return { produto: p, score: matches };
-    })
-    .filter(({ score }) => score > 0)
-    .sort((a, b) => b.score - a.score);
+  // Filtrar e pontuar produtos com índice de busca memoizado para evitar reprocessar tudo a cada tecla
+  const searchableProdutos = useMemo(() => {
+    if (!Array.isArray(produtos)) return [];
 
-  const exactMatches = scoredProdutos.filter(({ score }) => score === searchTokens.length);
-  const isFuzzy = exactMatches.length === 0 && scoredProdutos.length > 0;
-  const produtosFiltrados = (isFuzzy ? scoredProdutos : exactMatches).map(s => s.produto);
+    return produtos
+      .filter((p) => p?.ativo !== false)
+      .map((p) => {
+        const camposBusca = [
+          p.id,
+          p.nome,
+          p.modelo_referencia,
+          p.codigo_barras,
+          p.sku,
+          p.gtin,
+          p.ean,
+          p.ncm,
+          p.categoria,
+          p.ambiente,
+          p.material,
+          p.cor,
+          p.marca,
+          p.fornecedor_nome,
+          p.descricao,
+          p.descricao_completa,
+          p.observacoes,
+          p.largura,
+          p.altura,
+          p.profundidade,
+        ]
+          .filter((value) => value !== null && value !== undefined && value !== '')
+          .map(normSearch)
+          .join(' ');
+
+        return { produto: p, searchText: camposBusca };
+      });
+  }, [produtos]);
+
+  const searchTokens = useMemo(() => {
+    const normalized = normSearch(deferredSearchTerm);
+    return normalized.split(/\s+/).filter((token) => token.length > 0);
+  }, [deferredSearchTerm]);
+
+  const { produtosFiltrados, isFuzzy } = useMemo(() => {
+    if (searchTokens.length === 0 || !deferredSearchTerm.trim()) {
+      return { produtosFiltrados: [], isFuzzy: false };
+    }
+
+    const scoredProdutos = searchableProdutos
+      .map(({ produto, searchText }) => {
+        const matches = searchTokens.reduce((total, token) => total + (searchText.includes(token) ? 1 : 0), 0);
+        return matches > 0 ? { produto, score: matches } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score);
+
+    const exactMatches = scoredProdutos.filter(({ score }) => score === searchTokens.length);
+    const fuzzy = exactMatches.length === 0 && scoredProdutos.length > 0;
+    const resultados = (fuzzy ? scoredProdutos : exactMatches).map((item) => item.produto);
+
+    return { produtosFiltrados: resultados, isFuzzy: fuzzy };
+  }, [deferredSearchTerm, searchableProdutos, searchTokens]);
 
   return (
     <div ref={searchRef} className="relative">
@@ -418,29 +471,32 @@ export default function BuscaProdutoAvancada(props) {
                             {detalhesTecnicos}
                           </p>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className="text-[10px] font-semibold">
-                            {bloqueado ? (
-                              <span className="text-red-500">Sem estoque</span>
-                            ) : semEstoque ? (
-                              <span className="text-amber-500">Sob encomenda</span>
-                            ) : (
-                              <span className={qtd <= 5 ? 'text-orange-500' : 'text-green-600'}>{qtd}un</span>
+                        <div className="flex flex-col items-end shrink-0">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-semibold">
+                              {bloqueado ? (
+                                <span className="text-red-500">Sem estoque</span>
+                              ) : semEstoque ? (
+                                <span className="text-amber-500">Sob encomenda</span>
+                              ) : (
+                                <span className={qtd <= 5 ? 'text-orange-500' : 'text-green-600'}>Total: {qtd}un</span>
+                              )}
+                            </span>
+                            {onEditProduto && (
+                              <div onClick={(e) => e.stopPropagation()}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-full hover:bg-blue-100 text-blue-600"
+                                  title="Editar Produto"
+                                  onClick={() => onEditProduto(produto)}
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </Button>
+                              </div>
                             )}
-                          </span>
-                          {onEditProduto && (
-                            <div onClick={(e) => e.stopPropagation()}>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 rounded-full hover:bg-blue-100 text-blue-600"
-                                title="Editar Produto"
-                                onClick={() => onEditProduto(produto)}
-                              >
-                                <Edit2 className="w-3 h-3" />
-                              </Button>
-                            </div>
-                          )}
+                          </div>
+                          {renderEstoqueBages(produto)}
                         </div>
                       </div>
                     </div>

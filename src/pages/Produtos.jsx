@@ -46,6 +46,7 @@ import { formatDimensions, formatPrice } from "@/utils/productFormatters";
 import { getColorHex } from "@/components/produtos/FurnitureColorPicker";
 import { CATEGORIAS } from "@/constants/productConstants";
 import ProductIncompleteIndicator from "@/components/produtos/ProductIncompleteIndicator";
+import { getProductStockFields } from "@/utils/stockUtils";
 import GeradorEtiquetasModal from "@/components/legacy_estoque/GeradorEtiquetasModal";
 import { Printer } from "lucide-react";
 import { useProdutoFilters } from "@/hooks/useProdutoFilters";
@@ -252,6 +253,39 @@ export default function Produtos() {
   // Helper para calcular estoque total consolidado
   const getEstoqueTotal = (p) => {
     return p?.quantidade_estoque || p?.estoque_cd || 0;
+  };
+
+  const renderEstoqueBages = (produto, isListView = false) => {
+    const stockFields = getProductStockFields(produto);
+    const nonZeroFields = stockFields.filter(f => (produto[f] || 0) > 0);
+    
+    if (nonZeroFields.length === 0) {
+      return (
+        <Badge variant="secondary" className={`font-mono ${isListView ? 'text-xs' : 'text-[10px]'} bg-gray-50 text-gray-400 px-1.5 ${isListView ? '' : 'h-5'}`} title="Sem estoque">
+          Est: 0
+        </Badge>
+      );
+    }
+
+    return (
+      <div className={`flex flex-wrap justify-end gap-1 ${isListView ? 'max-w-[200px]' : 'max-w-[150px]'}`}>
+        {nonZeroFields.map(field => {
+          const val = produto[field];
+          let name = field === 'estoque_cd' ? 'CD' :
+                     field === 'estoque_mostruario_mega_store' ? 'Mega' :
+                     field === 'estoque_mostruario_centro' ? 'Centro' :
+                     field === 'estoque_mostruario_ponte_branca' ? 'P.Branca' :
+                     field === 'estoque_mostruario_futura' ? 'Futura' :
+                     field.replace('estoque_mostruario_', '').replace('estoque_', '').substring(0,8);
+                     
+          return (
+            <Badge key={field} variant="outline" className={`font-mono ${isListView ? 'text-xs' : 'text-[9px]'} border-gray-200 text-gray-600 px-1.5 ${isListView ? 'py-0.5' : 'h-4'} flex items-center`} title={field}>
+              {name}: <strong className="ml-1 text-gray-800">{val}</strong>
+            </Badge>
+          );
+        })}
+      </div>
+    );
   };
 
   // Apply ordering to products
@@ -765,9 +799,7 @@ export default function Produtos() {
                     </div>
 
                     <div className="text-right">
-                      <Badge variant="secondary" className="font-mono text-[10px] bg-gray-50 text-gray-600 px-1.5 h-5">
-                        Est: {getEstoqueTotal(produto)}
-                      </Badge>
+                      {renderEstoqueBages(produto, false)}
                     </div>
                   </div>
 
@@ -851,9 +883,7 @@ export default function Produtos() {
                           <span className="text-xs italic text-gray-400">Consulte</span>
                         )}
                       </div>
-                      <Badge variant="secondary" className="font-mono text-xs bg-gray-100 text-gray-600">
-                        Est: {getEstoqueTotal(produto)}
-                      </Badge>
+                      {renderEstoqueBages(produto, true)}
                     </div>
 
                     {/* Actions */}

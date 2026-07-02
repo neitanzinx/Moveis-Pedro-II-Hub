@@ -391,49 +391,56 @@ export default function ProdutoCadastroCompleto({
     // Inicializa com produto existente (modo edição)
     useEffect(() => {
         if (produto && isOpen) {
+            const cleanedProduct = { ...produto };
+            for (const key of Object.keys(INITIAL_FORM_DATA)) {
+                if (cleanedProduct[key] === null || cleanedProduct[key] === undefined) {
+                    cleanedProduct[key] = INITIAL_FORM_DATA[key];
+                }
+            }
+
             setFormData({
                 ...INITIAL_FORM_DATA,
-                ...produto,
-                modelo_referencia: produto.modelo_referencia || '',
-                preco_custo: produto.preco_custo?.toString() || '',
-                preco_custo_tabela: produto.preco_custo_tabela?.toString() || produto.preco_custo?.toString() || '',
-                impostos_percentual: produto.impostos_percentual ? `${produto.impostos_percentual}%` : '',
-                frete_custo: produto.frete_custo ? `${produto.frete_custo}%` : '',
-                ipi_percentual: produto.ipi_percentual ? `${produto.ipi_percentual}%` : '',
+                ...cleanedProduct,
+                modelo_referencia: cleanedProduct.modelo_referencia || '',
+                preco_custo: cleanedProduct.preco_custo?.toString() || '',
+                preco_custo_tabela: cleanedProduct.preco_custo_tabela?.toString() || cleanedProduct.preco_custo?.toString() || '',
+                impostos_percentual: cleanedProduct.impostos_percentual ? `${cleanedProduct.impostos_percentual}%` : '',
+                frete_custo: cleanedProduct.frete_custo ? `${cleanedProduct.frete_custo}%` : '',
+                ipi_percentual: cleanedProduct.ipi_percentual ? `${cleanedProduct.ipi_percentual}%` : '',
                 preco_custo_promocional: '', // Ignora valor do banco
                 promocao_inicio: '',
                 promocao_fim: '',
                 promocao_observacao: '',
                 tem_promocao: false, // Feature desabilitada
-                preco_venda: produto.preco_venda?.toString() || '',
-                markup_multiplicador: produto.markup_multiplicador?.toString() || '',
-                markup_percentual: produto.markup_percentual?.toString() || '',
-                preco_final_sugerido: produto.preco_final_sugerido?.toString() || '',
-                preco_final_manual: produto.preco_final_manual?.toString() || '',
-                usar_markup_fornecedor: Boolean(produto.usar_markup_fornecedor),
-                valor_montagem: produto.valor_montagem?.toString() || '',
+                preco_venda: cleanedProduct.preco_venda?.toString() || '',
+                markup_multiplicador: cleanedProduct.markup_multiplicador?.toString() || '',
+                markup_percentual: cleanedProduct.markup_percentual?.toString() || '',
+                preco_final_sugerido: cleanedProduct.preco_final_sugerido?.toString() || '',
+                preco_final_manual: cleanedProduct.preco_final_manual?.toString() || '',
+                usar_markup_fornecedor: Boolean(cleanedProduct.usar_markup_fornecedor),
+                valor_montagem: cleanedProduct.valor_montagem?.toString() || '',
                 // Estoque
-                estoque_cd: produto.estoque_cd?.toString() || '',
+                estoque_cd: cleanedProduct.estoque_cd?.toString() || '',
                 ...Object.fromEntries(
-                    ESTOQUE_LOJA_FIELDS.map((field) => [field, produto[field]?.toString() || ''])
+                    ESTOQUE_LOJA_FIELDS.map((field) => [field, cleanedProduct[field]?.toString() || ''])
                 ),
-                quantidade_estoque: produto.quantidade_estoque?.toString() || '',
-                estoque_minimo: produto.estoque_minimo?.toString() || '',
-                estoque_ideal: produto.estoque_ideal?.toString() || '',
-                largura: produto.largura?.toString() || '',
-                altura: produto.altura?.toString() || '',
-                profundidade: produto.profundidade?.toString() || '',
-                cfop: produto.cfop || '',
-                unidade: produto.unidade || 'UN',
-                origem_mercadoria: produto.origem_mercadoria || produto.origem || '0',
-                peso_bruto: produto.peso_bruto?.toString() || '',
-                peso_liquido: produto.peso_liquido?.toString() || '',
-                altura_embalagem: produto.altura_embalagem?.toString() || '',
-                largura_embalagem: produto.largura_embalagem?.toString() || '',
-                profundidade_embalagem: produto.profundidade_embalagem?.toString() || '',
-                fotos: produto.fotos || [],
-                variacoes: produto.variacoes || [],
-                cores: produto.cor ? [produto.cor] : [],
+                quantidade_estoque: cleanedProduct.quantidade_estoque?.toString() || '',
+                estoque_minimo: cleanedProduct.estoque_minimo?.toString() || '',
+                estoque_ideal: cleanedProduct.estoque_ideal?.toString() || '',
+                largura: cleanedProduct.largura?.toString() || '',
+                altura: cleanedProduct.altura?.toString() || '',
+                profundidade: cleanedProduct.profundidade?.toString() || '',
+                cfop: cleanedProduct.cfop || '',
+                unidade: cleanedProduct.unidade || 'UN',
+                origem_mercadoria: cleanedProduct.origem_mercadoria || cleanedProduct.origem || '0',
+                peso_bruto: cleanedProduct.peso_bruto?.toString() || '',
+                peso_liquido: cleanedProduct.peso_liquido?.toString() || '',
+                altura_embalagem: cleanedProduct.altura_embalagem?.toString() || '',
+                largura_embalagem: cleanedProduct.largura_embalagem?.toString() || '',
+                profundidade_embalagem: cleanedProduct.profundidade_embalagem?.toString() || '',
+                fotos: cleanedProduct.fotos || [],
+                variacoes: cleanedProduct.variacoes || [],
+                cores: cleanedProduct.cor ? [cleanedProduct.cor] : [],
             });
             setErrors({});
             setDuplicatas([]);

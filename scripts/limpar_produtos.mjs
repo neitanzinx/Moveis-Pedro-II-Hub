@@ -35,35 +35,69 @@ async function cleanAll() {
   for (const table of tablesToClean) {
     console.log(`Limpando tabela: ${table}...`);
     
-    // Tenta deletar todos os registros onde id não é nulo
-    const { error, count } = await supabase
-      .from(table)
-      .delete()
-      .not('id', 'is', null)
-      .select('id', { count: 'exact' });
-
-    if (error) {
-      // Se der erro porque a coluna 'id' não existe na tabela, tenta sem filtro ou com outro campo comum
-      if (error.message.includes("column id does not exist") || error.message.includes("id")) {
-        console.log(`  Coluna 'id' não encontrada em ${table}, tentando deletar sem filtro...`);
-        // No supabase-js v2, para deletar todas as linhas sem filtro, precisamos de um filtro sempre verdadeiro
-        // Vamos tentar com outro nome de PK comum se soubermos, ou com um filtro genérico
-        const { error: err2, count: c2 } = await supabase
-          .from(table)
-          .delete()
-          .neq('created_at', '1970-01-01')
-          .select('*, count:exact');
+    if (table === 'produtos') {
+      let deletedTotal = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const { data, error: fetchErr } = await supabase
+          .from('produtos')
+          .select('id')
+          .limit(1000);
           
-        if (err2) {
-          console.error(`  ❌ Erro ao limpar ${table}:`, err2.message);
+        if (fetchErr) {
+          console.error(`  ❌ Erro ao buscar produtos para limpar:`, fetchErr.message);
+          break;
+        }
+        
+        if (!data || data.length === 0) {
+          hasMore = false;
+          break;
+        }
+        
+        const ids = data.map(d => d.id);
+        const { error: delErr } = await supabase
+          .from('produtos')
+          .delete()
+          .in('id', ids);
+          
+        if (delErr) {
+          console.error(`  ❌ Erro ao deletar lote de produtos:`, delErr.message);
+          break;
+        }
+        
+        deletedTotal += ids.length;
+        console.log(`  Lote de ${ids.length} produtos limpo. Total removido: ${deletedTotal}`);
+      }
+      console.log(`  ✓ ${table} limpa.`);
+    } else {
+      // Tenta deletar todos os registros onde id não é nulo
+      const { error, count } = await supabase
+        .from(table)
+        .delete()
+        .not('id', 'is', null)
+        .select('id', { count: 'exact' });
+
+      if (error) {
+        // Se der erro porque a coluna 'id' não existe na tabela, tenta sem filtro ou com outro campo comum
+        if (error.message.includes("column id does not exist") || error.message.includes("id")) {
+          console.log(`  Coluna 'id' não encontrada em ${table}, tentando deletar sem filtro...`);
+          const { error: err2, count: c2 } = await supabase
+            .from(table)
+            .delete()
+            .neq('created_at', '1970-01-01')
+            .select('*, count:exact');
+            
+          if (err2) {
+            console.error(`  ❌ Erro ao limpar ${table}:`, err2.message);
+          } else {
+            console.log(`  ✓ ${table} limpa. Registros removidos: ${c2 || 0}`);
+          }
         } else {
-          console.log(`  ✓ ${table} limpa. Registros removidos: ${c2 || 0}`);
+          console.error(`  ❌ Erro ao limpar ${table}:`, error.message);
         }
       } else {
-        console.error(`  ❌ Erro ao limpar ${table}:`, error.message);
+        console.log(`  ✓ ${table} limpa. Registros removidos: ${count || 0}`);
       }
-    } else {
-      console.log(`  ✓ ${table} limpa. Registros removidos: ${count || 0}`);
     }
   }
 

@@ -21,6 +21,59 @@ import { useLojas } from "@/hooks/useLojas";
 import { obterCampoEstoqueDaLoja } from "@/constants/productConstants";
 import { useAuth } from "@/hooks/useAuth";
 
+const EditableStockCell = ({ produto, campo, valorOriginal, onSave, canEdit }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [value, setValue] = useState(valorOriginal);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      const numValue = Number(value);
+      if (numValue !== valorOriginal && !isNaN(numValue)) {
+        onSave(produto, campo, numValue);
+      }
+      setIsEditing(false);
+    } else if (e.key === 'Escape') {
+      setValue(valorOriginal);
+      setIsEditing(false);
+    }
+  };
+
+  const handleBlur = () => {
+    setValue(valorOriginal);
+    setIsEditing(false);
+  };
+
+  if (!canEdit) {
+    return <span className={`font-medium ${valorOriginal === 0 ? 'text-red-500' : 'text-gray-900 dark:text-white'}`}>{valorOriginal}</span>;
+  }
+
+  if (isEditing) {
+    return (
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onBlur={handleBlur}
+        autoFocus
+        onWheel={(e) => e.target.blur()}
+        className="w-14 h-6 text-center text-xs border border-green-500 rounded outline-none shadow-sm [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        style={{ MozAppearance: 'textfield' }}
+      />
+    );
+  }
+
+  return (
+    <span 
+      className={`font-medium cursor-pointer hover:text-green-600 hover:underline px-1 py-0.5 rounded transition-colors ${valorOriginal === 0 ? 'text-red-500' : 'text-gray-900 dark:text-white'}`}
+      onClick={() => setIsEditing(true)}
+      title="Clique para editar"
+    >
+      {valorOriginal}
+    </span>
+  );
+};
+
 export default function EstoqueTab({ user }) {
   const { data: lojasAtivas = [] } = useLojas();
   const lojasComCd = useMemo(() => {
@@ -307,6 +360,30 @@ export default function EstoqueTab({ user }) {
     }
   };
 
+  const handleQuickStockSave = async (produto, campo, novoValor) => {
+    try {
+      // Optimistic update
+      const updateData = (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          pages: old.pages.map(page => ({
+            ...page,
+            data: page.data.map(p => p.id === produto.id ? { ...p, [campo]: novoValor } : p)
+          }))
+        };
+      };
+      queryClient.setQueryData(['produtos-paginated', debouncedSearch, selectedCategoria, filtroAtencao, selectedFabricante], updateData);
+      
+      await base44.entities.Produto.update(produto.id, { [campo]: novoValor });
+      queryClient.invalidateQueries({ queryKey: ['produtos-paginated'] });
+      queryClient.invalidateQueries({ queryKey: ['produtos'] });
+      toast.success("Estoque atualizado!");
+    } catch (error) {
+      toast.error("Erro ao atualizar estoque: " + error.message);
+    }
+  };
+
   const handleOpenProdutoEditor = (produto, nextFocusField = null) => {
     if (!produto) {
       setCadastroProduto(null);
@@ -480,7 +557,7 @@ export default function EstoqueTab({ user }) {
               </TableRow>
             ) : (
               produtosExibidos.map(produto => {
-                const quantidadeAtual = Number(produto.quantidade_estoque || 0);
+                const quantidadeAtual = lojasComCd.reduce((acc, loja) => acc + Number(produto[obterCampoEstoqueDaLoja(loja)] || 0), 0);
                 const estoqueMinimo = Number(produto.estoque_minimo || 0);
                 const isOutOfStock = quantidadeAtual === 0;
                 const isLowStock = quantidadeAtual > 0 && estoqueMinimo > 0 && quantidadeAtual <= estoqueMinimo;
@@ -576,32 +653,43 @@ export default function EstoqueTab({ user }) {
                         {produto.categoria}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-center">
-                      <div className="flex flex-col items-center gap-1">
-                        <span className={`font-medium ${(isLowStock || isOutOfStock) ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
-                          {produto.quantidade_estoque}
-                        </span>
-                        {isOutOfStock ? (
-                          <Badge variant="destructive" className="h-4 px-1 text-[10px]">Zerado</Badge>
-                        ) : isLowStock && (
-                          <Badge variant="destructive" className="h-4 px-1 text-[10px]">Baixo</Badge>
-                        )}
-                        <div className="text-[10px] text-gray-500 flex gap-1 flex-wrap justify-center max-w-[120px]">
+                    <TableCell className="text-center align-top pt-4">
+                      <div className="flex flex-col gap-2 w-full max-w-[140px] mx-auto">
+                        <div className="flex justify-between items-center bg-gray-50 dark:bg-neutral-800/50 p-1.5 rounded-md border border-gray-100 dark:border-neutral-800">
+                          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">TOTAL</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`font-bold text-sm ${(isLowStock || isOutOfStock) ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
+                              {quantidadeAtual}
+                            </span>
+                            {isOutOfStock ? (
+                              <Badge variant="destructive" className="h-4 px-1 text-[9px] leading-none">Zerado</Badge>
+                            ) : isLowStock && (
+                              <Badge variant="destructive" className="h-4 px-1 text-[9px] leading-none">Baixo</Badge>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="flex flex-col gap-1.5">
                           {lojasComCd.map(loja => {
                             const campo = obterCampoEstoqueDaLoja(loja);
-                            const qtd = produto[campo];
-                            if (qtd > 0) {
-                              const sigla = loja.nome === "Depósito / CD" ? "CD" : 
-                                            loja.nome === "Centro" ? "CN" :
-                                            loja.nome === "Ponte Branca" ? "PB" :
-                                            loja.nome.substring(0, 2).toUpperCase();
-                              return (
-                                <span key={loja.id} title={loja.nome}>
-                                  {sigla}:{qtd}
-                                </span>
-                              );
-                            }
-                            return null;
+                            const qtd = Number(produto[campo] || 0);
+                            const sigla = loja.nome === "Depósito / CD" ? "CD" : 
+                                          loja.nome === "Centro" ? "Centro" :
+                                          loja.nome === "Ponte Branca" ? "P.Branca" :
+                                          loja.nome === "Mega Store" ? "Mega" :
+                                          loja.nome.substring(0, 8);
+                            return (
+                              <div key={loja.id} className="flex justify-between items-center text-xs px-1 hover:bg-gray-50/50 dark:hover:bg-neutral-800/30 rounded">
+                                <span className="text-gray-500 dark:text-gray-400" title={loja.nome}>{sigla}:</span>
+                                <EditableStockCell 
+                                  produto={produto}
+                                  campo={campo}
+                                  valorOriginal={qtd}
+                                  onSave={handleQuickStockSave}
+                                  canEdit={canEdit}
+                                />
+                              </div>
+                            );
                           })}
                         </div>
                       </div>

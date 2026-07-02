@@ -34,6 +34,7 @@ import { toast } from 'sonner';
 import { getColorHex } from './FurnitureColorPicker';
 import { sugerirNCMsComIA, aplicarSugestoesNCM } from '@/services/ncmSuggestionService';
 import { detectProductKeywordSuggestion } from '@/lib/productKeywordDetector';
+import { buildUniqueCodigoBarras, buildUniqueModeloReferencia } from '@/utils/importProdutosUtils';
 
 // Template CSV - NOTA: Lojas são carregádas dinamicamente
 const CSV_TEMPLATE_HEADER = `FABRICANTE / FORNECEDOR,DESCRIÇÃO DO PRODUTO,MODELO / REFERÊNCIA,PREÇO DE CUSTO,LARGURA,ALTURA,PROFUNDIDADE,EXTRA,VARIAÇÃO DE CORES,MODELOS DE TECIDOS,ESTOQUE CD`;
@@ -62,6 +63,7 @@ const BASE_COLUMN_MAPPING = {
     'descricao': 'nome',
     'nome': 'nome',
     'produto': 'nome',
+    'nome do produto': 'nome',
 
     // === MODELO / REFERÊNCIA ===
     'modelo / referência': 'modelo_referencia',
@@ -70,6 +72,14 @@ const BASE_COLUMN_MAPPING = {
     'modelo': 'modelo_referencia',
     'referência': 'modelo_referencia',
     'referencia': 'modelo_referencia',
+    'linha': 'modelo_referencia',
+    'coleção': 'modelo_referencia',
+    'colecao': 'modelo_referencia',
+    'ref': 'modelo_referencia',
+    'modelo/ref': 'modelo_referencia',
+    'modelo / ref': 'modelo_referencia',
+    'linha/modelo': 'modelo_referencia',
+    'linha / modelo': 'modelo_referencia',
 
     // === PREÇO DE CUSTO ===
     'preço de custo': 'preco_custo',
@@ -88,6 +98,12 @@ const BASE_COLUMN_MAPPING = {
     'variacao de cores': 'cor',
     'cor': 'cor',
     'cores': 'cor',
+    'variação': 'cor',
+    'variacao': 'cor',
+    'acabamento': 'cor',
+    'cores/acabamentos': 'cor',
+    'cor/acabamento': 'cor',
+    'cor / acabamento': 'cor',
     'modelos de tecidos': 'modelos_tecidos',
     'tecidos': 'modelos_tecidos',
 
@@ -271,11 +287,23 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
 
     // Gerar SKU único e DETERMINÍSTICO
     // Formato: FOR-MOD-COR-TECIDO (sanitizado)
-    const generateSKU = (fornecedor, modelo, cor = null, tecido = null) => {
+    const generateSKU = (fornecedor, modelo, cor = null, tecido = null, nome = '') => {
         const forPart = (fornecedor || 'GEN').substring(0, 3).toUpperCase().replace(/[^A-Z0-9]/g, '');
         const modPart = (modelo || 'PRD').substring(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, '');
 
         let sku = `${forPart}-${modPart}`;
+
+        if (nome) {
+            const nameSlug = nome
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toUpperCase()
+                .replace(/[^A-Z0-9]/g, '')
+                .substring(0, 8);
+            if (nameSlug) {
+                sku += `-${nameSlug}`;
+            }
+        }
 
         const variationSuffix = buildVariationSuffix(cor, tecido);
         if (variationSuffix) {
@@ -402,9 +430,18 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         const headers = rawHeaders.map((h, index) => {
             let mapped = normalizeColumn(h);
             if (!mapped || mapped === '') {
-                // Fallbacks baseados na posição da planilha do cliente caso o cabeçalho venha vazio
-                if (index === 2) mapped = 'nome';
-                if (index === 8) mapped = 'dimensao_extra';
+                // Fallbacks baseados na posição exata da planilha padrão quando o cabeçalho estiver vazio/não reconhecido
+                if (index === 0) mapped = 'fornecedor_nome';
+                if (index === 1) mapped = 'nome';
+                if (index === 2) mapped = 'modelo_referencia';
+                if (index === 3) mapped = 'preco_custo';
+                if (index === 4) mapped = 'largura';
+                if (index === 5) mapped = 'altura';
+                if (index === 6) mapped = 'profundidade';
+                if (index === 7) mapped = 'dimensao_extra';
+                if (index === 8) mapped = 'cor';
+                if (index === 9) mapped = 'modelos_tecidos';
+                if (index === 10) mapped = 'estoque_cd';
             }
             return mapped;
         });
@@ -518,10 +555,9 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
             });
 
             // Converter valores numéricos com sanitização Enterprise
-            data.push({
+            const processedRow = {
                 ...row,
                 preco_custo: parseNum(row.preco_custo) || 0,
-                preco_venda: parseNum(row.preco_venda) || 0,
                 largura: parseNum(row.largura),
                 altura: parseNum(row.altura),
                 profundidade: parseNum(row.profundidade),
@@ -539,7 +575,12 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                 // Estoque dinâmico por loja
                 ...estoquePorLoja,
                 linha: i + 1
-            });
+            };
+
+            // Calcula o preco_venda caso não venha preenchido (usa o utilitário que lê frete, IPI e markups)
+            processedRow.preco_venda = parseNum(row.preco_venda) || calcularPrecoFinalImportacao(processedRow) || 0;
+
+            data.push(processedRow);
         }
 
         return { data, errors: parseErrors };
@@ -765,45 +806,154 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
         let imported = 0;
         let skipped = 0;
         let failed = 0;
+        const usedCodes = new Set();
+        const usedModelos = new Set();
         const failedProducts = [];
+        const suggestionCache = new Map();
         const orgId = organization?.id || '00000000-0000-0000-0000-000000000001';
 
         console.log(`[Import] ${totalProdutos} produtos individuais a inserir (cada cor/tecido = 1 produto)`);
 
         // ========================================
-        // FASE 1: Preparar todos os dados de produto
+        // FASE 1/2: Processar produtos em tempo real, em lotes pequenos
+        // Isso evita estourar a memória com planilhas muito grandes.
         // ========================================
-        const todosOsProdutos = [];
+        const BATCH_SIZE = Math.min(50, Math.max(25, Math.ceil(totalProdutos / 1000)));
+        const produtoIds = [];
+        const pendingBatch = [];
+
+        const getSuggestedMetadata = (item) => {
+            const cacheKey = String(item?.nome || '').trim().toLowerCase();
+            if (!cacheKey) {
+                return { categoria: item?.categoria || '', ambiente: item?.ambiente || '' };
+            }
+
+            if (suggestionCache.has(cacheKey)) {
+                return suggestionCache.get(cacheKey);
+            }
+
+            const detected = detectProductKeywordSuggestion(item.nome, { returnDefault: true });
+            const resolved = {
+                categoria: item.categoria || detected.categoriaSuggestion,
+                ambiente: item.ambiente || detected.ambienteSuggestion
+            };
+            suggestionCache.set(cacheKey, resolved);
+            return resolved;
+        };
+
+        const persistBatch = async (batchProducts) => {
+            if (!batchProducts.length) return [];
+
+            setCurrentlyProcessing(() => batchProducts.slice(0, 3).map(p => p.nome + (p.cor ? ` (${p.cor})` : '')));
+
+            const dedupMap = new Map();
+            for (const prod of batchProducts) {
+                dedupMap.set(prod.codigo_barras, prod);
+            }
+            const dedupedBatch = [...dedupMap.values()];
+
+            try {
+                const { data: insertedBatch, error: batchError } = await withRetry(async () =>
+                    supabase
+                        .from('produtos')
+                        .upsert(dedupedBatch, { onConflict: 'codigo_barras,organization_id' })
+                        .select('id')
+                );
+
+                if (batchError) {
+                    throw batchError;
+                }
+
+                const ids = (insertedBatch || []).map(p => p.id).filter(Boolean);
+                produtoIds.push(...ids);
+                imported += ids.length;
+
+                const historicos = ids.map(produtoId => ({
+                    organization_id: orgId,
+                    produto_id: produtoId,
+                    preco_antigo: 0,
+                    preco_novo: 0,
+                    tipo: 'venda',
+                    motivo: `Importação Smart - ${file?.name || 'arquivo'}`,
+                    usuario_nome: user?.nome || 'Sistema'
+                }));
+
+                const HISTORICO_BATCH_SIZE = 500;
+                for (let i = 0; i < historicos.length; i += HISTORICO_BATCH_SIZE) {
+                    const chunk = historicos.slice(i, i + HISTORICO_BATCH_SIZE);
+                    try {
+                        const { error: histErr } = await supabase
+                            .from('historico_precos')
+                            .insert(chunk);
+                        if (histErr) throw histErr;
+                    } catch (err) {
+                        console.warn('[Import] Histórico de preços (batch) falhou:', err);
+                    }
+                }
+
+                console.log(`[Import] Batch inserido: ${ids.length} produtos individuais`);
+                return ids;
+            } catch (err) {
+                console.error('[Import] Erro no batch de produtos:', err);
+                let batchImported = 0;
+                for (const prod of dedupedBatch) {
+                    try {
+                        const { data: single, error: singleErr } = await withRetry(async () =>
+                            supabase
+                                .from('produtos')
+                                .upsert(prod, { onConflict: 'codigo_barras,organization_id' })
+                                .select('id')
+                        );
+                        if (singleErr) throw singleErr;
+                        if (single?.[0]?.id) {
+                            produtoIds.push(single[0].id);
+                            imported++;
+                            batchImported++;
+                        }
+                    } catch (singleErr) {
+                        console.error('[Import] Falha individual:', prod.nome, prod.cor, singleErr);
+                        failed++;
+                        failedProducts.push(`${prod.nome}${prod.cor ? ` (${prod.cor})` : ''}`);
+                    }
+                }
+                return batchImported;
+            }
+        };
 
         for (const item of groupedProducts) {
             if (cancelImportRef.current) break;
 
-            const detected = detectProductKeywordSuggestion(item.nome, { returnDefault: true });
-            const categoria = item.categoria || detected.categoriaSuggestion;
-            const ambiente = item.ambiente || detected.ambienteSuggestion;
+            const { categoria, ambiente } = getSuggestedMetadata(item);
 
-            // Gerar SKU/codigo_barras único incluindo cor e tecido
-            const rawSku = item.codigo_barras || generateSKU(item.fornecedor_nome, item.modelo_referencia, item.cor, item.modelos_tecidos);
-            const codigoBarras = String(rawSku || '').trim() || `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+            // Gerar SKU/codigo_barras único incluindo cor e tecido, mesmo quando a planilha
+            // contém linhas repetidas ou códigos em branco.
+            const rawSku = item.codigo_barras || generateSKU(item.fornecedor_nome, item.modelo_referencia, item.cor, item.modelos_tecidos, item.nome);
+            const codigoBarras = buildUniqueCodigoBarras(
+                rawSku,
+                item.linha || processados + 1,
+                usedCodes,
+                produtosExistentes
+            );
+            usedCodes.add(codigoBarras.toLowerCase());
 
-            // Gerar modelo_referencia único por variação para evitar conflito de UNIQUE CONSTRAINT
-            // Regra: modelo_referencia base + sufixo de cor/tecido (quando existir variação)
             const modeloBase = (item.modelo_referencia || '').trim();
-            const variationSuffix = buildVariationSuffix(item.cor, item.modelos_tecidos);
-            let modeloUnico;
-            if (modeloBase && variationSuffix) {
-                // Ex: "ALT-SF3" + cor "Cinza" + tecido "Suede" → "ALT-SF3-CINZA-SUEDE"
-                modeloUnico = `${modeloBase}-${variationSuffix}`;
-            } else if (modeloBase) {
-                // Sem variação — usa o modelo como está
-                modeloUnico = modeloBase;
-            } else {
-                // Referência vazia: gera fallback a partir do SKU para evitar colisão
-                // de múltiplos produtos sem referência na mesma importação
-                modeloUnico = codigoBarras;
-            }
+            const nameSlug = (item.nome || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toUpperCase()
+                .replace(/[^A-Z0-9]/g, '')
+                .substring(0, 8);
 
-            todosOsProdutos.push({
+            const variationSuffix = buildVariationSuffix(item.cor, item.modelos_tecidos);
+            const modeloUnico = buildUniqueModeloReferencia(
+                modeloBase,
+                nameSlug,
+                variationSuffix,
+                item.linha || processados + 1,
+                usedModelos
+            );
+
+            pendingBatch.push({
                 nome: item.nome,
                 categoria,
                 ambiente,
@@ -838,105 +988,21 @@ export default function ImportProdutosModal({ isOpen, onClose, onSuccess }) {
                 organization_id: orgId,
                 codigo_barras: codigoBarras
             });
+
+            if (pendingBatch.length >= BATCH_SIZE) {
+                await persistBatch(pendingBatch);
+                processados += pendingBatch.length;
+                setProgress(5 + Math.round((processados / totalProdutos) * 85));
+                pendingBatch.length = 0;
+                await sleep(25);
+            }
         }
 
-        // ========================================
-        // FASE 2: BULK INSERT — PRODUTOS (em lotes de 10)
-        // Cada produto é individual (cor/tecido no próprio registro)
-        // ========================================
-        const BATCH_SIZE = 10;
-        const produtoIds = []; // Armazena IDs retornados para histórico
-
-        for (let batchStart = 0; batchStart < todosOsProdutos.length; batchStart += BATCH_SIZE) {
-            if (cancelImportRef.current) break;
-
-            const batch = todosOsProdutos.slice(batchStart, batchStart + BATCH_SIZE);
-
-            // Atualizar exibição em tempo real
-            setCurrentlyProcessing(prev => {
-                const nomes = batch.slice(0, 3).map(p => p.nome + (p.cor ? ` (${p.cor})` : ''));
-                return nomes;
-            });
-
-            // Deduplicar batch por codigo_barras (previne erro ON CONFLICT)
-            const dedupMap = new Map();
-            for (const prod of batch) {
-                dedupMap.set(prod.codigo_barras, prod);
-            }
-            const dedupedBatch = [...dedupMap.values()];
-
-            try {
-                const { data: insertedBatch, error: batchError } = await withRetry(async () =>
-                    supabase
-                        .from('produtos')
-                        .upsert(dedupedBatch, { onConflict: 'codigo_barras,organization_id' })
-                        .select('id')
-                );
-
-                if (batchError) {
-                    throw batchError;
-                }
-
-                const ids = (insertedBatch || []).map(p => p.id).filter(Boolean);
-                produtoIds.push(...ids);
-                imported += ids.length;
-
-                console.log(`[Import] Batch ${Math.floor(batchStart / BATCH_SIZE) + 1}: ${ids.length} produtos individuais inseridos`);
-            } catch (err) {
-                console.error('[Import] Erro no batch de produtos:', err);
-                // Fallback: tentar um a um
-                for (const prod of dedupedBatch) {
-                    try {
-                        const { data: single, error: singleErr } = await withRetry(async () =>
-                            supabase
-                                .from('produtos')
-                                .upsert(prod, { onConflict: 'codigo_barras,organization_id' })
-                                .select('id')
-                        );
-                        if (singleErr) throw singleErr;
-                        if (single?.[0]?.id) {
-                            produtoIds.push(single[0].id);
-                            imported++;
-                        }
-                    } catch (singleErr) {
-                        console.error('[Import] Falha individual:', prod.nome, prod.cor, singleErr);
-                        failed++;
-                        failedProducts.push(`${prod.nome}${prod.cor ? ` (${prod.cor})` : ''}`);
-                    }
-                }
-            }
-
-            processados += batch.length;
-            setProgress(5 + Math.round((processados / totalProdutos) * 85)); // 5-90%
-
-            // Pequeno delay entre batches
-            await sleep(100);
-        }
-
-        // ========================================
-        // FASE 3: HISTÓRICO DE PREÇOS (Em lotes para evitar ERR_INSUFFICIENT_RESOURCES)
-        // ========================================
-        const historicos = produtoIds.map(produtoId => ({
-            organization_id: orgId,
-            produto_id: produtoId,
-            preco_antigo: 0,
-            preco_novo: 0,
-            tipo: 'venda',
-            motivo: `Importação Smart - ${file?.name || 'arquivo'}`,
-            usuario_nome: user?.nome || 'Sistema'
-        }));
-
-        const HISTORICO_BATCH_SIZE = 500;
-        for (let i = 0; i < historicos.length; i += HISTORICO_BATCH_SIZE) {
-            const chunk = historicos.slice(i, i + HISTORICO_BATCH_SIZE);
-            try {
-                const { error: histErr } = await supabase
-                    .from('historico_precos')
-                    .insert(chunk);
-                if (histErr) throw histErr;
-            } catch (err) {
-                console.warn('[Import] Histórico de preços (batch) falhou:', err);
-            }
+        if (pendingBatch.length > 0) {
+            await persistBatch(pendingBatch);
+            processados += pendingBatch.length;
+            setProgress(5 + Math.round((processados / totalProdutos) * 85));
+            pendingBatch.length = 0;
         }
 
         setProgress(100);
