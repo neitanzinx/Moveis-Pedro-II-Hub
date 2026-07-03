@@ -12,13 +12,26 @@ export function cn(...inputs) {
  */
 export function normSearch(str) {
   if (str == null) return '';
-  let normalized = String(str)
+  let normalized = String(str).toLowerCase();
+  
+  // Substituição manual explícita de acentos comuns para garantir flexibilidade
+  // caso o normalize('NFD') falhe em alguns navegadores ou com certos caracteres
+  normalized = normalized
+    .replace(/[áàãâä]/g, 'a')
+    .replace(/[éèêë]/g, 'e')
+    .replace(/[íìîï]/g, 'i')
+    .replace(/[óòõôö]/g, 'o')
+    .replace(/[úùûü]/g, 'u')
+    .replace(/[ç]/g, 'c');
+
+  normalized = normalized
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[-/|_.]+/g, ' ')
+    // Remove separadores decimais entre números para facilitar busca (ex: 1.83 -> 183, 1,50 -> 150)
+    .replace(/(\d)[.,](?=\d)/g, '$1')
+    .replace(/[-/|_.,]+/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
+    .trim();
 
   // Normalize feminine color adjectives to masculine to allow gender-insensitive search
   normalized = normalized

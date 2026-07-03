@@ -281,10 +281,7 @@ const INITIAL_FORM_DATA = {
     cores: [],
     // Estoque
     estoque_cd: '',
-    ...ESTOQUE_LOJA_FIELDS.reduce((acc, field) => {
-        acc[field] = '';
-        return acc;
-    }, {}),
+    // Dynamic store fields will be merged in useEffect
     quantidade_estoque: '', // Será a soma
     estoque_minimo: '',
     estoque_ideal: '',
@@ -320,6 +317,26 @@ export default function ProdutoCadastroCompleto({
     const { user } = useAuth();
     const isVendedor = String(user?.cargo || '').toLowerCase().includes('vendedor');
     const showFinancials = !readOnly;
+
+    const estoqueUnits = useMemo(() => {
+        const units = [];
+        const usedFields = new Set();
+        
+        const addUnit = (label, field) => {
+            if (!field || usedFields.has(field)) return;
+            usedFields.add(field);
+            units.push({ label, field });
+        };
+        
+        addUnit('Depósito / CD', 'estoque_cd');
+        (lojas || []).forEach(loja => {
+            const field = obterCampoEstoqueDaLoja(loja);
+            const label = loja?.nome || loja?.codigo || 'Loja';
+            addUnit(label, field);
+        });
+        
+        return units;
+    }, [lojas]);
 
     // Busca dados necessários
     const { data: fornecedores } = useQuery({
@@ -422,7 +439,7 @@ export default function ProdutoCadastroCompleto({
                 // Estoque
                 estoque_cd: cleanedProduct.estoque_cd?.toString() || '',
                 ...Object.fromEntries(
-                    ESTOQUE_LOJA_FIELDS.map((field) => [field, cleanedProduct[field]?.toString() || ''])
+                    estoqueUnits.filter(u => u.field !== 'estoque_cd').map((u) => [u.field, cleanedProduct[u.field]?.toString() || ''])
                 ),
                 quantidade_estoque: cleanedProduct.quantidade_estoque?.toString() || '',
                 estoque_minimo: cleanedProduct.estoque_minimo?.toString() || '',
@@ -749,8 +766,8 @@ export default function ProdutoCadastroCompleto({
         try {
             // Calcula estoque total das lojas
             const estoqueCd = parseInt(formData.estoque_cd) || 0;
-            const estoquePorLoja = ESTOQUE_LOJA_FIELDS.reduce((acc, field) => {
-                acc[field] = parseInt(formData[field]) || 0;
+            const estoquePorLoja = estoqueUnits.filter(u => u.field !== 'estoque_cd').reduce((acc, u) => {
+                acc[u.field] = parseInt(formData[u.field]) || 0;
                 return acc;
             }, {});
             const estoqueTotal = estoqueCd + Object.values(estoquePorLoja).reduce((sum, value) => sum + value, 0);
@@ -1442,7 +1459,7 @@ export default function ProdutoCadastroCompleto({
                                             <Badge variant="outline" className="bg-green-50">
                                                 Total: {
                                                     (parseInt(formData.estoque_cd) || 0) +
-                                                    ESTOQUE_LOJA_FIELDS.reduce((sum, field) => sum + (parseInt(formData[field]) || 0), 0)
+                                                    estoqueUnits.filter(u => u.field !== 'estoque_cd').reduce((sum, u) => sum + (parseInt(formData[u.field]) || 0), 0)
                                                 }
                                             </Badge>
                                         </div>
@@ -1456,26 +1473,16 @@ export default function ProdutoCadastroCompleto({
                                             </AlertDescription>
                                         </Alert>
                                         <div className="grid grid-cols-2 gap-3">
-                                            <div className="bg-gray-50 p-2 rounded-lg border">
-                                                <Label className="text-xs text-gray-500">Depósito / CD</Label>
-                                                <Input
-                                                    id="estoque_cd"
-                                                    type="number"
-                                                    value={formData.estoque_cd}
-                                                    disabled={true}
-                                                    className="h-8 text-sm bg-gray-100 cursor-not-allowed"
-                                                />
-                                            </div>
-                                            {(lojas || []).map(loja => {
-                                                const field = obterCampoEstoqueDaLoja(loja);
-
-                                                if (!field || field === 'estoque_cd' || !(field in formData)) return null;
+                                            {estoqueUnits.map(unit => {
+                                                const field = unit.field;
+                                                const label = unit.label;
+                                                // CD is already mapped as 'Depósito / CD'
                                                 return (
-                                                    <div key={loja.id} className="p-2 rounded-lg border">
-                                                        <Label className="text-xs text-gray-500">{loja.nome}</Label>
+                                                    <div key={field} className="bg-gray-50 p-2 rounded-lg border">
+                                                        <Label className="text-xs text-gray-500">{label}</Label>
                                                         <Input
                                                             type="number"
-                                                            value={formData[field]}
+                                                            value={formData[field] || ''}
                                                             disabled={true}
                                                             className="h-8 text-sm bg-gray-100 cursor-not-allowed"
                                                             id={field}
