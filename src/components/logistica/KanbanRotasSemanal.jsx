@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { whatsappService } from "@/services/whatsappService";
+import { useTenant } from "@/contexts/TenantContext";
 import RouteOptimizer from "./RouteOptimizer";
 import { buildProductDisplayName } from "@/utils/productReference";
 import { isStatusCancelado } from "@/utils/vendaStatus";
@@ -289,6 +290,7 @@ function DateTabVisual({ dia, index, isSelected, onClick, activeEntrega, onHover
 
 // Componente de coluna para cada caminhão
 function ColunaCaminhao({ caminhao, cor, dataAtual, entregas, vendas, onClickEntrega, onNotificar, onOtimizar, assistencias = [], activeEntrega }) {
+  const { isPaidModuleActive } = useTenant();
   const entregasDoCaminhao = entregas.filter(e =>
     e.data_agendada?.split('T')[0] === dataAtual &&
     e.caminhao_id === caminhao.id
@@ -344,11 +346,20 @@ function ColunaCaminhao({ caminhao, cor, dataAtual, entregas, vendas, onClickEnt
               totalNaoNotificadas,
               totalJaNotificadas
             })}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-all text-[10px] font-bold uppercase tracking-wide ${totalNaoNotificadas > 0
-              ? 'bg-green-600 hover:bg-green-700 text-white shadow-sm'
-              : 'bg-gray-200 text-gray-500'
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-all text-[10px] font-bold uppercase tracking-wide ${
+              !isPaidModuleActive('whatsapp')
+                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200'
+                : totalNaoNotificadas > 0
+                  ? 'bg-green-600 hover:bg-green-700 text-white shadow-sm'
+                  : 'bg-gray-200 text-gray-500'
               }`}
-            title={totalNaoNotificadas > 0 ? `Solicitar confirmação de ${totalNaoNotificadas} itens` : 'Todos confirmados'}
+            title={
+              !isPaidModuleActive('whatsapp')
+                ? "Módulo de WhatsApp desativado no plano atual"
+                : totalNaoNotificadas > 0
+                  ? `Solicitar confirmação de ${totalNaoNotificadas} itens`
+                  : 'Todos confirmados'
+            }
           >
             <CheckCircle className="w-3.5 h-3.5" />
             {totalNaoNotificadas > 0 && <span>Confirmar</span>}
@@ -395,6 +406,7 @@ function ColunaCaminhao({ caminhao, cor, dataAtual, entregas, vendas, onClickEnt
 
 export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes, caminhoes = [], assistencias = [] }) {
   const queryClient = useQueryClient();
+  const { isPaidModuleActive } = useTenant();
   const [activeId, setActiveId] = useState(null);
   const [entregaSelecionada, setEntregaSelecionada] = useState(null);
   const [searchTriagem, setSearchTriagem] = useState("");
@@ -587,6 +599,10 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
   // Abrir modal de notificação para um caminhão específico
   const handleNotificarCaminhao = (caminhao, dados) => {
+    if (!isPaidModuleActive('whatsapp')) {
+      toast.error("O módulo de WhatsApp não está ativo no plano da sua organização.");
+      return;
+    }
     setModalDisparo({ caminhao, ...dados });
     verificarServidor();
   };
@@ -947,23 +963,27 @@ export default function KanbanRotasSemanal({ entregas, vendas, entregasPendentes
 
         // DISPARAR NOTIFICAÇÃO DE REAGENDAMENTO PARA O CLIENTE
         try {
-          const venda = (vendas || []).find(v => v.id === modalReagendamento.entrega.venda_id);
-          const listaProdutos = venda?.itens?.map(item => `• ${item.quantidade}x ${buildProductDisplayName(item.produto_nome, item.modelo_referencia)}`).join('\n') || "Itens não informados";
+          if (isPaidModuleActive('whatsapp')) {
+            const venda = (vendas || []).find(v => v.id === modalReagendamento.entrega.venda_id);
+            const listaProdutos = venda?.itens?.map(item => `• ${item.quantidade}x ${buildProductDisplayName(item.produto_nome, item.modelo_referencia)}`).join('\n') || "Itens não informados";
 
-          const payload = [{
-            id: modalReagendamento.entrega.id,
-            tipo: 'entrega',
-            numero_pedido: modalReagendamento.entrega.numero_pedido,
-            cliente_nome: modalReagendamento.entrega.cliente_nome,
-            telefone: modalReagendamento.entrega.cliente_telefone,
-            turno: modalReagendamento.novoAgendamento.turno || "Comercial",
-            produtos: listaProdutos,
-            data_agendada: modalReagendamento.novoAgendamento.data_agendada,
-            is_reagendamento: true // Flag para mensagem diferenciada
-          }];
+            const payload = [{
+              id: modalReagendamento.entrega.id,
+              tipo: 'entrega',
+              numero_pedido: modalReagendamento.entrega.numero_pedido,
+              cliente_nome: modalReagendamento.entrega.cliente_nome,
+              telefone: modalReagendamento.entrega.cliente_telefone,
+              turno: modalReagendamento.novoAgendamento.turno || "Comercial",
+              produtos: listaProdutos,
+              data_agendada: modalReagendamento.novoAgendamento.data_agendada,
+              is_reagendamento: true // Flag para mensagem diferenciada
+            }];
 
-          await whatsappService.sendConfirmations(payload);
-          toast.success("Cliente notificado via WhatsApp!");
+            await whatsappService.sendConfirmations(payload);
+            toast.success("Cliente notificado via WhatsApp!");
+          } else {
+            console.log("Notificação de reagendamento pulada: módulo 'whatsapp' inativo.");
+          }
         } catch (err) {
           console.error("Erro ao notificar reagendamento:", err);
           toast.warning("Reagendado, mas erro ao notificar WhatsApp.");

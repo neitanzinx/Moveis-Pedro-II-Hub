@@ -17,6 +17,7 @@ import { supabase } from "@/api/base44Client";
 import { Input } from "@/components/ui/input";
 import { whatsappService } from "@/services/whatsappService";
 import { toast } from "sonner";
+import { useTenant } from "@/contexts/TenantContext";
 import { applyDeliveryPayment, formatMoney, needsDeliveryPaymentConfirmation, toMoneyNumber, MONEY_EPSILON } from "@/utils/deliveryPayment";
 import { isStatusCancelado } from "@/utils/vendaStatus";
 import { isInstallmentPaymentMethod, validatePaymentSplit } from "@/services/paymentOrchestrator";
@@ -92,6 +93,7 @@ function useChecklistCache(caminhaoId, dataSelecionada) {
 }
 
 export default function Entregador() {
+    const { isPaidModuleActive } = useTenant();
     const [user, setUser] = useState(null);
 
     // Hidratação síncrona do estado da rota a partir de sessão salva localmente
@@ -850,13 +852,17 @@ export default function Entregador() {
             const rotaJaPossuiAndamento = rotaPossuiAndamento(entregasRota);
             const primeiraPendente = entregasRota.find((e) => e.status !== 'Entregue');
 
-            // Notificar apenas em rota nova e somente o primeiro pedido pendente.
+            // Notificar apenas em rota nova e somente o primeiro pedido pendente se módulo WhatsApp ativo.
             if (primeiraPendente && !rotaJaPossuiAndamento) {
-                await whatsappService.notifyRouteStart([primeiraPendente]);
-                await whatsappService.sendDeliveryNextStop(
-                    primeiraPendente.cliente_telefone,
-                    primeiraPendente
-                );
+                if (isPaidModuleActive('whatsapp')) {
+                    await whatsappService.notifyRouteStart([primeiraPendente]);
+                    await whatsappService.sendDeliveryNextStop(
+                        primeiraPendente.cliente_telefone,
+                        primeiraPendente
+                    );
+                } else {
+                    console.log("Notificação de início de rota pulada: módulo 'whatsapp' inativo.");
+                }
             }
 
             setRotaIniciada(true);
@@ -1055,8 +1061,19 @@ export default function Entregador() {
         // NOVO: Salvar rascunho na sessionStorage para não perder se fechar o app/recarregar
         sessionStorage.setItem('rascunho_entrega', JSON.stringify(rascunho));
 
-        // NOVO: Sempre pedir foto dos móveis após assinatura
-        setModalFotoEntrega(rascunho);
+        if (isPaidModuleActive('fotos_entrega')) {
+            // NOVO: Sempre pedir foto dos móveis após assinatura
+            setModalFotoEntrega(rascunho);
+        } else {
+            toast.info("Fotos de confirmação de entrega desativadas no plano atual. Pulando etapa de fotos...");
+            // Se tem pagamento pendente na entrega, pedir comprovante de pagamento
+            if (needsDeliveryPaymentConfirmation(entrega)) {
+                abrirModalConfirmacaoPagamento(rascunho, 'finalizacao');
+            } else {
+                // Finalizar diretamente
+                await finalizarEntrega(rascunho, rascunho.assinatura_url, null, null);
+            }
+        }
     };
 
     // NOVO: Salvar fotos dos móveis e verificar se precisa de comprovante de pagamento
@@ -1189,19 +1206,24 @@ export default function Entregador() {
                     return oldData.map(e => e.id === entrega.id ? { ...e, status: 'Entregue' } : e);
                 });
             } else {
-                // 🚀 AUTOMAÇÃO: Chamar o robô de WhatsApp para concluir e avisar o próximo
-                try {
-                    const completionResult = await whatsappService.notifyDeliveryCompletion(entrega.id, updateData);
-                    if (completionResult?.status === 'failed') {
-                        throw new Error("A API retornou erro HTTP (500/400)");
-                    }
+                // 🚀 AUTOMAÇÃO: Chamar o robô de WhatsApp para concluir e avisar o próximo se módulo ativo
+                if (isPaidModuleActive('whatsapp')) {
+                    try {
+                        const completionResult = await whatsappService.notifyDeliveryCompletion(entrega.id, updateData);
+                        if (completionResult?.status === 'failed') {
+                            throw new Error("A API retornou erro HTTP (500/400)");
+                        }
 
-                    // Se foi para fila offline do bot, persistimos no banco aqui para manter consistência imediata.
-                    if (completionResult?.status === 'queued') {
+                        // Se foi para fila offline do bot, persistimos no banco aqui para manter consistência imediata.
+                        if (completionResult?.status === 'queued') {
+                            await updateEntrega.mutateAsync({ id: entrega.id, data: updateData });
+                        }
+                    } catch (zapErr) {
+                        console.error("Falha ao chamar automação do robô, tentando fallback direto no banco...");
                         await updateEntrega.mutateAsync({ id: entrega.id, data: updateData });
                     }
-                } catch (zapErr) {
-                    console.error("Falha ao chamar automação do robô, tentando fallback direto no banco...");
+                } else {
+                    // Sem WhatsApp, apenas salva no banco diretamente
                     await updateEntrega.mutateAsync({ id: entrega.id, data: updateData });
                 }
 
@@ -1278,8 +1300,8 @@ export default function Entregador() {
                 }
             });
 
-            // 2. Notificar cliente via bot/service
-            if (entrega.cliente_telefone) {
+            // 2. Notificar cliente via bot/service se módulo WhatsApp ativo
+            if (entrega.cliente_telefone && isPaidModuleActive('whatsapp')) {
                 await whatsappService.sendDeliveryFailure(
                     entrega.cliente_telefone,
                     entrega.cliente_nome,
@@ -2422,39 +2444,47 @@ export default function Entregador() {
                                     <MessageCircle className="w-4 h-4" /> Enviar via WhatsApp
                                 </p>
 
-                                {/* Enviar para cliente cadastrado */}
-                                {linkPagamentoData.entrega?.cliente_telefone && (
-                                    <Button
-                                        size="sm"
-                                        onClick={() => enviarWhatsAppPara(linkPagamentoData.entrega.cliente_telefone, linkPagamentoData.entrega)}
-                                        className="w-full bg-green-600 hover:bg-green-700 justify-start gap-2"
-                                    >
-                                        <MessageCircle className="w-4 h-4" />
-                                        Enviar para {linkPagamentoData.entrega?.cliente_nome?.split(' ')[0]}
-                                    </Button>
-                                )}
+                                {isPaidModuleActive('whatsapp') ? (
+                                    <>
+                                        {/* Enviar para cliente cadastrado */}
+                                        {linkPagamentoData.entrega?.cliente_telefone && (
+                                            <Button
+                                                size="sm"
+                                                onClick={() => enviarWhatsAppPara(linkPagamentoData.entrega.cliente_telefone, linkPagamentoData.entrega)}
+                                                className="w-full bg-green-600 hover:bg-green-700 justify-start gap-2"
+                                            >
+                                                <MessageCircle className="w-4 h-4" />
+                                                Enviar para {linkPagamentoData.entrega?.cliente_nome?.split(' ')[0]}
+                                            </Button>
+                                        )}
 
-                                {/* Enviar para outro número */}
-                                <div className="flex gap-2">
-                                    <div className="flex-1 relative">
-                                        <Input
-                                            type="tel"
-                                            placeholder="Outro número"
-                                            value={numeroAlternativo}
-                                            onChange={(e) => setNumeroAlternativo(e.target.value.replace(/\D/g, ''))}
-                                            className="h-9 text-sm pl-10"
-                                        />
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">+55</span>
-                                    </div>
-                                    <Button
-                                        size="sm"
-                                        onClick={() => enviarWhatsAppPara(numeroAlternativo, linkPagamentoData.entrega)}
-                                        disabled={!numeroAlternativo || numeroAlternativo.length < 10}
-                                        className="bg-green-600 hover:bg-green-700"
-                                    >
-                                        <Send className="w-4 h-4" />
-                                    </Button>
-                                </div>
+                                        {/* Enviar para outro número */}
+                                        <div className="flex gap-2">
+                                            <div className="flex-1 relative">
+                                                <Input
+                                                    type="tel"
+                                                    placeholder="Outro número"
+                                                    value={numeroAlternativo}
+                                                    onChange={(e) => setNumeroAlternativo(e.target.value.replace(/\D/g, ''))}
+                                                    className="h-9 text-sm pl-10"
+                                                />
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">+55</span>
+                                            </div>
+                                            <Button
+                                                size="sm"
+                                                onClick={() => enviarWhatsAppPara(numeroAlternativo, linkPagamentoData.entrega)}
+                                                disabled={!numeroAlternativo || numeroAlternativo.length < 10}
+                                                className="bg-green-600 hover:bg-green-700"
+                                            >
+                                                <Send className="w-4 h-4" />
+                                            </Button>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <p className="text-xs text-amber-700 bg-amber-50 p-2 rounded border border-amber-200">
+                                        ⚠️ O módulo de WhatsApp está desativado no plano atual da sua organização.
+                                    </p>
+                                )}
                             </div>
 
                             {/* Botão Fechar */}

@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { whatsappService } from "@/services/whatsappService";
+import { useTenant } from "@/contexts/TenantContext";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 
 export default function MontagemModal({ isOpen, onClose, montagem, vendas, valores }) {
+  const { isPaidModuleActive } = useTenant();
   const [formData, setFormData] = useState({
     venda_id: "",
     data_montagem: "",
@@ -68,6 +70,10 @@ export default function MontagemModal({ isOpen, onClose, montagem, vendas, valor
   }, [montagem, isOpen]);
 
   const notifyCliente = async (dadosMontagem) => {
+    if (!isPaidModuleActive('whatsapp')) {
+      console.log("Notificação de montagem pulada: módulo 'whatsapp' inativo.");
+      return;
+    }
     if (dadosMontagem.status !== 'Agendada') return;
 
     try {

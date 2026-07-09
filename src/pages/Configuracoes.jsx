@@ -18,6 +18,8 @@ import GestaoFuncionarios from "../components/configuracoes/GestaoFuncionarios";
 import ConfiguracaoPrazos from "../components/configuracoes/ConfiguracaoPrazos";
 import ConfiguracaoComprasPagamento from "../components/configuracoes/ConfiguracaoComprasPagamento";
 import ConfiguracaoPapeisSistema from "../components/configuracoes/ConfiguracaoPapeisSistema";
+import ConfiguracaoAssinatura from "../components/configuracoes/ConfiguracaoAssinatura";
+
 
 
 const MENU_CONFIG = {
@@ -38,6 +40,13 @@ const MENU_CONFIG = {
       { id: "taxas", label: "Taxas", icon: Calculator },
       { id: "precos", label: "Precificação", icon: Package },
       { id: "markup", label: "Markup Automático", icon: Sparkles },
+    ]
+  },
+  cobranca: {
+    label: "Cobrança",
+    icon: CreditCard,
+    items: [
+      { id: "assinatura", label: "Plano & Assinatura", icon: CreditCard },
     ]
   },
   operacao: {
@@ -142,6 +151,7 @@ export default function Configuracoes() {
       case "auditoria": return <AuditLogPage />;
       case "prazos": return <ConfiguracaoPrazos />;
       case "compras-pagamento": return <ConfiguracaoComprasPagamento />;
+      case "assinatura": return <ConfiguracaoAssinatura />;
 
       default: return null;
     }

@@ -12,11 +12,13 @@ import { toast } from "sonner";
 import { useConfirm } from "@/hooks/useConfirm";
 import EntregaCard from "./EntregaCard";
 import { whatsappService } from "@/services/whatsappService";
+import { useTenant } from "@/contexts/TenantContext";
 import { isStatusCancelado } from "@/utils/vendaStatus";
 
 export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEntrega, onCalcularRota, calculandoRota }) {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
+  const { isPaidModuleActive } = useTenant();
 
   const { setNodeRef: setNodeRefColuna, isOver: isOverColuna } = useDroppable({ id: coluna.id });
   const { setNodeRef: setNodeRefComercial, isOver: isOverComercial } = useDroppable({ id: `${coluna.id}-comercial` });
@@ -61,7 +63,14 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
     } catch (e) { setStatusServidor("offline"); }
   };
 
-  const abrirModalRobo = () => { setModalOpen(true); verificarServidor(); };
+  const abrirModalRobo = () => {
+    if (!isPaidModuleActive('whatsapp')) {
+      toast.error("O módulo de WhatsApp não está ativo no plano da sua organização.");
+      return;
+    }
+    setModalOpen(true);
+    verificarServidor();
+  };
 
   // Disparar apenas para os NÃO notificados
   const enviarParaRobo = async () => {
@@ -132,7 +141,9 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
         numero_pedido: e.numero_pedido
       }));
 
-      await whatsappService.rescheduleDeliveries(payload);
+      if (isPaidModuleActive('whatsapp')) {
+        await whatsappService.rescheduleDeliveries(payload);
+      }
 
       // Voltar todas para triagem
       for (const entrega of entregasParaDisparo) {
@@ -148,7 +159,7 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
         });
       }
 
-      toast.success(`✅ ${entregasParaDisparo.length} entregas reagendadas!`);
+      toast.success(`✅ ${entregasParaDisparo.length} entregas reagendadas!${!isPaidModuleActive('whatsapp') ? " (WhatsApp desativado no plano)" : ""}`);
       setModalReagendar(false);
     } catch (e) {
       toast.error("Erro ao reagendar.");
@@ -168,12 +179,13 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
     if (!confirmed) return;
 
     try {
-      // Notificar cliente
-      await whatsappService.rescheduleDeliveries([{
-        telefone: entrega.cliente_telefone,
-        nome: entrega.cliente_nome,
-        numero_pedido: entrega.numero_pedido
-      }]);
+      if (isPaidModuleActive('whatsapp')) {
+        await whatsappService.rescheduleDeliveries([{
+          telefone: entrega.cliente_telefone,
+          nome: entrega.cliente_nome,
+          numero_pedido: entrega.numero_pedido
+        }]);
+      }
 
       // Voltar para triagem
       await updateEntrega.mutateAsync({
@@ -187,7 +199,7 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
         }
       });
 
-      toast.success("Entrega reagendada!");
+      toast.success(isPaidModuleActive('whatsapp') ? "Entrega reagendada!" : "Entrega reagendada! (WhatsApp desativado no plano)");
     } catch (e) {
       toast.error("Erro ao reagendar.");
     }
@@ -257,12 +269,20 @@ export default function ColunaKanban({ coluna, vendas, caminhoes = [], onClickEn
                 {entregasParaDisparo.length > 0 && (
                   <Button
                     size="icon"
-                    className={`h-5 w-5 shadow-sm ${naoNotificadas.length > 0
-                      ? 'bg-green-100 hover:bg-green-200 text-green-700'
-                      : 'bg-gray-100 text-gray-400'
+                    className={`h-5 w-5 shadow-sm ${!isPaidModuleActive('whatsapp')
+                      ? 'bg-amber-100 text-amber-600 hover:bg-amber-200'
+                      : naoNotificadas.length > 0
+                        ? 'bg-green-100 hover:bg-green-200 text-green-700'
+                        : 'bg-gray-100 text-gray-400'
                       }`}
                     onClick={abrirModalRobo}
-                    title={naoNotificadas.length > 0 ? "Disparar Confirmações" : "Todos já notificados"}
+                    title={
+                      !isPaidModuleActive('whatsapp')
+                        ? "Módulo de WhatsApp desativado no plano atual"
+                        : naoNotificadas.length > 0
+                          ? "Disparar Confirmações"
+                          : "Todos já notificados"
+                    }
                   >
                     <MessageCircle className="w-3 h-3" />
                   </Button>

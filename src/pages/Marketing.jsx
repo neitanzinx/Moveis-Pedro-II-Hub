@@ -25,6 +25,7 @@ import {
     FileText, Package, Filter, Star, Trophy, Target, Award, Save, Crown
 } from "lucide-react";
 import { whatsappService } from "@/services/whatsappService";
+import { useTenant } from "@/contexts/TenantContext";
 
 // Print styles for labels
 
@@ -75,6 +76,7 @@ const printStyles = `
 const LOGO_URL = EMPRESA.logo_url;
 
 export default function Marketing() {
+    const { isPaidModuleActive } = useTenant();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCupom, setEditingCupom] = useState(null);
     const [error, setError] = useState("");
@@ -591,7 +593,15 @@ export default function Marketing() {
                                     Clientes que pediram orçamento mas não fecharam. Hora de recuperar!
                                 </p>
                             </CardHeader>
-                            <CardContent className="p-0">
+                            <CardContent className="p-4">
+                                {!isPaidModuleActive('whatsapp') && (
+                                    <Alert variant="warning" className="mb-4 border-amber-200 bg-amber-50 text-amber-800">
+                                        <AlertCircle className="w-4 h-4 text-amber-600" />
+                                        <AlertDescription className="text-xs">
+                                            O módulo de WhatsApp está desativado no seu plano. Para habilitar o envio automático e recuperação de vendas, ative o módulo de WhatsApp.
+                                        </AlertDescription>
+                                    </Alert>
+                                )}
                                 {orcamentosPendentes.length === 0 ? (
                                     <div className="text-center py-12">
                                         <ShoppingCart className="w-16 h-16 mx-auto mb-4 opacity-20 text-orange-500" />
@@ -627,7 +637,7 @@ export default function Marketing() {
                                                                 size="sm"
                                                                 className="bg-green-600 hover:bg-green-700"
                                                                 onClick={() => handleRecuperarVenda(orc)}
-                                                                disabled={enviandoMsg[`recuperacao - ${orc.cliente_telefone} `]}
+                                                                disabled={!isPaidModuleActive('whatsapp') || enviandoMsg[`recuperacao - ${orc.cliente_telefone} `]}
                                                             >
                                                                 {enviandoMsg[`recuperacao - ${orc.cliente_telefone} `] ? (
                                                                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -658,7 +668,15 @@ export default function Marketing() {
                                     Aniversariantes de {new Date().toLocaleDateString('pt-BR', { month: 'long' })}
                                 </CardTitle>
                             </CardHeader>
-                            <CardContent className="p-0">
+                            <CardContent className="p-4">
+                                {!isPaidModuleActive('whatsapp') && (
+                                    <Alert variant="warning" className="mb-4 border-amber-200 bg-amber-50 text-amber-800">
+                                        <AlertCircle className="w-4 h-4 text-amber-600" />
+                                        <AlertDescription className="text-xs">
+                                            O módulo de WhatsApp está desativado no seu plano. Para habilitar o envio automático de mensagens de aniversário, ative o módulo de WhatsApp.
+                                        </AlertDescription>
+                                    </Alert>
+                                )}
                                 {aniversariantes.length === 0 ? (
                                     <div className="text-center py-12">
                                         <Cake className="w-16 h-16 mx-auto mb-4 opacity-20 text-purple-500" />
@@ -694,7 +712,7 @@ export default function Marketing() {
                                                         size="sm"
                                                         className="w-full mt-3 bg-purple-600 hover:bg-purple-700"
                                                         onClick={() => handleEnviarParabens(cliente)}
-                                                        disabled={enviandoMsg[`aniversario - ${cliente.telefone} `]}
+                                                        disabled={!isPaidModuleActive('whatsapp') || enviandoMsg[`aniversario - ${cliente.telefone} `]}
                                                     >
                                                         {enviandoMsg[`aniversario - ${cliente.telefone} `] ? (
                                                             <Loader2 className="w-4 h-4 animate-spin" />

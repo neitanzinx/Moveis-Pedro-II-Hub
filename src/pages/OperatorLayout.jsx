@@ -10,6 +10,7 @@ export default function OperatorLayout({ children }) {
 
   const menuItems = [
     { title: "Painel", href: "/operador", icon: Activity },
+    { title: "Gestão de Planos", href: "/operador/planos", icon: Shield },
   ];
 
   const handleSignOut = async () => {

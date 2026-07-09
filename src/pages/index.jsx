@@ -41,8 +41,10 @@ const PoliticasEstoque = lazy(() => import("./PoliticasEstoque.jsx"));
 const AprovacaoSemEstoque = lazy(() => import("./AprovacaoSemEstoque.jsx"));
 const RelatorioAcessosClientes = lazy(() => import("./RelatorioAcessosClientes.jsx"));
 const PainelSaaSOperador = lazy(() => import("./PainelSaaSOperador.jsx"));
+const PainelSaaSOperadorPlanos = lazy(() => import("./PainelSaaSOperadorPlanos.jsx"));
 const OperadorLogin = lazy(() => import("./OperadorLogin.jsx"));
 const OperatorLayout = lazy(() => import("./OperatorLayout.jsx"));
+const CadastroEmpresa = lazy(() => import("./CadastroEmpresa.jsx"));
 
 // ============================================================================
 // CARREGAMENTO SÍNCRONO - Páginas Públicas (críticas para SEO e primeira impressão)
@@ -53,6 +55,7 @@ import ClienteAuth from "./cliente/ClienteAuth.jsx";
 import ClienteDashboard from "./cliente/ClienteDashboard.jsx";
 import AutoAtendimento from "./AutoAtendimento.jsx";
 import RastreioPublico from "./RastreioPublico.jsx";
+import BlockedSubscriptionScreen from "@/components/configuracoes/BlockedSubscriptionScreen.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation, Navigate, Link } from 'react-router-dom';
 import { hasAnyRole, getUserRoles } from "@/config/permissions";
@@ -177,6 +180,7 @@ function OperatorRouteGate() {
             <OperatorLayout>
                 <Routes>
                     <Route path="/operador" element={<PainelSaaSOperador />} />
+                    <Route path="/operador/planos" element={<PainelSaaSOperadorPlanos />} />
                     <Route path="/operador/*" element={<Navigate to="/operador" replace />} />
                 </Routes>
             </OperatorLayout>
@@ -217,7 +221,9 @@ function _getCurrentPage(url) {
 function PagesContent() {
     const location = useLocation();
     const { user, loading, can, authError, retryAuth } = useAuth();
-    const { isModuleActive } = useTenant();
+    const { isModuleActive, organization } = useTenant();
+    const isDefaultOrg = organization?.id === '00000000-0000-0000-0000-000000000001' || organization?.slug === 'moveis-pedro-ii';
+    const isBlockedSubscription = organization && !isDefaultOrg && organization.status_assinatura !== 'ativa';
     const currentPage = _getCurrentPage(location.pathname);
 
     const menuFiltrado = MENU_ITEMS.filter((item) => {
@@ -242,6 +248,7 @@ function PagesContent() {
         location.pathname === '/CadastroMobile' ||
         location.pathname.startsWith('/rastreio') ||
         location.pathname.startsWith('/avaliacao/') ||
+        location.pathname === '/cadastro' ||
         location.pathname.startsWith('/operador');
 
     if (loading && !isPublicRoute) {
@@ -299,6 +306,15 @@ function PagesContent() {
         return <RastreioPublico idProp={id !== 'rastreio' ? id : null} />;
     }
 
+    // Cadastro de nova empresa (onboarding SaaS)
+    if (location.pathname === '/cadastro') {
+        return (
+            <Suspense fallback={<PageLoadingFallback />}>
+                <CadastroEmpresa />
+            </Suspense>
+        );
+    }
+
     // ===== LOGIN DE FUNCIONÁRIOS =====
     if (location.pathname === '/login') {
         // Se já está logado como funcionário E tem cargo válido (qualquer cargo não vazio), redireciona
@@ -337,6 +353,10 @@ function PagesContent() {
     if (location.pathname.startsWith('/admin')) {
         if (!user) {
             return <Navigate to="/login" replace />;
+        }
+
+        if (isBlockedSubscription) {
+            return <BlockedSubscriptionScreen />;
         }
 
         // Bloquear clientes (usuários sem cargo)

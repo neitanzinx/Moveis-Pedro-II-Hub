@@ -37,7 +37,11 @@ const DEFAULT_SETTINGS = {
         marketing: true,
         rh: true,
         bi_dashboard: true,
-        catalogo_whatsapp: true
+        catalogo_whatsapp: true,
+        rastreio: true,
+        // Módulos pagos (ausência no banco = DESATIVADO, usar isPaidModuleActive)
+        whatsapp: true,
+        fotos_entrega: true
     }
 };
 
@@ -47,10 +51,60 @@ export function TenantProvider({ children, organizationId }) {
     const [lojas, setLojas] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [resolvedOrgId, setResolvedOrgId] = useState(organizationId || null);
+
+    // Detectar o organization_id do usuário logado (multi-tenant)
+    useEffect(() => {
+        const detectOrganization = async () => {
+            // Se um organizationId foi passado explicitamente, usar ele
+            if (organizationId) {
+                setResolvedOrgId(organizationId);
+                return;
+            }
+
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session?.user) {
+                    const { data: profile } = await supabase
+                        .from('public_users')
+                        .select('organization_id')
+                        .eq('id', session.user.id)
+                        .single();
+
+                    if (profile?.organization_id) {
+                        setResolvedOrgId(profile.organization_id);
+                        return;
+                    }
+                }
+            } catch (err) {
+                console.warn('[Tenant] Erro ao detectar organização do usuário:', err);
+            }
+
+            // Fallback: ID padrão da Móveis Pedro II (retrocompatibilidade)
+            setResolvedOrgId('00000000-0000-0000-0000-000000000001');
+        };
+
+        detectOrganization();
+
+        // Reagir a mudanças de autenticação (login/logout)
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (!session) {
+                // Logout — voltar ao padrão
+                setResolvedOrgId('00000000-0000-0000-0000-000000000001');
+            } else {
+                // Novo login — detectar novamente
+                detectOrganization();
+            }
+        });
+
+        return () => subscription?.unsubscribe();
+    }, [organizationId]);
 
     useEffect(() => {
-        loadTenantData();
-    }, [organizationId]);
+        if (resolvedOrgId) {
+            loadTenantData();
+        }
+    }, [resolvedOrgId]);
 
     // Atualiza o favicon e o título dinamicamente
     useEffect(() => {
@@ -79,8 +133,7 @@ export function TenantProvider({ children, organizationId }) {
             setLoading(true);
             setError(null);
 
-            // ID padrão para Móveis Pedro II se não especificado
-            const orgId = organizationId || '00000000-0000-0000-0000-000000000001';
+            const orgId = resolvedOrgId || '00000000-0000-0000-0000-000000000001';
 
             // Carregar organização
             const { data: orgData, error: orgError } = await supabase
@@ -136,10 +189,18 @@ export function TenantProvider({ children, organizationId }) {
         }
     };
 
-    // Verificar se um módulo está ativo
+    // Verificar se um módulo está ativo (padrão: ativo se ausente)
     const isModuleActive = (moduleName) => {
         if (!settings?.modulos_ativos) return true; // padrão: ativo
         return settings.modulos_ativos[moduleName] !== false;
+    };
+
+    // Verificar se um módulo PAGO está ativo (padrão: DESATIVADO se ausente)
+    // Usar esta função para módulos que geram custo real: 'whatsapp', 'fotos_entrega'
+    // Diferença do isModuleActive: chave ausente = bloqueado (fail-safe)
+    const isPaidModuleActive = (moduleName) => {
+        if (!settings?.modulos_ativos) return false; // sem settings = desativado
+        return settings.modulos_ativos[moduleName] === true;
     };
 
     // Obter taxa de juros para parcelas
@@ -155,6 +216,7 @@ export function TenantProvider({ children, organizationId }) {
         loading,
         error,
         isModuleActive,
+        isPaidModuleActive,
         getJurosParcela,
         refreshTenant: loadTenantData,
         // Flag de Conferência de Caixa
@@ -186,6 +248,7 @@ export function useTenant() {
             loading: false,
             error: null,
             isModuleActive: () => true,
+            isPaidModuleActive: () => false, // Fail-safe: sem contexto = desativado
             getJurosParcela: () => 0,
             refreshTenant: () => { },
             conferenciaCaixaEnabled: false,
@@ -206,8 +269,8 @@ export function useOrganization() {
 
 // Hook específico para configurações
 export function useOrganizationSettings() {
-    const { settings, loading, error, isModuleActive, getJurosParcela } = useTenant();
-    return { settings, loading, error, isModuleActive, getJurosParcela };
+    const { settings, loading, error, isModuleActive, isPaidModuleActive, getJurosParcela } = useTenant();
+    return { settings, loading, error, isModuleActive, isPaidModuleActive, getJurosParcela };
 }
 
 // Hook específico para lojas

@@ -48,6 +48,12 @@ export default function LandingPage() {
                         Fale Conosco no WhatsApp
                     </Button>
 
+                    <Link to="/cadastro">
+                        <Button className="w-full bg-green-700 hover:bg-green-800 text-white font-bold">
+                            Cadastre sua Empresa
+                        </Button>
+                    </Link>
+
                     <Link to="/cliente-login">
                         <Button variant="outline" className="w-full text-green-800 border-green-200 hover:bg-green-50">
                             Acesso do Cliente

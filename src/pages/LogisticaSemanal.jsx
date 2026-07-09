@@ -10,11 +10,16 @@ import AguardandoLiberacao from "@/components/logistica/AguardandoLiberacao";
 import MapaFrota from "@/components/logistica/MapaFrota";
 import RoteirosFreota from "@/components/logistica/RoteirosFreota";
 import ChatEquipe from "@/components/logistica/ChatEquipe";
+import ConferenciaEntregas from "@/components/logistica/ConferenciaEntregas";
+import { useTenant } from "@/contexts/TenantContext";
+import { isRastreioEnabled } from "@/utils/deliveryConference";
 import { isStatusCancelado } from "@/utils/vendaStatus";
 
 export default function LogisticaSemanal() {
   const [tabAtiva, setTabAtiva] = useState("planejamento");
   const [subTabFrota, setSubTabFrota] = useState("roteiros");
+  const { settings } = useTenant();
+  const rastreioHabilitado = isRastreioEnabled(settings);
 
   const { data: entregas = [], isLoading } = useQuery({
     queryKey: ['entregas'],
@@ -105,6 +110,20 @@ export default function LogisticaSemanal() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600" />
+      </div>
+    );
+  }
+
+  if (!rastreioHabilitado) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+          <h1 className="text-2xl font-semibold text-slate-900">Conferência de Entregas</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            O rastreamento está desabilitado para esta organização. Use esta tela para registrar entregas manualmente.
+          </p>
+        </div>
+        <ConferenciaEntregas />
       </div>
     );
   }

@@ -84,7 +84,15 @@ export const syncOfflineDeliveries = async () => {
                             cacheControl: '3600'
                         });
 
-                    if (error) throw error;
+                    if (error) {
+                        console.error('Erro no upload de foto da entrega offline:', error);
+                        // Se o erro for de RLS (módulo desativado no plano) ou 403, ignora a foto e prossegue
+                        if (error.statusCode === '403' || error.message?.includes('row-level security') || error.message?.includes('policy')) {
+                            console.warn('Upload bloqueado por política de segurança (plano). Pulando foto...');
+                            continue;
+                        }
+                        throw error;
+                    }
 
                     const { data: urlData } = supabase.storage
                         .from('comprovantes')

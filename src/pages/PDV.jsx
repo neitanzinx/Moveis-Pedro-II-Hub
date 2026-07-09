@@ -297,7 +297,7 @@ const enriquecerItensEncomendaComFornecedor = (itens = [], produtos = [], fornec
 
 export default function PDV() {
   const { user } = useAuth();
-  const { conferenciaCaixaEnabled } = useTenant();
+  const { conferenciaCaixaEnabled, isPaidModuleActive } = useTenant();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { state: sidebarState, isMobile } = useSidebar();
@@ -1964,42 +1964,46 @@ export default function PDV() {
 
       // 5. ENVIO WHATSAPP EM "BACKGROUND" (Delay para não competir com renderização do print)
       if (zapTelefone) {
-        toast.info("Emissão concluída. Tentando enviar comprovante pelo WhatsApp...");
+        if (isPaidModuleActive('whatsapp')) {
+          toast.info("Emissão concluída. Tentando enviar comprovante pelo WhatsApp...");
 
-        setTimeout(async () => {
-          try {
-            // Formata lista de produtos
-            const listaProdutos = zapItens.map(item => `• ${item.quantidade}x ${stripInternalProductPrefixes(item.produto_nome) || '-'}`).join('\n');
-
-            console.log("📄 Gerando PDF para WhatsApp em background...");
-            let pdfBase64 = null;
+          setTimeout(async () => {
             try {
-              // Nota: vendaData ainda está acessível no closure
-              pdfBase64 = await gerarNotaPedidoBase64(vendaData, { ...clienteSelecionado }, vendedorFinal.nome || user.full_name, lojaAtivaPDV || null);
+              // Formata lista de produtos
+              const listaProdutos = zapItens.map(item => `• ${item.quantidade}x ${stripInternalProductPrefixes(item.produto_nome) || '-'}`).join('\n');
 
-              if (pdfBase64) {
-                console.log(`📄 PDF gerado com sucesso (${pdfBase64.length} bytes)`);
-              } else {
-                console.warn('⚠️ Falha ao gerar PDF base64 (retornou null)');
+              console.log("📄 Gerando PDF para WhatsApp em background...");
+              let pdfBase64 = null;
+              try {
+                // Nota: vendaData ainda está acessível no closure
+                pdfBase64 = await gerarNotaPedidoBase64(vendaData, { ...clienteSelecionado }, vendedorFinal.nome || user.full_name, lojaAtivaPDV || null);
+
+                if (pdfBase64) {
+                  console.log(`📄 PDF gerado com sucesso (${pdfBase64.length} bytes)`);
+                } else {
+                  console.warn('⚠️ Falha ao gerar PDF base64 (retornou null)');
+                }
+              } catch (pdfErr) {
+                console.error('Erro na geração do PDF background:', pdfErr);
               }
-            } catch (pdfErr) {
-              console.error('Erro na geração do PDF background:', pdfErr);
+
+              // Envia para o Bot (com fallback offline automático)
+              await whatsappService.sendSaleConfirmation({
+                telefone: zapTelefone,
+                nome: zapNome,
+                pedido: zapPedido,
+                prazo: zapPrazo,
+                produtos: listaProdutos,
+                pdf_base64: pdfBase64
+              });
+
+            } catch (bgErr) {
+              console.error("Erro fatal no processo de background:", bgErr);
             }
-
-            // Envia para o Bot (com fallback offline automático)
-            await whatsappService.sendSaleConfirmation({
-              telefone: zapTelefone,
-              nome: zapNome,
-              pedido: zapPedido,
-              prazo: zapPrazo,
-              produtos: listaProdutos,
-              pdf_base64: pdfBase64
-            });
-
-          } catch (bgErr) {
-            console.error("Erro fatal no processo de background:", bgErr);
-          }
-        }, 1500); // 1.5s delay para garantir que o print dialog já abriu
+          }, 1500); // 1.5s delay para garantir que o print dialog já abriu
+        } else {
+          console.log("🚫 Envio automático de WhatsApp pulado: módulo 'whatsapp' desativado no plano.");
+        }
       }
 
     } catch (err) {

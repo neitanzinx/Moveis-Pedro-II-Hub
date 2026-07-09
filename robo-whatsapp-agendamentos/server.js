@@ -234,6 +234,107 @@ require('events').EventEmitter.defaultMaxListeners = 20;
 // Aumentar limite do body para suportar PDF base64 (~200KB+)
 app.use(express.json({ limit: '10mb' }));
 
+// =============================================================================
+// 🔒 SEGURANÇA: Checagem de módulo WhatsApp por organização (PLANO/ASSINATURA)
+// =============================================================================
+// IMPORTANTE — COMENTÁRIO DE SEGURANÇA:
+// Este bot roda com SUPABASE_SERVICE_KEY (service role), que IGNORA RLS.
+// Portanto, NÃO podemos confiar em RLS para bloquear envios aqui.
+// A checagem abaixo é EXPLÍCITA: consulta organization_settings.modulos_ativos
+// diretamente via query, antes de permitir qualquer envio de mensagem.
+// Essa é a camada de segurança real do bot — a RLS na tabela
+// whatsapp_message_queue protege apenas inserções client-side (frontend).
+// =============================================================================
+
+const DEFAULT_ORG_ID = '00000000-0000-0000-0000-000000000001';
+const MODULE_CHECK_CACHE_TTL_MS = 30000; // 30s cache
+let moduleCheckCache = {}; // { [orgId]: { active: bool, expiresAt: number } }
+
+/**
+ * Verifica se o módulo 'whatsapp' está ativo para a organização.
+ * Retorna false se a chave não existir (fail-safe: ausente = desativado).
+ * Usa cache de 30s para evitar queries excessivas.
+ */
+async function verificarModuloWhatsApp(orgId = DEFAULT_ORG_ID) {
+    const now = Date.now();
+    const cached = moduleCheckCache[orgId];
+    if (cached && now < cached.expiresAt) {
+        return cached.active;
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('organization_settings')
+            .select('modulos_ativos')
+            .eq('organization_id', orgId)
+            .single();
+
+        if (error || !data) {
+            console.warn(`⚠️ [ModuleCheck] Falha ao verificar módulo whatsapp para org ${orgId}:`, error?.message);
+            // Fail-safe: sem dados = desativado
+            moduleCheckCache[orgId] = { active: false, expiresAt: now + MODULE_CHECK_CACHE_TTL_MS };
+            return false;
+        }
+
+        const modulosAtivos = data.modulos_ativos || {};
+        // Fail-safe: chave ausente = desativado
+        const whatsappAtivo = modulosAtivos.whatsapp === true;
+
+        moduleCheckCache[orgId] = { active: whatsappAtivo, expiresAt: now + MODULE_CHECK_CACHE_TTL_MS };
+        return whatsappAtivo;
+    } catch (e) {
+        console.error(`💥 [ModuleCheck] Erro crítico ao verificar módulo whatsapp:`, e.message);
+        return false; // Fail-safe
+    }
+}
+
+/**
+ * Middleware Express que bloqueia rotas de envio de WhatsApp
+ * quando o módulo não está ativo para a organização.
+ * Aceita organization_id no body da requisição; se ausente, usa o tenant padrão.
+ */
+const WHATSAPP_SEND_ROUTES = new Set([
+    '/send-text',
+    '/send-image-url',
+    '/disparar-confirmacoes',
+    '/mensagem-pos-venda',
+    '/aviso-inicio-rota',
+    '/aviso-proxima-parada',
+    '/reagendar-entregas',
+    '/entrega-nao-realizada',
+    '/enviar-mensagem-marketing',
+    '/enviar-mensagem-aniversario',
+    '/aviso-montagem-agendada',
+    '/aviso-montagem-cancelada',
+    '/aviso-montagem-reagendada',
+    '/confirmar-montagem',
+    '/lembrete-montagem',
+    '/montador-a-caminho',
+    '/concluir-entrega'
+]);
+
+app.use(async (req, res, next) => {
+    // Só verificar rotas POST de envio de mensagem
+    if (req.method !== 'POST' || !WHATSAPP_SEND_ROUTES.has(req.path)) {
+        return next();
+    }
+
+    const orgId = req.body?.organization_id || DEFAULT_ORG_ID;
+    const moduloAtivo = await verificarModuloWhatsApp(orgId);
+
+    if (!moduloAtivo) {
+        console.warn(`🚫 [ModuleCheck] Módulo WhatsApp DESATIVADO para org ${orgId}. Bloqueando rota ${req.path}.`);
+        return res.status(403).json({
+            error: 'Módulo de WhatsApp não incluído no seu plano atual.',
+            code: 'MODULE_DISABLED',
+            module: 'whatsapp',
+            organization_id: orgId
+        });
+    }
+
+    next();
+});
+
 // 🔐 As rotas de autenticação de funcionários são registradas após a inicialização do client WhatsApp
 
 // 🏗️ SERVE FRONTEND (Monolith Mode)
@@ -900,9 +1001,20 @@ function limparJSON(texto) {
     } catch (e) { return null; }
 }
 
-// 🛡️ Enviar mensagem com verificação de conexão
+// 🛡️ Enviar mensagem com verificação de conexão E checagem de módulo
 async function enviarMensagemSegura(chatId, content, options = {}) {
     try {
+        // 🔒 CHECAGEM DE MÓDULO (fallback para mensagens que não passam pelo middleware HTTP)
+        // Mensagens enviadas por crons/triggers internos chegam aqui diretamente.
+        // O middleware Express já bloqueia rotas HTTP, mas esta checagem garante
+        // que NENHUMA mensagem escape se o módulo estiver desativado.
+        const orgId = options.organization_id || DEFAULT_ORG_ID;
+        const moduloAtivo = await verificarModuloWhatsApp(orgId);
+        if (!moduloAtivo) {
+            console.warn(`🚫 [ModuleCheck] Módulo WhatsApp DESATIVADO para org ${orgId}. Bloqueando envio para ${chatId}.`);
+            return { success: false, blocked: true, error: 'Módulo de WhatsApp não incluído no plano atual.' };
+        }
+
         // Se não estiver conectado, manda direto pra fila
         if (connectionStatus !== 'connected') {
             console.warn(`⚠️ WhatsApp desconectado. Enviando mensagem para ${chatId} para a fila.`);
