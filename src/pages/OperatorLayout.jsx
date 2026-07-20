@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Activity, LogOut, Shield } from "lucide-react";
+import { Activity, LogOut, Shield, Building2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useOperatorAuth } from "@/hooks/useOperatorAuth";
@@ -10,6 +10,7 @@ export default function OperatorLayout({ children }) {
 
   const menuItems = [
     { title: "Painel", href: "/operador", icon: Activity },
+    { title: "Empresas", href: "/operador/empresas", icon: Building2 },
     { title: "Gestão de Planos", href: "/operador/planos", icon: Shield },
   ];
 

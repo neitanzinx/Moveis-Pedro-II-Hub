@@ -81,8 +81,19 @@ export default function PainelSaaSOperador() {
     },
   });
 
-  const isLoading = usageQuery.isLoading || faultQuery.isLoading;
-  const hasError = usageQuery.error || faultQuery.error;
+  const orgsQuery = useQuery({
+    queryKey: ["saas-operator-orgs"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("organizations")
+        .select("id");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const isLoading = usageQuery.isLoading || faultQuery.isLoading || orgsQuery.isLoading;
+  const hasError = usageQuery.error || faultQuery.error || orgsQuery.error;
 
   const usageByTenant = useMemo(() => {
     const grouped = new Map();
@@ -116,12 +127,12 @@ export default function PainelSaaSOperador() {
     ).length;
 
     return {
-      monitoredTenants: usageByTenant.length,
+      monitoredTenants: orgsQuery.data?.length || 0,
       totalActiveUsers,
       totalEvents,
       criticalOpenFaults,
     };
-  }, [usageByTenant, faultQuery.data]);
+  }, [usageByTenant, faultQuery.data, orgsQuery.data]);
 
   return (
     <div className="p-6 space-y-6">
@@ -152,6 +163,7 @@ export default function PainelSaaSOperador() {
             onClick={() => {
               usageQuery.refetch();
               faultQuery.refetch();
+              orgsQuery.refetch();
             }}
             disabled={isLoading}
             className="gap-2"

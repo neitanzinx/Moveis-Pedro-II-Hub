@@ -22,7 +22,7 @@ export default function RastreioPublico({ idProp }) {
     const [localizacaoMotorista, setLocalizacaoMotorista] = useState(null);
     const [paradasNaFrente, setParadasNaFrente] = useState(null);
     const [organizacao, setOrganizacao] = useState({
-        name: "Móveis Pedro II",
+        name: "Empresa",
         logo_url: null,
         primary_color: "#16a34a", // green-600
         secondary_color: "#f38a4c"
@@ -40,7 +40,7 @@ export default function RastreioPublico({ idProp }) {
 
                 if (data) {
                     setOrganizacao({
-                        name: data.name || "Móveis Pedro II",
+                        name: data.name || "Empresa",
                         logo_url: data.logo_url,
                         primary_color: data.primary_color || "#16a34a",
                         secondary_color: data.secondary_color || "#f38a4c"

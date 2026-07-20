@@ -348,7 +348,7 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor, lojaInfo) {
         <div class="header-left">
           <img src="${logoSrc}" alt="Logo" class="logo-img" />
           <div class="empresa-info">
-            <div class="empresa-nome">Móveis Pedro II</div>
+            <div class="empresa-nome">${lojaInfo?.empresa_nome || EMPRESA.nome}</div>
             <div class="empresa-sub">Loja ${venda.loja}</div>
             ${lojaInfo?.cnpj ? `<div class="empresa-sub">CNPJ: ${lojaInfo.cnpj}</div>` : ''}
             ${lojaInfo?.endereco ? `<div class="empresa-sub">${lojaInfo.endereco}</div>` : ''}
@@ -434,7 +434,7 @@ export function gerarNotaPedidoHTML(venda, cliente, vendedor, lojaInfo) {
       </div>
 
       <div class="footer">
-        <div class="footer-text"><strong>Móveis Pedro II</strong></div>
+        <div class="footer-text"><strong>${lojaInfo?.empresa_nome || EMPRESA.nome}</strong></div>
         <div class="footer-text" style="margin-top:3px;font-size:8px;color:#999;">Emitido em ${new Date().toLocaleString('pt-BR')}</div>
       </div>
     </body>
@@ -646,7 +646,7 @@ export function prepararNotaPedidoPDF() {
     </head>
     <body>
       <div class="card" id="progress-card" data-state="loading">
-        <div class="logo">Móveis Pedro II</div>
+        <div class="logo">${EMPRESA.nome}</div>
         <div class="spinner"></div>
         <p class="label" id="progress-label">Finalizando pedido...</p>
         <div class="bar-track">
@@ -735,7 +735,7 @@ export function enviarWhatsApp(telefone, numeroPedido, valorTotal, nomeCliente, 
       : `Em breve entraremos em contato para agendar a entrega.`
     ) + `\n\n` +
     `Obrigado pela preferência!\n` +
-    `*Móveis Pedro II*`
+    `*${EMPRESA.nome}*`
   );
 
   const url = `https://wa.me/${tel}?text=${mensagem}`;

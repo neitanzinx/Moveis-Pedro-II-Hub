@@ -207,8 +207,9 @@ const formatarMoeda = (valor) => {
 };
 
 export function gerarAssistenciaTecnicaHTML(assistencia, venda, cliente, lojaInfo, produtos = []) {
-  const logoSrc = getLogoSrc();
-  const dataAbertura = formatarData(assistencia.data_abertura);
+  const logoSrc = lojaInfo?.logo_url || getLogoSrc();
+  const nomeEmpresa = lojaInfo?.empresa_nome || EMPRESA.nome;
+  const dataAbertura = formatarData(assistencia.data_abertura || assistencia.created_at);
   const dataResolucao = assistencia.data_resolucao ? formatarData(assistencia.data_resolucao) : null;
 
   const enderecoCompleto = obterEnderecoEntrega(venda, cliente);
@@ -430,7 +431,7 @@ export function gerarAssistenciaTecnicaHTML(assistencia, venda, cliente, lojaInf
         <div class="header-left">
           <img src="${logoSrc}" alt="Logo" class="logo-img" />
           <div>
-            <div class="empresa-nome">Móveis Pedro II</div>
+            <div class="empresa-nome">${nomeEmpresa}</div>
             <div class="empresa-sub">Loja ${lojaNome}</div>
             ${lojaInfo?.cnpj ? `<div class="empresa-sub">CNPJ: ${lojaInfo.cnpj}</div>` : ''}
             ${lojaInfo?.endereco ? `<div class="empresa-sub">${lojaInfo.endereco}</div>` : ''}
@@ -522,7 +523,7 @@ export function gerarAssistenciaTecnicaHTML(assistencia, venda, cliente, lojaInf
       </div>
 
       <div class="footer">
-        <div class="footer-text"><strong>Móveis Pedro II</strong> — Assistência Técnica</div>
+        <div class="footer-text"><strong>${nomeEmpresa}</strong> — Assistência Técnica</div>
         <div class="footer-text" style="margin-top:3px;font-size:9px;color:#999;">Emitido em ${new Date().toLocaleString('pt-BR')}</div>
       </div>
     </body>

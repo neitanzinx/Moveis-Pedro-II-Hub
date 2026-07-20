@@ -28,7 +28,7 @@ export default function Orcamentos() {
     const confirm = useConfirm();
     const navigate = useNavigate();
     const { user, filterData } = useAuth();
-    const { lojas } = useTenant();
+    const { brandName, lojas } = useTenant();
     const [generatingPdfId, setGeneratingPdfId] = useState(null);
 
     const handleGerarPDF = async (orcamento) => {
@@ -48,7 +48,8 @@ export default function Orcamentos() {
                 orcamentoFull.cidade = cliente.cidade || orcamentoFull.cidade || '';
             }
             
-            abrirOrcamentoPDF(orcamentoFull, sellerName, lojas.find(l => String(l.nome).trim().toLowerCase() === String(orcamentoFull.loja || '').trim().toLowerCase()) || null);
+            const lojaInfoPdf = lojas.find(l => String(l.nome).trim().toLowerCase() === String(orcamentoFull.loja || '').trim().toLowerCase()) || null;
+            abrirOrcamentoPDF(orcamentoFull, sellerName, lojaInfoPdf ? { ...lojaInfoPdf, empresa_nome: brandName } : null);
             toast.success("PDF gerado com sucesso!");
         } catch (err) {
             console.error(err);

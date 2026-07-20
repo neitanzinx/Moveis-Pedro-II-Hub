@@ -272,7 +272,7 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
       <body>
         <div class="header">
           <img src="${EMPRESA.logo_url}" alt="Logo" />
-          <h1>Móveis Pedro II</h1>
+          <h1>${EMPRESA.nome}</h1>
           <p>Loja ${venda.loja}</p>
         </div>
 
@@ -350,7 +350,7 @@ export default function VendaCard({ venda, onEdit, onDelete, onLiberarEstoque, s
 
         <div class="footer">
           <p>Obrigado pela preferência!</p>
-          <p>Móveis Pedro II - Loja ${venda.loja}</p>
+          <p>${EMPRESA.nome} - Loja ${venda.loja}</p>
         </div>
       </body>
       </html>

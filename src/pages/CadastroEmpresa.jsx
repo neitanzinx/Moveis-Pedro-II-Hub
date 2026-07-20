@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 const STEPS = [
   { id: 1, title: "Escolha o Plano", icon: Sparkles },
   { id: 2, title: "Dados da Empresa", icon: Building2 },
-  { id: 3, title: "Pagamento", icon: CreditCard },
+  { id: 3, title: "Ativação", icon: Check },
 ];
 
 export default function CadastroEmpresa() {
@@ -60,15 +60,8 @@ export default function CadastroEmpresa() {
     }
   };
 
-  // Step 3 — Payment
+  // Step 3 — Payment / Trial
   const [paymentMethod, setPaymentMethod] = useState("PIX");
-  const [cardHolderName, setCardHolderName] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [cardExpiryMonth, setCardExpiryMonth] = useState("");
-  const [cardExpiryYear, setCardExpiryYear] = useState("");
-  const [cardCvv, setCardCvv] = useState("");
-  const [holderPostalCode, setHolderPostalCode] = useState("");
-  const [holderAddressNumber, setHolderAddressNumber] = useState("1");
 
   // Result
   const [result, setResult] = useState(null);
@@ -127,16 +120,6 @@ export default function CadastroEmpresa() {
   };
 
   const handleSubmit = async () => {
-    if (paymentMethod === "CREDIT_CARD") {
-      if (!cardHolderName || !cardNumber || !cardExpiryMonth || !cardExpiryYear || !cardCvv) {
-        toast.error("Preencha todos os campos do cartão de crédito.");
-        return;
-      }
-      if (!holderPostalCode) {
-        toast.error("CEP é obrigatório para pagamento com cartão.");
-        return;
-      }
-    }
 
     try {
       setSubmitting(true);
@@ -151,16 +134,8 @@ export default function CadastroEmpresa() {
         emailAdmin: emailAdmin.trim(),
         senhaAdmin,
         planoId: selectedPlan.id,
-        paymentMethod,
-        cardDetails: paymentMethod === "CREDIT_CARD" ? {
-          holderName: cardHolderName,
-          number: cardNumber,
-          expiryMonth: cardExpiryMonth,
-          expiryYear: cardExpiryYear,
-          ccv: cardCvv,
-          postalCode: holderPostalCode,
-          addressNumber: holderAddressNumber,
-        } : null
+        paymentMethod: "PIX",
+        cardDetails: null
       };
 
       const { data, error } = await supabase.functions.invoke("criar-organizacao", {
@@ -173,7 +148,7 @@ export default function CadastroEmpresa() {
           try {
             const body = await error.context.json();
             if (body?.error) msg = body.error;
-          } catch (_) {}
+          } catch (_) { }
         }
         throw new Error(msg);
       }
@@ -220,16 +195,14 @@ export default function CadastroEmpresa() {
               <div className={`w-12 h-0.5 mx-1 transition-colors ${isDone ? "bg-green-600" : "bg-gray-200"}`} />
             )}
             <div className="flex flex-col items-center gap-1.5">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
-                isActive ? "bg-green-700 text-white shadow-lg ring-4 ring-green-100" :
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all ${isActive ? "bg-green-700 text-white shadow-lg ring-4 ring-green-100" :
                 isDone ? "bg-green-600 text-white" :
-                "bg-gray-100 text-gray-400"
-              }`}>
+                  "bg-gray-100 text-gray-400"
+                }`}>
                 {isDone ? <Check className="w-5 h-5" /> : <Icon className="w-4 h-4" />}
               </div>
-              <span className={`text-xs font-medium whitespace-nowrap ${
-                isActive ? "text-green-800" : isDone ? "text-green-600" : "text-gray-400"
-              }`}>{s.title}</span>
+              <span className={`text-xs font-medium whitespace-nowrap ${isActive ? "text-green-800" : isDone ? "text-green-600" : "text-gray-400"
+                }`}>{s.title}</span>
             </div>
           </React.Fragment>
         );
@@ -256,11 +229,10 @@ export default function CadastroEmpresa() {
             return (
               <Card
                 key={plano.id}
-                className={`cursor-pointer transition-all relative ${
-                  isSelected
-                    ? "border-2 border-green-700 shadow-lg ring-2 ring-green-100"
-                    : "border-gray-200 hover:shadow-md hover:border-green-300"
-                }`}
+                className={`cursor-pointer transition-all relative ${isSelected
+                  ? "border-2 border-green-700 shadow-lg ring-2 ring-green-100"
+                  : "border-gray-200 hover:shadow-md hover:border-green-300"
+                  }`}
                 onClick={() => setSelectedPlan(plano)}
               >
                 {plano.slug === "completo" && (
@@ -333,7 +305,7 @@ export default function CadastroEmpresa() {
         <CardContent className="space-y-4">
           <div>
             <Label htmlFor="nome-empresa">Nome da Empresa / Razão Social *</Label>
-            <Input id="nome-empresa" placeholder="Ex: Móveis Pedro II Ltda" value={nomeEmpresa}
+            <Input id="nome-empresa" placeholder="Ex: Minha Empresa Ltda" value={nomeEmpresa}
               onChange={(e) => setNomeEmpresa(e.target.value)} className="mt-1" required />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -438,82 +410,25 @@ export default function CadastroEmpresa() {
     </div>
   );
 
-  // ========== STEP 3: PAGAMENTO ==========
+  // ========== STEP 3: ATIVAÇÃO (TRIAL) ==========
   const renderStepPagamento = () => (
     <div key="step-3" className="space-y-6 max-w-xl mx-auto animate-in fade-in slide-in-from-right-4 duration-300">
       <div className="text-center">
-        <h2 className="text-2xl font-bold text-gray-900">Forma de Pagamento</h2>
+        <h2 className="text-2xl font-bold text-gray-900">15 Dias de Teste Grátis</h2>
         <p className="text-gray-500 mt-2">
-          Assinatura de <strong>{selectedPlan?.nome}</strong> — {formatCurrency(selectedPlan?.preco_mensal || 0)}/mês
+          Assinatura de <strong>{selectedPlan?.nome}</strong> — {formatCurrency(selectedPlan?.preco_mensal || 0)}/mês após o período de teste.
         </p>
       </div>
 
       <Card>
-        <CardContent className="pt-6 space-y-6">
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { key: "PIX", label: "PIX", Icon: QrCode },
-              { key: "BOLETO", label: "Boleto", Icon: FileText },
-              { key: "CREDIT_CARD", label: "Cartão", Icon: CreditCard },
-            ].map(({ key, label, Icon }) => (
-              <button key={key} type="button" onClick={() => setPaymentMethod(key)}
-                className={`flex flex-col items-center justify-center p-3 rounded-lg border text-sm font-medium transition-all ${
-                  paymentMethod === key
-                    ? "border-green-700 bg-green-50 text-green-800 ring-2 ring-green-700/20"
-                    : "border-gray-200 text-gray-600 hover:bg-gray-50"
-                }`}>
-                <Icon className="w-5 h-5 mb-1.5" />
-                {label}
-              </button>
-            ))}
+        <CardContent className="pt-8 pb-8 text-center space-y-4">
+          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto text-green-700">
+            <Sparkles className="w-8 h-8" />
           </div>
-
-          {paymentMethod === "CREDIT_CARD" && (
-            <div className="space-y-4 border-t pt-4">
-              <h4 className="text-sm font-bold text-gray-700 flex items-center gap-1.5">
-                <CreditCard className="w-4 h-4 text-green-700" /> Dados do Cartão
-              </h4>
-              <div>
-                <Label className="text-xs font-semibold text-gray-500">Nome Impresso no Cartão</Label>
-                <Input placeholder="NOME DO TITULAR" value={cardHolderName}
-                  onChange={(e) => setCardHolderName(e.target.value.toUpperCase())} className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs font-semibold text-gray-500">Número do Cartão</Label>
-                <Input placeholder="0000 0000 0000 0000" value={cardNumber}
-                  onChange={(e) => setCardNumber(e.target.value.replace(/\D/g, "").substring(0, 16))} className="mt-1" />
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <Label className="text-xs font-semibold text-gray-500">Mês Exp.</Label>
-                  <Input placeholder="MM" value={cardExpiryMonth}
-                    onChange={(e) => setCardExpiryMonth(e.target.value.replace(/\D/g, "").substring(0, 2))} className="mt-1" />
-                </div>
-                <div>
-                  <Label className="text-xs font-semibold text-gray-500">Ano Exp.</Label>
-                  <Input placeholder="AAAA" value={cardExpiryYear}
-                    onChange={(e) => setCardExpiryYear(e.target.value.replace(/\D/g, "").substring(0, 4))} className="mt-1" />
-                </div>
-                <div>
-                  <Label className="text-xs font-semibold text-gray-500">CVV</Label>
-                  <Input placeholder="123" value={cardCvv}
-                    onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").substring(0, 4))} className="mt-1" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3 border-t pt-3">
-                <div>
-                  <Label className="text-xs font-semibold text-gray-500">CEP</Label>
-                  <Input placeholder="00000-000" value={holderPostalCode}
-                    onChange={(e) => setHolderPostalCode(e.target.value.replace(/\D/g, "").substring(0, 8))} className="mt-1" />
-                </div>
-                <div>
-                  <Label className="text-xs font-semibold text-gray-500">Nº Endereço</Label>
-                  <Input placeholder="123" value={holderAddressNumber}
-                    onChange={(e) => setHolderAddressNumber(e.target.value)} className="mt-1" />
-                </div>
-              </div>
-            </div>
-          )}
+          <h3 className="text-xl font-bold text-gray-800">Seu acesso será liberado imediatamente!</h3>
+          <p className="text-sm text-gray-600 max-w-sm mx-auto">
+            Nenhuma cobrança será gerada agora. Aproveite todos os recursos do sistema sem compromisso durante os primeiros 15 dias. A forma de pagamento da sua assinatura poderá ser configurada posteriormente.
+          </p>
         </CardContent>
       </Card>
 
@@ -523,7 +438,6 @@ export default function CadastroEmpresa() {
           <p><strong>Empresa:</strong> {nomeEmpresa}</p>
           <p><strong>Plano:</strong> {selectedPlan?.nome} — {formatCurrency(selectedPlan?.preco_mensal || 0)}/mês</p>
           <p><strong>Admin:</strong> {nomeAdmin} ({emailAdmin})</p>
-          <p><strong>Pagamento:</strong> {paymentMethod === "PIX" ? "PIX" : paymentMethod === "BOLETO" ? "Boleto" : "Cartão de Crédito"}</p>
         </div>
       </div>
     </div>
@@ -555,42 +469,7 @@ export default function CadastroEmpresa() {
         </Card>
       )}
 
-      {result?.payment?.pixQrCode && (
-        <Card className="text-left">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <QrCode className="w-5 h-5 text-green-700" /> Pague via PIX
-            </CardTitle>
-            <CardDescription>Escaneie o QR Code ou copie o código abaixo.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-center">
-              <img src={`data:image/png;base64,${result.payment.pixQrCode}`} alt="QR Code PIX" className="w-48 h-48" />
-            </div>
-            {result.payment.pixCopiaCola && (
-              <div>
-                <Label className="text-xs text-gray-500">PIX Copia e Cola</Label>
-                <div className="mt-1 p-2 bg-gray-50 border rounded text-xs font-mono break-all select-all cursor-pointer"
-                  onClick={() => { navigator.clipboard.writeText(result.payment.pixCopiaCola); toast.success("Código copiado!"); }}>
-                  {result.payment.pixCopiaCola}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {result?.payment?.invoiceUrl && !result?.payment?.pixQrCode && (
-        <Card className="text-left">
-          <CardContent className="pt-6">
-            <a href={result.payment.invoiceUrl} target="_blank" rel="noopener noreferrer">
-              <Button className="w-full bg-green-700 hover:bg-green-800">
-                <FileText className="w-4 h-4 mr-2" /> Visualizar Boleto / Fatura
-              </Button>
-            </a>
-          </CardContent>
-        </Card>
-      )}
+      {/* Removido QRCode ou Boleto imediato pois a assinatura tem carência de 15 dias */}
 
       <Button onClick={handleLoginRedirect} className="w-full bg-green-700 hover:bg-green-800 h-12 text-base">
         Acessar o Sistema <ChevronRight className="w-5 h-5 ml-2" />
@@ -607,7 +486,7 @@ export default function CadastroEmpresa() {
           <button onClick={() => navigate("/")} className="flex items-center gap-2 text-gray-500 hover:text-gray-800 text-sm transition-colors">
             <ArrowLeft className="w-4 h-4" /> Voltar ao site
           </button>
-          <h1 className="text-lg font-bold" style={{ color: "#07593f" }}>MPII Hub — Cadastro</h1>
+          <h1 className="text-lg font-bold" style={{ color: "#07593f" }}>GestApp — Cadastro</h1>
           <div />
         </div>
       </header>

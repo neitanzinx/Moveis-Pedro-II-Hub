@@ -23,10 +23,11 @@ import QRCode from "qrcode";
 
 import { ZAP_API_URL as WHATSAPP_BOT_URL } from "@/utils/zapApiUrl";
 import { getOfflineQueue, removeOfflineQueueItem } from "@/utils/offlineQueue";
+import { useTenant } from "@/contexts/TenantContext";
 
 
 // Definição de todos os templates de mensagens
-const MESSAGE_TEMPLATES = {
+const getMessageTemplates = (brandName) => ({
     entregas: {
         label: "Entregas",
         icon: Package,
@@ -47,7 +48,7 @@ const MESSAGE_TEMPLATES = {
                     { key: "{{produtos}}", label: "Lista de Produtos", example: "Sofá 3 lugares, Mesa de jantar" }
                 ],
                 defaultTemplate: `Olá *{{nome}}*! 👋
-Aqui é da *Móveis Pedro II*.
+Aqui é da *${brandName}*.
 
 🚚 *Sua entrega está confirmada!*
 
@@ -86,7 +87,7 @@ Fique tranquilo(a)! O reagendamento será feito dentro do prazo original do seu 
 Nossa equipe entrará em contato em breve para confirmar a nova data da entrega.
 
 Pedimos desculpas pelo inconveniente. 🙏
-*Móveis Pedro II*`
+*${brandName}*`
             },
             {
                 key: "entrega_falha",
@@ -110,7 +111,7 @@ Nossa equipe entrará em contato para reagendar uma data conveniente para você.
 
 Caso tenha alguma dúvida, responda esta mensagem!
 
-*Móveis Pedro II* 🧡💚`
+*${brandName}* 🧡💚`
             },
             {
                 key: "entrega_agradecimento",
@@ -125,7 +126,7 @@ Caso tenha alguma dúvida, responda esta mensagem!
 
 Confirmamos que a entrega do seu pedido *#{{pedido}}* foi concluída com sucesso.
 
-Muito obrigado por escolher a *Móveis Pedro II*! 💚
+Muito obrigado por escolher a *${brandName}*! 💚
 
 Se precisar de qualquer suporte no pós-entrega, é só responder esta mensagem.
 
@@ -151,7 +152,7 @@ Aproveite seus móveis! ✨`
                 ],
                 defaultTemplate: `Bom dia, *{{nome}}*! 🚚
 
-O caminhão da *Móveis Pedro II* acabou de sair do depósito e iniciou a rota de entregas de hoje.
+O caminhão da *${brandName}* acabou de sair do depósito e iniciou a rota de entregas de hoje.
 
 📦 Seu pedido *#{{pedido}}* está a caminho!
 Por favor, mantenha alguém no local para receber.
@@ -167,7 +168,7 @@ Até breve!`
                     { key: "{{nome}}", label: "Nome do Cliente", example: "Roberto Lima" },
                     { key: "{{localizacao}}", label: "Link de Localização", example: "https://maps.google.com/..." }
                 ],
-                defaultTemplate: `*Móveis Pedro II Informa:* 📍
+                defaultTemplate: `*${brandName} Informa:* 📍
 
 Olá *{{nome}}*! O motorista finalizou a entrega anterior e **você é a próxima parada!**
 
@@ -197,7 +198,7 @@ Prepare-se para receber seus móveis em breve.
                     { key: "{{prazo}}", label: "Prazo de Entrega", example: "15 dias" }
                 ],
                 defaultTemplate: `Olá *{{nome}}!* 🎉
-Muito obrigado por comprar na *Móveis Pedro II*.
+Muito obrigado por comprar na *${brandName}*.
 
 ✅ *Seu Pedido #{{pedido}} foi confirmado!*
 
@@ -251,7 +252,7 @@ Entre em contato diretamente com o montador pelo WhatsApp acima. Ele tem autonom
 
 ⚠️ Por favor, certifique-se de que haverá alguém no local para receber.
 
-*Móveis Pedro II* 🧡💚`
+*${brandName}* 🧡💚`
             },
             {
                 key: "lembrete_montagem",
@@ -271,7 +272,7 @@ Hoje é o dia da sua *montagem*!
 O montador chegará em breve. Por favor, mantenha alguém no local para receber.
 
 Se precisar de algo, responda esta mensagem!
-*Móveis Pedro II* 🧡💚`
+*${brandName}* 🧡💚`
             },
             {
                 key: "montador_caminho",
@@ -289,7 +290,7 @@ Previsão de chegada: *em breve*
 
 Por favor, aguarde no local indicado.
 
-*Móveis Pedro II* 🧡💚`
+*${brandName}* 🧡💚`
             }
         ]
     },
@@ -312,7 +313,7 @@ Por favor, aguarde no local indicado.
                 ],
                 defaultTemplate: `Olá *{{nome}}*! 🎂🎉
 
-A equipe da *Móveis Pedro II* deseja um FELIZ ANIVERSÁRIO!
+A equipe da *${brandName}* deseja um FELIZ ANIVERSÁRIO!
 
 Para celebrar seu dia especial, preparamos um presente exclusivo:
 💜 *10% de desconto* na sua próxima compra!
@@ -335,7 +336,7 @@ Um grande abraço! 🧡💚`
                     { key: "{{valor}}", label: "Valor do Orçamento", example: "R$ 2.500,00" }
                 ],
                 defaultTemplate: `Olá *{{nome}}*!
-Aqui é da *Móveis Pedro II*.
+Aqui é da *${brandName}*.
 
 Vi que você fez um orçamento conosco de *{{valor}}* e ainda não fechou. 📋
 
@@ -346,9 +347,11 @@ Estou à disposição para tirar qualquer dúvida! 😊`
             }
         ]
     }
-};
+});
 
 export default function ConfiguracaoWhatsAppBot() {
+    const { brandName } = useTenant();
+    const MESSAGE_TEMPLATES = getMessageTemplates(brandName || "Nossa Empresa");
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [reconnecting, setReconnecting] = useState(false);

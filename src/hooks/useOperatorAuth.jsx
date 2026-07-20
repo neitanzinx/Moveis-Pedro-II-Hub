@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase, getActiveAuthMode, setActiveAuthMode, clearActiveAuthMode, AUTH_MODES } from "@/lib/supabase";
 
-const OPERATOR_AUTH_TIMEOUT_MS = 4000;
+const OPERATOR_AUTH_TIMEOUT_MS = 15000;
 const OPERATOR_AUTH_CACHE_KEY = "operator_auth_cache";
 
 function readCachedOperatorAuth() {
@@ -105,6 +105,14 @@ export function useOperatorAuth() {
         if (mounted) {
           setLoading(true);
           setAuthError(null);
+        }
+
+        // Se o modo ativo é 'tenant', não carregar perfil de operador
+        const currentMode = getActiveAuthMode();
+        if (currentMode === AUTH_MODES.TENANT) {
+          clearCachedOperatorAuth();
+          clearState();
+          return;
         }
 
         if (cachedAuth) {
@@ -226,6 +234,10 @@ export function useOperatorAuth() {
 
     const mergedUser = { ...sessionUser, ...profile };
 
+    // ISOLAMENTO: Marcar sessão como operador e limpar cache de tenant
+    setActiveAuthMode(AUTH_MODES.OPERATOR);
+    try { localStorage.removeItem('employee_user'); } catch { /* ignore */ }
+
     await supabase
       .from("saas_operator_users")
       .update({ last_login_at: new Date().toISOString() })
@@ -243,6 +255,7 @@ export function useOperatorAuth() {
   const signOut = async () => {
     await supabase.auth.signOut();
     clearCachedOperatorAuth();
+    clearActiveAuthMode();
     setUser(null);
     setOperatorProfile(null);
     setAuthError(null);

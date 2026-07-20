@@ -27,8 +27,10 @@ import { whatsappService } from "@/services/whatsappService";
 import { supabase } from "@/lib/supabase";
 import { useConfirm } from "@/hooks/useConfirm";
 import AssistenciaTecnicaModal from "@/components/assistencia/AssistenciaTecnicaModal";
+import { useTenant } from "@/contexts/TenantContext";
 
 export default function MontadorExterno() {
+    const { brandName, brandLogo } = useTenant();
     const MONTAGEM_ITEM_NULLABLE_FIELDS = new Set([
         'montador_id',
         'montador_nome',
@@ -387,7 +389,7 @@ export default function MontadorExterno() {
         const telefone = montagem.cliente_telefone?.replace(/\D/g, '');
         const mensagem = encodeURIComponent(
             `Olá ${montagem.cliente_nome}! \n\n` +
-            `Aqui é o montador da *Móveis Pedro II*.\n` +
+            `Aqui é o montador da *${brandName}*.\n` +
             `Estou *a caminho* do seu endereço para realizar a montagem do seu pedido #${montagem.numero_pedido}!\n\n` +
             `Previsão de chegada: em breve.\n\n` +
             `Qualquer dúvida, estou à disposição!`
@@ -671,11 +673,17 @@ export default function MontadorExterno() {
         return (
             <div className="flex flex-col h-screen items-center justify-center p-6 bg-gradient-to-br from-orange-50 to-orange-100">
                 <div className="bg-white rounded-2xl shadow-lg p-8 text-center max-w-sm">
-                    <img
-                        src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/690ce4cb64e20af6b4a46b6f/3474ff954_undefined-Imgur.png"
-                        alt="Móveis Pedro II"
-                        className="h-16 w-auto mx-auto mb-4"
-                    />
+                    {brandLogo ? (
+                        <img
+                            src={brandLogo}
+                            alt={brandName}
+                            className="h-16 w-auto mx-auto mb-4"
+                        />
+                    ) : (
+                        <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                            <Wrench className="w-8 h-8 text-orange-500" />
+                        </div>
+                    )}
                     <h2 className="text-xl font-bold text-gray-900 mb-2">Área do Montador</h2>
                     <p className="text-gray-600 mb-6">
                         Faça login ou cadastre-se para acessar.
@@ -766,11 +774,17 @@ export default function MontadorExterno() {
             <header className="bg-gradient-to-r from-orange-500 to-orange-600 text-white p-4 pb-6 rounded-b-3xl shadow-lg">
                 <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
-                        <img
-                            src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/690ce4cb64e20af6b4a46b6f/3474ff954_undefined-Imgur.png"
-                            alt="Móveis Pedro II"
-                            className="h-[52px] w-auto rounded-xl object-contain"
-                        />
+                        {brandLogo ? (
+                            <img
+                                src={brandLogo}
+                                alt={brandName}
+                                className="h-[52px] w-auto rounded-xl object-contain"
+                            />
+                        ) : (
+                            <div className="w-[52px] h-[52px] bg-white rounded-xl flex items-center justify-center">
+                                <Wrench className="w-8 h-8 text-orange-500" />
+                            </div>
+                        )}
                         <div>
                             <h1 className="font-bold text-lg">Olá, {montadorDisplay.nome?.split(' ')[0]}!</h1>
                             <p className="text-orange-100 text-sm">Montador Externo</p>

@@ -17,8 +17,11 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   )
 
-  const asaasUrl = Deno.env.get('ASAAS_API_URL') || 'https://api-sandbox.asaas.com/v3';
   const asaasKey = Deno.env.get('ASAAS_API_KEY') || '';
+  const defaultUrl = (asaasKey.trim().startsWith('$aae') || asaasKey.trim().startsWith('$aact_prod')) 
+    ? 'https://api.asaas.com/v3' 
+    : 'https://api-sandbox.asaas.com/v3';
+  const asaasUrl = Deno.env.get('ASAAS_API_URL') || defaultUrl;
 
   if (!asaasKey) {
     return new Response(
@@ -138,7 +141,7 @@ serve(async (req) => {
         email_suporte: emailEmpresa,
         whatsapp_suporte: whatsappEmpresa || null,
         plano_id: plano.id,
-        status_assinatura: 'processando'
+        status_assinatura: 'ativa'
       })
       .select()
       .single();
@@ -171,20 +174,34 @@ serve(async (req) => {
     }
 
     // ========== 6. CRIAR PERFIL DO ADMIN EM public_users ==========
-    // Gerar matrícula no padrão MP-AD0001 (padrão existente do sistema)
+    // Gerar prefixo baseado no nome da empresa
+    const words = nomeEmpresa.trim().split(/\s+/);
+    let prefix = 'EMP';
+    if (words.length >= 2) {
+      prefix = (words[0][0] + words[1][0]).toUpperCase();
+    } else if (words[0].length >= 2) {
+      prefix = words[0].substring(0, 2).toUpperCase();
+    }
+    prefix = prefix.replace(/[^A-Z]/g, '');
+    if (prefix.length === 0) prefix = 'EMP';
+    if (prefix.length > 3) prefix = prefix.substring(0, 3);
+    
+    const matriculaPrefix = `${prefix}-AD`;
+
     const { data: lastUser } = await supabaseAdmin
       .from('public_users')
       .select('matricula')
-      .like('matricula', 'MP-AD%')
+      .like('matricula', `${matriculaPrefix}%`)
       .order('matricula', { ascending: false })
       .limit(1);
 
     let nextNum = 1;
     if (lastUser && lastUser.length > 0 && lastUser[0].matricula) {
-      const match = lastUser[0].matricula.match(/MP-AD(\d+)/);
+      const regex = new RegExp(`${matriculaPrefix}(\\d+)`);
+      const match = lastUser[0].matricula.match(regex);
       if (match) nextNum = parseInt(match[1], 10) + 1;
     }
-    const matricula = `MP-AD${String(nextNum).padStart(4, '0')}`;
+    const matricula = `${matriculaPrefix}${String(nextNum).padStart(4, '0')}`;
 
     const { error: userError } = await supabaseAdmin
       .from('public_users')
@@ -246,6 +263,7 @@ serve(async (req) => {
 
     // 7b. Criar Assinatura
     const date = new Date();
+    date.setDate(date.getDate() + 15); // 15 dias grátis
     const brtDate = new Date(date.getTime() - 3 * 60 * 60 * 1000);
     const nextDueDate = brtDate.toISOString().split('T')[0];
 

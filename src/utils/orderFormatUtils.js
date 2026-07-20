@@ -73,7 +73,7 @@ export function gerarTextoPedidoOperacional(oc, itens = [], user = {}, lojaName 
   const linhas = [];
 
   // Cabeçalho com nome da loja (sempre validado pelas chamadas de componentes)
-  const nomeEmpresa = lojaName || 'Móveis Pedro II';
+  const nomeEmpresa = lojaName || 'Empresa';
   linhas.push(`Segue encomenda da loja *${nomeEmpresa}*:\n`);
 
   // Linha do pedido OC com referências
@@ -179,7 +179,7 @@ export function gerarTextoPedido(pedidoData, fornecedores = []) {
         texto += `\n*Observações:*\n${pedidoData.observacoes}\n`;
     }
 
-    texto += `\n---\n_Móveis Pedro II - Gestão de Compras_`;
+    texto += `\n---\n_Gestão de Compras_`;
 
     return texto;
 }

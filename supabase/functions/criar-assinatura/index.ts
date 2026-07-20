@@ -13,8 +13,11 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  const asaasUrl = Deno.env.get('ASAAS_API_URL') || 'https://api-sandbox.asaas.com/v3';
   const asaasKey = Deno.env.get('ASAAS_API_KEY') || '';
+  const defaultUrl = (asaasKey.trim().startsWith('$aae') || asaasKey.trim().startsWith('$aact_prod')) 
+    ? 'https://api.asaas.com/v3' 
+    : 'https://api-sandbox.asaas.com/v3';
+  const asaasUrl = Deno.env.get('ASAAS_API_URL') || defaultUrl;
 
   if (!asaasKey) {
     return new Response(
@@ -59,9 +62,9 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // Fetch user's organization_id from profiles
+    // Fetch user's organization_id from public_users
     const { data: profile, error: profileError } = await supabaseAdmin
-      .from('profiles')
+      .from('public_users')
       .select('organization_id')
       .eq('id', user.id)
       .single();
@@ -77,7 +80,7 @@ serve(async (req) => {
     const orgId = profile.organization_id;
 
     // Parse request body
-    const { planoId, paymentMethod, cardDetails, action = 'create' } = await req.json().catch(() => ({}));
+    const { planoId, paymentMethod, cardDetails, billingInfo, action = 'create' } = await req.json().catch(() => ({}));
 
     // Action: Cancel Subscription
     if (action === 'cancel') {
@@ -94,11 +97,19 @@ serve(async (req) => {
         )
       }
 
-      // Call Asaas DELETE subscription
-      const asaasResponse = await fetch(`${asaasUrl}/subscriptions/${org.asaas_subscription_id}`, {
-        method: 'DELETE',
-        headers: asaasHeaders
-      });
+      // Call Asaas DELETE subscription or payment
+      let asaasResponse;
+      if (org.asaas_subscription_id.startsWith('sub_')) {
+        asaasResponse = await fetch(`${asaasUrl}/subscriptions/${org.asaas_subscription_id}`, {
+          method: 'DELETE',
+          headers: asaasHeaders
+        });
+      } else {
+        asaasResponse = await fetch(`${asaasUrl}/payments/${org.asaas_subscription_id}`, {
+          method: 'DELETE',
+          headers: asaasHeaders
+        });
+      }
 
       if (!asaasResponse.ok) {
         const errText = await asaasResponse.text();
@@ -121,6 +132,49 @@ serve(async (req) => {
       )
     }
 
+    // Action: Cancel pending subscription and allow restart
+    if (action === 'cancel-and-restart') {
+      const { data: org, error: orgError } = await supabaseAdmin
+        .from('organizations')
+        .select('asaas_subscription_id')
+        .eq('id', orgId)
+        .single();
+
+      if (orgError || !org || !org.asaas_subscription_id) {
+        return new Response(
+          JSON.stringify({ error: 'No active subscription found to cancel' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Call Asaas DELETE subscription or payment to clean up the pending boleto
+      if (org.asaas_subscription_id.startsWith('sub_')) {
+        await fetch(`${asaasUrl}/subscriptions/${org.asaas_subscription_id}`, {
+          method: 'DELETE',
+          headers: asaasHeaders
+        });
+      } else {
+        await fetch(`${asaasUrl}/payments/${org.asaas_subscription_id}`, {
+          method: 'DELETE',
+          headers: asaasHeaders
+        });
+      }
+
+      // Mark database as inativa and clear the subscription ID so they can start fresh
+      await supabaseAdmin
+        .from('organizations')
+        .update({ 
+          status_assinatura: 'inativa',
+          asaas_subscription_id: null 
+        })
+        .eq('id', orgId);
+
+      return new Response(
+        JSON.stringify({ success: true, message: 'Subscription canceled, ready to restart' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // Action: Get pending payment details
     if (action === 'get-pending-payment') {
       const { data: org, error: orgError } = await supabaseAdmin
@@ -136,51 +190,71 @@ serve(async (req) => {
         )
       }
 
-      const paymentsResponse = await fetch(`${asaasUrl}/subscriptions/${org.asaas_subscription_id}/payments?status=PENDING`, {
-        method: 'GET',
-        headers: asaasHeaders
-      });
+      let paymentsData = { data: [] };
 
-      if (!paymentsResponse.ok) {
-        const errText = await paymentsResponse.text();
-        return new Response(
-          JSON.stringify({ error: `Asaas error: ${errText}` }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+      if (org.asaas_subscription_id.startsWith('sub_')) {
+        const paymentsResponse = await fetch(`${asaasUrl}/subscriptions/${org.asaas_subscription_id}/payments`, {
+          method: 'GET',
+          headers: asaasHeaders
+        });
+
+        if (paymentsResponse.ok) {
+          paymentsData = await paymentsResponse.json();
+        } else {
+          const errText = await paymentsResponse.text();
+          return new Response(
+            JSON.stringify({ error: `Asaas error: ${errText}` }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      } else if (org.asaas_subscription_id.startsWith('pay_')) {
+        const singlePaymentRes = await fetch(`${asaasUrl}/payments/${org.asaas_subscription_id}`, {
+          method: 'GET',
+          headers: asaasHeaders
+        });
+        if (singlePaymentRes.ok) {
+          const singlePayment = await singlePaymentRes.json();
+          paymentsData.data = [singlePayment];
+        } else {
+          const errText = await singlePaymentRes.text();
+          return new Response(
+            JSON.stringify({ error: `Asaas error: ${errText}` }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
       }
 
-      const paymentsData = await paymentsResponse.json();
       if (!paymentsData.data || paymentsData.data.length === 0) {
         return new Response(
-          JSON.stringify({ message: 'No pending payments found' }),
+          JSON.stringify({ message: 'No payments found' }),
           { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
 
       const payment = paymentsData.data[0];
 
-      if (payment.billingType === 'PIX') {
+      if (['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH'].includes(payment.status)) {
+        await supabaseAdmin
+          .from('organizations')
+          .update({ status_assinatura: 'ativa' })
+          .eq('id', orgId);
+      }
+
+      let pixQrCode = null;
+      let pixCopiaCola = null;
+
+      try {
         const pixResponse = await fetch(`${asaasUrl}/payments/${payment.id}/pixQrCode`, {
           method: 'GET',
           headers: asaasHeaders
         });
-
         if (pixResponse.ok) {
           const pixData = await pixResponse.json();
-          return new Response(
-            JSON.stringify({
-              subscriptionId: org.asaas_subscription_id,
-              paymentId: payment.id,
-              billingType: 'PIX',
-              invoiceUrl: payment.invoiceUrl,
-              pixQrCode: pixData.encodedImage,
-              pixCopiaCola: pixData.payload,
-              dueDate: payment.dueDate,
-              value: payment.value
-            }),
-            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
+          pixQrCode = pixData.encodedImage;
+          pixCopiaCola = pixData.payload;
         }
+      } catch (err) {
+        console.error("Error fetching pix QrCode:", err);
       }
 
       return new Response(
@@ -190,8 +264,11 @@ serve(async (req) => {
           billingType: payment.billingType,
           invoiceUrl: payment.invoiceUrl,
           bankSlipUrl: payment.bankSlipUrl,
+          pixQrCode,
+          pixCopiaCola,
           dueDate: payment.dueDate,
-          value: payment.value
+          value: payment.value,
+          status: payment.status
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
@@ -209,6 +286,29 @@ serve(async (req) => {
         JSON.stringify({ error: 'Organization not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
+    }
+
+    // Update billing info if provided
+    if (billingInfo) {
+      const updateData: any = {};
+      if (billingInfo.cnpj) updateData.cnpj = billingInfo.cnpj.replace(/\D/g, '');
+      if (billingInfo.email) updateData.email_suporte = billingInfo.email.trim();
+      if (billingInfo.phone) updateData.whatsapp_suporte = billingInfo.phone.replace(/\D/g, '');
+
+      if (Object.keys(updateData).length > 0) {
+        const { error: updateError } = await supabaseAdmin
+          .from('organizations')
+          .update(updateData)
+          .eq('id', orgId);
+
+        if (updateError) {
+          console.error('Error updating organization billing info:', updateError);
+        } else {
+          if (updateData.cnpj) org.cnpj = updateData.cnpj;
+          if (updateData.email_suporte) org.email_suporte = updateData.email_suporte;
+          if (updateData.whatsapp_suporte) org.whatsapp_suporte = updateData.whatsapp_suporte;
+        }
+      }
     }
 
     if (!planoId || !paymentMethod) {
@@ -274,146 +374,272 @@ serve(async (req) => {
     const isNewSub = !subscriptionId;
 
     if (isNewSub) {
-      // 2. Create Subscription in Asaas
-      const subscriptionPayload: any = {
-        customer: customerId,
-        billingType: paymentMethod, // "PIX", "BOLETO", "CREDIT_CARD"
-        value: plano.preco_mensal,
-        nextDueDate: nextDueDate,
-        cycle: 'MONTHLY',
-        description: `Assinatura de Plano - ${plano.nome}`,
-        remoteIp: req.headers.get('x-real-ip') || req.headers.get('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1',
-      };
+      if (paymentMethod === 'PIX') {
+        // Create a single payment instead of a subscription for PIX
+        const paymentPayload: any = {
+          customer: customerId,
+          billingType: 'PIX',
+          value: plano.preco_mensal,
+          dueDate: nextDueDate,
+          description: `Pagamento Mensal - ${plano.nome}`,
+          remoteIp: req.headers.get('x-real-ip') || req.headers.get('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1',
+        };
 
-      if (paymentMethod === 'CREDIT_CARD') {
-        if (!cardDetails) {
+        const createPayRes = await fetch(`${asaasUrl}/payments`, {
+          method: 'POST',
+          headers: asaasHeaders,
+          body: JSON.stringify(paymentPayload)
+        });
+
+        if (!createPayRes.ok) {
+          const errText = await createPayRes.text();
+          console.error('Asaas payment creation failed:', errText);
           return new Response(
-            JSON.stringify({ error: 'Missing credit card details' }),
+            JSON.stringify({ error: `Asaas PIX creation failed: ${errText}` }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
-        subscriptionPayload.creditCard = {
-          holderName: cardDetails.holderName,
-          number: cardDetails.number.replace(/\D/g, ''),
-          expiryMonth: cardDetails.expiryMonth,
-          expiryYear: cardDetails.expiryYear,
-          ccv: cardDetails.ccv
+
+        const payData = await createPayRes.json();
+        subscriptionId = payData.id;
+
+        await supabaseAdmin
+          .from('organizations')
+          .update({
+            plano_id: plano.id,
+            asaas_subscription_id: subscriptionId, // We store the payment ID here
+            status_assinatura: 'processando',
+            proxima_cobranca: nextDueDate
+          })
+          .eq('id', orgId);
+
+      } else {
+        // 2. Create Subscription in Asaas
+        const subscriptionPayload: any = {
+          customer: customerId,
+          billingType: paymentMethod, // CREDIT_CARD or BOLETO
+          value: plano.preco_mensal,
+          nextDueDate: nextDueDate,
+          cycle: 'MONTHLY',
+          description: `Assinatura de Plano - ${plano.nome}`,
+          remoteIp: req.headers.get('x-real-ip') || req.headers.get('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1',
         };
-        subscriptionPayload.creditCardHolderInfo = {
-          name: cardDetails.holderName,
-          email: org.email_suporte || cardDetails.email,
-          cpfCnpj: org.cnpj ? org.cnpj.replace(/\D/g, '') : cardDetails.cpfCnpj.replace(/\D/g, ''),
-          postalCode: cardDetails.postalCode?.replace(/\D/g, ''),
-          addressNumber: cardDetails.addressNumber || '1',
-          phone: org.whatsapp_suporte ? org.whatsapp_suporte.replace(/\D/g, '') : cardDetails.phone?.replace(/\D/g, ''),
-        };
-      }
 
-      const createSubRes = await fetch(`${asaasUrl}/subscriptions`, {
-        method: 'POST',
-        headers: asaasHeaders,
-        body: JSON.stringify(subscriptionPayload)
-      });
+        if (paymentMethod === 'CREDIT_CARD') {
+          if (!cardDetails) {
+            return new Response(
+              JSON.stringify({ error: 'Missing credit card details' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          subscriptionPayload.creditCard = {
+            holderName: cardDetails.holderName,
+            number: cardDetails.number.replace(/\D/g, ''),
+            expiryMonth: cardDetails.expiryMonth,
+            expiryYear: cardDetails.expiryYear,
+            ccv: cardDetails.ccv
+          };
+          subscriptionPayload.creditCardHolderInfo = {
+            name: cardDetails.holderName,
+            email: org.email_suporte || cardDetails.email,
+            cpfCnpj: org.cnpj ? org.cnpj.replace(/\D/g, '') : cardDetails.cpfCnpj.replace(/\D/g, ''),
+            postalCode: cardDetails.postalCode?.replace(/\D/g, ''),
+            addressNumber: cardDetails.addressNumber || '1',
+            phone: org.whatsapp_suporte ? org.whatsapp_suporte.replace(/\D/g, '') : cardDetails.phone?.replace(/\D/g, ''),
+          };
+        }
 
-      if (!createSubRes.ok) {
-        const errText = await createSubRes.text();
-        console.error('Asaas subscription creation failed:', errText);
-        return new Response(
-          JSON.stringify({ error: `Asaas subscription creation failed: ${errText}` }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
+        const createSubRes = await fetch(`${asaasUrl}/subscriptions`, {
+          method: 'POST',
+          headers: asaasHeaders,
+          body: JSON.stringify(subscriptionPayload)
+        });
 
-      const subData = await createSubRes.json();
-      subscriptionId = subData.id;
-
-      await supabaseAdmin
-        .from('organizations')
-        .update({
-          plano_id: plano.id,
-          asaas_subscription_id: subscriptionId,
-          status_assinatura: 'processando',
-          proxima_cobranca: nextDueDate
-        })
-        .eq('id', orgId);
-
-    } else {
-      // 3. Update Existing Subscription (Upgrade/Downgrade)
-      const updatePayload: any = {
-        value: plano.preco_mensal,
-        billingType: paymentMethod,
-        description: `Alteração Plano - ${plano.nome}`,
-        updatePendingPayments: true
-      };
-
-      if (paymentMethod === 'CREDIT_CARD') {
-        if (!cardDetails) {
+        if (!createSubRes.ok) {
+          const errText = await createSubRes.text();
+          console.error('Asaas subscription creation failed:', errText);
           return new Response(
-            JSON.stringify({ error: 'Missing credit card details' }),
+            JSON.stringify({ error: `Asaas subscription creation failed: ${errText}` }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
-        updatePayload.creditCard = {
-          holderName: cardDetails.holderName,
-          number: cardDetails.number.replace(/\D/g, ''),
-          expiryMonth: cardDetails.expiryMonth,
-          expiryYear: cardDetails.expiryYear,
-          ccv: cardDetails.ccv
-        };
-        updatePayload.creditCardHolderInfo = {
-          name: cardDetails.holderName,
-          email: org.email_suporte || cardDetails.email,
-          cpfCnpj: org.cnpj ? org.cnpj.replace(/\D/g, '') : cardDetails.cpfCnpj.replace(/\D/g, ''),
-          postalCode: cardDetails.postalCode?.replace(/\D/g, ''),
-          addressNumber: cardDetails.addressNumber || '1',
-          phone: org.whatsapp_suporte ? org.whatsapp_suporte.replace(/\D/g, '') : cardDetails.phone?.replace(/\D/g, ''),
-        };
+
+        const subData = await createSubRes.json();
+        subscriptionId = subData.id;
+
+        await supabaseAdmin
+          .from('organizations')
+          .update({
+            plano_id: plano.id,
+            asaas_subscription_id: subscriptionId,
+            status_assinatura: 'processando',
+            proxima_cobranca: nextDueDate
+          })
+          .eq('id', orgId);
       }
 
-      const updateSubRes = await fetch(`${asaasUrl}/subscriptions/${subscriptionId}`, {
-        method: 'POST',
-        headers: asaasHeaders,
-        body: JSON.stringify(updatePayload)
-      });
+      // 3. Update Existing Subscription or Payment
+      if (paymentMethod === 'PIX') {
+        // If they are changing to PIX, cancel the old subscription or old payment
+        if (subscriptionId.startsWith('sub_')) {
+          await fetch(`${asaasUrl}/subscriptions/${subscriptionId}`, { method: 'DELETE', headers: asaasHeaders });
+        } else if (subscriptionId.startsWith('pay_')) {
+          await fetch(`${asaasUrl}/payments/${subscriptionId}`, { method: 'DELETE', headers: asaasHeaders });
+        }
 
-      if (!updateSubRes.ok) {
-        const errText = await updateSubRes.text();
-        console.error('Asaas subscription update failed:', errText);
-        return new Response(
-          JSON.stringify({ error: `Asaas subscription update failed: ${errText}` }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+        // Create a new single payment for PIX
+        const paymentPayload: any = {
+          customer: customerId,
+          billingType: 'PIX',
+          value: plano.preco_mensal,
+          dueDate: nextDueDate,
+          description: `Pagamento Mensal - ${plano.nome}`,
+        };
+        const createPayRes = await fetch(`${asaasUrl}/payments`, {
+          method: 'POST',
+          headers: asaasHeaders,
+          body: JSON.stringify(paymentPayload)
+        });
+
+        if (createPayRes.ok) {
+          const payData = await createPayRes.json();
+          subscriptionId = payData.id;
+          await supabaseAdmin.from('organizations').update({
+            plano_id: plano.id,
+            asaas_subscription_id: subscriptionId,
+            status_assinatura: 'processando',
+            proxima_cobranca: nextDueDate
+          }).eq('id', orgId);
+        }
+      } else {
+        // Update Asaas Subscription
+        if (subscriptionId.startsWith('pay_')) {
+           // If old was a single payment (PIX) and they are moving to CREDIT/BOLETO, cancel old payment and create subscription
+           await fetch(`${asaasUrl}/payments/${subscriptionId}`, { method: 'DELETE', headers: asaasHeaders });
+           
+           const subscriptionPayload: any = {
+             customer: customerId,
+             billingType: paymentMethod,
+             value: plano.preco_mensal,
+             nextDueDate: nextDueDate,
+             cycle: 'MONTHLY',
+             description: `Assinatura de Plano - ${plano.nome}`,
+           };
+           //... credit card logic omitted for brevity, let's keep it simple or recreate it
+           // Actually, since they use the "Cancelar Fatura" button to restart, they rarely hit this path for changing methods.
+           // Let's just create the subscription.
+           if (paymentMethod === 'CREDIT_CARD' && cardDetails) {
+              subscriptionPayload.creditCard = {
+                holderName: cardDetails.holderName,
+                number: cardDetails.number.replace(/\D/g, ''),
+                expiryMonth: cardDetails.expiryMonth,
+                expiryYear: cardDetails.expiryYear,
+                ccv: cardDetails.ccv
+              };
+              subscriptionPayload.creditCardHolderInfo = {
+                name: cardDetails.holderName,
+                email: org.email_suporte || cardDetails.email,
+                cpfCnpj: org.cnpj ? org.cnpj.replace(/\D/g, '') : cardDetails.cpfCnpj.replace(/\D/g, ''),
+                postalCode: cardDetails.postalCode?.replace(/\D/g, ''),
+                addressNumber: cardDetails.addressNumber || '1',
+                phone: org.whatsapp_suporte ? org.whatsapp_suporte.replace(/\D/g, '') : cardDetails.phone?.replace(/\D/g, ''),
+              };
+           }
+           const createSubRes = await fetch(`${asaasUrl}/subscriptions`, {
+             method: 'POST',
+             headers: asaasHeaders,
+             body: JSON.stringify(subscriptionPayload)
+           });
+           if (createSubRes.ok) {
+             const subData = await createSubRes.json();
+             subscriptionId = subData.id;
+             await supabaseAdmin.from('organizations').update({
+               plano_id: plano.id,
+               asaas_subscription_id: subscriptionId,
+               status_assinatura: 'processando',
+               proxima_cobranca: nextDueDate
+             }).eq('id', orgId);
+           }
+        } else {
+           // Normal subscription update
+           const updatePayload: any = {
+             value: plano.preco_mensal,
+             billingType: paymentMethod,
+             description: `Alteração Plano - ${plano.nome}`,
+             updatePendingPayments: true
+           };
+
+           if (paymentMethod === 'CREDIT_CARD') {
+             if (!cardDetails) {
+               return new Response(
+                 JSON.stringify({ error: 'Missing credit card details' }),
+                 { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+               )
+             }
+             updatePayload.creditCard = {
+               holderName: cardDetails.holderName,
+               number: cardDetails.number.replace(/\D/g, ''),
+               expiryMonth: cardDetails.expiryMonth,
+               expiryYear: cardDetails.expiryYear,
+               ccv: cardDetails.ccv
+             };
+             updatePayload.creditCardHolderInfo = {
+               name: cardDetails.holderName,
+               email: org.email_suporte || cardDetails.email,
+               cpfCnpj: org.cnpj ? org.cnpj.replace(/\D/g, '') : cardDetails.cpfCnpj.replace(/\D/g, ''),
+               postalCode: cardDetails.postalCode?.replace(/\D/g, ''),
+               addressNumber: cardDetails.addressNumber || '1',
+               phone: org.whatsapp_suporte ? org.whatsapp_suporte.replace(/\D/g, '') : cardDetails.phone?.replace(/\D/g, ''),
+             };
+           }
+
+           const updateSubRes = await fetch(`${asaasUrl}/subscriptions/${subscriptionId}`, {
+             method: 'POST',
+             headers: asaasHeaders,
+             body: JSON.stringify(updatePayload)
+           });
+
+           if (!updateSubRes.ok) {
+             const errText = await updateSubRes.text();
+             console.error('Asaas subscription update failed:', errText);
+             return new Response(
+               JSON.stringify({ error: `Asaas subscription update failed: ${errText}` }),
+               { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+             )
+           }
+
+           await supabaseAdmin
+             .from('organizations')
+             .update({
+               plano_id: plano.id,
+               status_assinatura: 'processando'
+             })
+             .eq('id', orgId);
+        }
       }
-
-      await supabaseAdmin
-        .from('organizations')
-        .update({
-          plano_id: plano.id,
-          status_assinatura: 'processando'
-        })
-        .eq('id', orgId);
     }
 
     // 4. Retrieve details of the current pending invoice
-    const paymentsResponse = await fetch(`${asaasUrl}/subscriptions/${subscriptionId}/payments?status=PENDING`, {
-      method: 'GET',
-      headers: asaasHeaders
-    });
-
-    if (!paymentsResponse.ok) {
-      const errText = await paymentsResponse.text();
-      console.error('Asaas payments fetch failed:', errText);
-      return new Response(
-        JSON.stringify({
-          success: true,
-          subscriptionId,
-          message: 'Assinatura criada/atualizada. Detalhes de pagamento indisponíveis no momento.'
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    let paymentsData = { data: [] };
+    if (subscriptionId.startsWith('sub_')) {
+      const paymentsResponse = await fetch(`${asaasUrl}/subscriptions/${subscriptionId}/payments?status=PENDING`, {
+        method: 'GET',
+        headers: asaasHeaders
+      });
+      if (paymentsResponse.ok) paymentsData = await paymentsResponse.json();
+    } else if (subscriptionId.startsWith('pay_')) {
+      const singlePayRes = await fetch(`${asaasUrl}/payments/${subscriptionId}`, {
+        method: 'GET',
+        headers: asaasHeaders
+      });
+      if (singlePayRes.ok) {
+        const singlePayData = await singlePayRes.json();
+        if (singlePayData.status === 'PENDING' || singlePayData.status === 'OVERDUE') {
+          paymentsData.data = [singlePayData];
+        }
+      }
     }
 
-    const paymentsData = await paymentsResponse.json();
     if (!paymentsData.data || paymentsData.data.length === 0) {
       return new Response(
         JSON.stringify({
@@ -425,31 +651,40 @@ serve(async (req) => {
       )
     }
 
-    const payment = paymentsData.data[0];
+    let payment = paymentsData.data[0];
 
-    if (paymentMethod === 'PIX') {
+    if (paymentMethod === 'PIX' || paymentMethod === 'BOLETO') {
+      const targetBillingType = paymentMethod;
+      if (payment.billingType !== targetBillingType) {
+        console.log(`Updating pending payment ${payment.id} billingType from ${payment.billingType} to ${targetBillingType}`);
+        const updatePaymentRes = await fetch(`${asaasUrl}/payments/${payment.id}`, {
+          method: 'POST',
+          headers: asaasHeaders,
+          body: JSON.stringify({ billingType: targetBillingType })
+        });
+        if (updatePaymentRes.ok) {
+          payment = await updatePaymentRes.json();
+        } else {
+          console.error(`Failed to update pending payment billingType:`, await updatePaymentRes.text());
+        }
+      }
+    }
+
+    let pixQrCode = null;
+    let pixCopiaCola = null;
+
+    try {
       const pixResponse = await fetch(`${asaasUrl}/payments/${payment.id}/pixQrCode`, {
         method: 'GET',
         headers: asaasHeaders
       });
-
       if (pixResponse.ok) {
         const pixData = await pixResponse.json();
-        return new Response(
-          JSON.stringify({
-            success: true,
-            subscriptionId,
-            paymentId: payment.id,
-            billingType: 'PIX',
-            invoiceUrl: payment.invoiceUrl,
-            pixQrCode: pixData.encodedImage,
-            pixCopiaCola: pixData.payload,
-            dueDate: payment.dueDate,
-            value: payment.value
-          }),
-          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+        pixQrCode = pixData.encodedImage;
+        pixCopiaCola = pixData.payload;
       }
+    } catch (err) {
+      console.error("Error fetching pix QrCode:", err);
     }
 
     return new Response(
@@ -460,6 +695,8 @@ serve(async (req) => {
         billingType: payment.billingType,
         invoiceUrl: payment.invoiceUrl,
         bankSlipUrl: payment.bankSlipUrl,
+        pixQrCode,
+        pixCopiaCola,
         dueDate: payment.dueDate,
         value: payment.value
       }),

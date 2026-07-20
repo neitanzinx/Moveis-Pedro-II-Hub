@@ -32,6 +32,41 @@ if (!window.__supabase_instance) {
 
 export const supabase = window.__supabase_instance;
 
+// ============================================================================
+// AUTH MODE ISOLATION - Separar sessão Operador SaaS vs Funcionário GestApp
+// ============================================================================
+const AUTH_MODE_KEY = 'active_auth_mode';
+export const AUTH_MODES = Object.freeze({
+    OPERATOR: 'operator',
+    TENANT: 'tenant',
+});
+
+export function getActiveAuthMode() {
+    try {
+        return localStorage.getItem(AUTH_MODE_KEY) || null;
+    } catch {
+        return null;
+    }
+}
+
+export function setActiveAuthMode(mode) {
+    try {
+        if (mode && Object.values(AUTH_MODES).includes(mode)) {
+            localStorage.setItem(AUTH_MODE_KEY, mode);
+        }
+    } catch {
+        // Ignora falhas de storage
+    }
+}
+
+export function clearActiveAuthMode() {
+    try {
+        localStorage.removeItem(AUTH_MODE_KEY);
+    } catch {
+        // Ignora falhas de storage
+    }
+}
+
 // Listener para refresh automático de sessão quando estiver prestes a expirar
 supabase.auth.onAuthStateChange(async (event, session) => {
     if (event === 'TOKEN_REFRESHED') {
@@ -43,25 +78,9 @@ supabase.auth.onAuthStateChange(async (event, session) => {
     }
 });
 
-// Tentar recuperar sessão ao inicializar (força refresh se necessário)
-(async () => {
-    try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (session) {
-            // Se a sessão existe mas está prestes a expirar (menos de 5 min), força refresh
-            const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
-            const now = Date.now();
-            const fiveMinutes = 5 * 60 * 1000;
-
-            if (expiresAt - now < fiveMinutes) {
-                console.log('⏰ Token expirando, renovando...');
-                await supabase.auth.refreshSession();
-            }
-        }
-    } catch (e) {
-        console.warn('Erro ao verificar sessão:', e);
-    }
-})();
+// O cliente Supabase configurado com autoRefreshToken: true já cuida do refresh
+// automático de sessão em background e sempre que supabase.auth.getSession() for chamado.
+// Isso evita deadlocks de concorrência com o navigator.locks no GoTrueClient.
 
 // Mapa Completo: Entidade (Código) -> Tabela (Supabase)
 const tableMap = {
@@ -364,7 +383,7 @@ const createHandler = (tableName) => ({
         const from = (page - 1) * limit;
         const to = from + limit - 1;
 
-        let query = supabase.from(tableName).select('*', { count: 'exact' });
+        let query = supabase.from(tableName).select('*', { count: 'estimated' });
 
         // Aplicar filtros (match exato)
         if (filters && typeof filters === 'object') {
@@ -380,21 +399,8 @@ const createHandler = (tableName) => ({
 
         // Aplicar busca textual
         if (search) {
-            // Construir filtro OR genérico para campos comuns
-            // Usando ilike para case-insensitive
-            // Importante: Verifique se as colunas existem na tabela antes de usar
-            // Para ser genérico, vamos tentar campos comuns. 
-            // Se falhar em tabelas sem esses campos, precisaremos de um tratamento melhor.
-            // O ideal é passar os campos de busca como parâmetro, mas vamos assumir um padrão aqui.
             const searchLower = search.toLowerCase();
 
-            // Estratégia: Tentar identificar colunas textuais comuns
-            // Mas como é genérico, vamos focar no que sabemos que existe na tabela Produto e Cliente
-            // ou deixar que o erro aconteça se a coluna não existir (o que é ruim).
-
-            // Para Produto: busca por múltiplas palavras-chave em todos os campos descritivos.
-            // Cada palavra deve bater em pelo menos um dos campos (OR dentro de keyword).
-            // Encadeamento de .or() = AND entre keywords → ex: "rosa sofá" exige ambas.
             if (tableName === 'produtos') {
                 const keywords = search.trim().split(/\s+/).filter(Boolean);
                 keywords.forEach((kw) => {
@@ -403,11 +409,7 @@ const createHandler = (tableName) => ({
                         `codigo_barras.ilike.%${kw}%,` +
                         `categoria.ilike.%${kw}%,` +
                         `modelo_referencia.ilike.%${kw}%,` +
-                        `cor.ilike.%${kw}%,` +
-                        `material.ilike.%${kw}%,` +
-                        `ambiente.ilike.%${kw}%,` +
-                        `fornecedor_nome.ilike.%${kw}%,` +
-                        `descricao.ilike.%${kw}%`
+                        `fornecedor_nome.ilike.%${kw}%`
                     );
                 });
             } else if (tableName === 'clientes') {
@@ -515,7 +517,7 @@ export const base44 = {
             const { data: { session } } = await supabase.auth.getSession();
             const user = session?.user;
             if (!user) return null;
-            const { data: profile } = await supabase.from('public_users').select('*').eq('id', user.id).single();
+            const { data: profile } = await supabase.from('public_users').select('*').eq('id', user.id).maybeSingle();
             return { ...user, ...profile };
         },
 
@@ -549,6 +551,28 @@ export const base44 = {
         logout: () => supabase.auth.signOut(),
 
         onAuthStateChange: (callback) => supabase.auth.onAuthStateChange(callback),
+
+        trackStep: (stepName, userId, details = {}) => {
+            if (!userId) return;
+            if (window.location.pathname.startsWith('/operador')) return;
+
+            try {
+                const step = {
+                    action: stepName,
+                    path: window.location.pathname + window.location.search,
+                    timestamp: new Date().toISOString(),
+                    ...details
+                };
+
+                // Fire and forget, sem await para não travar
+                supabase.rpc('track_user_footstep', {
+                    p_user_id: userId,
+                    p_step: step
+                }).catch(e => console.warn('[Telemetry] DB error:', e));
+            } catch (e) {
+                console.warn('[Telemetry] Erro ao gravar footstep:', e);
+            }
+        },
     },
 
     integrations: {

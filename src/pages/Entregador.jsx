@@ -93,7 +93,7 @@ function useChecklistCache(caminhaoId, dataSelecionada) {
 }
 
 export default function Entregador() {
-    const { isPaidModuleActive } = useTenant();
+    const { brandName, brandLogo, isPaidModuleActive } = useTenant();
     const [user, setUser] = useState(null);
 
     // Hidratação síncrona do estado da rota a partir de sessão salva localmente
@@ -1381,7 +1381,7 @@ export default function Entregador() {
             const payload = {
                 venda_id: entrega.venda_id || null,
                 valor: entrega.valor_a_receber || 0,
-                descricao: `Pedido #${entrega.numero_pedido} - Móveis Pedro II`,
+                descricao: `Pedido #${entrega.numero_pedido} - ${brandName}`,
                 cliente_nome: entrega.cliente_nome,
                 cliente_email: null,
                 cliente_documento: null,
@@ -1453,7 +1453,7 @@ export default function Entregador() {
             `💰 Valor: R$ ${linkPagamentoData.valor?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n\n` +
             `🔗 Link: ${linkPagamentoData.link_pagamento}\n\n` +
             `Você pode pagar com Pix, Cartão ou Boleto.\n\n` +
-            `- Móveis Pedro II`
+            `- ${brandName}`
         );
         window.open(`https://wa.me/${telefoneFormatado}?text=${mensagem}`, '_blank');
     };
@@ -1471,11 +1471,17 @@ export default function Entregador() {
                 <div className="bg-gradient-to-r from-green-600 to-green-700 rounded-xl shadow-lg p-5 text-white">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                            <img
-                                src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/690ce4cb64e20af6b4a46b6f/3474ff954_undefined-Imgur.png"
-                                alt="Móveis Pedro II"
-                                className="h-[52px] w-auto rounded-xl object-contain"
-                            />
+                            {brandLogo ? (
+                                <img
+                                    src={brandLogo}
+                                    alt={brandName}
+                                    className="h-[52px] w-auto rounded-xl object-contain"
+                                />
+                            ) : (
+                                <div className="w-[52px] h-[52px] bg-white rounded-xl flex items-center justify-center">
+                                    <Truck className="w-8 h-8 text-green-600" />
+                                </div>
+                            )}
                             <div>
                                 <h1 className="text-xl font-bold">Olá, {user?.full_name?.split(' ')[0] || 'Entregador'}!</h1>
                                 <p className="text-sm text-green-100">Entregador</p>

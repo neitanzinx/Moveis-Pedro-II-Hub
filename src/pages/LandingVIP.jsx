@@ -48,12 +48,12 @@ export default function LandingVIP() {
                     <div className="w-20 h-20 mx-auto bg-white rounded-2xl border border-slate-100 flex items-center justify-center mb-4 shadow-xl shadow-slate-200/60 animate-float">
                         <img
                             src={EMPRESA.logo_url}
-                            alt="Móveis Pedro II"
+                            alt={EMPRESA.nome}
                             className="h-12 w-auto object-contain drop-shadow-sm"
                         />
                     </div>
                     <h1 className="font-serif text-3xl font-bold text-slate-800 text-center tracking-tight">
-                        Móveis Pedro II
+                        {EMPRESA.nome}
                     </h1>
                 </div>
 
@@ -130,7 +130,7 @@ export default function LandingVIP() {
                 {/* Footer */}
                 <div className="text-center mt-8">
                     <p className="text-slate-400 text-xs font-body">
-                        © 2026 Móveis Pedro II. Todos os direitos reservados.
+                        © 2026 {EMPRESA.nome}. Todos os direitos reservados.
                     </p>
                 </div>
 

@@ -5,21 +5,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, EyeOff, Lock, IdCard, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Lock, IdCard, Loader2, Store } from "lucide-react";
 import { supabase } from "@/api/base44Client";
+import { setActiveAuthMode, AUTH_MODES } from "@/lib/supabase";
 import { useNavigate } from "react-router-dom";
-
-
 
 export default function LoginFuncionario() {
     const navigate = useNavigate();
-    const { brandName, brandLogo } = useTenant();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [showPassword, setShowPassword] = useState(false);
 
     // Estados do formulário
-    const [matricula, setMatricula] = useState("");
+    const [identificacao, setIdentificacao] = useState("");
     const [senha, setSenha] = useState("");
 
     // Estado de primeiro acesso
@@ -87,16 +85,23 @@ export default function LoginFuncionario() {
         setError("");
 
         try {
-            // Login via Supabase - busca por matrícula no banco
-            const { data: userProfile, error: profileError } = await supabase
+            const isEmail = identificacao.includes('@');
+
+            let query = supabase
                 .from('public_users')
                 .select('*')
-                .eq('matricula', matricula.toUpperCase())
-                .eq('ativo', true)
-                .single();
+                .eq('ativo', true);
+
+            if (isEmail) {
+                query = query.eq('email', identificacao.toLowerCase());
+            } else {
+                query = query.eq('matricula', identificacao.toUpperCase());
+            }
+
+            const { data: userProfile, error: profileError } = await query.single();
 
             if (profileError || !userProfile) {
-                throw new Error("Matrícula não encontrada ou usuário inativo.");
+                throw new Error("Usuário não encontrado ou inativo.");
             }
 
             // Verificar senha (usando Supabase Auth com o email do usuário)
@@ -142,6 +147,10 @@ export default function LoginFuncionario() {
                         if (error) console.error("Erro ao atualizar ultimo_login:", error);
                     });
             }
+
+            // ISOLAMENTO: Marcar sessão como tenant e limpar cache de operador
+            setActiveAuthMode(AUTH_MODES.TENANT);
+            try { localStorage.removeItem('operator_auth_cache'); } catch { /* ignore */ }
 
             // Salvar dados do usuário no localStorage para compatibilidade
             localStorage.setItem('employee_user', JSON.stringify(userProfile));
@@ -205,7 +214,7 @@ export default function LoginFuncionario() {
             const { data: userProfile } = await supabase
                 .from('public_users')
                 .select('*')
-                .eq('matricula', matricula.toUpperCase())
+                .eq('id', sessionData.session.user.id)
                 .single();
 
             if (userProfile) {
@@ -231,11 +240,9 @@ export default function LoginFuncionario() {
                 <Card className="w-full max-w-md shadow-xl">
                     <CardHeader className="text-center">
                         <div className="flex justify-center mb-4">
-                            <img
-                                src={brandLogo}
-                                alt={brandName}
-                                className="w-16 h-16 object-contain"
-                            />
+                            <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
+                                <Store className="w-8 h-8 text-green-600 dark:text-green-400" />
+                            </div>
                         </div>
                         <CardTitle className="text-2xl font-bold text-gray-900 dark:text-white">
                             Primeiro Acesso
@@ -321,14 +328,12 @@ export default function LoginFuncionario() {
             <Card className="w-full max-w-md shadow-xl">
                 <CardHeader className="text-center">
                     <div className="flex justify-center mb-4">
-                        <img
-                            src={brandLogo}
-                            alt={brandName}
-                            className="w-16 h-16 object-contain"
-                        />
+                        <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
+                            <Store className="w-8 h-8 text-green-600 dark:text-green-400" />
+                        </div>
                     </div>
                     <CardTitle className="text-2xl font-bold text-gray-900 dark:text-white">
-                        {brandName}
+                        GestApp
                     </CardTitle>
                     <CardDescription className="text-gray-600 dark:text-gray-400">
                         Acesso para funcionários
@@ -343,16 +348,16 @@ export default function LoginFuncionario() {
                         )}
 
                         <div className="space-y-2">
-                            <Label htmlFor="matricula">Matrícula</Label>
+                            <Label htmlFor="identificacao">Matrícula ou Email</Label>
                             <div className="relative">
                                 <IdCard className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                                 <Input
-                                    id="matricula"
+                                    id="identificacao"
                                     type="text"
-                                    placeholder="MP-VE0001"
-                                    value={matricula}
-                                    onChange={(e) => setMatricula(e.target.value.toUpperCase())}
-                                    className="pl-10 uppercase"
+                                    placeholder="MP-VE0001 ou email@exemplo.com"
+                                    value={identificacao}
+                                    onChange={(e) => setIdentificacao(e.target.value)}
+                                    className="pl-10"
                                     required
                                     disabled={loading}
                                 />
@@ -400,7 +405,17 @@ export default function LoginFuncionario() {
                         </Button>
                     </form>
 
-                    <div className="mt-6 text-center text-xs text-gray-400">
+                    <div className="mt-4 flex flex-col items-center gap-1 border-t pt-4">
+                        <Button
+                            variant="outline"
+                            className="w-full border-green-200 text-green-800 hover:bg-green-50"
+                            onClick={() => navigate("/cadastro")}
+                        >
+                            Cadastre sua Empresa (15 Dias Grátis)
+                        </Button>
+                    </div>
+
+                    <div className="mt-4 text-center text-xs text-gray-400">
                         Por Natan R.
                     </div>
                 </CardContent>

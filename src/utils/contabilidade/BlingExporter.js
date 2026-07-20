@@ -55,7 +55,7 @@ export function exportarPedidosBling(vendas) {
             <vlr_frete>0.00</vlr_frete>
             <vlr_desconto>${formatarValor(v.desconto || 0)}</vlr_desconto>
             <obs>${escaparXML(v.observacoes || '')}</obs>
-            <obs_internas>Exportado do Móveis Pedro II Hub</obs_internas>
+            <obs_internas>Exportado do Sistema de Gestão</obs_internas>
         </pedido>
     `).join('');
 

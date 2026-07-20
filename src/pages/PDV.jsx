@@ -297,7 +297,7 @@ const enriquecerItensEncomendaComFornecedor = (itens = [], produtos = [], fornec
 
 export default function PDV() {
   const { user } = useAuth();
-  const { conferenciaCaixaEnabled, isPaidModuleActive } = useTenant();
+  const { brandName, conferenciaCaixaEnabled, isPaidModuleActive } = useTenant();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { state: sidebarState, isMobile } = useSidebar();
@@ -1678,7 +1678,7 @@ export default function PDV() {
       const salvou = saveOfflineSale(vendaData);
       if (salvou) {
         toast.warning("⚠️ Sem internet: Venda salva no dispositivo! Será sincronizada quando a conexão voltar.");
-        abrirNotaPedidoPDF({ ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name, lojaAtivaPDV || null);
+        abrirNotaPedidoPDF({ ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name, lojaAtivaPDV ? { ...lojaAtivaPDV, empresa_nome: brandName } : null);
         resetForm();
         carregarVendasPendentes();
       } else {
@@ -1739,7 +1739,7 @@ export default function PDV() {
         ]);
 
         atualizarProgressoPedido('Preparando impressao...', 96);
-        preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name, lojaAtivaPDV || null);
+        preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name, lojaAtivaPDV ? { ...lojaAtivaPDV, empresa_nome: brandName } : null);
 
         toast.success("Venda criada! Aguardando conferência de caixa para liberar entrega e lançamentos.");
         resetForm();
@@ -1861,7 +1861,7 @@ export default function PDV() {
 
       // 4. IMPRESSÃO
       atualizarProgressoPedido('Preparando impressao...', 96);
-      preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name, lojaAtivaPDV || null);
+      preencherEImprimirPDF(printWindow, { ...vendaData }, clienteSelecionado, vendedorFinal.nome || user.full_name, lojaAtivaPDV ? { ...lojaAtivaPDV, empresa_nome: brandName } : null);
 
       toast.success("Venda finalizada com sucesso!");
 
@@ -1976,7 +1976,7 @@ export default function PDV() {
               let pdfBase64 = null;
               try {
                 // Nota: vendaData ainda está acessível no closure
-                pdfBase64 = await gerarNotaPedidoBase64(vendaData, { ...clienteSelecionado }, vendedorFinal.nome || user.full_name, lojaAtivaPDV || null);
+                pdfBase64 = await gerarNotaPedidoBase64(vendaData, { ...clienteSelecionado }, vendedorFinal.nome || user.full_name, lojaAtivaPDV ? { ...lojaAtivaPDV, empresa_nome: brandName } : null);
 
                 if (pdfBase64) {
                   console.log(`📄 PDF gerado com sucesso (${pdfBase64.length} bytes)`);

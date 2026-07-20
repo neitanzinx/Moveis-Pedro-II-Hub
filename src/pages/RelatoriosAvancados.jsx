@@ -979,7 +979,7 @@ export default function RelatoriosAvancados() {
 
         <div class="footer">
           <p>Relatório gerado em ${new Date().toLocaleString('pt-BR')}</p>
-          <p>Móveis Pedro II - Sistema de Gestão Integrada</p>
+          <p>Sistema de Gestão Integrada</p>
         </div>
       </body>
       </html>

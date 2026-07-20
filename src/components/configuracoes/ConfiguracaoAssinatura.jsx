@@ -129,6 +129,29 @@ export default function ConfiguracaoAssinatura() {
     }
   };
 
+  const [isCancelingPending, setIsCancelingPending] = useState(false);
+  const handleCancelPending = async () => {
+    if (!confirm("Tem certeza que deseja cancelar esta fatura? Você poderá escolher o plano e a forma de pagamento novamente.")) return;
+    
+    try {
+      setIsCancelingPending(true);
+      const { data, error } = await supabase.functions.invoke("criar-assinatura", {
+        body: { action: "cancel-and-restart" }
+      });
+      
+      if (error) throw error;
+      
+      toast.success("Fatura cancelada com sucesso. Escolha seu plano novamente.");
+      await refreshTenant();
+      setShowPlanSelection(true);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao cancelar a fatura.");
+    } finally {
+      setIsCancelingPending(false);
+    }
+  };
+
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
     toast.success("Copiado para a área de transferência!");
@@ -169,7 +192,7 @@ export default function ConfiguracaoAssinatura() {
             Organização Matriz
           </CardTitle>
           <CardDescription className="text-green-800 font-medium">
-            Esta organização (Móveis Pedro II) possui licença corporativa vitalícia.
+            Esta organização ({organization?.name || "Matriz"}) possui licença corporativa vitalícia.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6 text-center space-y-4">
@@ -337,7 +360,7 @@ export default function ConfiguracaoAssinatura() {
                     <div className="flex flex-col md:flex-row gap-6 items-center">
                       
                       {/* PIX QR CODE SHOWING */}
-                      {pendingPayment.billingType === "PIX" && pendingPayment.pixQrCode && (
+                      {pendingPayment.pixQrCode && (
                         <div className="flex flex-col items-center p-4 bg-white border rounded-xl shadow-inner shrink-0">
                           <img 
                             src={`data:image/png;base64,${pendingPayment.pixQrCode}`} 
@@ -365,7 +388,7 @@ export default function ConfiguracaoAssinatura() {
 
                         {/* ACTION BUTTONS */}
                         <div className="flex flex-wrap gap-3 pt-2">
-                          {pendingPayment.billingType === "PIX" && pendingPayment.pixCopiaCola && (
+                          {pendingPayment.pixCopiaCola && (
                             <Button 
                               variant="outline"
                               onClick={() => copyToClipboard(pendingPayment.pixCopiaCola)}
@@ -397,6 +420,28 @@ export default function ConfiguracaoAssinatura() {
                               Abrir Fatura Asaas
                             </Button>
                           )}
+
+                          <Button 
+                            variant="outline"
+                            onClick={() => {
+                              setPendingPayment(null);
+                              setShowPlanSelection(true);
+                            }}
+                            className="text-amber-700 border-amber-200 hover:bg-amber-50 hover:text-amber-800"
+                          >
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Alterar Plano
+                          </Button>
+
+                          <Button 
+                            variant="outline"
+                            onClick={handleCancelPending}
+                            disabled={isCancelingPending}
+                            className="text-red-700 border-red-200 hover:bg-red-50 hover:text-red-800"
+                          >
+                            {isCancelingPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                            Cancelar Fatura Atual
+                          </Button>
                         </div>
                       </div>
 

@@ -155,8 +155,8 @@ Seu agendamento de montagem foi confirmado!
 Em caso de dúvidas ou necessidade de reagendamento, entre em contato diretamente com nosso montador:
 📞 ${montador.whatsapp || montador.telefone || "Número não disponível"}
 
-Agradecemos a preferência!
-_Móveis Pedro II_`;
+Agradecemos a preferência!`;
+
 
         return whatsappService.sendMessage(cliente.telefone, mensagem);
     },
@@ -171,8 +171,7 @@ Seu pedido está a caminho!
 Acompanhe a entrega em tempo real pelo link abaixo:
 
 🔗 ${link}
-
-_Móveis Pedro II_`;
+`;
         return whatsappService.sendMessage(cliente.telefone, mensagem);
     },
     /**

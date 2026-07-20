@@ -3,7 +3,7 @@ import { useNavigate, Link, useLocation } from "react-router-dom";
 import { supabase } from "@/api/base44Client";
 import { resgatarCoroasDesconto, buscarHistoricoCliente, formatarTipoEvento } from "@/utils/fidelidadeEngine";
 import { ensureClientPortalSession, markClientSessionAlive, trackClientAccessEvent } from "@/lib/clienteAccessTracking";
-import { EMPRESA } from "@/config/empresa";
+import { useTenant } from "@/contexts/TenantContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,15 +16,15 @@ import { toast } from "sonner";
 import {
     LogOut, User, Award, ShoppingBag, Gift, ChevronRight,
     Star, Package, Calendar, MapPin, Phone, Mail, Loader2,
-    Trophy, Target, Sparkles, ArrowRight, Crown, Edit2, Save, X, Navigation, Home, Globe, Hash, Search, CreditCard
+    Trophy, Target, Sparkles, ArrowRight, Crown, Edit2, Save, X, Navigation, Home, Globe, Hash, Search, CreditCard, Store
 } from "lucide-react";
 
-const LOGO_URL = EMPRESA.logo_url;
 const HERO_IMAGE = "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?q=80&w=2000&auto=format&fit=crop";
 
 export default function ClienteDashboard() {
     const navigate = useNavigate();
     const location = useLocation();
+    const { brandName, brandLogo } = useTenant();
     const [loading, setLoading] = useState(true);
     const [user, setUser] = useState(null);
     const [cliente, setCliente] = useState(null);
@@ -445,10 +445,14 @@ export default function ClienteDashboard() {
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
                     <div className="flex items-center gap-4">
                         <div className="h-12 w-12 rounded-xl bg-white p-2 shadow-inner border border-stone-100 flex items-center justify-center">
-                            <img src={LOGO_URL} alt="Logo" className="h-full w-full object-contain" />
+                            {brandLogo ? (
+                                <img src={brandLogo} alt={brandName} className="h-full w-full object-contain" />
+                            ) : (
+                                <Store className="h-6 w-6 text-green-950" />
+                            )}
                         </div>
                         <div>
-                            <h1 className="text-xl font-['Playfair_Display'] font-bold text-stone-900 tracking-tight">Móveis Pedro II</h1>
+                            <h1 className="text-xl font-['Playfair_Display'] font-bold text-stone-900 tracking-tight">{brandName}</h1>
                             <p className="text-[10px] uppercase tracking-[0.2em] text-amber-600 font-bold">Portal do Cliente</p>
                         </div>
                     </div>

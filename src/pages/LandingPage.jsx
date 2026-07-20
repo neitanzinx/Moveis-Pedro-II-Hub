@@ -23,7 +23,7 @@ export default function LandingPage() {
                 <div className="flex justify-center mb-6">
                     <img
                         src={EMPRESA.logo_url}
-                        alt="Móveis Pedro II"
+                        alt={EMPRESA.nome}
                         className="h-20 w-auto object-contain"
                     />
                 </div>
@@ -98,11 +98,11 @@ function LandingPageOriginal() {
                             {/* Logo */}
                             <img
                                 src={EMPRESA.logo_url}
-                                alt="Móveis Pedro II"
+                                alt={EMPRESA.nome}
                                 className="h-12 w-auto object-contain"
                             />
                             <span className="font-serif text-2xl font-bold text-green-950 tracking-tight">
-                                Móveis Pedro II
+                                {EMPRESA.nome}
                             </span>
                         </div>
 
@@ -263,7 +263,7 @@ function LandingPageOriginal() {
                         <div className="text-left text-white">
                             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-md border border-white/20 mb-6">
                                 <Crown className="w-4 h-4 text-amber-400 fill-amber-400" />
-                                <span className="text-sm font-bold tracking-widest uppercase text-amber-50">Pedro II Club</span>
+                                <span className="text-sm font-bold tracking-widest uppercase text-amber-50">{EMPRESA.nome} Club</span>
                             </div>
                             <h2 className="font-serif text-5xl md:text-6xl font-bold mb-6 leading-tight">
                                 Mais que móveis...<br />
@@ -306,7 +306,7 @@ function LandingPageOriginal() {
                             <div className="relative bg-white/10 backdrop-blur-xl border border-white/20 p-8 rounded-3xl shadow-2xl text-white transform hover:scale-105 transition-transform duration-500">
                                 <div className="flex justify-between items-start mb-12">
                                     <div>
-                                        <h3 className="text-2xl font-serif font-bold">Móveis Pedro II</h3>
+                                        <h3 className="text-2xl font-serif font-bold">{EMPRESA.nome}</h3>
                                         <p className="text-amber-300 text-sm tracking-[0.2em] uppercase">Premium Member</p>
                                     </div>
                                     <Crown className="w-10 h-10 text-amber-400 fill-amber-400" />
@@ -339,7 +339,7 @@ function LandingPageOriginal() {
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="grid md:grid-cols-4 gap-12">
                         <div className="col-span-1 md:col-span-2">
-                            <h3 className="text-white font-serif text-2xl font-bold mb-6">Móveis Pedro II</h3>
+                            <h3 className="text-white font-serif text-2xl font-bold mb-6">{EMPRESA.nome}</h3>
                             <p className="mb-6 max-w-sm">
                                 Tradição em criar lares com conforto e elegância.
                                 Sua satisfação é o nosso maior compromisso.
@@ -374,13 +374,13 @@ function LandingPageOriginal() {
                                 </li>
                                 <li className="flex items-center gap-3">
                                     <Mail className="w-5 h-5 text-amber-500" />
-                                    <span>contato@moveispedroii.com.br</span>
+                                    <span>contato@GestApp.com.br</span>
                                 </li>
                             </ul>
                         </div>
                     </div>
                     <div className="border-t border-white/10 mt-12 pt-8 text-center text-sm">
-                        <p>&copy; 2026 Móveis Pedro II. Todos os direitos reservados.</p>
+                        <p>&copy; 2026 {EMPRESA.nome}. Todos os direitos reservados.</p>
                     </div>
                 </div>
             </footer >

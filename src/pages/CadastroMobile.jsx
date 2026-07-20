@@ -138,7 +138,7 @@ export default function CadastroMobile() {
                         {step === 1 ? "Cadastro de Colaborador" : `Cadastro de ${tipoUsuario === 'entregador' ? 'Entregador' : 'Montador'}`}
                     </CardTitle>
                     <p className="text-sm text-gray-500 mt-1">
-                        Móveis Pedro II
+                        Sistema de Gestão
                     </p>
                 </CardHeader>
 

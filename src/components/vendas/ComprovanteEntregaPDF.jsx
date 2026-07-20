@@ -1,5 +1,6 @@
 import { getEntregaFotos } from '@/utils/vendaStatus';
 import { stripInternalProductPrefixes } from '@/utils/productReference';
+import { EMPRESA } from '@/config/empresa';
 
 /**
  * Gera PDF de comprovante de entrega com:
@@ -171,7 +172,7 @@ export function gerarComprovanteEntregaPDF(entrega, venda) {
     </head>
     <body>
       <div class="header">
-        <div class="logo">Móveis Pedro II</div>
+        <div class="logo">${EMPRESA.nome}</div>
         <div class="subtitle">Comprovante de Entrega</div>
         <div class="badge">✓ ENTREGA REALIZADA</div>
       </div>
@@ -248,7 +249,7 @@ export function gerarComprovanteEntregaPDF(entrega, venda) {
 
       <div class="footer">
         Documento gerado em ${new Date().toLocaleString('pt-BR')}<br/>
-        Móveis Pedro II - Sistema de Gestão
+        ${EMPRESA.nome} - Sistema de Gestão
       </div>
     </body>
     </html>

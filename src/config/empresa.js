@@ -51,7 +51,7 @@ export const getCores = (organization) => ({
 // DEPRECATED: Manter para compatibilidade temporária
 // Use getEmpresa(organization) ou hooks do TenantContext
 export const EMPRESA = {
-    nome: "Móveis Pedro II",
+    nome: "GestApp",
     logo_url: DEFAULT_LOGO,
     cores: DEFAULT_COLORS
 };

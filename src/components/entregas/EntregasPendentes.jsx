@@ -10,6 +10,7 @@ import { EMPRESA } from "@/config/empresa";
 import { supabase } from "@/lib/supabase";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
+import { useTenant } from "@/contexts/TenantContext";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -18,6 +19,7 @@ import { toast } from "sonner";
 import AgendarEntregaModal from "./AgendarEntregaModal";
 
 export default function EntregasPendentes({ entregas, vendas, clientes }) {
+  const { brandName, brandLogo } = useTenant();
   const [selecionados, setSelecionados] = useState([]);
   const [imprimindo, setImprimindo] = useState(false);
   const { user, can } = useAuth();
@@ -101,9 +103,11 @@ export default function EntregasPendentes({ entregas, vendas, clientes }) {
         <!-- Cabeçalho -->
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #07593f; padding-bottom: 10px; margin-bottom: 15px;">
           <div style="display: flex; align-items: center; gap: 10px;">
-            <img src="${EMPRESA.logo_url}" alt="Logo" style="width: 40px; height: auto;" />
+            {brandLogo || EMPRESA.logo_url ? (
+              <img src={brandLogo || EMPRESA.logo_url} alt="Logo" style="width: 40px; height: auto;" />
+            ) : null}
             <div>
-              <div style="font-size: 14px; font-weight: bold; color: #07593f;">Móveis Pedro II</div>
+              <div style="font-size: 14px; font-weight: bold; color: #07593f;">${brandName || EMPRESA.nome}</div>
               <div style="font-size: 9px; color: #666;">FICHA DE EXPEDIÇÃO</div>
             </div>
           </div>

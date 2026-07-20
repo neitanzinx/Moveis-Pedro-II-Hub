@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/api/base44Client";
 import { usePixCobrancaStatus } from "@/hooks/usePaymentStatus";
+import { useTenant } from "@/contexts/TenantContext";
 
 /**
  * Modal para exibir QR Code PIX Stone com:
@@ -40,6 +41,7 @@ export default function PixQRCodeModal({
     descricao,
     onPaymentConfirmed
 }) {
+    const { brandName } = useTenant();
     const [loading, setLoading] = useState(false);
     const [pixData, setPixData] = useState(null);
     const [copiado, setCopiado] = useState(false);
@@ -125,7 +127,7 @@ export default function PixQRCodeModal({
                     numero_pedido: numeroPedido,
                     cliente_nome: clienteNome,
                     cliente_documento: clienteDocumento,
-                    descricao: descricao || `Pedido #${numeroPedido || 'N/A'} - Móveis Pedro II`
+                    descricao: descricao || `Pedido #${numeroPedido || 'N/A'} - ${brandName || 'StoreHub'}`
                 }
             });
 
@@ -171,7 +173,7 @@ export default function PixQRCodeModal({
             `💰 Valor: R$ ${valor?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n\n` +
             `📱 *PIX Copia e Cola:*\n${pixData.pix_copia_cola}\n\n` +
             `⏰ Válido por 24 horas\n\n` +
-            `Móveis Pedro II 🧡💚`
+            `${brandName || 'StoreHub'} 🧡💚`
         );
 
         window.open(`https://wa.me/${telFormatado}?text=${mensagem}`, '_blank');

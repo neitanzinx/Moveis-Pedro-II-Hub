@@ -11,9 +11,9 @@ import { Star, CheckCircle, XCircle, Clock, ThumbsUp, ThumbsDown, Loader2 } from
 const Logo = () => (
     <div className="text-center mb-6">
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 text-white text-2xl font-bold shadow-lg mb-3">
-            MP
+            ⭐
         </div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Móveis Pedro II</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Avaliação</h1>
         <p className="text-gray-500 dark:text-gray-400">Avaliação de Satisfação</p>
     </div>
 );
@@ -313,7 +313,7 @@ export default function AvaliacaoNPS() {
 
                             {/* Question 4: Would recommend */}
                             <YesNoSelector
-                                label="Você indicaria a Móveis Pedro II para algum amigo ou parente?"
+                                label="Você indicaria nossa empresa para algum amigo ou parente?"
                                 value={recomendaria}
                                 onChange={setRecomendaria}
                             />

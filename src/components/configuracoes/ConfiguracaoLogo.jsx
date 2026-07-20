@@ -268,7 +268,7 @@ export default function ConfiguracaoLogo({ user }) {
               id="nomeEmpresa"
               value={nomeEmpresa}
               onChange={(e) => setNomeEmpresa(e.target.value)}
-              placeholder="Ex: Móveis Pedro II"
+              placeholder="Ex: Minha Empresa"
               disabled={savingName}
             />
           </div>

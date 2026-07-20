@@ -45,23 +45,87 @@ const DEFAULT_SETTINGS = {
     }
 };
 
-export function TenantProvider({ children, organizationId }) {
+export function TenantProvider({ children, organizationId, slug: slugProp }) {
     const [organization, setOrganization] = useState(null);
     const [settings, setSettings] = useState(null);
     const [lojas, setLojas] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [resolvedOrgId, setResolvedOrgId] = useState(organizationId || null);
+    const [isDomainResolved, setIsDomainResolved] = useState(false);
 
-    // Detectar o organization_id do usuário logado (multi-tenant)
+    // Detectar o organization_id: prioridade hostname/domain > slug > organizationId > sessão do usuário > fallback
     useEffect(() => {
         const detectOrganization = async () => {
-            // Se um organizationId foi passado explicitamente, usar ele
+            // A. Detectar por hostname (domínio customizado ou subdomínio)
+            const hostname = window.location.hostname;
+            const mainDomains = ['localhost', 'moveis-pedro-ii-hub.vercel.app', 'gesthub.com', 'GestApp.com.br']; // domínios principais do SaaS
+
+            const isMainDomain = mainDomains.includes(hostname) || hostname.endsWith('.vercel.app');
+
+            if (!isMainDomain) {
+                try {
+                    // 1. Verificar se é um subdomínio (ex: moveis-pedro-ii.gesthub.com)
+                    const parts = hostname.split('.');
+                    if (parts.length > 2) {
+                        const subdomain = parts[0];
+                        const { data: orgBySlug } = await supabase
+                            .from('organizations')
+                            .select('id')
+                            .eq('slug', subdomain)
+                            .single();
+
+                        if (orgBySlug?.id) {
+                            setResolvedOrgId(orgBySlug.id);
+                            setIsDomainResolved(true);
+                            return;
+                        }
+                    }
+
+                    // 2. Verificar se é um domínio customizado completo (ex: portal.moveispedroii.com.br)
+                    const { data: orgByDomain } = await supabase
+                        .from('organizations')
+                        .select('id')
+                        .eq('custom_domain', hostname)
+                        .single();
+
+                    if (orgByDomain?.id) {
+                        setResolvedOrgId(orgByDomain.id);
+                        setIsDomainResolved(true);
+                        return;
+                    }
+                } catch (err) {
+                    console.warn('[Tenant] Erro ao resolver tenant por hostname:', hostname, err);
+                }
+            }
+
+            // B. Se um slug foi passado (rota pública/path-based), resolver por slug
+            if (slugProp) {
+                try {
+                    const { data: orgBySlug } = await supabase
+                        .from('organizations')
+                        .select('id')
+                        .eq('slug', slugProp)
+                        .single();
+
+                    if (orgBySlug?.id) {
+                        setResolvedOrgId(orgBySlug.id);
+                        setIsDomainResolved(false);
+                        return;
+                    }
+                } catch (err) {
+                    console.warn('[Tenant] Erro ao resolver slug:', slugProp, err);
+                }
+                // Slug inválido — cai no fallback abaixo
+            }
+
+            // C. Se um organizationId foi passado explicitamente, usar ele
             if (organizationId) {
                 setResolvedOrgId(organizationId);
                 return;
             }
 
+            // D. Tentar detectar via sessão do usuário logado
             try {
                 const { data: { session } } = await supabase.auth.getSession();
                 if (session?.user) {
@@ -69,7 +133,7 @@ export function TenantProvider({ children, organizationId }) {
                         .from('public_users')
                         .select('organization_id')
                         .eq('id', session.user.id)
-                        .single();
+                        .maybeSingle();
 
                     if (profile?.organization_id) {
                         setResolvedOrgId(profile.organization_id);
@@ -80,25 +144,27 @@ export function TenantProvider({ children, organizationId }) {
                 console.warn('[Tenant] Erro ao detectar organização do usuário:', err);
             }
 
-            // Fallback: ID padrão da Móveis Pedro II (retrocompatibilidade)
+            // E. Fallback: ID padrão (retrocompatibilidade)
             setResolvedOrgId('00000000-0000-0000-0000-000000000001');
         };
 
         detectOrganization();
 
-        // Reagir a mudanças de autenticação (login/logout)
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (!session) {
-                // Logout — voltar ao padrão
-                setResolvedOrgId('00000000-0000-0000-0000-000000000001');
-            } else {
-                // Novo login — detectar novamente
-                detectOrganization();
-            }
-        });
+        // Reagir a mudanças de autenticação (login/logout) — apenas se não tem slug fixo ou domínio resolvido
+        if (!slugProp && !isDomainResolved) {
+            const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+                if (!session) {
+                    // Logout — voltar ao padrão
+                    setResolvedOrgId('00000000-0000-0000-0000-000000000001');
+                } else {
+                    // Novo login — detectar novamente
+                    detectOrganization();
+                }
+            });
 
-        return () => subscription?.unsubscribe();
-    }, [organizationId]);
+            return () => subscription?.unsubscribe();
+        }
+    }, [organizationId, slugProp, isDomainResolved]);
 
     useEffect(() => {
         if (resolvedOrgId) {
@@ -106,25 +172,28 @@ export function TenantProvider({ children, organizationId }) {
         }
     }, [resolvedOrgId]);
 
-    // Atualiza o favicon e o título dinamicamente
     useEffect(() => {
         if (organization) {
-            document.title = organization.name || "Móveis Pedro II";
+            // Se estiver na rota de operador, ignorar títulos e favicons do tenant
+            if (window.location.pathname.startsWith('/operador')) {
+                return;
+            }
+
+            document.title = organization.name || 'Sistema de Gestão';
 
             // Remove favicons antigos se existirem para evitar duplicidade
             const existingLinks = document.querySelectorAll("link[rel~='icon']");
             existingLinks.forEach(link => link.remove());
 
-            // Cria o novo favicon do tenant com bypass de cache longo
-            const logoUrl = organization.logo_url
-                ? `${organization.logo_url}?v=${new Date().getTime()}`
-                : `https://stgatkuwnouzwczkpphs.supabase.co/storage/v1/object/public/publico/mp2logo.png?v=${new Date().getTime()}`;
-
-            const link = document.createElement('link');
-            link.rel = 'icon';
-            link.type = 'image/png';
-            link.href = logoUrl;
-            document.getElementsByTagName('head')[0].appendChild(link);
+            // Cria o novo favicon do tenant (sem fallback hardcoded)
+            if (organization.logo_url) {
+                const logoUrl = `${organization.logo_url}?v=${new Date().getTime()}`;
+                const link = document.createElement('link');
+                link.rel = 'icon';
+                link.type = 'image/png';
+                link.href = logoUrl;
+                document.getElementsByTagName('head')[0].appendChild(link);
+            }
         }
     }, [organization]);
 
@@ -218,6 +287,7 @@ export function TenantProvider({ children, organizationId }) {
         isModuleActive,
         isPaidModuleActive,
         getJurosParcela,
+        isDomainResolved,
         refreshTenant: loadTenantData,
         // Flag de Conferência de Caixa
         conferenciaCaixaEnabled: settings?.conferencia_caixa_enabled === true,

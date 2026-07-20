@@ -45,6 +45,13 @@ const STATUS_ENTREGA_OPTIONS = [
     'Retirado'
 ];
 
+const STATUS_MONTAGEM_OPTIONS = [
+    { label: 'Pendente', value: 'pendente' },
+    { label: 'Em andamento', value: 'em_andamento' },
+    { label: 'Concluída', value: 'concluida' },
+    { label: 'Cancelada', value: 'cancelada' }
+];
+
 const SALES_PAYMENT_OPTIONS = [
     'Dinheiro',
     'PIX',
@@ -125,12 +132,15 @@ export default function Vendas() {
     const [modalLiberarEntrega, setModalLiberarEntrega] = useState(null); // { entregaId, pedido }
     const [modalStatusEntregaVenda, setModalStatusEntregaVenda] = useState(null); // { venda, entrega }
     const [statusEntregaForm, setStatusEntregaForm] = useState({ status: 'Pendente', observacoes: '' });
+    const [modalStatusMontagemVenda, setModalStatusMontagemVenda] = useState(null); // { venda, montagens }
+    const [statusMontagemForm, setStatusMontagemForm] = useState({ status: 'pendente' });
     const [selectedVendaIds, setSelectedVendaIds] = useState([]);
     const [isBulkRunning, setIsBulkRunning] = useState(false);
     const [bulkTransferVendedorOpen, setBulkTransferVendedorOpen] = useState(false);
     const [bulkTransferLojaOpen, setBulkTransferLojaOpen] = useState(false);
     const [bulkPagamentoOpen, setBulkPagamentoOpen] = useState(false);
     const [bulkStatusEntregaOpen, setBulkStatusEntregaOpen] = useState(false);
+    const [bulkStatusMontagemOpen, setBulkStatusMontagemOpen] = useState(false);
     const [bulkVendedorId, setBulkVendedorId] = useState("");
     const [bulkLoja, setBulkLoja] = useState("");
     const [bulkPagamentoForm, setBulkPagamentoForm] = useState({
@@ -139,6 +149,7 @@ export default function Vendas() {
         observacao: ""
     });
     const [bulkStatusEntregaForm, setBulkStatusEntregaForm] = useState({ status: 'Pendente', observacoes: '' });
+    const [bulkStatusMontagemForm, setBulkStatusMontagemForm] = useState({ status: 'pendente' });
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -146,7 +157,7 @@ export default function Vendas() {
 
     // Hook de Autenticação e Controle de Acesso
     const { user, filterData, can, getUserLoja } = useAuth();
-    const { conferenciaCaixaEnabled } = useTenant();
+    const { brandName, conferenciaCaixaEnabled } = useTenant();
     const canCancelVendas = can('cancel_vendas');
     const canManagePayments = can('manage_financeiro') || can('manage_vendas');
     const canManageVendas = can('manage_vendas');
@@ -896,7 +907,7 @@ export default function Vendas() {
 
     const getEntregaAlvoVenda = (venda) => {
         const entregasVenda = (entregas || []).filter((e) =>
-            e.numero_pedido === venda.numero_pedido && !isStatusCancelado(e.status)
+            (e.venda_id === venda.id || e.numero_pedido === venda.numero_pedido) && !isStatusCancelado(e.status)
         );
 
         if (!entregasVenda.length) return null;
@@ -941,6 +952,53 @@ export default function Vendas() {
             observacoes: entrega.observacoes || ''
         });
         setModalStatusEntregaVenda({ venda, entrega });
+    };
+
+    const getMontagensAlvoVenda = (venda) => {
+        return (montagens || []).filter((m) =>
+            (m.venda_id === venda.id || m.numero_pedido === venda.numero_pedido) && !isStatusCancelado(m.status)
+        );
+    };
+
+    const atualizarStatusMontagem = async ({ montagensVenda, status }) => {
+        if (!montagensVenda || !montagensVenda.length) {
+            throw new Error('Nenhuma montagem encontrada para este pedido.');
+        }
+
+        const novoStatus = String(status || '').trim();
+        if (!novoStatus) {
+            throw new Error('Selecione um status de montagem válido.');
+        }
+
+        const payload = {
+            status: novoStatus,
+            updated_at: new Date().toISOString()
+        };
+
+        if (novoStatus === 'concluida') {
+            payload.concluido_por = user.id?.toString();
+            payload.concluido_por_nome = user.full_name || user.email;
+        } else if (novoStatus === 'pendente') {
+            payload.concluido_por = null;
+            payload.concluido_por_nome = null;
+        }
+
+        for (const montagem of montagensVenda) {
+            await base44.entities.MontagemItem.update(montagem.id, payload);
+        }
+    };
+
+    const abrirModalStatusMontagem = (venda) => {
+        const montagensVenda = getMontagensAlvoVenda(venda);
+        if (!montagensVenda.length) {
+            toast.warning('Este pedido não possui montagem elegível para atualização de status.');
+            return;
+        }
+
+        setStatusMontagemForm({
+            status: montagensVenda[0].status || 'pendente'
+        });
+        setModalStatusMontagemVenda({ venda, montagens: montagensVenda });
     };
 
     const executarAcaoEmLote = async ({ itens, acao }) => {
@@ -1186,6 +1244,61 @@ export default function Vendas() {
         setBulkStatusEntregaForm({ status: 'Pendente', observacoes: '' });
     };
 
+    const handleConfirmarStatusMontagem = async () => {
+        if (!modalStatusMontagemVenda) return;
+
+        try {
+            await atualizarStatusMontagem({
+                montagensVenda: modalStatusMontagemVenda.montagens,
+                status: statusMontagemForm.status
+            });
+
+            queryClient.invalidateQueries({ queryKey: ['montagens'] });
+            queryClient.invalidateQueries({ queryKey: ['vendas'] });
+            toast.success('Status da montagem atualizado com sucesso.');
+
+            setModalStatusMontagemVenda(null);
+            setStatusMontagemForm({ status: 'pendente' });
+        } catch (error) {
+            toast.error(error?.message || 'Não foi possível atualizar o status da montagem.');
+        }
+    };
+
+    const handleBulkAtualizarStatusMontagem = async () => {
+        const novoStatus = String(bulkStatusMontagemForm.status || '').trim();
+        if (!novoStatus) {
+            toast.error('Selecione o novo status da montagem.');
+            return;
+        }
+
+        const elegiveis = selectedVendas.filter((venda) => getMontagensAlvoVenda(venda).length > 0);
+        if (!elegiveis.length) {
+            toast.warning('Nenhuma venda selecionada possui montagem elegível para atualização.');
+            return;
+        }
+
+        const confirmed = await confirm({
+            title: 'Alterar status de montagem em lote',
+            message: `Deseja atualizar o status de montagem de ${elegiveis.length} pedido(s) para "${novoStatus}"?`,
+            confirmText: 'Atualizar status'
+        });
+        if (!confirmed) return;
+
+        await executarAcaoEmLote({
+            itens: elegiveis,
+            acao: async (venda) => {
+                const montagensVenda = getMontagensAlvoVenda(venda);
+                await atualizarStatusMontagem({
+                    montagensVenda,
+                    status: novoStatus
+                });
+            }
+        });
+
+        setBulkStatusMontagemOpen(false);
+        setBulkStatusMontagemForm({ status: 'pendente' });
+    };
+
     return (
         <div className="max-w-7xl mx-auto space-y-6">
             <div className="flex justify-between items-center">
@@ -1275,9 +1388,14 @@ export default function Vendas() {
                                     </Button>
                                 )}
                                 {canManageDeliveryStatus && (
-                                    <Button size="sm" variant="outline" onClick={() => setBulkStatusEntregaOpen(true)} disabled={isBulkRunning}>
-                                        Status da entrega
-                                    </Button>
+                                    <>
+                                        <Button size="sm" variant="outline" onClick={() => setBulkStatusEntregaOpen(true)} disabled={isBulkRunning}>
+                                            Status da entrega
+                                        </Button>
+                                        <Button size="sm" variant="outline" onClick={() => setBulkStatusMontagemOpen(true)} disabled={isBulkRunning}>
+                                            Status da montagem
+                                        </Button>
+                                    </>
                                 )}
                                 <Button size="sm" variant="outline" onClick={handleBulkLiberarEntrega} disabled={isBulkRunning}>
                                     Liberar entrega
@@ -2192,6 +2310,44 @@ export default function Vendas() {
                 </DialogContent>
             </Dialog>
 
+            <Dialog open={bulkStatusMontagemOpen} onOpenChange={(open) => !isBulkRunning && setBulkStatusMontagemOpen(open)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Alterar status de montagem em lote</DialogTitle>
+                        <DialogDescription>
+                            Atualize o status das montagens vinculadas aos {selectedVendaIds.length} pedido(s) selecionado(s).
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label>Novo status</Label>
+                            <Select
+                                value={bulkStatusMontagemForm.status}
+                                onValueChange={(value) => setBulkStatusMontagemForm((prev) => ({ ...prev, status: value }))}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Selecione" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {STATUS_MONTAGEM_OPTIONS.map((opt) => (
+                                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setBulkStatusMontagemOpen(false)} disabled={isBulkRunning}>Cancelar</Button>
+                        <Button onClick={handleBulkAtualizarStatusMontagem} disabled={isBulkRunning} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                            {isBulkRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                            Confirmar status
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             {/* Modal de Transferência de Montagem */}
             <TransferirMontagemModal
                 isOpen={!!modalTransferencia}
@@ -2243,7 +2399,7 @@ export default function Vendas() {
                                                 if (u && u.full_name) nomeVendedor = u.full_name;
                                             }
                                             const lojaInfoPdf = lojasAtivas.find(l => String(l.nome).trim().toLowerCase() === String(venda.loja || '').trim().toLowerCase()) || null;
-                                            abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name, lojaInfoPdf);
+                                            abrirNotaPedidoPDF(venda, clienteCompleto, nomeVendedor || user?.full_name, lojaInfoPdf ? { ...lojaInfoPdf, empresa_nome: brandName } : null);
                                             setModalAcoesVenda(null);
                                         }}
                                     >
@@ -2295,17 +2451,30 @@ export default function Vendas() {
 
                                     {/* Alterar Status da Entrega */}
                                     {canManageDeliveryStatus && (
-                                        <Button
-                                            variant="outline"
-                                            className="justify-start gap-2 h-11 text-sky-600 hover:text-sky-700 hover:bg-sky-50 dark:hover:bg-sky-950/20"
-                                            onClick={() => {
-                                                abrirModalStatusEntrega(venda);
-                                                setModalAcoesVenda(null);
-                                            }}
-                                        >
-                                            <Truck className="w-4 h-4" />
-                                            Alterar Status da Entrega
-                                        </Button>
+                                        <>
+                                            <Button
+                                                variant="outline"
+                                                className="justify-start gap-2 h-11 text-sky-600 hover:text-sky-700 hover:bg-sky-50 dark:hover:bg-sky-950/20"
+                                                onClick={() => {
+                                                    abrirModalStatusEntrega(venda);
+                                                    setModalAcoesVenda(null);
+                                                }}
+                                            >
+                                                <Truck className="w-4 h-4" />
+                                                Alterar Status da Entrega
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                className="justify-start gap-2 h-11 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/20"
+                                                onClick={() => {
+                                                    abrirModalStatusMontagem(venda);
+                                                    setModalAcoesVenda(null);
+                                                }}
+                                            >
+                                                <Wrench className="w-4 h-4" />
+                                                Alterar Status da Montagem
+                                            </Button>
+                                        </>
                                     )}
 
                                     {/* Liberar Entrega */}
@@ -2406,6 +2575,39 @@ export default function Vendas() {
                         <Button variant="outline" onClick={() => setModalAcoesVenda(null)}>
                             Fechar
                         </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!modalStatusMontagemVenda} onOpenChange={(open) => !open && setModalStatusMontagemVenda(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Alterar Status da Montagem</DialogTitle>
+                        <DialogDescription>
+                            Pedido #{modalStatusMontagemVenda?.venda?.numero_pedido}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label>Novo status</Label>
+                            <Select
+                                value={statusMontagemForm.status}
+                                onValueChange={(value) => setStatusMontagemForm((prev) => ({ ...prev, status: value }))}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Selecione" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {STATUS_MONTAGEM_OPTIONS.map((opt) => (
+                                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setModalStatusMontagemVenda(null)}>Cancelar</Button>
+                        <Button onClick={handleConfirmarStatusMontagem} className="bg-indigo-600 hover:bg-indigo-700 text-white">Confirmar status</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -2530,13 +2732,24 @@ function OrderStatusBadge({ venda, entregas, montagens, financeiro }) {
     const resumoLogistico = getVendaResumoLogistico(venda, { entregas, montagens });
     const entregasVenda = entregas.filter(e => e.numero_pedido === venda.numero_pedido);
     const temDataEntrega = entregasVenda.some(e => e.data_agendada);
-    const triagemPendente = !venda.triagem_realizada && !temDataEntrega;
+    
+    const temEntregaEmAndamento = entregasVenda.some(e => {
+        const status = String(e.status || '').toLowerCase();
+        return ['entregue', 'retirado', 'em rota', 'agendada', 'concluida', 'concluída'].includes(status);
+    });
+    
+    const triagemPendente = !venda.triagem_realizada && !temDataEntrega && !temEntregaEmAndamento;
     const pagamentoPendente = financeiro?.isPending;
 
     // 1. Verificação de Triagem
     if (triagemPendente) {
         pushBadge('triagem', 'bg-orange-100 text-orange-700 border border-orange-200', ClipboardList, 'Pendente Triagem');
     }
+
+    let showRetirado = false;
+    let showEntregue = false;
+    let showMontado = false;
+    let showMontagemPendente = false;
 
     // 2. Verificação de Entrega
     // Se a triagem ainda não foi realizada e não existe data, não mostramos status de entrega/montagem.
@@ -2569,14 +2782,14 @@ function OrderStatusBadge({ venda, entregas, montagens, financeiro }) {
 
             if (todosRetira) {
                 if (isStatusFinalizado(entrega.status)) {
-                    pushBadge('retirado', 'bg-green-100 text-green-700 border border-green-200', CheckCircle, 'Concluido');
+                    showRetirado = true;
                 } else {
                     pushBadge('retirada_pendente', 'bg-purple-100 text-purple-700 border border-purple-200', UserCheck, 'Aguardando Retirada');
                 }
             } else {
                 // Entrega Comum
                 if (isStatusFinalizado(entrega.status)) {
-                    pushBadge('entregue', 'bg-green-100 text-green-700 border border-green-200', CheckCircle, 'Entregue');
+                    showEntregue = true;
                 } else if (entrega.status === 'Em Rota') {
                     pushBadge('em_rota', 'bg-blue-100 text-blue-700 border border-blue-200', Truck, 'Em Rota');
                 } else {
@@ -2602,11 +2815,26 @@ function OrderStatusBadge({ venda, entregas, montagens, financeiro }) {
         const todasConcluidas = montagensVenda.length > 0 && montagensVenda.every(m => m.status === 'concluida');
 
         if (todasConcluidas) {
-            pushBadge('montado', 'bg-green-100 text-green-700 border border-green-200', Wrench, 'Montado');
+            showMontado = true;
         } else {
-            // Se tem itens de montagem criados ou se a venda requer montagem
-            pushBadge('mont_pendente', 'bg-amber-100 text-amber-700 border border-amber-200', Wrench, 'Montagem Pendente');
+            showMontagemPendente = true;
         }
+    }
+
+    // Processar badges consolidadas
+    if (showEntregue && showMontado) {
+        pushBadge('concluido_total', 'bg-green-100 text-green-700 border border-green-200', CheckCircle, 'Concluído');
+    } else {
+        if (showEntregue) pushBadge('entregue', 'bg-green-100 text-green-700 border border-green-200', CheckCircle, 'Entregue');
+        if (showMontado) pushBadge('montado', 'bg-green-100 text-green-700 border border-green-200', Wrench, 'Montado');
+    }
+    
+    if (showRetirado) {
+        pushBadge('retirado', 'bg-green-100 text-green-700 border border-green-200', CheckCircle, 'Concluído');
+    }
+
+    if (showMontagemPendente) {
+        pushBadge('mont_pendente', 'bg-amber-100 text-amber-700 border border-amber-200', Wrench, 'Montagem Pendente');
     }
 
     return (

@@ -18,7 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
     Search, KeyRound, UserCheck, UserX, RotateCcw, Shield,
     Clock, CheckCircle2, AlertCircle, Loader2, Copy, Eye, EyeOff,
-    Users, Edit, Store, TrendingUp, Trash2
+    Users, Edit, Store, TrendingUp, Trash2, Lock, Unlock
 } from "lucide-react";
 import { getZapApiUrl } from '../../utils/zapApiUrl';
 import { CARGOS, getCargoConfig } from "@/config/cargos";
@@ -193,13 +193,14 @@ export default function GestaoFuncionarios({ currentUser }) {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['funcionarios-gestao'] });
-            toast.success(selectedUser?.ativo === false ? "Conta ativada!" : "Conta desativada!");
+            toast.success(selectedUser?.ativo === false ? "Acesso desbloqueado!" : "Acesso bloqueado!");
             handleCloseModal();
         },
         onError: (error) => {
             toast.error("Erro ao alterar status: " + error.message);
         }
     });
+
 
     // Mutation para editar funcionário
     const updateUserMutation = useMutation({
@@ -411,8 +412,8 @@ export default function GestaoFuncionarios({ currentUser }) {
         if (user.ativo === false) {
             return (
                 <Badge className="bg-red-100 text-red-700">
-                    <UserX className="w-3 h-3 mr-1" />
-                    Desativado
+                    <Lock className="w-3 h-3 mr-1" />
+                    Bloqueado
                 </Badge>
             );
         }
@@ -664,7 +665,7 @@ export default function GestaoFuncionarios({ currentUser }) {
                                                                 variant="outline"
                                                                 className="h-8"
                                                                 onClick={() => handleOpenModal(user, 'reset')}
-                                                                title="Resetar Senha"
+                                                                title="Resetar / Exigir Troca de Senha"
                                                             >
                                                                 <RotateCcw className="w-4 h-4" />
                                                             </Button>
@@ -673,12 +674,12 @@ export default function GestaoFuncionarios({ currentUser }) {
                                                                 variant={user.ativo === false ? "default" : "destructive"}
                                                                 className={`h-8 ${user.ativo === false ? 'bg-green-600 hover:bg-green-700' : ''}`}
                                                                 onClick={() => handleOpenModal(user, 'toggle')}
-                                                                title={user.ativo === false ? "Ativar" : "Desativar"}
+                                                                title={user.ativo === false ? "Desbloquear Acesso" : "Bloquear Acesso"}
                                                             >
                                                                 {user.ativo === false ? (
-                                                                    <UserCheck className="w-4 h-4" />
+                                                                    <Unlock className="w-4 h-4" />
                                                                 ) : (
-                                                                    <UserX className="w-4 h-4" />
+                                                                    <Lock className="w-4 h-4" />
                                                                 )}
                                                             </Button>
                                                         </>
@@ -979,9 +980,9 @@ export default function GestaoFuncionarios({ currentUser }) {
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             {selectedUser?.ativo === false ? (
-                                <><UserCheck className="w-5 h-5 text-green-600" /> Ativar Conta</>
+                                <><Unlock className="w-5 h-5 text-green-600" /> Desbloquear Acesso</>
                             ) : (
-                                <><UserX className="w-5 h-5 text-red-600" /> Desativar Conta</>
+                                <><Lock className="w-5 h-5 text-red-600" /> Bloquear Acesso</>
                             )}
                         </DialogTitle>
                     </DialogHeader>
@@ -991,14 +992,14 @@ export default function GestaoFuncionarios({ currentUser }) {
                             <Alert className="bg-green-50 border-green-200">
                                 <CheckCircle2 className="w-4 h-4 text-green-600" />
                                 <AlertDescription className="text-green-800">
-                                    Ao ativar, o funcionário poderá fazer login novamente.
+                                    Ao desbloquear, o funcionário poderá fazer login normalmente.
                                 </AlertDescription>
                             </Alert>
                         ) : (
                             <Alert className="bg-red-50 border-red-200">
                                 <AlertCircle className="w-4 h-4 text-red-600" />
                                 <AlertDescription className="text-red-800">
-                                    Ao desativar, o funcionário <strong>não poderá mais fazer login</strong>.
+                                    Ao bloquear, o funcionário <strong>não poderá mais fazer login</strong> no sistema.
                                 </AlertDescription>
                             </Alert>
                         )}
@@ -1017,11 +1018,12 @@ export default function GestaoFuncionarios({ currentUser }) {
                             className={selectedUser?.ativo === false ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"}
                         >
                             {toggleAccountMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                            {selectedUser?.ativo === false ? 'Ativar' : 'Desativar'}
+                            {selectedUser?.ativo === false ? 'Desbloquear' : 'Bloquear'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
 
             {/* Modal: Alterar Cargo (múltiplos cargos) */}
             <Dialog open={modalType === 'cargo'} onOpenChange={handleCloseModal}>

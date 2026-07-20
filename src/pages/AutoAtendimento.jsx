@@ -316,7 +316,7 @@ export default function AutoAtendimento() {
 
                 {/* Header Logo */}
                 <div className="text-center mb-6">
-                    <h1 className="text-2xl font-bold text-green-800">Móveis Pedro II</h1>
+                    <h1 className="text-2xl font-bold text-green-800">Assistência Técnica</h1>
                     <p className="text-gray-500">Autoatendimento Assistência Técnica</p>
                 </div>
 

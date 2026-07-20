@@ -76,7 +76,7 @@ const printStyles = `
 const LOGO_URL = EMPRESA.logo_url;
 
 export default function Marketing() {
-    const { isPaidModuleActive } = useTenant();
+    const { brandName, brandLogo, isPaidModuleActive } = useTenant();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCupom, setEditingCupom] = useState(null);
     const [error, setError] = useState("");
@@ -1167,8 +1167,8 @@ export default function Marketing() {
                                     >
                                         {/* Logo */}
                                         <img
-                                            src={LOGO_URL}
-                                            alt="Móveis Pedro II"
+                                            src={brandLogo || EMPRESA.logo_url}
+                                            alt={brandName || EMPRESA.nome}
                                             style={{
                                                 width: layoutConfig.logoSize,
                                                 height: 'auto',
@@ -1392,8 +1392,8 @@ export default function Marketing() {
                             }}>
                                 {/* Logo */}
                                 <img
-                                    src={LOGO_URL}
-                                    alt="Móveis Pedro II"
+                                    src={brandLogo || EMPRESA.logo_url}
+                                    alt={brandName || EMPRESA.nome}
                                     style={{
                                         width: config.logoSize,
                                         height: 'auto',

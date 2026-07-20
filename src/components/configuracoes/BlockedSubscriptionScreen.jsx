@@ -3,6 +3,7 @@ import { useTenant } from '@/contexts/TenantContext';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
+import EscolhaPlano from './EscolhaPlano';
 import {
   CreditCard, QrCode, FileText, Loader2, LogOut,
   AlertTriangle, CheckCircle, Clock, Copy, ExternalLink, RefreshCw
@@ -16,6 +17,7 @@ export default function BlockedSubscriptionScreen() {
   const [loadingPending, setLoadingPending] = useState(false);
   const [pendingPayment, setPendingPayment] = useState(null);
   const [checkingStatus, setCheckingStatus] = useState(false);
+  const [showPlanSelection, setShowPlanSelection] = useState(false);
 
   const fetchPendingPaymentDetails = async () => {
     if (!organization?.asaas_subscription_id) return;
@@ -38,6 +40,11 @@ export default function BlockedSubscriptionScreen() {
       }
       
       if (data && data.paymentId) {
+        if (['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH'].includes(data.status)) {
+          toast.success("Pagamento confirmado! Seu acesso foi liberado.");
+          await refreshTenant();
+          return;
+        }
         setPendingPayment(data);
       } else {
         setPendingPayment(null);
@@ -62,6 +69,30 @@ export default function BlockedSubscriptionScreen() {
       toast.error("Erro ao atualizar o status.");
     } finally {
       setCheckingStatus(false);
+    }
+  };
+
+  const [isCanceling, setIsCanceling] = useState(false);
+  
+  const handleCancelPending = async () => {
+    if (!confirm("Tem certeza que deseja cancelar esta fatura? Você poderá escolher o plano e a forma de pagamento novamente.")) return;
+    
+    try {
+      setIsCanceling(true);
+      const { data, error } = await supabase.functions.invoke("criar-assinatura", {
+        body: { action: "cancel-and-restart" }
+      });
+      
+      if (error) throw error;
+      
+      toast.success("Fatura cancelada com sucesso. Escolha seu plano novamente.");
+      await refreshTenant();
+      setShowPlanSelection(true);
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao cancelar a fatura.");
+    } finally {
+      setIsCanceling(false);
     }
   };
 
@@ -118,6 +149,16 @@ export default function BlockedSubscriptionScreen() {
 
   const statusInfo = getStatusInfo();
 
+  if (showPlanSelection) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-neutral-950 p-4">
+        <div className="w-full max-w-4xl bg-white dark:bg-neutral-900 p-6 rounded-2xl border shadow-lg">
+          <EscolhaPlano onCancel={() => setShowPlanSelection(false)} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-neutral-950 p-4">
       <div className="w-full max-w-2xl space-y-6">
@@ -165,8 +206,17 @@ export default function BlockedSubscriptionScreen() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 space-y-6">
+                  {pendingPayment.status && !['PENDING', 'OVERDUE'].includes(pendingPayment.status) && (
+                    <div className="bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-400 p-3 rounded-lg text-sm flex items-start gap-2 border border-red-200 dark:border-red-800">
+                      <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                      <p>
+                        Atenção: O status atual do pagamento é <strong>{pendingPayment.status}</strong>. 
+                        Isso pode indicar que o pagamento foi recusado ou falhou. Considere cancelar a fatura atual e tentar novamente.
+                      </p>
+                    </div>
+                  )}
                   <div className="flex flex-col md:flex-row gap-6 items-center">
-                    {pendingPayment.billingType === "PIX" && pendingPayment.pixQrCode && (
+                    {pendingPayment.pixQrCode && (
                       <div className="flex flex-col items-center p-3 bg-white border rounded-xl shadow-inner shrink-0">
                         <img 
                           src={`data:image/png;base64,${pendingPayment.pixQrCode}`} 
@@ -192,7 +242,7 @@ export default function BlockedSubscriptionScreen() {
                       </div>
 
                       <div className="flex flex-wrap gap-2 pt-2">
-                        {pendingPayment.billingType === "PIX" && pendingPayment.pixCopiaCola && (
+                        {pendingPayment.pixCopiaCola && (
                           <Button 
                             variant="outline"
                             size="sm"
@@ -227,6 +277,27 @@ export default function BlockedSubscriptionScreen() {
                             Abrir Fatura
                           </Button>
                         )}
+
+                        <Button 
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowPlanSelection(true)}
+                          className="text-amber-700 border-amber-200 hover:bg-amber-50 hover:text-amber-800"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                          Alterar Plano
+                        </Button>
+
+                        <Button 
+                          variant="outline"
+                          size="sm"
+                          onClick={handleCancelPending}
+                          disabled={isCanceling}
+                          className="text-red-700 border-red-200 hover:bg-red-50 hover:text-red-800"
+                        >
+                          {isCanceling ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5 mr-1.5" />}
+                          Cancelar Fatura Atual
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -234,9 +305,18 @@ export default function BlockedSubscriptionScreen() {
               </Card>
             ) : (
               organization?.status_assinatura !== 'cancelada' && (
-                <div className="text-center py-6 text-gray-500 text-sm border border-dashed rounded-xl bg-gray-50/50">
-                  <p>Nenhuma cobrança ativa pendente encontrada no Asaas.</p>
-                  <p className="text-xs text-gray-400 mt-1">Acesse a área de configurações ou aguarde o faturamento.</p>
+                <div className="text-center py-6 px-4 space-y-4 text-gray-500 text-sm border border-dashed rounded-xl bg-gray-50/50">
+                  <div className="space-y-1">
+                    <p className="font-medium text-gray-700 dark:text-gray-300">Nenhuma cobrança ativa pendente encontrada no Asaas.</p>
+                    <p className="text-xs text-gray-400">Isso pode ocorrer se os dados de faturamento (como CNPJ/CPF) estiverem incorretos ou se a assinatura não pôde ser gerada no Asaas.</p>
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setShowPlanSelection(true)}
+                    className="border-green-700 text-green-700 hover:bg-green-50 hover:text-green-800"
+                  >
+                    Configurar Assinatura / Corrigir CNPJ
+                  </Button>
                 </div>
               )
             )}

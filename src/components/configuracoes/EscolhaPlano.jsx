@@ -80,13 +80,28 @@ export default function EscolhaPlano({ onCancel }) {
     e.preventDefault();
     if (!selectedPlan) return;
 
+    // Validar dados de faturamento para todas as formas de pagamento
+    const cleanCpfCnpj = holderCpfCnpj.replace(/\D/g, "");
+    if (cleanCpfCnpj.length !== 11 && cleanCpfCnpj.length !== 14) {
+      toast.error("CPF deve ter 11 dígitos e CNPJ deve ter 14 dígitos.");
+      return;
+    }
+    if (!holderEmail || !holderEmail.includes("@")) {
+      toast.error("E-mail de faturamento inválido.");
+      return;
+    }
+    if (!holderPhone || holderPhone.replace(/\D/g, "").length < 10) {
+      toast.error("WhatsApp / Telefone inválido (mínimo 10 dígitos).");
+      return;
+    }
+
     if (paymentMethod === "CREDIT_CARD") {
       if (!cardHolderName || !cardNumber || !cardExpiryMonth || !cardExpiryYear || !cardCvv) {
         toast.error("Preencha todos os campos do cartão de crédito.");
         return;
       }
-      if (!holderCpfCnpj || !holderEmail || !holderPostalCode) {
-        toast.error("Preencha os dados de cobrança adicionais para o cartão.");
+      if (!holderPostalCode) {
+        toast.error("CEP é obrigatório para pagamento com cartão.");
         return;
       }
     }
@@ -97,6 +112,11 @@ export default function EscolhaPlano({ onCancel }) {
       const payload = {
         planoId: selectedPlan.id,
         paymentMethod,
+        billingInfo: {
+          cnpj: cleanCpfCnpj,
+          email: holderEmail.trim(),
+          phone: holderPhone.replace(/\D/g, "")
+        },
         cardDetails: paymentMethod === "CREDIT_CARD" ? {
           holderName: cardHolderName,
           number: cardNumber,
@@ -173,7 +193,7 @@ export default function EscolhaPlano({ onCancel }) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:max-w-4xl mx-auto">
         {planos.map((plano) => {
-          const isCurrent = plano.id === organization?.plano_id && isSubscribed;
+          const isCurrent = plano.id === organization?.plano_id && organization?.status_assinatura === 'ativa';
           
           return (
             <Card 
@@ -231,7 +251,9 @@ export default function EscolhaPlano({ onCancel }) {
                     onClick={() => handleSelectPlan(plano)}
                     className="w-full bg-green-700 hover:bg-green-800 transition-colors"
                   >
-                    {isSubscribed ? "Alterar para este Plano" : "Assinar este Plano"}
+                    {plano.id === organization?.plano_id 
+                      ? "Confirmar e Gerar Cobrança" 
+                      : (isSubscribed ? "Alterar para este Plano" : "Assinar este Plano")}
                     <ChevronRight className="w-4 h-4 ml-1" />
                   </Button>
                 )}
@@ -362,58 +384,76 @@ export default function EscolhaPlano({ onCancel }) {
                     </div>
                   </div>
                 </div>
-
-                <h4 className="text-sm font-bold text-gray-700 pt-3 border-t">Dados de Faturamento (Dono do Cartão)</h4>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label htmlFor="billing-cnpj" className="text-xs font-semibold text-gray-500">CPF ou CNPJ</Label>
-                    <Input 
-                      id="billing-cnpj"
-                      placeholder="Apenas números"
-                      value={holderCpfCnpj}
-                      onChange={(e) => setHolderCpfCnpj(e.target.value.replace(/\D/g, ""))}
-                      className="mt-1"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="billing-email" className="text-xs font-semibold text-gray-500">E-mail para Recibo</Label>
-                    <Input 
-                      id="billing-email"
-                      type="email"
-                      placeholder="email@provedor.com"
-                      value={holderEmail}
-                      onChange={(e) => setHolderEmail(e.target.value)}
-                      className="mt-1"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="billing-cep" className="text-xs font-semibold text-gray-500">CEP Residencial</Label>
-                    <Input 
-                      id="billing-cep"
-                      placeholder="00000-000"
-                      value={holderPostalCode}
-                      onChange={(e) => setHolderPostalCode(e.target.value.replace(/\D/g, "").substring(0, 8))}
-                      className="mt-1"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="billing-num" className="text-xs font-semibold text-gray-500">Número Residência</Label>
-                    <Input 
-                      id="billing-num"
-                      placeholder="Ex: 123"
-                      value={holderAddressNumber}
-                      onChange={(e) => setHolderAddressNumber(e.target.value)}
-                      className="mt-1"
-                      required
-                    />
-                  </div>
-                </div>
               </div>
             )}
+
+            {/* Dados de Faturamento (Sempre Visíveis) */}
+            <div className="space-y-4 border-t pt-4">
+              <h4 className="text-sm font-bold text-gray-700">Dados de Faturamento</h4>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="billing-cnpj" className="text-xs font-semibold text-gray-500">CPF ou CNPJ</Label>
+                  <Input 
+                    id="billing-cnpj"
+                    placeholder="Apenas números"
+                    value={holderCpfCnpj}
+                    onChange={(e) => setHolderCpfCnpj(e.target.value.replace(/\D/g, ""))}
+                    className="mt-1"
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="billing-email" className="text-xs font-semibold text-gray-500">E-mail para Recibo / Faturas</Label>
+                  <Input 
+                    id="billing-email"
+                    type="email"
+                    placeholder="email@provedor.com"
+                    value={holderEmail}
+                    onChange={(e) => setHolderEmail(e.target.value)}
+                    className="mt-1"
+                    required
+                  />
+                </div>
+                <div className={paymentMethod === "CREDIT_CARD" ? "" : "col-span-2"}>
+                  <Label htmlFor="billing-phone" className="text-xs font-semibold text-gray-500">WhatsApp / Telefone</Label>
+                  <Input 
+                    id="billing-phone"
+                    placeholder="Ex: 24999999999"
+                    value={holderPhone}
+                    onChange={(e) => setHolderPhone(e.target.value.replace(/\D/g, ""))}
+                    className="mt-1"
+                    required
+                  />
+                </div>
+                {paymentMethod === "CREDIT_CARD" && (
+                  <>
+                    <div>
+                      <Label htmlFor="billing-cep" className="text-xs font-semibold text-gray-500">CEP Residencial</Label>
+                      <Input 
+                        id="billing-cep"
+                        placeholder="00000-000"
+                        value={holderPostalCode}
+                        onChange={(e) => setHolderPostalCode(e.target.value.replace(/\D/g, "").substring(0, 8))}
+                        className="mt-1"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="billing-num" className="text-xs font-semibold text-gray-500">Número Residência</Label>
+                      <Input 
+                        id="billing-num"
+                        placeholder="Ex: 123"
+                        value={holderAddressNumber}
+                        onChange={(e) => setHolderAddressNumber(e.target.value)}
+                        className="mt-1"
+                        required
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
 
             <DialogFooter className="gap-2">
               <Button

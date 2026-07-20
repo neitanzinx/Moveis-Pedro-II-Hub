@@ -15,6 +15,7 @@ import {
 import AssistenciaTecnicaModal from "../components/assistencia/AssistenciaTecnicaModal";
 import SelecionarLojaReposicaoModal from "../components/assistencia/SelecionarLojaReposicaoModal";
 import { abrirAssistenciaTecnicaPDF } from "../components/assistencia/AssistenciaTecnicaPDF";
+import { useTenant } from "@/contexts/TenantContext";
 import { toast } from "sonner";
 import DevolucaoModal from "../components/devolucoes/DevolucaoModal";
 
@@ -56,6 +57,7 @@ export default function AssistenciaTecnica() {
     const [reposicaoPendente, setReposicaoPendente] = useState(null);
     const [isReposicaoModalOpen, setIsReposicaoModalOpen] = useState(false);
     const { user } = useAuth();
+    const { brandName } = useTenant();
     const queryClient = useQueryClient();
 
     // Queries
@@ -559,7 +561,7 @@ export default function AssistenciaTecnica() {
             }
         }
 
-        abrirAssistenciaTecnicaPDF(assistencia, venda, clienteCompleto, lojaInfo, involvedProducts);
+        abrirAssistenciaTecnicaPDF(assistencia, venda, clienteCompleto, lojaInfo ? { ...lojaInfo, empresa_nome: brandName } : null, involvedProducts);
     };
 
     return (

@@ -506,8 +506,8 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
       </head>
       <body>
         <div class="header">
-          <img src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/690ce4cb64e20af6b4a46b6f/3474ff954_undefined-Imgur.png" alt="Logo" />
-          <h1>Móveis Pedro II</h1>
+          <img src="${organization?.logo_url || EMPRESA.logo_url}" alt="Logo" />
+          <h1>${organization?.name || EMPRESA.nome}</h1>
           <p>Loja ${vendaData.loja}</p>
         </div>
 
@@ -604,7 +604,7 @@ export default function VendaModal({ isOpen, onClose, onSave, venda, clientes, p
 
         <div class="footer">
           <p>Obrigado pela preferência!</p>
-          <p>Móveis Pedro II - Loja ${vendaData.loja}</p>
+          <p>${organization?.name || EMPRESA.nome} - Loja ${vendaData.loja}</p>
         </div>
       </body>
       </html>
@@ -666,7 +666,7 @@ ${vendaData.prazo_entrega === 'Retirado na loja'
       }
 
 Obrigado pela preferência! 🧡💚
-_Móveis Pedro II - ${vendaData.loja}_`;
+_${organization?.name || EMPRESA.nome} - ${vendaData.loja}_`;
 
     const url = `https://wa.me/55${telefone}?text=${encodeURIComponent(mensagem)}`;
     window.open(url, '_blank');

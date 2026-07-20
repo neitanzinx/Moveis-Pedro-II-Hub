@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
-import { Loader2, ShieldAlert, Edit, Save, Plus } from "lucide-react";
+import { Loader2, ShieldAlert, Edit, Save, Plus, Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,16 +11,25 @@ import { Checkbox } from "@/components/ui/checkbox";
 
 export default function PainelSaaSOperadorPlanos() {
   const [loading, setLoading] = useState(true);
-  const [organizations, setOrganizations] = useState([]);
   const [planos, setPlanos] = useState([]);
-  
-  // Override State
-  const [showOverrideModal, setShowOverrideModal] = useState(false);
-  const [selectedOrg, setSelectedOrg] = useState(null);
-  const [overridePlanId, setOverridePlanId] = useState("");
-  const [overrideModules, setOverrideModules] = useState({ whatsapp_bot: false, fotos_entrega: false });
-  const [overrideMotivo, setOverrideMotivo] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Edit/Create Plan State
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false); // false = creating
+  const [planForm, setPlanForm] = useState({
+    id: null,
+    nome: "",
+    preco_mensal: "",
+    ativo: true,
+    recursos: { whatsapp_bot: false, fotos_entrega: false },
+    updateExisting: false,
+    updateExistingModules: false
+  });
+
+  // Delete State
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [planToDelete, setPlanToDelete] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -30,36 +39,15 @@ export default function PainelSaaSOperadorPlanos() {
     try {
       setLoading(true);
       
-      // Fetch Planos
       const { data: planosData, error: planosError } = await supabase
         .from("planos")
         .select("*")
         .order("preco_mensal", { ascending: true });
         
       if (planosError) throw planosError;
-      setPlanos(planosData || []);
-
-      // Fetch Organizations with their settings
-      const { data: orgsData, error: orgsError } = await supabase
-        .from("organizations")
-        .select(`
-          id, 
-          nome, 
-          plano_id, 
-          status_assinatura,
-          organization_settings (
-            modulos_ativos
-          )
-        `);
         
-      if (orgsError) throw orgsError;
-      
-      const formattedOrgs = orgsData?.map(org => ({
-        ...org,
-        modulos_ativos: org.organization_settings?.[0]?.modulos_ativos || {}
-      })) || [];
-      
-      setOrganizations(formattedOrgs);
+      if (planosError) throw planosError;
+      setPlanos(planosData || []);
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
       toast.error("Falha ao carregar planos e organizações.");
@@ -68,54 +56,106 @@ export default function PainelSaaSOperadorPlanos() {
     }
   }
 
-  const handleOpenOverride = (org) => {
-    setSelectedOrg(org);
-    setOverridePlanId(org.plano_id || "");
-    setOverrideModules(org.modulos_ativos || { whatsapp_bot: false, fotos_entrega: false });
-    setOverrideMotivo("");
-    setShowOverrideModal(true);
+  // Ações de Plano
+  const handleOpenCreatePlan = () => {
+    setIsEditing(false);
+    setPlanForm({
+      id: null,
+      nome: "",
+      preco_mensal: "",
+      ativo: true,
+      recursos: { whatsapp_bot: false, fotos_entrega: false },
+      updateExisting: false,
+      updateExistingModules: false
+    });
+    setShowPlanModal(true);
   };
 
-  const handleOverrideSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!overrideMotivo.trim()) {
-      toast.error("O motivo é obrigatório para registrar a auditoria.");
-      return;
-    }
-    if (!overridePlanId) {
-      toast.error("Selecione um plano.");
-      return;
-    }
+  const handleOpenEditPlan = (plano) => {
+    setIsEditing(true);
+    setPlanForm({
+      id: plano.id,
+      nome: plano.nome,
+      preco_mensal: plano.preco_mensal.toString(),
+      ativo: plano.ativo,
+      recursos: {
+        whatsapp_bot: !!plano.recursos?.whatsapp_bot,
+        fotos_entrega: !!plano.recursos?.fotos_entrega
+      },
+      updateExisting: false,
+      updateExistingModules: false
+    });
+    setShowPlanModal(true);
+  };
 
+  const handlePlanSubmit = async (e) => {
+    e.preventDefault();
     try {
       setSubmitting(true);
-      const { data, error } = await supabase.rpc('operator_override_subscription', {
-        p_org_id: selectedOrg.id,
-        p_plano_id: overridePlanId,
-        p_modulos: overrideModules,
-        p_motivo: overrideMotivo
-      });
+      
+      const body = {
+        action: isEditing ? 'update' : 'create',
+        nome: planForm.nome,
+        preco_mensal: parseFloat(planForm.preco_mensal.replace(',', '.')),
+        ativo: planForm.ativo,
+        recursos: planForm.recursos
+      };
+
+      if (isEditing) {
+        body.planId = planForm.id;
+        body.update_existing = planForm.updateExisting;
+        body.update_existing_modules = planForm.updateExistingModules;
+      }
+
+      const { data, error } = await supabase.functions.invoke('operator-update-plan', { body });
 
       if (error) throw error;
-      
-      toast.success("Assinatura alterada com sucesso!");
-      setShowOverrideModal(false);
+      if (data?.error) throw new Error(data.error);
+
+      toast.success(data?.message || "Plano salvo com sucesso!");
+      if (data?.asaas_stats?.success > 0 || data?.asaas_stats?.errors > 0) {
+         toast.info(`Atualizações no Asaas: ${data.asaas_stats?.success} sucessos, ${data.asaas_stats?.errors} erros.`);
+      }
+
+      setShowPlanModal(false);
       fetchData();
     } catch (error) {
-      console.error("Erro no override:", error);
-      toast.error(error.message || "Erro ao realizar override da assinatura.");
+      console.error("Erro ao salvar plano:", error);
+      toast.error(error.message || "Erro ao salvar plano.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const toggleModule = (moduleName) => {
-    setOverrideModules(prev => ({
+  const handleDeletePlan = async () => {
+    if (!planToDelete) return;
+    try {
+      setSubmitting(true);
+      const { data, error } = await supabase.functions.invoke('operator-update-plan', {
+        body: { action: 'delete', planId: planToDelete.id }
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      toast.success(data?.message || "Plano excluído com sucesso.");
+      setShowDeleteModal(false);
+      fetchData();
+    } catch (error) {
+      console.error("Erro ao excluir:", error);
+      toast.error(error.message || "Falha ao excluir plano.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const togglePlanModule = (mod) => {
+    setPlanForm(prev => ({
       ...prev,
-      [moduleName]: !prev[moduleName]
+      recursos: { ...prev.recursos, [mod]: !prev.recursos[mod] }
     }));
   };
+
 
   if (loading) {
     return (
@@ -127,19 +167,23 @@ export default function PainelSaaSOperadorPlanos() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Gestão de Planos & Assinaturas</h1>
-        <p className="text-slate-500 mt-1">
-          Visão geral de planos e administração forçada de assinaturas (Override Manual).
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Gestão de Planos & Assinaturas</h1>
+          <p className="text-slate-500 mt-1">
+            Crie, edite planos e altere manualmente assinaturas de organizações (Override).
+          </p>
+        </div>
+        <Button onClick={handleOpenCreatePlan} className="bg-blue-600 hover:bg-blue-700 text-white">
+          <Plus className="w-4 h-4 mr-2" /> Novo Plano
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 gap-6">
-        {/* Tabela de Planos (Apenas Leitura / Visão Geral) */}
         <Card>
           <CardHeader>
             <CardTitle>Planos do Sistema</CardTitle>
-            <CardDescription>Planos disponíveis e legados no sistema.</CardDescription>
+            <CardDescription>Planos disponíveis para novas assinaturas e legados.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -150,6 +194,7 @@ export default function PainelSaaSOperadorPlanos() {
                     <th className="px-4 py-3">Preço Mensal</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Módulos Inclusos</th>
+                    <th className="px-4 py-3 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -161,13 +206,9 @@ export default function PainelSaaSOperadorPlanos() {
                       </td>
                       <td className="px-4 py-3">
                         {plano.ativo ? (
-                          <span className="px-2 py-1 text-xs font-semibold bg-green-100 text-green-800 rounded-full">
-                            Ativo
-                          </span>
+                          <span className="px-2 py-1 text-xs font-semibold bg-green-100 text-green-800 rounded-full">Ativo</span>
                         ) : (
-                          <span className="px-2 py-1 text-xs font-semibold bg-gray-100 text-gray-800 rounded-full">
-                            Legado (Inativo)
-                          </span>
+                          <span className="px-2 py-1 text-xs font-semibold bg-gray-100 text-gray-800 rounded-full">Legado</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -181,6 +222,17 @@ export default function PainelSaaSOperadorPlanos() {
                           ))}
                         </div>
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button size="sm" variant="ghost" className="text-slate-600 hover:text-slate-900" onClick={() => handleOpenEditPlan(plano)}>
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => {
+                          setPlanToDelete(plano);
+                          setShowDeleteModal(true);
+                        }}>
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -189,143 +241,135 @@ export default function PainelSaaSOperadorPlanos() {
           </CardContent>
         </Card>
 
-        {/* Gestão de Assinaturas (Tenants) */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Tenants & Overrides</CardTitle>
-            <CardDescription>Altere planos e módulos ativos manualmente. Essa ação é auditada.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left">
-                <thead className="text-xs text-slate-500 bg-slate-50 border-b uppercase">
-                  <tr>
-                    <th className="px-4 py-3">Organização</th>
-                    <th className="px-4 py-3">Plano Atual</th>
-                    <th className="px-4 py-3">Status Financeiro</th>
-                    <th className="px-4 py-3 text-right">Ação</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {organizations.map(org => {
-                    const plano = planos.find(p => p.id === org.plano_id);
-                    return (
-                      <tr key={org.id} className="hover:bg-slate-50/50">
-                        <td className="px-4 py-3 font-medium text-slate-900">{org.nome}</td>
-                        <td className="px-4 py-3">
-                          {plano ? plano.nome : <span className="text-slate-400">Sem Plano</span>}
-                        </td>
-                        <td className="px-4 py-3 capitalize">
-                          {org.status_assinatura.replace("_", " ")}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <Button 
-                            size="sm" 
-                            variant="outline" 
-                            className="text-amber-700 border-amber-200 hover:bg-amber-50"
-                            onClick={() => handleOpenOverride(org)}
-                          >
-                            <ShieldAlert className="w-4 h-4 mr-2" />
-                            Override
-                          </Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+
       </div>
 
-      {/* Modal de Override */}
-      <Dialog open={showOverrideModal} onOpenChange={setShowOverrideModal}>
+      {/* Modal de Criar/Editar Plano */}
+      <Dialog open={showPlanModal} onOpenChange={setShowPlanModal}>
         <DialogContent className="max-w-md">
-          <form onSubmit={handleOverrideSubmit}>
+          <form onSubmit={handlePlanSubmit}>
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-amber-800">
-                <ShieldAlert className="w-5 h-5" />
-                Override de Assinatura
+              <DialogTitle className="flex items-center gap-2">
+                {isEditing ? <Edit className="w-5 h-5 text-blue-600" /> : <Plus className="w-5 h-5 text-blue-600" />}
+                {isEditing ? "Editar Plano" : "Novo Plano"}
               </DialogTitle>
               <DialogDescription>
-                Alterar forçadamente a assinatura de <strong>{selectedOrg?.nome}</strong>. Esta ação será registrada no log de auditoria.
+                {isEditing ? "Atualize os detalhes e recursos do plano." : "Preencha os detalhes para criar um novo plano."}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="plano">Novo Plano</Label>
-                <select 
-                  id="plano"
-                  className="w-full p-2 border rounded-md text-sm bg-white"
-                  value={overridePlanId}
-                  onChange={(e) => setOverridePlanId(e.target.value)}
+                <Label htmlFor="planName">Nome do Plano</Label>
+                <Input
+                  id="planName"
+                  value={planForm.nome}
+                  onChange={(e) => setPlanForm({...planForm, nome: e.target.value})}
                   required
-                >
-                  <option value="" disabled>Selecione um plano</option>
-                  {planos.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.nome} {p.ativo ? "" : "(Legado)"}
-                    </option>
-                  ))}
-                </select>
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="planPrice">Preço Mensal (R$)</Label>
+                <Input
+                  id="planPrice"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={planForm.preco_mensal}
+                  onChange={(e) => setPlanForm({...planForm, preco_mensal: e.target.value})}
+                  required
+                />
+              </div>
+
+              <div className="flex items-center space-x-2 pt-2">
+                <Checkbox 
+                  id="planActive" 
+                  checked={planForm.ativo}
+                  onCheckedChange={(c) => setPlanForm({...planForm, ativo: !!c})}
+                />
+                <label htmlFor="planActive" className="text-sm font-medium leading-none cursor-pointer">
+                  Plano Ativo (Disponível para novas assinaturas)
+                </label>
               </div>
 
               <div className="space-y-2 pt-2 border-t">
-                <Label>Módulos Ativos (Override)</Label>
-                <div className="space-y-2 mt-2">
+                <Label>Módulos Inclusos neste Plano</Label>
+                <div className="flex flex-col gap-2 mt-2">
                   <div className="flex items-center space-x-2">
-                    <Checkbox 
-                      id="mod_wpp" 
-                      checked={!!overrideModules.whatsapp_bot}
-                      onCheckedChange={() => toggleModule('whatsapp_bot')}
-                    />
-                    <label htmlFor="mod_wpp" className="text-sm font-medium leading-none cursor-pointer">
-                      WhatsApp Bot
-                    </label>
+                    <Checkbox id="p_wpp" checked={planForm.recursos.whatsapp_bot} onCheckedChange={() => togglePlanModule('whatsapp_bot')} />
+                    <label htmlFor="p_wpp" className="text-sm">WhatsApp Bot</label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Checkbox 
-                      id="mod_fotos" 
-                      checked={!!overrideModules.fotos_entrega}
-                      onCheckedChange={() => toggleModule('fotos_entrega')}
-                    />
-                    <label htmlFor="mod_fotos" className="text-sm font-medium leading-none cursor-pointer">
-                      Fotos de Entrega
-                    </label>
+                    <Checkbox id="p_fotos" checked={planForm.recursos.fotos_entrega} onCheckedChange={() => togglePlanModule('fotos_entrega')} />
+                    <label htmlFor="p_fotos" className="text-sm">Fotos de Entrega</label>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-2 pt-2 border-t">
-                <Label htmlFor="motivo">Motivo (Obrigatório)</Label>
-                <Input
-                  id="motivo"
-                  placeholder="Ex: Correção de bug no faturamento, cortesia..."
-                  value={overrideMotivo}
-                  onChange={(e) => setOverrideMotivo(e.target.value)}
-                  required
-                />
-              </div>
+              {isEditing && (
+                <div className="space-y-2 pt-4 border-t mt-4">
+                  <div className="flex flex-col gap-3 bg-blue-50 p-3 rounded-md border border-blue-100">
+                    <div className="flex items-start space-x-2">
+                      <Checkbox 
+                        id="updateExistingPrice" 
+                        className="mt-1"
+                        checked={planForm.updateExisting}
+                        onCheckedChange={(c) => setPlanForm({...planForm, updateExisting: !!c})}
+                      />
+                      <label htmlFor="updateExistingPrice" className="text-sm font-medium text-blue-900 cursor-pointer">
+                        Propagar NOVO PREÇO para a próxima fatura das empresas ativas
+                      </label>
+                    </div>
+                    <div className="flex items-start space-x-2">
+                      <Checkbox 
+                        id="updateExistingModules" 
+                        className="mt-1"
+                        checked={planForm.updateExistingModules}
+                        onCheckedChange={(c) => setPlanForm({...planForm, updateExistingModules: !!c})}
+                      />
+                      <label htmlFor="updateExistingModules" className="text-sm font-medium text-blue-900 cursor-pointer">
+                        Propagar NOVOS MÓDULOS para as empresas ativas neste plano
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowOverrideModal(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={submitting} className="bg-amber-700 hover:bg-amber-800">
-                {submitting ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <Save className="w-4 h-4 mr-2" />
-                )}
-                Aplicar Override
+              <Button type="button" variant="outline" onClick={() => setShowPlanModal(false)}>Cancelar</Button>
+              <Button type="submit" disabled={submitting} className="bg-blue-600 hover:bg-blue-700 text-white">
+                {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                Salvar
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Modal Confirmar Exclusão */}
+      <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Excluir Plano</DialogTitle>
+            <DialogDescription>
+              Tem certeza que deseja excluir o plano <strong>{planToDelete?.nome}</strong>?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 text-sm text-slate-600">
+            A exclusão só será permitida se não existirem organizações atreladas a este plano. Caso existam, inative-o.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteModal(false)}>Cancelar</Button>
+            <Button variant="destructive" onClick={handleDeletePlan} disabled={submitting}>
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Excluir"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+
     </div>
   );
 }

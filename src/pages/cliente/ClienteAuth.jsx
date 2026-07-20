@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
-import { EMPRESA } from "@/config/empresa";
+import { useTenant } from "@/contexts/TenantContext";
 import { supabase } from "@/api/base44Client";
 import { processarFidelidadeCadastro } from "@/utils/fidelidadeEngine";
 import { ensureClientPortalSession, trackClientAccessEvent } from "@/lib/clienteAccessTracking";
@@ -15,15 +15,15 @@ import { toast } from "sonner";
 import {
     Loader2, Mail, Lock, User, Phone, MapPin, Search,
     ArrowLeft, Sparkles, Check, Eye, EyeOff, Building, Crown,
-    UserCircle, CreditCard, Hash, Calendar, Map, Navigation, Home, Globe, Info
+    UserCircle, CreditCard, Hash, Calendar, Map, Navigation, Home, Globe, Info, Store
 } from "lucide-react";
 
-const LOGO_URL = EMPRESA.logo_url;
 const HERO_IMAGE = "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?q=80&w=2000&auto=format&fit=crop";
 
 export default function ClienteAuth() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
+    const { brandName, brandLogo } = useTenant();
     const initialMode = searchParams.get("mode") === "register" ? "register" : "login";
 
     const [activeTab, setActiveTab] = useState(initialMode);
@@ -363,8 +363,14 @@ export default function ClienteAuth() {
 
                 <Card className="border-white/20 shadow-2xl bg-white/95 backdrop-blur-md rounded-2xl overflow-hidden">
                     <CardHeader className="text-center pb-6 border-b border-stone-100 bg-white/50">
-                        <img src={LOGO_URL} alt="Móveis Pedro II" className="h-16 mx-auto mb-4 object-contain" />
-                        <CardTitle className="text-3xl font-serif text-green-950">Área do Cliente</CardTitle>
+                        {brandLogo ? (
+                            <img src={brandLogo} alt={brandName} className="h-16 mx-auto mb-4 object-contain" />
+                        ) : (
+                            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm border border-stone-100">
+                                <Store className="w-8 h-8 text-green-950" />
+                            </div>
+                        )}
+                        <CardTitle className="text-3xl font-serif text-green-950">{brandName || 'Área do Cliente'}</CardTitle>
                         <CardDescription className="font-body text-stone-600 text-base">
                             {activeTab === "login"
                                 ? "Bem-vindo de volta! Acesse sua conta."

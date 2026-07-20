@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import Layout from "./Layout.jsx";
 import LoginFuncionario from "./LoginFuncionario.jsx";
 
@@ -42,6 +42,7 @@ const AprovacaoSemEstoque = lazy(() => import("./AprovacaoSemEstoque.jsx"));
 const RelatorioAcessosClientes = lazy(() => import("./RelatorioAcessosClientes.jsx"));
 const PainelSaaSOperador = lazy(() => import("./PainelSaaSOperador.jsx"));
 const PainelSaaSOperadorPlanos = lazy(() => import("./PainelSaaSOperadorPlanos.jsx"));
+const PainelSaaSOperadorEmpresas = lazy(() => import("./PainelSaaSOperadorEmpresas.jsx"));
 const OperadorLogin = lazy(() => import("./OperadorLogin.jsx"));
 const OperatorLayout = lazy(() => import("./OperatorLayout.jsx"));
 const CadastroEmpresa = lazy(() => import("./CadastroEmpresa.jsx"));
@@ -56,6 +57,7 @@ import ClienteDashboard from "./cliente/ClienteDashboard.jsx";
 import AutoAtendimento from "./AutoAtendimento.jsx";
 import RastreioPublico from "./RastreioPublico.jsx";
 import BlockedSubscriptionScreen from "@/components/configuracoes/BlockedSubscriptionScreen.jsx";
+import TenantSlugResolver from "@/components/TenantSlugResolver.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation, Navigate, Link } from 'react-router-dom';
 import { hasAnyRole, getUserRoles } from "@/config/permissions";
@@ -77,6 +79,7 @@ function PageLoadingFallback() {
 }
 import { useAuth } from "@/hooks/useAuth";
 import { useOperatorAuth } from "@/hooks/useOperatorAuth";
+import { useFootstepsTracker } from "@/hooks/useFootstepsTracker";
 
 function AuthTimeoutFallback({ error, onRetry }) {
     return (
@@ -180,6 +183,7 @@ function OperatorRouteGate() {
             <OperatorLayout>
                 <Routes>
                     <Route path="/operador" element={<PainelSaaSOperador />} />
+                    <Route path="/operador/empresas" element={<PainelSaaSOperadorEmpresas />} />
                     <Route path="/operador/planos" element={<PainelSaaSOperadorPlanos />} />
                     <Route path="/operador/*" element={<Navigate to="/operador" replace />} />
                 </Routes>
@@ -218,10 +222,98 @@ function _getCurrentPage(url) {
     return pageName || "Dashboard";
 }
 
+const RESERVED_PATHS = [
+    'login', 'cadastro', 'operador', 'vip', 'restrito', 'admin', 'home', '',
+    'cliente-login', 'area-cliente', 'assistencia', 'rastreio', 'avaliacao', 'CadastroMobile'
+];
+
+const getClientRouteInfo = (pathname, isDomainResolved) => {
+    const pathParts = pathname.split('/');
+    
+    if (isDomainResolved) {
+        const subRoute = pathParts[1] || '';
+        const extraSegment = pathParts[2] || '';
+        const isClient = ['cliente-login', 'area-cliente', 'CadastroMobile', 'avaliacao'].includes(subRoute) ||
+                         (subRoute === 'assistencia' && extraSegment === 'auto') ||
+                         (subRoute === 'rastreio') ||
+                         !subRoute;
+        
+        return { 
+            isClient, 
+            slug: null, 
+            subRoute, 
+            rastreioId: subRoute === 'rastreio' ? extraSegment : null 
+        };
+    } else {
+        const possibleSlug = pathParts[1] || '';
+        if (possibleSlug && !RESERVED_PATHS.includes(possibleSlug)) {
+            const subRoute = pathParts[2] || '';
+            const extraSegment = pathParts[3] || '';
+            const isClient = ['cliente-login', 'area-cliente', 'CadastroMobile', 'avaliacao'].includes(subRoute) ||
+                             (subRoute === 'assistencia' && extraSegment === 'auto') ||
+                             (subRoute === 'rastreio') ||
+                             !subRoute;
+            
+            return { 
+                isClient, 
+                slug: possibleSlug, 
+                subRoute, 
+                rastreioId: subRoute === 'rastreio' ? extraSegment : null 
+            };
+        }
+    }
+    return { isClient: false, slug: null, subRoute: null, rastreioId: null };
+};
+
 function PagesContent() {
     const location = useLocation();
     const { user, loading, can, authError, retryAuth } = useAuth();
-    const { isModuleActive, organization } = useTenant();
+    
+    // Telemetria de Footsteps (Pegadas do Usuário)
+    useFootstepsTracker(user);
+
+    const { isModuleActive, organization, isDomainResolved } = useTenant();
+
+    useEffect(() => {
+        const isOperatorPath = location.pathname.startsWith('/operador');
+
+        if (isOperatorPath) {
+            document.title = 'GestApp - Operador SaaS';
+            
+            // Remove existing favicons
+            const existingLinks = document.querySelectorAll("link[rel~='icon']");
+            existingLinks.forEach(link => link.remove());
+
+            // Create a generic SVG favicon (shield emoji)
+            const link = document.createElement('link');
+            link.rel = 'icon';
+            link.type = 'image/svg+xml';
+            link.href = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>';
+            document.getElementsByTagName('head')[0].appendChild(link);
+        } else if (organization) {
+            // Restore tenant title and favicon
+            document.title = organization.name || 'Sistema de Gestão';
+
+            const existingLinks = document.querySelectorAll("link[rel~='icon']");
+            existingLinks.forEach(link => link.remove());
+
+            if (organization.logo_url) {
+                const logoUrl = `${organization.logo_url}?v=${new Date().getTime()}`;
+                const link = document.createElement('link');
+                link.rel = 'icon';
+                link.type = 'image/png';
+                link.href = logoUrl;
+                document.getElementsByTagName('head')[0].appendChild(link);
+            } else {
+                const link = document.createElement('link');
+                link.rel = 'icon';
+                link.type = 'image/png';
+                link.href = 'https://stgatkuwnouzwczkpphs.supabase.co/storage/v1/object/public/publico/mp2logo.png';
+                document.getElementsByTagName('head')[0].appendChild(link);
+            }
+        }
+    }, [location.pathname, organization]);
+
     const isDefaultOrg = organization?.id === '00000000-0000-0000-0000-000000000001' || organization?.slug === 'moveis-pedro-ii';
     const isBlockedSubscription = organization && !isDefaultOrg && organization.status_assinatura !== 'ativa';
     const currentPage = _getCurrentPage(location.pathname);
@@ -237,6 +329,8 @@ function PagesContent() {
     // Mover lógica de loading para o final do "processamento de hooks"
     // ou garantir que as rotas públicas que não usam hooks extras venham depois do loading se necessário.
 
+    const clientRouteInfo = getClientRouteInfo(location.pathname, isDomainResolved);
+
     const isPublicRoute =
         location.pathname === '/' ||
         location.pathname === '/home' ||
@@ -249,7 +343,8 @@ function PagesContent() {
         location.pathname.startsWith('/rastreio') ||
         location.pathname.startsWith('/avaliacao/') ||
         location.pathname === '/cadastro' ||
-        location.pathname.startsWith('/operador');
+        location.pathname.startsWith('/operador') ||
+        clientRouteInfo.isClient;
 
     if (loading && !isPublicRoute) {
         return (
@@ -280,12 +375,29 @@ function PagesContent() {
         return <LandingVIP />;
     }
 
-    // Autenticação de clientes (público)
+    // ===== ROTAS TENANT-AWARE (Subdomínio, domínio próprio ou path-based) =====
+    if (clientRouteInfo.isClient) {
+        const { slug, subRoute, rastreioId } = clientRouteInfo;
+
+        return (
+            <TenantSlugResolver>
+                {subRoute === 'cliente-login' && <ClienteAuth />}
+                {subRoute === 'area-cliente' && <ClienteDashboard />}
+                {subRoute === 'assistencia' && <AutoAtendimento />}
+                {subRoute === 'rastreio' && <RastreioPublico idProp={rastreioId} />}
+                {subRoute === 'avaliacao' && <AvaliacaoNPS />}
+                {subRoute === 'CadastroMobile' && <CadastroMobile />}
+                {!subRoute && <ClienteAuth />}
+            </TenantSlugResolver>
+        );
+    }
+
+    // Autenticação de clientes (público — fallback sem slug, usa org padrão)
     if (location.pathname === '/cliente-login') {
         return <ClienteAuth />;
     }
 
-    // Área do cliente (requer autenticação Supabase, mas não admin)
+    // Área do cliente (requer autenticação Supabase, mas não admin — fallback sem slug)
     if (location.pathname === '/area-cliente') {
         return <ClienteDashboard />;
     }

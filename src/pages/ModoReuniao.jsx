@@ -11,9 +11,11 @@ import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { motion } from "framer-motion";
 import ApresentacaoReuniao from "../components/reuniao/ApresentacaoReuniao";
+import { useTenant } from "@/contexts/TenantContext";
 
 export default function ModoReuniao() {
   const navigate = useNavigate();
+  const { brandName } = useTenant();
   const [user, setUser] = useState(null);
   const [apresentacaoAtiva, setApresentacaoAtiva] = useState(false);
   const [configuracao, setConfiguracao] = useState({
@@ -37,7 +39,7 @@ export default function ModoReuniao() {
       "Cada desafio é uma oportunidade de crescer 🌟",
     ],
     historiaEmpresa: {
-      titulo: "Móveis Pedro II",
+      titulo: "",
       missao: "Oferecer móveis de qualidade com atendimento excepcional",
       visao: "Ser referência em móveis planejados na região",
       valores: "Qualidade, Comprometimento, Inovação e Respeito",
@@ -167,7 +169,13 @@ export default function ModoReuniao() {
   if (apresentacaoAtiva) {
     return (
       <ApresentacaoReuniao
-        configuracao={configuracao}
+        configuracao={{
+          ...configuracao,
+          historiaEmpresa: {
+            ...configuracao.historiaEmpresa,
+            titulo: configuracao.historiaEmpresa.titulo || brandName || "Nossa Empresa"
+          }
+        }}
         vendas={vendas}
         clientes={clientes}
         produtos={produtos}

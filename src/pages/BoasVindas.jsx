@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
-import { EMPRESA } from "@/config/empresa";
+import { useTenant } from "@/contexts/TenantContext";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Clock, CheckCircle, Mail, User, Shield, XCircle } from "lucide-react";
 
 export default function BoasVindas() {
+  const { brandName, brandLogo } = useTenant();
   const [user, setUser] = useState(null);
 
   useEffect(() => {
@@ -35,17 +36,19 @@ export default function BoasVindas() {
         <Card className="w-full max-w-2xl border-0 shadow-2xl">
           <CardHeader className="text-center pb-6" style={{ background: 'linear-gradient(135deg, #dc2626 0%, #ef4444 100%)' }}>
             <div className="mx-auto mb-4 bg-white rounded-2xl p-4 inline-block">
-              <img
-                src={EMPRESA.logo_url}
-                alt="Logo Móveis Pedro II"
-                style={{ width: '100px', height: 'auto', objectFit: 'contain' }}
-              />
+              {brandLogo ? (
+                <img
+                  src={brandLogo}
+                  alt={brandName}
+                  style={{ width: '100px', height: 'auto', objectFit: 'contain' }}
+                />
+              ) : null}
             </div>
             <h1 className="text-3xl font-bold text-white mb-2">
               Cadastro Não Aprovado
             </h1>
             <p className="text-white/90 text-lg">
-              Móveis Pedro II - Sistema de Gestão
+              {brandName} - Sistema de Gestão
             </p>
           </CardHeader>
 
@@ -129,17 +132,19 @@ export default function BoasVindas() {
       <Card className="w-full max-w-2xl border-0 shadow-2xl">
         <CardHeader className="text-center pb-6" style={{ background: 'linear-gradient(135deg, #07593f 0%, #0a6b4d 100%)' }}>
           <div className="mx-auto mb-4 bg-white rounded-2xl p-4 inline-block">
-            <img
-              src={EMPRESA.logo_url}
-              alt="Logo Móveis Pedro II"
-              style={{ width: '100px', height: 'auto', objectFit: 'contain' }}
-            />
+            {brandLogo ? (
+              <img
+                src={brandLogo}
+                alt={brandName}
+                style={{ width: '100px', height: 'auto', objectFit: 'contain' }}
+              />
+            ) : null}
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">
             Bem-vindo ao Sistema!
           </h1>
           <p className="text-white/90 text-lg">
-            Móveis Pedro II - Sistema de Gestão
+            {brandName} - Sistema de Gestão
           </p>
         </CardHeader>
 

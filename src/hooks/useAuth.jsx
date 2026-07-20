@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext } from "react";
 import { base44, supabase } from "@/api/base44Client";
+import { getActiveAuthMode, setActiveAuthMode, clearActiveAuthMode, AUTH_MODES } from "@/lib/supabase";
 import { ROLE_RULES, SCOPES, userCan, getUserRoles, getHighestScope, hasRole, getUserEffectivePermissions } from "@/config/permissions";
 import { canAccessLojaId, filterDataByLoja } from "@/lib/utils";
 
@@ -128,7 +129,7 @@ export function AuthProvider({ children }) {
           .from('public_users')
           .select('*')
           .eq('id', sessionUser.id)
-          .single();
+          .maybeSingle();
 
         if (profileError && profileError.code !== 'PGRST116') {
           console.error('Erro ao buscar perfil:', profileError);
@@ -177,8 +178,8 @@ export function AuthProvider({ children }) {
               .from('public_users')
               .select('*')
               .eq('id', session.user.id)
-              .single(),
-            10000,
+              .maybeSingle(),
+            15000,
             'public_users.profile'
           );
           userProfile = profileResponse?.data || null;
@@ -248,6 +249,17 @@ export function AuthProvider({ children }) {
           localStorage.removeItem('employee_token');
         }
 
+        // ISOLAMENTO: Se o modo ativo é 'operator', não carregar perfil de tenant
+        const currentMode = getActiveAuthMode();
+        if (currentMode === AUTH_MODES.OPERATOR) {
+          console.log('[Auth] Modo operador ativo. Ignorando sessão de tenant.');
+          if (mounted) {
+            setUser(null);
+            setLoading(false);
+          }
+          return;
+        }
+
         // 1. Primeiro verifica se há cache de funcionário
         const hasCachedUser = localStorage.getItem('employee_user');
 
@@ -275,7 +287,7 @@ export function AuthProvider({ children }) {
         console.log('[Auth] Verificando autenticação Supabase...');
         const supabaseUser = await withTimeout(
           base44.auth.me(),
-          10000,
+          15000,
           'base44.auth.me'
         );
 
@@ -327,7 +339,8 @@ export function AuthProvider({ children }) {
         setLoading(false);
         localStorage.removeItem('admin_selected_store'); // Limpa seleção ao sair
       } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && !localStorage.getItem('employee_user')) {
-        // Só atualiza se não estiver logado como funcionário
+        // Só atualiza se não estiver logado como funcionário E se não estiver em modo operador
+        if (getActiveAuthMode() === AUTH_MODES.OPERATOR) return;
         loadSupabaseProfile(session?.user).then(profile => {
           if (mounted && profile) {
             setAuthType('supabase');
@@ -357,6 +370,8 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     // Limpar cache de funcionário
     localStorage.removeItem('employee_user');
+    // Limpar modo de autenticação
+    clearActiveAuthMode();
     // Sempre tenta deslogar do Supabase também
     await base44.auth.logout();
     setUser(null);

@@ -67,7 +67,7 @@ serve(async (req) => {
       subscriptionId = body.subscription?.id;
     } else if (body.payment) {
       paymentData = body.payment;
-      subscriptionId = paymentData.subscription;
+      subscriptionId = paymentData.subscription || paymentData.id; // Fallback to payment.id for single payments
     }
 
     if (!subscriptionId) {

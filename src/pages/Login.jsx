@@ -6,10 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, EyeOff, Lock, Mail } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, Store } from "lucide-react";
 
 export default function Login() {
-  const { brandName, brandLogo } = useTenant();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -70,14 +69,12 @@ export default function Login() {
       <Card className="w-full max-w-md shadow-xl">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <img
-              src={brandLogo}
-              alt={brandName}
-              className="w-16 h-16 object-contain"
-            />
+            <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
+              <Store className="w-8 h-8 text-green-600 dark:text-green-400" />
+            </div>
           </div>
           <CardTitle className="text-2xl font-bold text-gray-900 dark:text-white">
-            {brandName}
+            GestApp
           </CardTitle>
           <CardDescription className="text-gray-600 dark:text-gray-400">
             Entre com suas credenciais para acessar

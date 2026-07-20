@@ -303,7 +303,7 @@ export default function DashboardBI() {
                         Dashboard BI
                     </h1>
                     <p className="text-sm text-muted-foreground mt-0.5">
-                        Inteligência de negócios • Móveis Pedro II
+                        Inteligência de negócios • Sistema de Gestão
                     </p>
                 </div>
 
