@@ -317,6 +317,7 @@ export default function Financeiro() {
               comissoes={comissoes}
               contasPagarCompras={contasPagarCompras}
               lancamentos={listaLancamentos}
+              categorias={categorias}
               colaboradores={colaboradores}
               mesAno={mesAno}
               isLoadingFolha={loadingFolhas}

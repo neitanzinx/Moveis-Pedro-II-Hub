@@ -171,17 +171,90 @@ export function buildRecurringOccurrenceKey(lancamentoId, competenciaDate) {
 export function isRecurringOccurrenceDuplicate(lancamentoOriginal, competenciaDate, todosLancamentos = []) {
   const origemRef = buildRecurringOccurrenceKey(lancamentoOriginal?.id, competenciaDate);
   const categoriaIdOriginal = normalizeCategoriaId(lancamentoOriginal?.categoria_id);
+  const anchorDate = getRecorrenciaAnchorDate(lancamentoOriginal);
+
+  // Se a data de competência for a própria data âncora do lançamento original,
+  // essa ocorrência já é representada pelo próprio lançamento original.
+  if (anchorDate === competenciaDate) return true;
 
   return todosLancamentos.some((lancamento) => {
     if (origemRef && lancamento?.origem_ref === origemRef) return true;
 
     const categoriaIdAtual = normalizeCategoriaId(lancamento?.categoria_id);
+    const dateMatch = (lancamento?.data_vencimento || lancamento?.data_lancamento) === competenciaDate;
+
+    if (lancamento?.id === lancamentoOriginal?.id && dateMatch) return true;
+
     return (
-      lancamento?.id !== lancamentoOriginal?.id &&
+      dateMatch &&
       lancamento?.descricao === lancamentoOriginal?.descricao &&
       Number(lancamento?.valor) === Number(lancamentoOriginal?.valor) &&
-      categoriaIdAtual === categoriaIdOriginal &&
-      (lancamento?.data_vencimento || lancamento?.data_lancamento) === competenciaDate
+      categoriaIdAtual === categoriaIdOriginal
     );
   });
 }
+
+export function isLancamentoRecorrente(lancamento) {
+  if (!lancamento) return false;
+  if (lancamento.recorrente === true) return true;
+  if (lancamento.origem_tipo === 'recorrencia') return true;
+  if (lancamento.origem_ref && String(lancamento.origem_ref).startsWith('recorrencia:')) return true;
+  return false;
+}
+
+export function extractRecorrenciaParentId(lancamento) {
+  if (!lancamento) return null;
+  if (lancamento.recorrente === true) return lancamento.id;
+  if (lancamento.origem_ref && String(lancamento.origem_ref).startsWith('recorrencia:')) {
+    const parts = String(lancamento.origem_ref).split(':');
+    if (parts.length >= 2) {
+      const parsed = parseInt(parts[1], 10);
+      return !isNaN(parsed) ? parsed : parts[1];
+    }
+  }
+  return null;
+}
+
+export async function encerrarEExcluirRecorrencia(lancamento, base44) {
+  if (!lancamento || !base44) return;
+
+  const lancamentoId = lancamento.id;
+  const dataCorte = lancamento.data_vencimento || lancamento.data_lancamento;
+  const parentId = extractRecorrenciaParentId(lancamento);
+
+  if (parentId) {
+    // Desativa a recorrência no lançamento pai
+    try {
+      await base44.entities.LancamentoFinanceiro.update(parentId, {
+        recorrente: false,
+      });
+    } catch (err) {
+      console.warn("Erro ao atualizar status do lançamento pai da recorrência:", err);
+    }
+
+    // Busca lançamentos filhos gerados que tenham data >= dataCorte para excluir
+    try {
+      const todos = await base44.entities.LancamentoFinanceiro.list();
+      const prefixo = `recorrencia:${parentId}:`;
+
+      const filhosParaExcluir = todos.filter((item) => {
+        if (item.id === lancamentoId) return false;
+        if (item.origem_ref && item.origem_ref.startsWith(prefixo)) {
+          const itemData = item.data_vencimento || item.data_lancamento;
+          return itemData >= dataCorte;
+        }
+        return false;
+      });
+
+      for (const filho of filhosParaExcluir) {
+        await base44.entities.LancamentoFinanceiro.delete(filho.id);
+      }
+    } catch (err) {
+      console.warn("Erro ao buscar/excluir ocorrências futuras da recorrência:", err);
+    }
+  }
+
+  // Deleta o lançamento selecionado
+  await base44.entities.LancamentoFinanceiro.delete(lancamentoId);
+}
+

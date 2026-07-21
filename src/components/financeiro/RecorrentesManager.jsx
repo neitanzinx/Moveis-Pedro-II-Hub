@@ -5,18 +5,28 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useConfirm } from "@/hooks/useConfirm";
+import { useAuth } from "@/hooks/useAuth";
+import { formatBrazilDate } from "@/lib/dateBrazil";
 import { 
   RefreshCw, 
   Calendar, 
   CheckCircle, 
   AlertCircle,
-  Clock
+  Clock,
+  Eye,
+  Trash2,
+  TrendingUp,
+  TrendingDown
 } from "lucide-react";
 import {
   addRecorrenciaToDate,
   buildRecurringOccurrenceKey,
+  encerrarEExcluirRecorrencia,
   getRecorrenciaAnchorDate,
   getRecorrenciaTipo,
+  isLancamentoRecorrente,
   isRecurringOccurrenceDuplicate,
 } from "@/lib/financeiroRecorrencia";
 
@@ -25,10 +35,102 @@ export default function RecorrentesManager({ lancamentos }) {
   const [result, setResult] = useState(null);
   const autoProcessedRef = useRef(false);
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
+  const { user } = useAuth();
 
   const createMutation = useMutation({
     mutationFn: (data) => base44.entities.LancamentoFinanceiro.create(data),
   });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.LancamentoFinanceiro.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
+    }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (target) => {
+      if (typeof target === "object" && target !== null) {
+        if (isLancamentoRecorrente(target)) {
+          return await encerrarEExcluirRecorrencia(target, base44);
+        }
+        return await base44.entities.LancamentoFinanceiro.delete(target.id);
+      }
+      return await base44.entities.LancamentoFinanceiro.delete(target);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
+    }
+  });
+
+  const handleStatusChange = async (id, newStatus) => {
+    const lanc = lancamentos.find((item) => item.id === id);
+    if (!lanc) return;
+
+    const previousStatus = lanc.status || 'Pendente';
+    const isMarkingAsPaid = newStatus === 'Pago' && previousStatus !== 'Pago';
+
+    if (isMarkingAsPaid) {
+      const confirmed = await confirm({
+        title: 'Confirmar pagamento',
+        message: `Confirmar ${lanc.descricao || 'lançamento'} (${formatBrazilDate(lanc.data_vencimento || lanc.data_lancamento)} · R$ ${Number(lanc.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) como pago?`,
+        confirmText: 'Confirmar pagamento',
+        cancelText: 'Cancelar',
+        variant: 'default',
+      });
+
+      if (!confirmed) return;
+    }
+
+    updateMutation.mutate(
+      { id, data: { status: newStatus } },
+      {
+        onSuccess: async () => {
+          if (!isMarkingAsPaid) return;
+
+          try {
+            await base44.entities.AuditLog.create({
+              acao: 'MARK_PAID',
+              usuario: user?.full_name || user?.nome || user?.email || 'Usuário desconhecido',
+              user_id: user?.id || null,
+              tabela: 'lancamentos_financeiros',
+              detalhes: {
+                record_id: id,
+                descricao: lanc.descricao || null,
+                categoria: lanc.categoria_nome || null,
+                valor: lanc.valor ?? null,
+                data_vencimento: lanc.data_vencimento || null,
+                from_status: previousStatus,
+                to_status: newStatus,
+              },
+            });
+            queryClient.invalidateQueries({ queryKey: ['audit-mark-paid'] });
+          } catch (error) {
+            console.error('Erro ao registrar declaração de pagamento:', error);
+          }
+        }
+      }
+    );
+  };
+
+  const handleDelete = async (lanc) => {
+    const dataRef = formatBrazilDate(lanc.data_vencimento || lanc.data_lancamento);
+    const confirmed = await confirm({
+      title: 'Excluir e encerrar recorrência',
+      message: `Atenção: Ao excluir "${lanc.descricao}", esta ocorrência e TODAS as ocorrências futuras desta recorrência serão encerradas a partir de ${dataRef}.\n\nLançamentos recorrentes anteriores a esta data serão mantidos no histórico. Deseja continuar?`,
+      confirmText: 'Excluir e Encerrar Recorrência',
+      cancelText: 'Cancelar',
+      variant: 'destructive',
+    });
+
+    if (!confirmed) return;
+    deleteMutation.mutate(lanc);
+  };
+
+  const abrirDetalhes = (lanc) => {
+    window.dispatchEvent(new CustomEvent("openLancamentoDetalhes", { detail: lanc }));
+  };
 
   const gerarLancamentosRecorrentes = async () => {
     setProcessing(true);
@@ -36,8 +138,6 @@ export default function RecorrentesManager({ lancamentos }) {
 
     try {
       const hoje = new Date();
-      const hojeIso = hoje.toISOString().slice(0, 10);
-      // Gerar lançamentos até 90 dias no futuro para que apareçam em Vencimentos Próximos
       const limiteData = new Date(hoje);
       limiteData.setDate(limiteData.getDate() + 90);
       const limiteIso = limiteData.toISOString().slice(0, 10);
@@ -62,12 +162,9 @@ export default function RecorrentesManager({ lancamentos }) {
           continue;
         }
 
-        // Gerar todos os lançamentos pendentes até o limite futuro (hoje + 90 dias)
         while (competencia && competencia <= limiteIso) {
-          // Verificar se já existe
           if (!isRecurringOccurrenceDuplicate(lanc, competencia, lancamentosAtualizados)) {
             const origemRef = buildRecurringOccurrenceKey(lanc.id, competencia);
-            // Criar novo lançamento
             const novoLancamento = await createMutation.mutateAsync({
               tipo: lanc.tipo,
               categoria_id: lanc.categoria_id,
@@ -77,9 +174,9 @@ export default function RecorrentesManager({ lancamentos }) {
               data_lancamento: competencia,
               data_vencimento: competencia,
               forma_pagamento: lanc.forma_pagamento,
-              status: 'Pendente', // Novos lançamentos recorrentes começam como pendentes
+              status: 'Pendente',
               observacao: `Gerado automaticamente de lançamento com recorrência (${tipoRecorrencia})`,
-              recorrente: false, // O novo lançamento não é recorrente
+              recorrente: false,
               anexo_url: lanc.anexo_url,
               origem_tipo: 'recorrencia',
               origem_ref: origemRef || null,
@@ -97,7 +194,6 @@ export default function RecorrentesManager({ lancamentos }) {
             ignorados++;
           }
 
-          // Calcular próxima data
           competencia = addRecorrenciaToDate(competencia, tipoRecorrencia);
         }
       }
@@ -123,16 +219,13 @@ export default function RecorrentesManager({ lancamentos }) {
     }
   };
 
-  // Auto-executar ao montar o componente
   useEffect(() => {
     const autoGenerate = async () => {
       if (autoProcessedRef.current) return;
 
-      // Verificar se há lançamentos recorrentes
       const recorrentes = lancamentos.filter(l => l.recorrente === true);
       if (recorrentes.length > 0) {
         autoProcessedRef.current = true;
-        // Pequeno delay para não executar imediatamente
         await new Promise(resolve => setTimeout(resolve, 1000));
         gerarLancamentosRecorrentes();
       }
@@ -151,7 +244,7 @@ export default function RecorrentesManager({ lancamentos }) {
             <Calendar className="w-5 h-5" />
             Lançamentos Recorrentes
           </CardTitle>
-          <Badge variant="outline" className="text-blue-600 border-blue-600">
+          <Badge variant="outline" className="text-emerald-700 border-emerald-600 bg-emerald-50">
             {recorrentes.length} ativo(s)
           </Badge>
         </div>
@@ -189,7 +282,7 @@ export default function RecorrentesManager({ lancamentos }) {
                       <p className="font-semibold text-green-800">Lançamentos gerados:</p>
                       {result.detalhes.slice(0, 5).map((det, idx) => (
                         <p key={idx} className="text-sm text-green-700">
-                          • {det.descricao} - {new Date(det.data).toLocaleDateString('pt-BR')} - R$ {det.valor.toFixed(2)}
+                          • {det.descricao} - {formatBrazilDate(det.data)} - R$ {Number(det.valor || 0).toFixed(2)}
                         </p>
                       ))}
                       {result.detalhes.length > 5 && (
@@ -217,27 +310,108 @@ export default function RecorrentesManager({ lancamentos }) {
             <h4 className="font-semibold" style={{ color: '#07593f' }}>
               Lançamentos Recorrentes Ativos:
             </h4>
-            {recorrentes.map((lanc) => (
-              <div 
-                key={lanc.id}
-                className="flex items-center justify-between p-3 rounded-lg border"
-                style={{ borderColor: '#E5E0D8' }}
-              >
-                <div className="flex-1">
-                  <p className="font-semibold" style={{ color: '#07593f' }}>
-                    {lanc.descricao}
-                  </p>
-                  <div className="flex items-center gap-4 text-sm" style={{ color: '#8B8B8B' }}>
-                    <span>R$ {lanc.valor?.toFixed(2)}</span>
-                    <Badge variant="outline">{lanc.recorrencia_tipo}</Badge>
-                    <span>Vence em {new Date((lanc.data_vencimento || lanc.data_lancamento)).toLocaleDateString('pt-BR')}</span>
+            {recorrentes.map((lanc) => {
+              const isEntrada = lanc.tipo === 'Entrada' || lanc.tipo === 'receita';
+              const isUpdating = updateMutation.isPending && updateMutation.variables?.id === lanc.id;
+
+              return (
+                <div 
+                  key={lanc.id}
+                  className="flex items-center justify-between p-3.5 rounded-lg border hover:bg-gray-50 dark:hover:bg-neutral-800/50 transition-colors cursor-pointer group"
+                  style={{ borderColor: '#E5E0D8' }}
+                  onClick={() => abrirDetalhes(lanc)}
+                >
+                  <div className="flex items-center gap-3 flex-1 min-w-0 mr-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isEntrada ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {isEntrada ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold truncate text-gray-900 dark:text-white" style={{ color: '#07593f' }}>
+                          {lanc.descricao}
+                        </p>
+                        <Badge variant="outline" className="text-[10px] shrink-0 border-emerald-600 text-emerald-700 bg-emerald-50">
+                          {lanc.recorrencia_tipo || 'Mensal'}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs mt-0.5 text-gray-500">
+                        <span className={`font-semibold ${isEntrada ? 'text-green-600' : 'text-red-600'}`}>
+                          R$ {Number(lanc.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                        <span>·</span>
+                        <span>Vence em {formatBrazilDate(lanc.data_vencimento || lanc.data_lancamento)}</span>
+                        {lanc.categoria_nome && (
+                          <>
+                            <span>·</span>
+                            <span className="truncate">{lanc.categoria_nome}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <Select
+                      value={lanc.status || 'Pendente'}
+                      onValueChange={(val) => handleStatusChange(lanc.id, val)}
+                      disabled={isUpdating}
+                    >
+                      <SelectTrigger className="h-7 text-xs border-0 bg-transparent hover:bg-gray-100 dark:hover:bg-neutral-800">
+                        <SelectValue>
+                          <Badge className={
+                            lanc.status === 'Pago'
+                              ? 'bg-green-100 text-green-800'
+                              : lanc.status === 'Cancelado'
+                              ? 'bg-gray-100 text-gray-600'
+                              : 'bg-yellow-100 text-yellow-800'
+                          }>
+                            {lanc.status || 'Pendente'}
+                          </Badge>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Pago">
+                          <Badge className="bg-green-100 text-green-800 text-[10px]">Pago</Badge>
+                        </SelectItem>
+                        <SelectItem value="Pendente">
+                          <Badge className="bg-yellow-100 text-yellow-800 text-[10px]">Pendente</Badge>
+                        </SelectItem>
+                        <SelectItem value="Cancelado">
+                          <Badge className="bg-gray-100 text-gray-600 text-[10px]">Cancelado</Badge>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                      title="Visualizar/Editar detalhes"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        abrirDetalhes(lanc);
+                      }}
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                    </Button>
+
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50"
+                      title="Excluir lançamento"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(lanc);
+                      }}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
                   </div>
                 </div>
-                <Badge className={lanc.tipo === 'Entrada' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
-                  {lanc.tipo}
-                </Badge>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-center py-8" style={{ color: '#8B8B8B' }}>

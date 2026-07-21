@@ -22,11 +22,14 @@ import { formatBrazilDate, formatBrazilDateTime } from "@/lib/dateBrazil";
 import {
   buildCategoriaFilterValue,
   DEFAULT_RECORRENCIA_TIPO,
+  encerrarEExcluirRecorrencia,
   getLancamentoCategoriaLabel,
+  isLancamentoRecorrente,
   lancamentoMatchesCategoriaFilter,
   normalizeCategoriaId,
   RECORRENCIA_OPTIONS,
 } from "@/lib/financeiroRecorrencia";
+import AlteracaoEmMassaModal from "@/components/financeiro/AlteracaoEmMassaModal";
 import {
   TrendingUp,
   TrendingDown,
@@ -40,7 +43,8 @@ import {
   Pencil,
   Upload,
   Save,
-  AlertTriangle
+  AlertTriangle,
+  CheckSquare
 } from "lucide-react";
 
 // Formata dígitos digitados em moeda brasileira: "150050" → "1.500,50"
@@ -63,6 +67,7 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
   const [isEditing, setIsEditing] = useState(false);
   const [detalhesError, setDetalhesError] = useState("");
   const [uploadingAnexo, setUploadingAnexo] = useState(false);
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
 
   // Estado do modal de confirmação rígida para excluir lançamentos pagos
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -93,7 +98,15 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
   const [categoriaFiltro, setCategoriaFiltro] = useState("todos");
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.LancamentoFinanceiro.delete(id),
+    mutationFn: async (target) => {
+      if (typeof target === "object" && target !== null) {
+        if (isLancamentoRecorrente(target)) {
+          return await encerrarEExcluirRecorrencia(target, base44);
+        }
+        return await base44.entities.LancamentoFinanceiro.delete(target.id);
+      }
+      return await base44.entities.LancamentoFinanceiro.delete(target);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lancamentos-financeiros'] });
     }
@@ -220,6 +233,10 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
   };
 
   const abrirDetalhes = (lanc) => {
+    if (!onlyModal) {
+      window.dispatchEvent(new CustomEvent("openLancamentoDetalhes", { detail: lanc }));
+      return;
+    }
     const tipoNormalizado = normalizarTipo(lanc.tipo);
     setSelectedLancamento(lanc);
     setIsEditing(false);
@@ -244,12 +261,14 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
   };
 
   useEffect(() => {
+    if (!onlyModal) return;
+
     const handleOpenModal = (e) => {
       if (e.detail) abrirDetalhes(e.detail);
     };
     window.addEventListener("openLancamentoDetalhes", handleOpenModal);
     return () => window.removeEventListener("openLancamentoDetalhes", handleOpenModal);
-  }, []);
+  }, [onlyModal]);
 
   const handleCloseDetalhes = (open) => {
     setIsDetalhesOpen(open);
@@ -368,7 +387,7 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
 
     setDeleteConfirmOpen(false);
     setIsDetalhesOpen(false);
-    deleteMutation.mutate(lanc.id);
+    deleteMutation.mutate(lanc);
   };
 
   // Separar impostos/taxas por categoria
@@ -980,9 +999,29 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
                 ))}
               </SelectContent>
             </Select>
+
+            <div className="flex-1" />
+
+            <Button
+              type="button"
+              onClick={() => setIsBulkModalOpen(true)}
+              variant="outline"
+              className="h-9 gap-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500 dark:text-emerald-400 dark:hover:bg-emerald-950/40 font-semibold"
+            >
+              <CheckSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              Alterar em Massa
+            </Button>
           </div>
         </CardContent>
       </Card>
+
+      {/* Modal de Alteração em Massa */}
+      <AlteracaoEmMassaModal
+        open={isBulkModalOpen}
+        onOpenChange={setIsBulkModalOpen}
+        lancamentos={lancamentos}
+        categorias={categorias}
+      />
 
       {/* Tabela de Lançamentos Normais */}
       <TabelaLancamentos
@@ -1369,6 +1408,21 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
                 <p><span className="font-semibold text-gray-700 dark:text-gray-300">Valor:</span> {formatMoney(selectedLancamento.valor)}</p>
                 <p><span className="font-semibold text-gray-700 dark:text-gray-300">Status:</span> {selectedLancamento.status || "Pendente"}</p>
               </div>
+
+              {isLancamentoRecorrente(selectedLancamento) && (
+                <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 p-3 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+                  <p className="font-semibold flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                    Atenção: Lançamento Recorrente
+                  </p>
+                  <p>
+                    Ao confirmar, esta ocorrência e <strong>todas as ocorrências futuras desta recorrência serão encerradas/excluídas</strong> a partir desta data ({formatBrazilDate(selectedLancamento.data_vencimento || selectedLancamento.data_lancamento)}).
+                  </p>
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                    Os lançamentos recorrentes anteriores a esta data continuarão mantidos no seu histórico.
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-1">
                 <Label className="text-sm font-medium">

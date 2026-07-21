@@ -6,8 +6,14 @@ const serviceRoleKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmF
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 
 async function run() {
-  const { data, error } = await supabase.from('audit_logs').select('*').limit(1);
-  console.log("Audit log sample:", data, error);
+  const { data: vRow } = await supabase.from('vendas').select('*').limit(1);
+  const { data: lfRow } = await supabase.from('lancamentos_financeiros').select('*').limit(1);
+
+  console.log("=== Vendas sample ===");
+  console.log(vRow);
+
+  console.log("=== Lancamentos sample ===");
+  console.log(lfRow);
 }
 
 run();

@@ -6,8 +6,14 @@ const serviceRoleKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmF
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 
 async function run() {
-  const { data, error } = await supabase.from('audit_logs').select('*').limit(1);
-  console.log("Audit log sample:", data, error);
+  const { data: rows, error } = await supabase
+    .from('lancamentos_financeiros')
+    .select('*')
+    .eq('origem_tipo', 'recorrencia')
+    .limit(10);
+  
+  console.log("Recurrent child rows:", rows);
+  console.log("Error:", error);
 }
 
 run();

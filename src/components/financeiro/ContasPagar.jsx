@@ -1,12 +1,14 @@
 import React, { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Users, ShoppingCart, TrendingUp, CheckCircle2 } from "lucide-react";
+import { Search, Users, ShoppingCart, TrendingUp, CheckCircle2, CheckSquare } from "lucide-react";
 import { filtrarFolhasPorMes, normalizeTipo } from "@/services/financeiroAggregation";
 import { calcularFolhaCompleta } from "@/utils/calculosTrabalhistas";
+import AlteracaoEmMassaModal from "@/components/financeiro/AlteracaoEmMassaModal";
 
 const fmt = (v) =>
   Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -775,6 +777,7 @@ export default function ContasPagar({
   comissoes = [],
   contasPagarCompras = [],
   lancamentos = [],
+  categorias = [],
   colaboradores = [],
   mesAno,
   isLoadingFolha = false,
@@ -783,6 +786,7 @@ export default function ContasPagar({
   isLoadingLancamentos = false,
 }) {
   const [activeTab, setActiveTab] = useState("folha");
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
 
   const totalFolhaMesPendente = useMemo(() => {
     const folhasMes = filtrarFolhasPorMes(folhas, mesAno);
@@ -856,6 +860,29 @@ export default function ContasPagar({
 
   return (
     <div className="space-y-4">
+      {/* Botão de Alteração em Massa no Topo de Contas a Pagar */}
+      <div className="flex justify-between items-center px-1">
+        <div>
+          <h3 className="text-base font-bold text-gray-900 dark:text-white">Saídas e Contas a Pagar</h3>
+          <p className="text-xs text-gray-500">Gestão de obrigações e despesas</p>
+        </div>
+        <Button
+          type="button"
+          onClick={() => setIsBulkModalOpen(true)}
+          variant="outline"
+          className="h-9 gap-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500 dark:text-emerald-400 font-semibold"
+        >
+          <CheckSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          Alterar em Massa
+        </Button>
+      </div>
+
+      <AlteracaoEmMassaModal
+        open={isBulkModalOpen}
+        onOpenChange={setIsBulkModalOpen}
+        lancamentos={lancamentos}
+        categorias={categorias}
+      />
       {/* Resumo total */}
       <div className="grid grid-cols-5 gap-4">
         <Card className="border-0 shadow-md">

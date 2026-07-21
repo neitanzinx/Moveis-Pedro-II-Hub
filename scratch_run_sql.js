@@ -6,8 +6,16 @@ const serviceRoleKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmF
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 
 async function run() {
-  const { data, error } = await supabase.from('audit_logs').select('*').limit(1);
-  console.log("Audit log sample:", data, error);
+  const sql = `
+    SELECT tgname, tgtype, tgenabled, pg_get_triggerdef(oid) as def
+    FROM pg_trigger 
+    WHERE tgrelid = 'public.lancamentos_financeiros'::regclass;
+  `;
+
+  console.log("Running query via execute_raw_sql...");
+  const { data, error } = await supabase.rpc('execute_raw_sql', { sql });
+  console.log("Data:", data);
+  console.log("Error:", error);
 }
 
 run();
