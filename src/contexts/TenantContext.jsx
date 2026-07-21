@@ -73,7 +73,7 @@ export function TenantProvider({ children, organizationId, slug: slugProp }) {
                             .from('organizations')
                             .select('id')
                             .eq('slug', subdomain)
-                            .single();
+                            .maybeSingle();
 
                         if (orgBySlug?.id) {
                             setResolvedOrgId(orgBySlug.id);
@@ -87,7 +87,7 @@ export function TenantProvider({ children, organizationId, slug: slugProp }) {
                         .from('organizations')
                         .select('id')
                         .eq('custom_domain', hostname)
-                        .single();
+                        .maybeSingle();
 
                     if (orgByDomain?.id) {
                         setResolvedOrgId(orgByDomain.id);
@@ -106,7 +106,7 @@ export function TenantProvider({ children, organizationId, slug: slugProp }) {
                         .from('organizations')
                         .select('id')
                         .eq('slug', slugProp)
-                        .single();
+                        .maybeSingle();
 
                     if (orgBySlug?.id) {
                         setResolvedOrgId(orgBySlug.id);

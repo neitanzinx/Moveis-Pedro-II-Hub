@@ -565,10 +565,12 @@ export const base44 = {
                 };
 
                 // Fire and forget, sem await para não travar
-                supabase.rpc('track_user_footstep', {
-                    p_user_id: userId,
-                    p_step: step
-                }).catch(e => console.warn('[Telemetry] DB error:', e));
+                Promise.resolve(
+                    supabase.rpc('track_user_footstep', {
+                        p_user_id: userId,
+                        p_step: step
+                    })
+                ).catch(e => console.warn('[Telemetry] DB error:', e));
             } catch (e) {
                 console.warn('[Telemetry] Erro ao gravar footstep:', e);
             }
