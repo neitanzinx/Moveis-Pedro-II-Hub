@@ -153,6 +153,7 @@ serve(async (req) => {
       if (insertError) throw new Error(insertError.message)
 
       await supabase.from('nfe_eventos').insert({
+        organization_id: orgId,
         venda_id: venda_id || null,
         nfe_ref: nfe_ref || null,
         tipo_evento: `solicitacao_${tipo_evento}`,
@@ -201,6 +202,7 @@ serve(async (req) => {
       if (updateError) throw new Error(updateError.message)
 
       await supabase.from('nfe_eventos').insert({
+        organization_id: solicitacao.organization_id,
         venda_id: solicitacao.venda_id,
         nfe_ref: solicitacao.nfe_ref,
         tipo_evento: `aprovacao_${solicitacao.tipo_evento}`,
@@ -241,6 +243,7 @@ serve(async (req) => {
       if (updateError) throw new Error(updateError.message)
 
       await supabase.from('nfe_eventos').insert({
+        organization_id: solicitacao.organization_id,
         venda_id: solicitacao.venda_id,
         nfe_ref: solicitacao.nfe_ref,
         tipo_evento: `reprovacao_${solicitacao.tipo_evento}`,
@@ -319,6 +322,7 @@ serve(async (req) => {
         .eq('nfe_ref', solicitacao.nfe_ref)
 
       await supabase.from('nfe_eventos').insert({
+        organization_id: solicitacao.organization_id,
         venda_id: solicitacao.venda_id,
         nfe_ref: solicitacao.nfe_ref,
         tipo_evento: 'cancelamento',
@@ -377,6 +381,7 @@ serve(async (req) => {
       protocolo = apiResponse?.protocolo || null
 
       await supabase.from('nfe_carta_correcao').insert({
+        organization_id: solicitacao.organization_id,
         nota_fiscal_id: nfeRecord.id,
         nfe_ref: solicitacao.nfe_ref,
         sequencia: proximaSequencia,
@@ -390,6 +395,7 @@ serve(async (req) => {
       })
 
       await supabase.from('nfe_eventos').insert({
+        organization_id: solicitacao.organization_id,
         venda_id: nfeRecord.venda_id,
         nfe_ref: solicitacao.nfe_ref,
         tipo_evento: 'carta_correcao',
@@ -431,6 +437,7 @@ serve(async (req) => {
       protocolo = apiResponse?.protocolo || null
 
       await supabase.from('nfe_eventos').insert({
+        organization_id: solicitacao.organization_id,
         venda_id: solicitacao.venda_id || null,
         nfe_ref: solicitacao.nfe_ref || null,
         tipo_evento: 'inutilizacao',

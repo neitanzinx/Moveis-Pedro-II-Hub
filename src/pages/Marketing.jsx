@@ -1,4 +1,5 @@
 import React, { useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import FidelidadeRegras from "@/components/marketing/FidelidadeRegras";
 import { useConfirm } from "@/hooks/useConfirm";
 import { base44, supabase } from "@/api/base44Client";
@@ -84,6 +85,7 @@ export default function Marketing() {
     const [enviandoMsg, setEnviandoMsg] = useState({});
     const queryClient = useQueryClient();
     const confirm = useConfirm();
+    const navigate = useNavigate();
 
     // Label states
     const [selectedProducts, setSelectedProducts] = useState([]);
@@ -852,7 +854,23 @@ export default function Marketing() {
 
                     {/* ABA 4: FIDELIDADE */}
                     <TabsContent value="fidelidade">
-                        <FidelidadeRegras />
+                        <Card className="border-0 shadow-lg p-8 text-center bg-gradient-to-br from-amber-50 to-emerald-50 dark:from-neutral-900 dark:to-neutral-800">
+                            <div className="max-w-md mx-auto space-y-4">
+                                <div className="w-16 h-16 bg-amber-500 text-white rounded-full flex items-center justify-center mx-auto shadow-md">
+                                    <Trophy className="w-8 h-8" />
+                                </div>
+                                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Programa de Fidelidade no CRM</h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-300">
+                                    As configurações do Programa de Fidelidade, regras de pontos, bônus de cadastro e níveis de clientes agora estão centralizadas no módulo de CRM & Clientes.
+                                </p>
+                                <Button 
+                                    onClick={() => navigate('/crm?tab=fidelidade')}
+                                    className="bg-emerald-700 hover:bg-emerald-800 text-white gap-2 font-medium"
+                                >
+                                    <Trophy className="w-4 h-4" /> Ir para Fidelidade no CRM
+                                </Button>
+                            </div>
+                        </Card>
                     </TabsContent>
 
 

@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-    Building2, Save, CheckCircle, Edit, AlertCircle, Search, Loader2
+    Building2, Save, Edit, AlertCircle, Search, Loader2
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -16,13 +16,13 @@ import { useTenant } from "@/contexts/TenantContext";
 
 const DEFAULT_ORG_ID = "00000000-0000-0000-0000-000000000001";
 
-// Empresas base para emissao de NFe
-const EMPRESAS_BASE = [
-    { cnpj: "49129137000130", nome: "Atacadao Outlet", cnpjFormatado: "49.129.137/0001-30" },
-    { cnpj: "04842257000141", nome: "Moveis Pedro II", cnpjFormatado: "04.842.257/0001-41" },
-    { cnpj: "42316614000127", nome: "Massi Home Design", cnpjFormatado: "42.316.614/0001-27" },
-    { cnpj: "53795479000166", nome: "Alta Performance Decoracoes", cnpjFormatado: "53.795.479/0001-66" },
-];
+// Formatação de CNPJ para exibição
+const formatarCnpj = (cnpj) => {
+    if (!cnpj) return '';
+    const digits = cnpj.replace(/\D/g, '');
+    if (digits.length !== 14) return cnpj;
+    return `${digits.slice(0,2)}.${digits.slice(2,5)}.${digits.slice(5,8)}/${digits.slice(8,12)}-${digits.slice(12,14)}`;
+};
 
 const REGIMES_TRIBUTARIOS = [
     { value: "1", label: "Simples Nacional" },
@@ -39,6 +39,14 @@ const carregarDadosFiscaisLocal = () => {
         return {};
     }
 };
+
+// Mapeia config do banco → objeto empresa para exibição
+const dbConfigParaEmpresa = (config) => ({
+    cnpj: (config.emitente_cnpj || '').replace(/\D/g, ''),
+    nome: config.emitente_nome || 'Empresa não configurada',
+    cnpjFormatado: formatarCnpj(config.emitente_cnpj),
+    email: config.emitente_email || '',
+});
 
 // Mapeia colunas do banco → objeto formEmpresa
 const dbConfigParaForm = (config) => ({
@@ -58,8 +66,10 @@ export default function ConfiguracaoNfe() {
     const { organization } = useTenant();
     const orgId = organization?.id || DEFAULT_ORG_ID;
 
+    // Empresa emissora carregada do banco para este tenant
+    const [empresaEmissora, setEmpresaEmissora] = useState(null);
     const [empresaPadrao, setEmpresaPadrao] = useState(() => {
-        return localStorage.getItem("nfe_empresa_padrao") || EMPRESAS_BASE[0].cnpj;
+        return localStorage.getItem("nfe_empresa_padrao") || '';
     });
 
     const [dadosFiscais, setDadosFiscais] = useState(carregarDadosFiscaisLocal);
@@ -157,6 +167,10 @@ export default function ConfiguracaoNfe() {
             }));
             setFiscalLoaded(true);
 
+            // Montar objeto empresa emissora a partir do banco
+            const empresa = dbConfigParaEmpresa(data);
+            setEmpresaEmissora(empresa);
+
             const { emitente_cnpj } = data;
             if (!emitente_cnpj) return;
 
@@ -202,7 +216,8 @@ export default function ConfiguracaoNfe() {
     };
 
     const abrirEdicaoEmpresa = (empresa) => {
-        const dados = dadosFiscais[empresa.cnpj] || {};
+        const cnpj = empresa?.cnpj || empresaPadrao;
+        const dados = dadosFiscais[cnpj] || {};
         setFormEmpresa({
             ie: dados.ie || "",
             regimeTributario: dados.regimeTributario || "1",
@@ -215,7 +230,7 @@ export default function ConfiguracaoNfe() {
             uf: dados.uf || "ES",
             cep: dados.cep || "",
         });
-        setEditandoEmpresa(empresa);
+        setEditandoEmpresa(empresa || empresaEmissora);
     };
 
     const formatarTexto = (valor) => {
@@ -428,13 +443,12 @@ export default function ConfiguracaoNfe() {
     };
 
     const abrirDialogCertificado = () => {
-        const empresaAtual = EMPRESAS_BASE.find(e => e.cnpj === empresaPadrao);
         const dados = dadosFiscais[empresaPadrao] || {};
 
         setCertForm({
             cnpj: (empresaPadrao || '').replace(/\D/g, ''),
-            nome_razao_social: empresaAtual?.nome || '',
-            email: '',
+            nome_razao_social: empresaEmissora?.nome || organization?.name || '',
+            email: empresaEmissora?.email || '',
             logradouro: dados.logradouro || '',
             numero: dados.numero || '',
             complemento: dados.complemento || '',
@@ -845,9 +859,9 @@ export default function ConfiguracaoNfe() {
                 <CardHeader>
                     <CardTitle className="text-lg flex items-center gap-2">
                         <Building2 className="w-5 h-5 text-gray-500" />
-                        Empresas Cadastradas
+                        Empresa Emissora
                     </CardTitle>
-                    <CardDescription>Configure Inscrição Estadual e endereços fiscais</CardDescription>
+                    <CardDescription>Dados fiscais da empresa emissora de NF-e desta organização</CardDescription>
                 </CardHeader>
                 <CardContent>
                     {highlightEmitente && (
@@ -858,86 +872,67 @@ export default function ConfiguracaoNfe() {
                             </AlertDescription>
                         </Alert>
                     )}
-                    <div className="grid md:grid-cols-2 gap-4">
-                        {EMPRESAS_BASE.map(empresa => {
-                            const status = getStatusEmpresa(empresa.cnpj);
-                            const isPadrao = empresaPadrao === empresa.cnpj;
-                            const dados = dadosFiscais[empresa.cnpj] || {};
 
+                    {(() => {
+                        const empresa = empresaEmissora;
+                        const cnpj = empresa?.cnpj || empresaPadrao;
+                        const dados = dadosFiscais[cnpj] || {};
+                        const status = getStatusEmpresa(cnpj);
+
+                        if (!cnpj) {
                             return (
-                                <div
-                                    key={empresa.cnpj}
-                                    className={`p-5 rounded-xl border-2 transition-all relative overflow-hidden group hover:shadow-md ${isPadrao ? "border-green-500 bg-green-50/50" : "border-gray-100 bg-white"
-                                        }`}
-                                >
-                                    <div className="flex items-start justify-between mb-4">
-                                        <div>
-                                            <h4 className="font-bold text-gray-900">{empresa.nome}</h4>
-                                            <p className="text-xs text-gray-500 font-mono mt-0.5">{empresa.cnpjFormatado}</p>
-                                        </div>
-                                        <div className="flex flex-col items-end gap-1">
-                                            {isPadrao && (
-                                                <Badge className="bg-green-100 text-green-800 border-green-200">Padrão</Badge>
-                                            )}
-                                            <Badge variant="outline" className={status.ok ? "text-blue-600 bg-blue-50 border-blue-100" : "text-red-600 bg-red-50 border-red-100"}>
-                                                {status.msg}
-                                            </Badge>
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-2 mb-5">
-                                        <div className="flex justify-between text-sm py-1 border-b border-dashed border-gray-200">
-                                            <span className="text-gray-500">Inscrição Estadual</span>
-                                            <span className="font-mono">{dados.ie || "-"}</span>
-                                        </div>
-                                        <div className="flex justify-between text-sm py-1 border-b border-dashed border-gray-200">
-                                            <span className="text-gray-500">Regime</span>
-                                            <span>{REGIMES_TRIBUTARIOS.find(r => r.value === dados.regimeTributario)?.label.split(" - ")[0] || "-"}</span>
-                                        </div>
-                                        <div className="text-sm py-1">
-                                            <span className="text-gray-500 block text-xs mb-0.5">Endereço Fiscal</span>
-                                            <span className="line-clamp-1 text-gray-700">
-                                                {dados.logradouro ? `${dados.logradouro}, ${dados.numero} - ${dados.municipio}/${dados.uf}` : "-"}
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex gap-2">
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="flex-1"
-                                            onClick={() => abrirEdicaoEmpresa(empresa)}
-                                        >
-                                            <Edit className="w-3.5 h-3.5 mr-2" />
-                                            Editar Dados
-                                        </Button>
-                                        {!isPadrao && (
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                onClick={async () => {
-                                                    setEmpresaPadrao(empresa.cnpj);
-                                                    localStorage.setItem("nfe_empresa_padrao", empresa.cnpj);
-                                                    // Salva dados fiscais desta empresa no banco
-                                                    const dadosEmpresa = dadosFiscais[empresa.cnpj];
-                                                    if (dadosEmpresa) {
-                                                        const err = await salvarEmitenteNoBanco(empresa, dadosEmpresa);
-                                                        if (err) {
-                                                            toast.warning('Empresa padrão definida, mas erro ao salvar no banco.');
-                                                        }
-                                                    }
-                                                    toast.success(`${empresa.nome} definida como padrão.`);
-                                                }}
-                                            >
-                                                <CheckCircle className="w-4 h-4 text-gray-400 hover:text-green-600" />
-                                            </Button>
-                                        )}
-                                    </div>
+                                <div className="text-center py-8">
+                                    <Building2 className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                                    <p className="text-gray-500 mb-4">Nenhuma empresa emissora configurada para esta organização.</p>
+                                    <p className="text-sm text-gray-400 mb-4">Configure as credenciais ACBR acima e cadastre o certificado digital para começar.</p>
                                 </div>
                             );
-                        })}
-                    </div>
+                        }
+
+                        return (
+                            <div className="p-5 rounded-xl border-2 border-green-500 bg-green-50/50">
+                                <div className="flex items-start justify-between mb-4">
+                                    <div>
+                                        <h4 className="font-bold text-gray-900">{empresa?.nome || organization?.name || 'Empresa'}</h4>
+                                        <p className="text-xs text-gray-500 font-mono mt-0.5">{formatarCnpj(cnpj)}</p>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-1">
+                                        <Badge className="bg-green-100 text-green-800 border-green-200">Emissora Ativa</Badge>
+                                        <Badge variant="outline" className={status.ok ? "text-blue-600 bg-blue-50 border-blue-100" : "text-red-600 bg-red-50 border-red-100"}>
+                                            {status.msg}
+                                        </Badge>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2 mb-5">
+                                    <div className="flex justify-between text-sm py-1 border-b border-dashed border-gray-200">
+                                        <span className="text-gray-500">Inscrição Estadual</span>
+                                        <span className="font-mono">{dados.ie || "-"}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm py-1 border-b border-dashed border-gray-200">
+                                        <span className="text-gray-500">Regime</span>
+                                        <span>{REGIMES_TRIBUTARIOS.find(r => r.value === dados.regimeTributario)?.label.split(" - ")[0] || "-"}</span>
+                                    </div>
+                                    <div className="text-sm py-1">
+                                        <span className="text-gray-500 block text-xs mb-0.5">Endereço Fiscal</span>
+                                        <span className="line-clamp-1 text-gray-700">
+                                            {dados.logradouro ? `${dados.logradouro}, ${dados.numero} - ${dados.municipio}/${dados.uf}` : "-"}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="w-full"
+                                    onClick={() => abrirEdicaoEmpresa(empresa)}
+                                >
+                                    <Edit className="w-3.5 h-3.5 mr-2" />
+                                    Editar Dados Fiscais
+                                </Button>
+                            </div>
+                        );
+                    })()}
                 </CardContent>
             </Card>
 

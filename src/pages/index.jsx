@@ -8,6 +8,7 @@ import LoginFuncionario from "./LoginFuncionario.jsx";
 const Dashboard = lazy(() => import("./Dashboard.jsx"));
 const Produtos = lazy(() => import("./Produtos.jsx"));
 const Clientes = lazy(() => import("./Clientes.jsx"));
+const CRM = lazy(() => import("./CRM.jsx"));
 const Vendas = lazy(() => import("./Vendas.jsx"));
 const Devolucoes = lazy(() => import("./Devolucoes.jsx"));
 
@@ -233,7 +234,7 @@ const getClientRouteInfo = (pathname, isDomainResolved) => {
     if (isDomainResolved) {
         const subRoute = pathParts[1] || '';
         const extraSegment = pathParts[2] || '';
-        const isClient = ['cliente-login', 'area-cliente', 'CadastroMobile', 'avaliacao'].includes(subRoute) ||
+        const isClient = ['cliente-login', 'login', 'area-cliente', 'cliente', 'portal', 'CadastroMobile', 'avaliacao'].includes(subRoute) ||
                          (subRoute === 'assistencia' && extraSegment === 'auto') ||
                          (subRoute === 'rastreio') ||
                          !subRoute;
@@ -249,7 +250,7 @@ const getClientRouteInfo = (pathname, isDomainResolved) => {
         if (possibleSlug && !RESERVED_PATHS.includes(possibleSlug)) {
             const subRoute = pathParts[2] || '';
             const extraSegment = pathParts[3] || '';
-            const isClient = ['cliente-login', 'area-cliente', 'CadastroMobile', 'avaliacao'].includes(subRoute) ||
+            const isClient = ['cliente-login', 'login', 'area-cliente', 'cliente', 'portal', 'CadastroMobile', 'avaliacao'].includes(subRoute) ||
                              (subRoute === 'assistencia' && extraSegment === 'auto') ||
                              (subRoute === 'rastreio') ||
                              !subRoute;
@@ -292,12 +293,17 @@ function PagesContent() {
             document.getElementsByTagName('head')[0].appendChild(link);
         } else if (organization) {
             // Restore tenant title and favicon
-            document.title = organization.name || 'Sistema de Gestão';
+            const orgName = organization.name || '';
+            const isDefaultOrg = orgName.toLowerCase().includes('pedro ii');
+            
+            document.title = orgName && !isDefaultOrg
+                ? `${orgName} - GestApp` 
+                : 'GestApp';
 
             const existingLinks = document.querySelectorAll("link[rel~='icon']");
             existingLinks.forEach(link => link.remove());
 
-            if (organization.logo_url) {
+            if (!isDefaultOrg && organization.logo_url && !organization.logo_url.includes('mp2logo.png')) {
                 const logoUrl = `${organization.logo_url}?v=${new Date().getTime()}`;
                 const link = document.createElement('link');
                 link.rel = 'icon';
@@ -307,8 +313,8 @@ function PagesContent() {
             } else {
                 const link = document.createElement('link');
                 link.rel = 'icon';
-                link.type = 'image/png';
-                link.href = 'https://stgatkuwnouzwczkpphs.supabase.co/storage/v1/object/public/publico/mp2logo.png';
+                link.type = 'image/svg+xml';
+                link.href = '/favicon.svg?v=2';
                 document.getElementsByTagName('head')[0].appendChild(link);
             }
         }
@@ -381,13 +387,12 @@ function PagesContent() {
 
         return (
             <TenantSlugResolver>
-                {subRoute === 'cliente-login' && <ClienteAuth />}
-                {subRoute === 'area-cliente' && <ClienteDashboard />}
+                {(subRoute === 'cliente-login' || subRoute === 'login' || !subRoute) && <ClienteAuth />}
+                {(subRoute === 'area-cliente' || subRoute === 'cliente' || subRoute === 'portal') && <ClienteDashboard />}
                 {subRoute === 'assistencia' && <AutoAtendimento />}
-                {subRoute === 'rastreio' && <RastreioPublico idProp={rastreioId} />}
+                {subRoute === 'rastreio' && <RastreioPublico idProp={rastreioId} slugProp={slug} />}
                 {subRoute === 'avaliacao' && <AvaliacaoNPS />}
                 {subRoute === 'CadastroMobile' && <CadastroMobile />}
-                {!subRoute && <ClienteAuth />}
             </TenantSlugResolver>
         );
     }
@@ -567,7 +572,8 @@ function PagesContent() {
                         <Route path="/admin/Vendas" element={<Vendas />} />
                         <Route path="/admin/Devolucoes" element={<Devolucoes />} />
                         <Route path="/admin/Orcamentos" element={<Orcamentos />} />
-                        <Route path="/admin/Clientes" element={<Clientes />} />
+                        <Route path="/admin/CRM" element={<CRM />} />
+                        <Route path="/admin/Clientes" element={<Navigate to="/admin/CRM" replace />} />
 
                         <Route path="/admin/SelecaoVendedor" element={<SelecaoVendedor />} />
                         <Route path="/admin/CatalogoWhatsApp" element={<CatalogoWhatsApp />} />
@@ -590,7 +596,7 @@ function PagesContent() {
                         {/* Gestão e Financeiro */}
                         <Route path="/admin/Financeiro" element={<Financeiro />} />
                         <Route path="/admin/CentralAnalitica" element={<CentralAnalitica />} />
-                        <Route path="/admin/RelatorioAcessosClientes" element={<RelatorioAcessosClientes />} />
+                        <Route path="/admin/RelatorioAcessosClientes" element={<Navigate to="/admin/CRM?tab=acessos" replace />} />
                         <Route path="/admin/RelatorioComissoes" element={<Navigate to="/admin/CentralAnalitica?aba=comissoes" replace />} />
                         <Route path="/admin/RelatoriosAvancados" element={<Navigate to="/admin/CentralAnalitica?aba=relatorios" replace />} />
                         <Route path="/admin/RecursosHumanos" element={<RecursosHumanos />} />

@@ -17,6 +17,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import PlanModulesDisplay from "@/components/planos/PlanModulesDisplay";
+
 
 export default function EscolhaPlano({ onCancel }) {
   const { organization, refreshTenant } = useTenant();
@@ -224,16 +226,8 @@ export default function EscolhaPlano({ onCancel }) {
                   <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 border-b pb-2">
                     <Sparkles className="w-4 h-4 text-green-700" /> Módulos Habilitados:
                   </div>
-                  {plano.recursos && Object.entries(plano.recursos).map(([key, val]) => (
-                    <div key={key} className="flex items-start gap-2 text-sm text-gray-600">
-                      {val ? (
-                        <Check className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
-                      ) : (
-                        <span className="w-4 h-4 text-gray-300 font-bold shrink-0 mt-0.5 text-center">-</span>
-                      )}
-                      <span className="capitalize">{key.replace("_", " ")}</span>
-                    </div>
-                  ))}
+                  <PlanModulesDisplay recursos={plano.recursos} variant="card" />
+
                   <div className="flex items-start gap-2 text-sm text-gray-500 pt-2 border-t text-xs">
                     <Info className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
                     <span>Inclui suporte técnico e atualizações do MPII Hub.</span>

@@ -301,7 +301,7 @@ export const MENU_ITEMS = [
 
   { title: "Vendas", url: "/admin/Vendas", icon: ShoppingCart, permission: 'view_vendas', section: "Vendas" },
   { title: "Orçamentos", url: "/admin/Orcamentos", icon: FileText, permission: 'view_orcamentos', section: "Vendas" },
-  { title: "Clientes", url: "/admin/Clientes", icon: Users, permission: 'view_clientes', section: "Vendas" },
+  { title: "CRM", url: "/admin/CRM", icon: Users, permission: 'view_clientes', section: "Vendas" },
 
   { title: "Produtos", url: "/admin/Produtos", icon: Tag, permission: 'view_produtos', section: "Operacional" },
   { title: "Estoque", url: "/admin/Estoque", icon: Warehouse, permission: 'view_estoque', section: "Operacional" },
@@ -314,7 +314,6 @@ export const MENU_ITEMS = [
 
   { title: "Financeiro", url: "/admin/Financeiro", icon: DollarSign, permission: 'view_financeiro', section: "Gestão" },
   { title: "Central Analítica", url: "/admin/CentralAnalitica", icon: TrendingUp, permission: ['view_relatorios', 'view_financeiro'], section: "Gestão" },
-  { title: "Acessos do Portal", url: "/admin/RelatorioAcessosClientes", icon: Activity, permission: 'view_cliente_access_analytics', section: "Gestão" },
   { title: "Marketing", url: "/admin/Marketing", icon: Tag, permission: 'view_marketing', section: "Gestão", module: 'marketing' },
   { title: "RH", url: "/admin/RecursosHumanos", icon: UserCog, permission: 'view_rh', section: "Gestão", module: 'rh' },
 

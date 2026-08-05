@@ -8,6 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Camera, Search, ArrowRight, CheckCircle, RefreshCcw, Loader2, Trash2, AlertTriangle, Image as ImageIcon, Clock } from "lucide-react";
 import { toast } from "sonner";
+import { useTenant } from "@/contexts/TenantContext";
+
 
 const TIPOS_ASSISTENCIA = [
     { value: "Devolução", label: "Devolução" },
@@ -18,8 +20,10 @@ const TIPOS_ASSISTENCIA = [
 ];
 
 export default function AutoAtendimento() {
+    const { brandName, brandLogo, organization } = useTenant();
     const [step, setStep] = useState(0);
     const [loading, setLoading] = useState(false);
+
 
     // Identification
     const [searchTerm, setSearchTerm] = useState("");
@@ -218,7 +222,8 @@ export default function AutoAtendimento() {
 
         // Add Watermark
         const date = new Date().toLocaleString('pt-BR');
-        const text = `PEDIDO #${pedido.numero_pedido} - ${date} - MÓVEIS PEDRO II`;
+        const text = `PEDIDO #${pedido.numero_pedido} - ${date} - ${brandName.toUpperCase()}`;
+
 
         context.font = 'bold 24px Arial';
         context.fillStyle = 'rgba(255, 255, 255, 0.8)';
@@ -284,6 +289,7 @@ export default function AutoAtendimento() {
 
             // Create Assistance Record
             const { error } = await supabase.from('assistencias_tecnicas').insert({
+                organization_id: pedido?.organization_id || organization?.id || null,
                 venda_id: pedido.id,
                 numero_pedido: pedido.numero_pedido,
                 cliente_nome: pedido.cliente_nome,
@@ -296,6 +302,7 @@ export default function AutoAtendimento() {
                 arquivos: uploadedFiles,
                 observacoes: 'Solicitação via Autoatendimento'
             });
+
 
             if (error) throw error;
 
@@ -316,9 +323,11 @@ export default function AutoAtendimento() {
 
                 {/* Header Logo */}
                 <div className="text-center mb-6">
-                    <h1 className="text-2xl font-bold text-green-800">Assistência Técnica</h1>
+                    {brandLogo && <img src={brandLogo} alt={brandName} className="h-16 mx-auto mb-2 object-contain" />}
+                    <h1 className="text-2xl font-bold text-green-800">{brandName}</h1>
                     <p className="text-gray-500">Autoatendimento Assistência Técnica</p>
                 </div>
+
 
                 {/* STEPS */}
                 {step === 0 && (

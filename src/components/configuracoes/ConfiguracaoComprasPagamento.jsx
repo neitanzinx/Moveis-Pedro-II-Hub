@@ -164,10 +164,10 @@ export default function ConfiguracaoComprasPagamento() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-green-700" />
-            <CardTitle>Aprovacao Automatica por Forma de Pagamento</CardTitle>
+            <CardTitle>Aprovação Automática de Vendas por Forma de Pagamento</CardTitle>
           </div>
           <CardDescription>
-            Selecione quais formas de pagamento NAO precisam passar pela aprovacao manual do master.
+            Selecione quais formas de pagamento NÃO precisam passar pela aprovação manual do gerente/master nas vendas.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

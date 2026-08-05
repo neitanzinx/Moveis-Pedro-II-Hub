@@ -164,10 +164,9 @@ const EstadoCidadeFields = ({ estado, cidade, onChangeEstado, onChangeCidade, di
 const getTierBadge = (cliente) => {
   const coroas = cliente?.coroas || cliente?.fidelidade_steps || cliente?.passos || 0;
   const tiers = [
-    { nome: 'Elite', icone: '💎', cor: '#8B5CF6', textCor: '#6D28D9', coroas: 1000 },
-    { nome: 'Master', icone: '👑', cor: '#F59E0B', textCor: '#B45309', coroas: 500 },
-    { nome: 'Prime', icone: '✨', cor: '#10B981', textCor: '#047857', coroas: 100 },
-    { nome: 'Cliente', icone: '⭐', cor: '#6B7280', textCor: '#374151', coroas: 0 },
+    { nome: 'Ouro', icone: '👑', cor: '#F59E0B', textCor: '#B45309', coroas: 500 },
+    { nome: 'Prata', icone: '🥈', cor: '#94A3B8', textCor: '#475569', coroas: 100 },
+    { nome: 'Bronze', icone: '⭐', cor: '#6B7280', textCor: '#374151', coroas: 0 },
   ];
   for (const tier of tiers) {
     if (coroas >= tier.coroas) return { ...tier, totalCoroas: coroas };

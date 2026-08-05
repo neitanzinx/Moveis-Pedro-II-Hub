@@ -19,7 +19,12 @@ serve(async (req) => {
     }
 
     try {
-        const { chave_acesso, cnpj_destinatario, ambiente = 'homologacao', acao = 'buscar' } = await req.json()
+        const { chave_acesso, cnpj_destinatario, ambiente = 'homologacao', acao = 'buscar', organization_id } = await req.json()
+
+        // Log org_id for traceability
+        if (organization_id) {
+            console.log(`[importar-nfe] org=${organization_id}, chave=${chave_acesso?.substring(0, 10)}...`);
+        }
 
         // Validações
         if (!chave_acesso || chave_acesso.replace(/\D/g, '').length !== 44) {

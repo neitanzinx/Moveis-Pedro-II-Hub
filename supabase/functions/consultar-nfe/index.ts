@@ -132,6 +132,7 @@ serve(async (req) => {
             const terminalStatuses = ['autorizado', 'autorizada', 'cancelado', 'rejeitado', 'denegado', 'erro_autorizacao'];
             if (vendaId && terminalStatuses.includes(nfeData.status)) {
                 await supabase.from('nfe_eventos').insert({
+                    organization_id: orgId,
                     venda_id: vendaId,
                     nfe_ref,
                     tipo_evento: `consulta_${nfeData.status}`,

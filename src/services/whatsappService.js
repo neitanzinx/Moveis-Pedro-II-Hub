@@ -1,6 +1,8 @@
 import { toast } from "sonner";
 import { ZAP_API_URL as API_URL } from "@/utils/zapApiUrl";
 import { saveToOfflineQueue } from "@/utils/offlineQueue";
+import { buildTrackingUrl, buildClientPortalUrl, buildAssistenciaUrl } from "@/utils/tenantLinkHelper";
+
 
 const isLikelyBotOfflineResponse = (status, errorPayload) => {
     // Qualquer erro 5xx do bot deve cair no fallback offline.

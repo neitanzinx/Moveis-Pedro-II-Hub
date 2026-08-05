@@ -138,6 +138,7 @@ serve(async (req) => {
         // ─── Audit event ──────────────────────────────────────────────────────
         if (vendaId) {
             await supabase.from('nfe_eventos').insert({
+                organization_id: orgId,
                 venda_id: vendaId,
                 nfe_ref,
                 tipo_evento: 'sincronizacao',

@@ -21,6 +21,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import EscolhaPlano from "./EscolhaPlano";
+import PlanModulesDisplay from "@/components/planos/PlanModulesDisplay";
+
 
 export default function ConfiguracaoAssinatura() {
   const { organization, refreshTenant } = useTenant();
@@ -293,24 +295,10 @@ export default function ConfiguracaoAssinatura() {
               {currentPlan?.recursos && (
                 <div className="mt-8 border-t pt-6">
                   <h4 className="text-sm font-semibold text-gray-700 mb-3">Módulos Habilitados por este Plano:</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {Object.entries(currentPlan.recursos).map(([modulo, ativo]) => (
-                      <div key={modulo} className="flex items-center gap-2 text-sm text-gray-600">
-                        {ativo ? (
-                          <div className="bg-green-100 text-green-800 rounded-full p-0.5">
-                            <Check className="w-3.5 h-3.5" />
-                          </div>
-                        ) : (
-                          <div className="bg-gray-100 text-gray-400 rounded-full p-0.5">
-                            <Check className="w-3.5 h-3.5" />
-                          </div>
-                        )}
-                        <span className="capitalize">{modulo.replace("_", " ")}</span>
-                      </div>
-                    ))}
-                  </div>
+                  <PlanModulesDisplay recursos={currentPlan.recursos} variant="card" />
                 </div>
               )}
+
             </CardContent>
             
             <CardFooter className="bg-gray-50/50 border-t py-4 px-6 flex flex-wrap justify-between gap-4">

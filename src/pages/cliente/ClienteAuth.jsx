@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useTenant } from "@/contexts/TenantContext";
+import { getPortalTheme } from "@/config/portalThemes";
 import { supabase } from "@/api/base44Client";
 import { processarFidelidadeCadastro } from "@/utils/fidelidadeEngine";
 import { ensureClientPortalSession, trackClientAccessEvent } from "@/lib/clienteAccessTracking";
@@ -23,7 +24,11 @@ const HERO_IMAGE = "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6
 export default function ClienteAuth() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const { brandName, brandLogo } = useTenant();
+    const { organization, settings, brandName, brandLogo, isDomainResolved } = useTenant();
+
+    const themeId = settings?.portal_theme || settings?.modulos_ativos?.portal_theme || "luxo";
+    const portalTheme = getPortalTheme(themeId).auth;
+
     const initialMode = searchParams.get("mode") === "register" ? "register" : "login";
 
     const [activeTab, setActiveTab] = useState(initialMode);
@@ -32,6 +37,27 @@ export default function ClienteAuth() {
     const [showPassword, setShowPassword] = useState(false);
     const [buscandoCep, setBuscandoCep] = useState(false);
     const [registrationStep, setRegistrationStep] = useState(1);
+    const [signupBonus, setSignupBonus] = useState(2);
+    const [signupBonusAtivo, setSignupBonusAtivo] = useState(true);
+    const [nomePontosSingular, setNomePontosSingular] = useState("Coroa");
+    const [nomePontosPlural, setNomePontosPlural] = useState("Coroas");
+
+    useEffect(() => {
+        async function fetchConfig() {
+            try {
+                const { data } = await supabase.from("fidelidade_config").select("signup_bonus, signup_bonus_ativo, nome_pontos_singular, nome_pontos_plural").eq("is_active", true).maybeSingle();
+                if (data) {
+                    if (data.signup_bonus !== undefined) setSignupBonus(data.signup_bonus);
+                    if (data.signup_bonus_ativo !== undefined) setSignupBonusAtivo(data.signup_bonus_ativo !== false);
+                    if (data.nome_pontos_singular) setNomePontosSingular(data.nome_pontos_singular);
+                    if (data.nome_pontos_plural) setNomePontosPlural(data.nome_pontos_plural);
+                }
+            } catch (err) {
+                // fallback to 2
+            }
+        }
+        fetchConfig();
+    }, []);
 
     // Login form
     const [loginData, setLoginData] = useState({ email: "", password: "" });
@@ -169,7 +195,8 @@ export default function ClienteAuth() {
             }
 
             toast.success("Login realizado com sucesso!");
-            navigate("/area-cliente");
+            const targetUrl = (!isDomainResolved && organization?.slug) ? `/${organization.slug}/area-cliente` : "/area-cliente";
+            navigate(targetUrl);
         } catch (err) {
             console.error("Erro no login:", err);
             if (err.message.includes("Invalid login")) {
@@ -276,8 +303,10 @@ export default function ClienteAuth() {
             } else {
                 // 4b. Create new cliente record
                 const clienteData = {
+                    organization_id: organization?.id || null,
                     user_id: authData.user.id,
                     nome_completo: registerData.nome_completo,
+
                     nome: registerData.nome_completo,
                     tipo_pessoa: registerData.tipo_pessoa,
                     cpf: registerData.tipo_pessoa === "Física" ? registerData.cpf || null : null,
@@ -312,7 +341,8 @@ export default function ClienteAuth() {
             // Verifica se sessão foi criada (auto-confirm ativo) ou se e-mail precisa ser confirmado
             const { data: { session: newSession } } = await supabase.auth.getSession();
             if (newSession) {
-                navigate("/area-cliente");
+                const targetUrl = (!isDomainResolved && organization?.slug) ? `/${organization.slug}/area-cliente` : "/area-cliente";
+                navigate(targetUrl);
             } else {
                 toast.success("Quase lá! Verifique seu e-mail para confirmar o cadastro.");
                 setActiveTab("login");
@@ -335,7 +365,7 @@ export default function ClienteAuth() {
     };
 
     return (
-        <div className="min-h-screen font-sans selection:bg-amber-100 selection:text-green-900 relative flex items-center justify-center p-4 overflow-hidden">
+        <div className={`min-h-screen font-sans relative flex items-center justify-center p-4 overflow-hidden ${portalTheme.bg}`}>
             {/* Import Premium Fonts */}
             <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Lato:wght@300;400;700&display=swap');
@@ -348,30 +378,30 @@ export default function ClienteAuth() {
                 className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat transform scale-105 blur-[2px]"
                 style={{ backgroundImage: `url(${HERO_IMAGE})` }}
             >
-                <div className="absolute inset-0 bg-green-950/80 backdrop-blur-sm"></div>
+                <div className={`absolute inset-0 ${portalTheme.heroBg} backdrop-blur-sm`}></div>
             </div>
 
             <div className="w-full max-w-lg relative z-10 animate-fade-in-up">
                 {/* Back to Landing */}
                 <Link
                     to="/"
-                    className="inline-flex items-center gap-2 text-stone-300 hover:text-amber-400 mb-6 group font-body transition-colors"
+                    className="inline-flex items-center gap-2 text-stone-300 hover:text-amber-400 mb-6 group font-body transition-colors text-sm font-medium"
                 >
                     <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
                     Voltar para o início
                 </Link>
 
-                <Card className="border-white/20 shadow-2xl bg-white/95 backdrop-blur-md rounded-2xl overflow-hidden">
-                    <CardHeader className="text-center pb-6 border-b border-stone-100 bg-white/50">
+                <Card className={`border shadow-2xl rounded-3xl overflow-hidden ${portalTheme.card}`}>
+                    <CardHeader className="text-center pb-6 border-b border-stone-800/20">
                         {brandLogo ? (
                             <img src={brandLogo} alt={brandName} className="h-16 mx-auto mb-4 object-contain" />
                         ) : (
-                            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm border border-stone-100">
-                                <Store className="w-8 h-8 text-green-950" />
+                            <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/10">
+                                <Store className={`w-8 h-8 ${portalTheme.accentText}`} />
                             </div>
                         )}
-                        <CardTitle className="text-3xl font-serif text-green-950">{brandName || 'Área do Cliente'}</CardTitle>
-                        <CardDescription className="font-body text-stone-600 text-base">
+                        <CardTitle className={`text-3xl ${portalTheme.textHeading}`}>{brandName || 'Área do Cliente'}</CardTitle>
+                        <CardDescription className={`text-sm ${portalTheme.textMuted}`}>
                             {activeTab === "login"
                                 ? "Bem-vindo de volta! Acesse sua conta."
                                 : "Cadastre-se e entre para o Clube Real."}
@@ -380,16 +410,16 @@ export default function ClienteAuth() {
 
                     <CardContent className="pt-6">
                         <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setRegistrationStep(1); setError(""); }}>
-                            <TabsList className="grid w-full grid-cols-2 mb-8 p-1 bg-stone-100 rounded-xl">
+                            <TabsList className="grid w-full grid-cols-2 mb-8 p-1 bg-black/20 rounded-2xl border border-white/5">
                                 <TabsTrigger
                                     value="login"
-                                    className="data-[state=active]:bg-white data-[state=active]:text-green-950 data-[state=active]:shadow-md rounded-lg font-bold font-body transition-all duration-300"
+                                    className="data-[state=active]:bg-white/20 data-[state=active]:text-white rounded-xl font-bold transition-all duration-300"
                                 >
                                     Entrar
                                 </TabsTrigger>
                                 <TabsTrigger
                                     value="register"
-                                    className="data-[state=active]:bg-white data-[state=active]:text-green-950 data-[state=active]:shadow-md rounded-lg font-bold font-body transition-all duration-300"
+                                    className="data-[state=active]:bg-white/20 data-[state=active]:text-white rounded-xl font-bold transition-all duration-300"
                                 >
                                     Cadastrar
                                 </TabsTrigger>
@@ -405,14 +435,14 @@ export default function ClienteAuth() {
                             <TabsContent value="login">
                                 <form onSubmit={handleLogin} className="space-y-4">
                                     <div>
-                                        <Label htmlFor="login-email">E-mail</Label>
+                                        <Label htmlFor="login-email" className={portalTheme.textMuted}>E-mail</Label>
                                         <div className="relative mt-1">
-                                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                            <Mail className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                             <Input
                                                 id="login-email"
                                                 type="email"
                                                 placeholder="seu@email.com"
-                                                className="pl-10 h-12 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                className={`pl-10 h-12 rounded-xl ${portalTheme.input}`}
                                                 value={loginData.email}
                                                 onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
                                                 required
@@ -421,14 +451,14 @@ export default function ClienteAuth() {
                                     </div>
 
                                     <div>
-                                        <Label htmlFor="login-password">Senha</Label>
+                                        <Label htmlFor="login-password" className={portalTheme.textMuted}>Senha</Label>
                                         <div className="relative mt-1">
-                                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                            <Lock className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                             <Input
                                                 id="login-password"
                                                 type={showPassword ? "text" : "password"}
                                                 placeholder="••••••••"
-                                                className="pl-10 pr-10 h-12 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                className={`pl-10 pr-10 h-12 rounded-xl ${portalTheme.input}`}
                                                 value={loginData.password}
                                                 onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
                                                 required
@@ -436,7 +466,7 @@ export default function ClienteAuth() {
                                             <button
                                                 type="button"
                                                 onClick={() => setShowPassword(!showPassword)}
-                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
                                             >
                                                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                             </button>
@@ -445,7 +475,7 @@ export default function ClienteAuth() {
 
                                     <Button
                                         type="submit"
-                                        className="w-full bg-green-950 hover:bg-green-900 text-white font-bold h-12 rounded-xl shadow-lg shadow-green-950/20 text-lg transition-all hover:scale-[1.02]"
+                                        className={`w-full font-bold h-12 rounded-xl text-base transition-all hover:scale-[1.01] ${portalTheme.primaryButton}`}
                                         disabled={loading}
                                     >
                                         {loading ? (
@@ -464,15 +494,19 @@ export default function ClienteAuth() {
                             <TabsContent value="register">
                                 <form onSubmit={handleRegister} className="space-y-4">
                                     {/* Loyalty Banner */}
-                                    <div className="bg-gradient-to-r from-amber-50 to-amber-100/50 border border-amber-200 p-4 rounded-xl flex items-center gap-4 mb-6 shadow-sm">
-                                        <div className="w-12 h-12 bg-amber-400 text-green-950 rounded-full flex items-center justify-center shrink-0 shadow-md">
-                                            <Crown className="w-6 h-6 fill-current" />
+                                    {signupBonusAtivo && (
+                                        <div className="bg-gradient-to-r from-amber-50 to-amber-100/50 border border-amber-200 p-4 rounded-xl flex items-center gap-4 mb-6 shadow-sm">
+                                            <div className="w-12 h-12 bg-amber-400 text-green-950 rounded-full flex items-center justify-center shrink-0 shadow-md">
+                                                <Crown className="w-6 h-6 fill-current" />
+                                            </div>
+                                            <div>
+                                                <p className="font-serif font-bold text-green-950 text-lg">
+                                                    Ganhe {signupBonus} {signupBonus === 1 ? nomePontosSingular : nomePontosPlural} de Bônus
+                                                </p>
+                                                <p className="text-sm text-stone-600 font-body">Cadastre-se agora e comece com vantagens exclusivas.</p>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="font-serif font-bold text-green-950 text-lg">Ganhe 2 Coroas de Bônus</p>
-                                            <p className="text-sm text-stone-600 font-body">Cadastre-se agora e comece com vantagens exclusivas.</p>
-                                        </div>
-                                    </div>
+                                    )}
 
                                     {/* Step 1: Account Info */}
                                     {registrationStep === 1 && (

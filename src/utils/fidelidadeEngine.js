@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Motor de Fidelidade - Sistema Progressivo Expandido
  *
  * Gatilhos de ganho suportados:
@@ -187,9 +187,11 @@ export async function processarFidelidadeCadastro(cliente) {
     try {
         if (!cliente?.id) return { sucesso: false, coroasGanhas: 0 };
         const config = await buscarConfig();
-        if (!config?.signup_bonus) return { sucesso: false, coroasGanhas: 0 };
+        if (!config?.signup_bonus || config.signup_bonus_ativo === false) return { sucesso: false, coroasGanhas: 0 };
 
-        const bonus = config.signup_bonus;
+        const bonus = parseInt(config.signup_bonus) || 0;
+        if (bonus <= 0) return { sucesso: false, coroasGanhas: 0 };
+
         const saldoAtual = cliente.coroas || 0;
         const novoSaldo = saldoAtual + bonus;
         await atualizarSaldo(cliente.id, novoSaldo);

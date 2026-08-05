@@ -85,28 +85,22 @@ export default function LoginFuncionario() {
         setError("");
 
         try {
-            const isEmail = identificacao.includes('@');
+            // 1. Resolver matrícula/email para o email de login via RPC (bypass RLS)
+            const { data: resolvedEmail, error: rpcError } = await supabase
+                .rpc('resolve_login_email', { p_identificacao: identificacao });
 
-            let query = supabase
-                .from('public_users')
-                .select('*')
-                .eq('ativo', true);
-
-            if (isEmail) {
-                query = query.eq('email', identificacao.toLowerCase());
-            } else {
-                query = query.eq('matricula', identificacao.toUpperCase());
+            if (rpcError) {
+                console.error("Erro na RPC resolve_login_email:", rpcError);
+                throw new Error("Erro ao verificar credenciais. Tente novamente.");
             }
 
-            const { data: userProfile, error: profileError } = await query.single();
-
-            if (profileError || !userProfile) {
+            if (!resolvedEmail) {
                 throw new Error("Usuário não encontrado ou inativo.");
             }
 
-            // Verificar senha (usando Supabase Auth com o email do usuário)
+            // 2. Autenticar via Supabase Auth com o email resolvido
             const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-                email: userProfile.email,
+                email: resolvedEmail,
                 password: senha
             });
 
@@ -114,35 +108,31 @@ export default function LoginFuncionario() {
                 throw new Error("Senha incorreta.");
             }
 
-            // [FIX] Buscar perfil novamente, agora AUTENTICADO, para garantir que estamos vendo o status real de 'primeiro_acesso'
-            // A leitura anterior era anônima e poderia estar sofrendo cache ou restrição de RLS
-            const { data: freshProfile, error: freshError } = await supabase
+            // 3. Buscar perfil AUTENTICADO (agora o RLS permite via organization_id)
+            const { data: userProfile, error: profileError } = await supabase
                 .from('public_users')
                 .select('*')
                 .eq('id', authData.session.user.id)
                 .single();
 
-            if (freshProfile) {
-                // Perfil carregado com sucesso
+            if (profileError || !userProfile) {
+                console.error("Erro ao buscar perfil autenticado:", profileError);
+                throw new Error("Perfil do usuário não encontrado. Contate o administrador.");
             }
 
-            const profileToUse = freshProfile || userProfile;
-
             // Verificar primeiro acesso
-            if (profileToUse && profileToUse.primeiro_acesso) { // Check for existance too
+            if (userProfile.primeiro_acesso) {
                 setPrimeiroAcesso(true);
-                // Para troca de senha, precisamos do token da sessão
                 setTokenTemp(authData.session?.access_token || '');
                 setError("");
                 return;
             }
 
-
             // [FEATURE] Atualizar último login
-            if (profileToUse && profileToUse.id) {
+            if (userProfile.id) {
                 supabase.from('public_users')
                     .update({ ultimo_login: new Date().toISOString() })
-                    .eq('id', profileToUse.id)
+                    .eq('id', userProfile.id)
                     .then(({ error }) => {
                         if (error) console.error("Erro ao atualizar ultimo_login:", error);
                     });

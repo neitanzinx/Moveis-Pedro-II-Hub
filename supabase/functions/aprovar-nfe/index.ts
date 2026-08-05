@@ -76,7 +76,7 @@ serve(async (req) => {
         // ─── Buscar venda ─────────────────────────────────────────────────────
         const { data: venda, error: vendaError } = await supabase
             .from('vendas')
-            .select('id, status, nfe_emitida, nfe_status, nfe_solicitada, nfe_aprovada, nfe_reprovada')
+            .select('id, status, nfe_emitida, nfe_status, nfe_solicitada, nfe_aprovada, nfe_reprovada, organization_id')
             .eq('id', venda_id)
             .single()
 
@@ -157,6 +157,7 @@ serve(async (req) => {
 
         // ─── Auditoria de evento ──────────────────────────────────────────────
         await supabase.from('nfe_eventos').insert({
+            organization_id: venda.organization_id || null,
             venda_id,
             tipo_evento: eventoTipo,
             dados_resposta: { acao, motivo_reprovacao: motivo_reprovacao?.trim() ?? null },

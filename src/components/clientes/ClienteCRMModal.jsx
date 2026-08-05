@@ -130,10 +130,9 @@ export function ClienteCRMModal({ cliente, isOpen, onClose }) {
 
     // Função para pegar a badge de tier (coroas)
     const getTierBadge = (coroas = 0) => {
-        if (coroas >= 1000) return { label: 'Elite', color: 'bg-amber-500 text-white' };
-        if (coroas >= 500) return { label: 'Master', color: 'bg-slate-400 text-white' };
-        if (coroas >= 100) return { label: 'Prime', color: 'bg-emerald-500 text-white' };
-        return { label: 'Cliente', color: 'bg-blue-500 text-white' };
+        if (coroas >= 500) return { label: 'Ouro', color: 'bg-amber-500 text-white' };
+        if (coroas >= 100) return { label: 'Prata', color: 'bg-slate-400 text-white' };
+        return { label: 'Bronze', color: 'bg-amber-700 text-white' };
     };
 
     const tier = getTierBadge(cliente?.coroas);

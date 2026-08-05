@@ -84,7 +84,7 @@ export async function ensureClientPortalSession({ authUserId, clienteId, pagePat
         .single();
 
     if (error) {
-        console.error("Erro ao criar sessao de acesso do cliente:", error);
+        if (import.meta.env.DEV) console.warn("Sessão de acesso do cliente não gravada (verifique RLS):", error?.message || error);
         return null;
     }
 

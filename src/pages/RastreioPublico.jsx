@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Truck, MapPin, Package, AlertCircle, Clock, Smartphone, Hash } from "lucide-react";
 
-export default function RastreioPublico({ idProp }) {
+export default function RastreioPublico({ idProp, slugProp }) {
     const params = useParams();
     const idUrlOriginal = idProp || params.id || (window.location.pathname.split('/').pop() !== 'rastreio' ? window.location.pathname.split('/').pop() : null);
     const tokenUrl = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('token') : null;
@@ -21,37 +21,92 @@ export default function RastreioPublico({ idProp }) {
     const [erro, setErro] = useState(null);
     const [localizacaoMotorista, setLocalizacaoMotorista] = useState(null);
     const [paradasNaFrente, setParadasNaFrente] = useState(null);
+    const [rastreioDesativado, setRastreioDesativado] = useState(false);
     const [organizacao, setOrganizacao] = useState({
         name: "Empresa",
         logo_url: null,
         primary_color: "#16a34a", // green-600
-        secondary_color: "#f38a4c"
+        secondary_color: "#f38a4c",
+        cnpj: null
     });
 
-    // Busca dados da organização para branding
+    // Busca dados da organização de forma dinâmica baseada no pedido, slug ou CNPJ
     useEffect(() => {
         async function fetchBranding() {
             try {
-                const { data } = await supabase
-                    .from("organizations")
-                    .select("name, logo_url, primary_color, secondary_color")
-                    .limit(1)
-                    .single();
+                let targetOrgId = null;
 
-                if (data) {
+                // 1. Tentar identificar a organização através do pedido/entrega
+                if (idUrlOriginal && idUrlOriginal !== 'rastreio') {
+                    const { data: entregaInfo } = await supabase
+                        .from("entregas")
+                        .select("organization_id")
+                        .or(`id.eq.${idUrlOriginal},numero_pedido.eq.${idUrlOriginal}`)
+                        .maybeSingle();
+
+                    if (entregaInfo?.organization_id) {
+                        targetOrgId = entregaInfo.organization_id;
+                    }
+                }
+
+                // 2. Se não encontrou pelo pedido, tentar por slug ou param da URL (ex: /slug/rastreio ou ?org=slug)
+                if (!targetOrgId) {
+                    const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+                    const pathParts = typeof window !== 'undefined' ? window.location.pathname.split('/').filter(Boolean) : [];
+                    const pathCandidate = pathParts.length >= 2 && pathParts[1] === 'rastreio' ? pathParts[0] : null;
+                    const identifier = slugProp || urlParams.get('org') || urlParams.get('tenant') || urlParams.get('cnpj') || pathCandidate;
+
+                    if (identifier && identifier !== 'rastreio') {
+                        const { data: orgByIdentifier } = await supabase
+                            .from("organizations")
+                            .select("id")
+                            .or(`slug.eq.${identifier},cnpj.eq.${identifier},id.eq.${identifier}`)
+                            .maybeSingle();
+
+                        if (orgByIdentifier?.id) {
+                            targetOrgId = orgByIdentifier.id;
+                        }
+                    }
+                }
+
+                // 3. Buscar os dados da organização (com fallback para a primeira caso nenhuma seja especificada)
+                let query = supabase.from("organizations").select("id, name, logo_url, primary_color, secondary_color, cnpj");
+                if (targetOrgId) {
+                    query = query.eq("id", targetOrgId);
+                } else {
+                    query = query.limit(1);
+                }
+
+                const { data: orgData } = await query.maybeSingle();
+
+                if (orgData) {
                     setOrganizacao({
-                        name: data.name || "Empresa",
-                        logo_url: data.logo_url,
-                        primary_color: data.primary_color || "#16a34a",
-                        secondary_color: data.secondary_color || "#f38a4c"
+                        name: orgData.name || "Empresa",
+                        logo_url: orgData.logo_url,
+                        primary_color: orgData.primary_color || "#16a34a",
+                        secondary_color: orgData.secondary_color || "#f38a4c",
+                        cnpj: orgData.cnpj
                     });
+
+                    if (orgData.id) {
+                        const { data: settingsData } = await supabase
+                            .from("organization_settings")
+                            .select("modulos_ativos")
+                            .eq("organization_id", orgData.id)
+                            .maybeSingle();
+
+                        if (settingsData?.modulos_ativos?.rastreio === false) {
+                            setRastreioDesativado(true);
+                        }
+                    }
                 }
             } catch (err) {
-                console.error("Erro branding:", err);
+                console.error("Erro ao carregar branding do tenant:", err);
             }
         }
         fetchBranding();
-    }, []);
+    }, [idUrlOriginal, slugProp]);
+
 
     // Formatação de telefone em tempo real
     function formatarTelefone(valor) {
@@ -360,7 +415,27 @@ export default function RastreioPublico({ idProp }) {
                     </div>
                 </div>
 
-                {etapa === "busca" && (
+                {rastreioDesativado ? (
+                    <Card className="shadow-lg border-amber-200 bg-amber-50/60">
+                        <CardContent className="p-6 md:p-8 text-center space-y-4">
+                            <div className="mx-auto w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
+                                <AlertCircle className="w-7 h-7 text-amber-600" />
+                            </div>
+                            <div className="space-y-2">
+                                <h3 className="text-xl font-bold text-gray-900">Rastreamento Online Indisponível</h3>
+                                <p className="text-sm text-gray-600 max-w-md mx-auto leading-relaxed">
+                                    O acompanhamento de entregas em tempo real via mapa não está ativado para esta empresa.
+                                </p>
+                                <p className="text-xs text-gray-500 max-w-sm mx-auto">
+                                    Para verificar o agendamento ou status da entrega do seu pedido, por favor entre em contato diretamente com o atendimento da loja.
+                                </p>
+                            </div>
+                        </CardContent>
+                    </Card>
+                ) : (
+                    <>
+                        {etapa === "busca" && (
+
                     <Card className="shadow-lg border-green-100">
                         <CardHeader className="text-center pb-2">
                             <CardTitle className="text-xl">Encontre seu pedido</CardTitle>
@@ -603,9 +678,11 @@ export default function RastreioPublico({ idProp }) {
                         })()}
                     </div>
                 )}
+                    </>
+                )}
 
                 <p className="text-center text-[10px] text-gray-400 uppercase tracking-widest mt-8 pb-8">
-                    {organizacao.name} • CNPJ 12.345.678/0001-90
+                    {organizacao.name} {organizacao.cnpj ? `• CNPJ ${organizacao.cnpj}` : ''}
                 </p>
             </div>
         </div>

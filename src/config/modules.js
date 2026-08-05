@@ -1,0 +1,125 @@
+export const SYSTEM_MODULES = [
+    // Operação & Logística
+    {
+        key: 'rastreio',
+        category: 'operacao',
+        categoryLabel: 'Operação & Logística',
+        label: 'Rastreamento de Entregas',
+        description: 'Rastreio em tempo real com mapa/GPS para o cliente. Quando desativado, ativa o modo de baixa manual.',
+        defaultActive: true,
+    },
+    {
+        key: 'montagem',
+        category: 'operacao',
+        categoryLabel: 'Operação & Logística',
+        label: 'Montagem de Móveis',
+        description: 'Gestão de montagens internas e externas, escalas e montadores.',
+        defaultActive: true,
+    },
+    {
+        key: 'assistencia_tecnica',
+        category: 'operacao',
+        categoryLabel: 'Operação & Logística',
+        label: 'Assistência Técnica',
+        description: 'Chamados de garantia, assistência pós-venda e peças de reposição.',
+        defaultActive: true,
+    },
+    {
+        key: 'frota',
+        category: 'operacao',
+        categoryLabel: 'Operação & Logística',
+        label: 'Frota Própria de Veículos',
+        description: 'Cadastro e gestão de veículos/caminhões próprios da empresa.',
+        defaultActive: true,
+    },
+    {
+        key: 'fotos_entrega',
+        category: 'operacao',
+        categoryLabel: 'Operação & Logística',
+        label: 'Fotos do Comprovante de Entrega',
+        description: 'Captura de foto da mercadoria no ato da entrega pelo entregador.',
+        defaultActive: true,
+    },
+
+    // Financeiro & Vendas
+    {
+        key: 'comissoes',
+        category: 'financeiro',
+        categoryLabel: 'Financeiro & Vendas',
+        label: 'Comissão de Vendedores',
+        description: 'Cálculo, regras e relatórios de comissionamento de vendas.',
+        defaultActive: true,
+    },
+    {
+        key: 'conferencia_caixa',
+        category: 'financeiro',
+        categoryLabel: 'Financeiro & Vendas',
+        label: 'Conferência de Caixa Diária',
+        description: 'Exige fechamento e conferência diária de valores no PDV.',
+        defaultActive: true,
+    },
+    {
+        key: 'markup_automatico',
+        category: 'financeiro',
+        categoryLabel: 'Financeiro & Vendas',
+        label: 'Markup & Margem Automática',
+        description: 'Sugestão e cálculo automático de preços via margem de markup.',
+        defaultActive: true,
+    },
+    {
+        key: 'nfe',
+        category: 'financeiro',
+        categoryLabel: 'Financeiro & Vendas',
+        label: 'Notas Fiscais (NF-e)',
+        description: 'Emissão e integração de Nota Fiscal Eletrônica.',
+        defaultActive: true,
+    },
+    {
+        key: 'aprovacao_vendas',
+        category: 'financeiro',
+        categoryLabel: 'Financeiro & Vendas',
+        label: 'Aprovação de Vendas',
+        description: 'Regras e fluxos de aprovação de vendas e liberação por forma de pagamento.',
+        defaultActive: true,
+    },
+
+    // Gestão, RH & Automação
+    {
+        key: 'rh',
+        category: 'gestao',
+        categoryLabel: 'Gestão, RH & Automação',
+        label: 'Recursos Humanos & Ponto',
+        description: 'Gestão de funcionários, folha de pagamento e folgas.',
+        defaultActive: true,
+    },
+    {
+        key: 'marketing',
+        category: 'gestao',
+        categoryLabel: 'Gestão, RH & Automação',
+        label: 'Marketing, Fidelidade & NPS',
+        description: 'Campanhas, programa de pontos, cupons e pesquisa NPS.',
+        defaultActive: true,
+    },
+    {
+        key: 'whatsapp',
+        category: 'gestao',
+        categoryLabel: 'Gestão, RH & Automação',
+        label: 'Automação WhatsApp & Catálogo',
+        description: 'Bot de atendimento automatizado e catálogo via WhatsApp.',
+        defaultActive: true,
+    },
+    {
+        key: 'bi_dashboard',
+        category: 'gestao',
+        categoryLabel: 'Gestão, RH & Automação',
+        label: 'Business Intelligence (BI)',
+        description: 'Dashboards analíticos avançados e relatórios estratégicos.',
+        defaultActive: true,
+    },
+];
+
+export const MODULE_CATEGORIES = [
+    { key: 'operacao', label: 'Operação & Logística' },
+    { key: 'financeiro', label: 'Financeiro & Vendas' },
+    { key: 'gestao', label: 'Gestão, RH & Automação' },
+];

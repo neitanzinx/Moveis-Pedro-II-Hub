@@ -1,4 +1,4 @@
-﻿import React, { useState } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/api/base44Client";
 import { adicionarCoroas } from "@/utils/fidelidadeEngine";
@@ -61,6 +61,9 @@ export default function FidelidadeRegras() {
     const [campanhaLoading, setCampanhaLoading] = useState(false);
 
     const [config, setConfig] = useState({
+        nome_pontos_singular: "Coroa",
+        nome_pontos_plural: "Coroas",
+        signup_bonus_ativo: true,
         purchase_value_threshold: 50, steps_per_purchase: 10, signup_bonus: 5, is_active: true,
         reward_threshold: 100, desconto_por_coroa: 0.10,
         aniversario_ativo: false, aniversario_coroas: 50,
@@ -154,6 +157,9 @@ export default function FidelidadeRegras() {
         try {
             const { error } = await supabase.from("fidelidade_config").upsert({
                 id: config.id || 1,
+                nome_pontos_singular: config.nome_pontos_singular || "Coroa",
+                nome_pontos_plural: config.nome_pontos_plural || "Coroas",
+                signup_bonus_ativo: config.signup_bonus_ativo !== false,
                 purchase_value_threshold: parseFloat(config.purchase_value_threshold) || 50,
                 steps_per_purchase: parseInt(config.steps_per_purchase) || 10,
                 signup_bonus: parseInt(config.signup_bonus) || 5,
@@ -333,14 +339,77 @@ export default function FidelidadeRegras() {
                 </TabsList>
 
                 {/* ============================================================ */}
-                {/* TAB 1: COMPRAS                                                 */}
+                {/* TAB 1: COMPRAS & IDENTIDADE DA MOEDA                        */}
                 {/* ============================================================ */}
                 <TabsContent value="compras" className="space-y-4 mt-4">
+                    {/* Identidade / Nomenclatura dos Pontos */}
+                    <Card className="border-0 shadow border-l-4 border-l-amber-500">
+                        <CardHeader className="border-b bg-amber-50/50 dark:bg-neutral-900">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <Sparkles className="w-5 h-5 text-amber-600" />
+                                    <div>
+                                        <CardTitle className="text-base text-gray-900 dark:text-white">Identidade da Pontuação de Fidelidade</CardTitle>
+                                        <CardDescription className="text-xs">Escolha como sua loja chama a pontuação do cliente (ex: Coroas, Pontos, Moedas, Estrelas)</CardDescription>
+                                    </div>
+                                </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="p-5 space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <Label className="text-xs font-semibold">Nome no Singular</Label>
+                                    <Input 
+                                        className="mt-1 h-9 text-sm"
+                                        placeholder="Ex: Coroa, Ponto, Moeda, Estrela"
+                                        value={config.nome_pontos_singular || "Coroa"}
+                                        onChange={(e) => setConfig(p => ({ ...p, nome_pontos_singular: e.target.value }))}
+                                    />
+                                    <p className="text-[11px] text-gray-500 mt-1">Usado quando for 1 unidade (Ex: "1 {config.nome_pontos_singular || 'Coroa'}")</p>
+                                </div>
+
+                                <div>
+                                    <Label className="text-xs font-semibold">Nome no Plural</Label>
+                                    <Input 
+                                        className="mt-1 h-9 text-sm"
+                                        placeholder="Ex: Coroas, Pontos, Moedas, Estrelas"
+                                        value={config.nome_pontos_plural || "Coroas"}
+                                        onChange={(e) => setConfig(p => ({ ...p, nome_pontos_plural: e.target.value }))}
+                                    />
+                                    <p className="text-[11px] text-gray-500 mt-1">Usado para mais de 1 unidade (Ex: "10 {config.nome_pontos_plural || 'Coroas'}")</p>
+                                </div>
+                            </div>
+
+                            {/* Preset Buttons */}
+                            <div className="pt-2">
+                                <span className="text-xs font-medium text-gray-500 block mb-2">Modelos Rápidos (Clique para preencher em 1 clique):</span>
+                                <div className="flex flex-wrap gap-2">
+                                    {[
+                                        { singular: "Coroa", plural: "Coroas", emoji: "👑" },
+                                        { singular: "Ponto", plural: "Pontos", emoji: "⭐" },
+                                        { singular: "Moeda", plural: "Moedas", emoji: "🪙" },
+                                        { singular: "Estrela", plural: "Estrelas", emoji: "🌟" },
+                                        { singular: "Crédito", plural: "Créditos", emoji: "💳" },
+                                    ].map(item => (
+                                        <button
+                                            key={item.singular}
+                                            type="button"
+                                            onClick={() => setConfig(p => ({ ...p, nome_pontos_singular: item.singular, nome_pontos_plural: item.plural }))}
+                                            className="px-2.5 py-1 text-xs rounded-lg border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-gray-700 dark:text-gray-300 font-medium flex items-center gap-1.5 transition-colors"
+                                        >
+                                            <span>{item.emoji}</span> {item.plural}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
                     <Card className="border-0 shadow">
                         <CardHeader className="border-b bg-amber-50">
                             <div className="flex items-center gap-2">
                                 <Coins className="w-5 h-5 text-amber-600" />
-                                <CardTitle className="text-amber-800">Coroas por Compra</CardTitle>
+                                <CardTitle className="text-amber-800">Acúmulo por Compra</CardTitle>
                             </div>
                         </CardHeader>
                         <CardContent className="p-6 space-y-6">
@@ -361,14 +430,42 @@ export default function FidelidadeRegras() {
                                         onChange={(e) => setConfig(p => ({ ...p, steps_per_purchase: e.target.value }))} />
                                     <p className="text-xs text-gray-500 mt-1">Coroas por unidade</p>
                                 </div>
-                                <div>
-                                    <Label className="flex items-center gap-2 mb-2">
-                                        <Sparkles className="w-4 h-4 text-purple-500" />Bonus Cadastro
-                                    </Label>
-                                    <Input type="number" min="0" value={config.signup_bonus}
-                                        onChange={(e) => setConfig(p => ({ ...p, signup_bonus: e.target.value }))} />
-                                    <p className="text-xs text-gray-500 mt-1">Coroas de boas-vindas</p>
+                            </div>
+
+                            {/* Bonus Cadastro Switch & Input */}
+                            <div className="border rounded-xl p-4 bg-purple-50/40 dark:bg-purple-950/20 border-purple-200 dark:border-purple-800 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Sparkles className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                                        <div>
+                                            <span className="font-semibold text-sm text-gray-900 dark:text-white">Bônus de Boas-Vindas no Cadastro</span>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Conceder pontuação automática quando um cliente cria conta no portal</p>
+                                        </div>
+                                    </div>
+                                    <Switch 
+                                        checked={config.signup_bonus_ativo !== false}
+                                        onCheckedChange={(v) => setConfig(p => ({ ...p, signup_bonus_ativo: v }))} 
+                                    />
                                 </div>
+
+                                {config.signup_bonus_ativo !== false ? (
+                                    <div className="flex items-center gap-3 pt-3 border-t border-purple-200/60 dark:border-purple-800/60">
+                                        <Label className="text-xs font-semibold whitespace-nowrap">
+                                            Quantidade de {config.nome_pontos_plural || 'Coroas'} de Bônus:
+                                        </Label>
+                                        <Input 
+                                            type="number" 
+                                            min="1" 
+                                            className="w-28 h-9 text-sm" 
+                                            value={config.signup_bonus}
+                                            onChange={(e) => setConfig(p => ({ ...p, signup_bonus: e.target.value }))} 
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 rounded-lg border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300">
+                                        ⚠️ <strong>Bônus Desativado:</strong> Novos clientes se cadastrarão na plataforma sem pontos iniciais.
+                                    </div>
+                                )}
                             </div>
 
                             <div className="p-4 bg-green-50 rounded-xl border border-green-200">
@@ -955,7 +1052,23 @@ export default function FidelidadeRegras() {
                     <div className="space-y-4">
                         <div>
                             <Label>Nome do Nivel *</Label>
-                            <Input value={tierForm.nome} onChange={(e) => setTierForm(p => ({ ...p, nome: e.target.value }))} placeholder="Ex: Ouro" />
+                            <Input value={tierForm.nome} onChange={(e) => setTierForm(p => ({ ...p, nome: e.target.value }))} placeholder="Ex: Prata ou Ouro" />
+                            <div className="flex gap-2 mt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setTierForm(p => ({ ...p, nome: "Prata", coroas_minimas: 100, multiplicador_coroas: 1.2, ordem: 1 }))}
+                                    className="text-xs bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-slate-300 px-2 py-1 rounded border border-slate-200 dark:border-neutral-700 hover:bg-slate-200"
+                                >
+                                    Sugestão: Prata (100 pts / 1.2x)
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setTierForm(p => ({ ...p, nome: "Ouro", coroas_minimas: 500, multiplicador_coroas: 1.5, ordem: 2 }))}
+                                    className="text-xs bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 px-2 py-1 rounded border border-amber-200 dark:border-amber-800 hover:bg-amber-100"
+                                >
+                                    Sugestão: Ouro (500 pts / 1.5x)
+                                </button>
+                            </div>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div>

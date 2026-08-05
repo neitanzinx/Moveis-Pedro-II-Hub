@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useSearchParams } from "react-router-dom";
-import { Building2, DollarSign, Truck, FileText, Users, Shield, AlertCircle, Image, Store, Calculator, Package, UserCheck, ClipboardList, ChevronRight, CreditCard, Sparkles, Bot, MessageCircle, TrendingDown } from "lucide-react";
+import { Building2, DollarSign, Truck, FileText, Users, Shield, AlertCircle, Image, Store, Calculator, Package, UserCheck, ClipboardList, ChevronRight, CreditCard, Sparkles, Bot, MessageCircle, TrendingDown, Sliders } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import ConfiguracaoComissoes from "../components/configuracoes/ConfiguracaoComissoes";
 import ConfiguracaoFrota from "../components/configuracoes/ConfiguracaoFrota";
@@ -19,6 +19,7 @@ import ConfiguracaoPrazos from "../components/configuracoes/ConfiguracaoPrazos";
 import ConfiguracaoComprasPagamento from "../components/configuracoes/ConfiguracaoComprasPagamento";
 import ConfiguracaoPapeisSistema from "../components/configuracoes/ConfiguracaoPapeisSistema";
 import ConfiguracaoAssinatura from "../components/configuracoes/ConfiguracaoAssinatura";
+import ConfiguracaoModulosOperacionais from "../components/configuracoes/ConfiguracaoModulosOperacionais";
 
 
 
@@ -53,12 +54,13 @@ const MENU_CONFIG = {
     label: "Operação",
     icon: Truck,
     items: [
+      { id: "rastreio", label: "Módulos & Recursos", icon: Sliders },
       { id: "frota", label: "Frota de Veículos", icon: Truck },
       { id: "prazos", label: "Prazos de Entrega", icon: ClipboardList },
-      { id: "compras-pagamento", label: "Aprovação de Compras", icon: CreditCard },
+      { id: "compras-pagamento", label: "Aprovação de Vendas", icon: CreditCard },
     ]
-
   },
+
   automacao: {
     label: "Automação",
     icon: Bot,
@@ -151,6 +153,7 @@ export default function Configuracoes() {
       case "auditoria": return <AuditLogPage />;
       case "prazos": return <ConfiguracaoPrazos />;
       case "compras-pagamento": return <ConfiguracaoComprasPagamento />;
+      case "rastreio": return <ConfiguracaoModulosOperacionais />;
       case "assinatura": return <ConfiguracaoAssinatura />;
 
       default: return null;

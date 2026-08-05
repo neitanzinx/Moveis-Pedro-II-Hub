@@ -10,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { MessageCircle, Download, Eye, Share2, Filter, Search, ImageIcon, ImagePlus, Upload, Loader2, Check, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { useTenant } from "@/contexts/TenantContext";
+
 import {
   Dialog,
   DialogContent,
@@ -19,7 +21,9 @@ import {
 } from "@/components/ui/dialog";
 
 export default function CatalogoWhatsApp() {
+  const { brandName } = useTenant();
   const [user, setUser] = useState(null);
+
   const [filtroCategoria, setFiltroCategoria] = useState("all");
   const [filtroAmbiente, setFiltroAmbiente] = useState("all");
   const [filtroDisponibilidade, setFiltroDisponibilidade] = useState("all");
@@ -119,7 +123,8 @@ export default function CatalogoWhatsApp() {
   };
 
   const gerarTextoWhatsApp = () => {
-    let texto = `🛋️ *CATÁLOGO MÓVEIS PEDRO II* 🛋️\n\n`;
+    let texto = `🛋️ *CATÁLOGO ${brandName.toUpperCase()}* 🛋️\n\n`;
+
     texto += `📱 Entre em contato pelo WhatsApp para mais informações!\n\n`;
     texto += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 

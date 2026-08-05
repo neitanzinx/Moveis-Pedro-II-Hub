@@ -739,6 +739,7 @@ serve(async (req) => {
 
         // Insert into notas_fiscais_emitidas
         await supabase.from('notas_fiscais_emitidas').insert({
+            organization_id,
             venda_id,
             acbr_id: acbrId,
             ambiente: ambiente,
@@ -772,6 +773,7 @@ serve(async (req) => {
 
         // ── Auditoria de evento fiscal ────────────────────────────────────────
         const { error: eventoErr } = await supabase.from('nfe_eventos').insert({
+            organization_id,
             venda_id,
             nfe_ref: acbrId,
             tipo_evento: 'emissao_enviada',

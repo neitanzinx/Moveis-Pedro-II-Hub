@@ -4,6 +4,7 @@ import { supabase } from "@/api/base44Client";
 import { resgatarCoroasDesconto, buscarHistoricoCliente, formatarTipoEvento } from "@/utils/fidelidadeEngine";
 import { ensureClientPortalSession, markClientSessionAlive, trackClientAccessEvent } from "@/lib/clienteAccessTracking";
 import { useTenant } from "@/contexts/TenantContext";
+import { getPortalTheme } from "@/config/portalThemes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +17,7 @@ import { toast } from "sonner";
 import {
     LogOut, User, Award, ShoppingBag, Gift, ChevronRight,
     Star, Package, Calendar, MapPin, Phone, Mail, Loader2,
-    Trophy, Target, Sparkles, ArrowRight, Crown, Edit2, Save, X, Navigation, Home, Globe, Hash, Search, CreditCard, Store
+    Trophy, Target, Sparkles, ArrowRight, Crown, Edit2, Save, X, Navigation, Home, Globe, Hash, Search, CreditCard, Store, AlertCircle
 } from "lucide-react";
 
 const HERO_IMAGE = "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?q=80&w=2000&auto=format&fit=crop";
@@ -24,7 +25,15 @@ const HERO_IMAGE = "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6
 export default function ClienteDashboard() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { brandName, brandLogo } = useTenant();
+    const { organization, settings, brandName, brandLogo } = useTenant();
+
+    const themeId = settings?.portal_theme || settings?.modulos_ativos?.portal_theme || "luxo";
+    const portalTheme = getPortalTheme(themeId).dashboard;
+
+    const isFidelidadeActive = settings?.modulos_ativos ? settings.modulos_ativos.fidelidade !== false : true;
+    const isPedidosActive = settings?.modulos_ativos ? settings.modulos_ativos.meus_pedidos !== false : true;
+    const isAutoatendimentoActive = settings?.modulos_ativos ? settings.modulos_ativos.autoatendimento !== false : true;
+
     const [loading, setLoading] = useState(true);
     const [user, setUser] = useState(null);
     const [cliente, setCliente] = useState(null);
@@ -126,24 +135,35 @@ export default function ClienteDashboard() {
             }
 
             // Fetch loyalty config
-            const { data: configData } = await supabase
+            let fidelidadeQuery = supabase
                 .from("fidelidade_config")
                 .select("*")
-                .eq("is_active", true)
-                .single();
+                .eq("is_active", true);
 
+            if (organization?.id) {
+                fidelidadeQuery = fidelidadeQuery.eq("organization_id", organization.id);
+            }
+
+            const { data: configData } = await fidelidadeQuery.maybeSingle();
             setFidelidadeConfig(configData);
 
             // Fetch purchases — usa resolvedCliente diretamente (estado React ainda não re-renderizou)
             if (resolvedCliente?.id) {
-                const { data: vendasData } = await supabase
+                let vendasQuery = supabase
                     .from("vendas")
                     .select("*")
-                    .eq("cliente_id", resolvedCliente.id)
+                    .eq("cliente_id", resolvedCliente.id);
+
+                if (organization?.id) {
+                    vendasQuery = vendasQuery.eq("organization_id", organization.id);
+                }
+
+                const { data: vendasData } = await vendasQuery
                     .order("data_venda", { ascending: false })
                     .limit(10);
 
                 setVendas(vendasData || []);
+
 
                 // Fetch coroas history
                 try {
@@ -388,16 +408,23 @@ export default function ClienteDashboard() {
     const progressPercent = Math.min((currentSteps / maxSteps) * 100, 100);
 
     const statusMembro = currentSteps >= maxSteps
-        ? "Membro Coroa Master"
-        : currentSteps >= Math.ceil(maxSteps * 0.75)
-            ? "Membro Coroa Ouro"
-            : currentSteps >= Math.ceil(maxSteps * 0.4)
-                ? "Membro Coroa Prata"
-                : "Membro Coroa Inicial";
+        ? "Membro Coroa Ouro"
+        : currentSteps >= Math.ceil(maxSteps * 0.5)
+            ? "Membro Coroa Prata"
+            : "Membro Coroa Bronze";
 
-    const firstMilestone = Math.max(1, Math.ceil(maxSteps * 0.25));
-    const secondMilestone = Math.max(firstMilestone + 1, Math.ceil(maxSteps * 0.5));
-    const thirdMilestone = Math.max(secondMilestone + 1, Math.ceil(maxSteps * 0.75));
+    // Client profile validity checks
+    const rawName = cliente?.nome_completo;
+    const isNameValid = rawName && !rawName.includes('@') && rawName.trim().length > 0;
+    const displayName = isNameValid 
+        ? rawName.split(' ')[0] 
+        : (user?.user_metadata?.nome && !user.user_metadata.nome.includes('@') ? user.user_metadata.nome.split(' ')[0] : 'Cliente');
+
+    const isIncompleteProfile = !cliente || 
+        !isNameValid || 
+        !cliente?.telefone || 
+        cliente.telefone === '-' ||
+        (!cliente.cpf && !cliente.cnpj);
 
     const milestones = [
         { steps: firstMilestone, reward: `${firstMilestone} coroas acumuladas` },
@@ -415,8 +442,13 @@ export default function ClienteDashboard() {
                 </div>
                 <div className="relative z-10 flex flex-col items-center gap-4">
                     <div className="w-16 h-16 rounded-3xl bg-white shadow-xl shadow-amber-500/10 flex items-center justify-center animate-bounce">
-                        <img src={LOGO_URL} alt="Loading" className="w-10 h-10 object-contain" />
+                        {brandLogo ? (
+                            <img src={brandLogo} alt={brandName} className="w-10 h-10 object-contain" />
+                        ) : (
+                            <Store className="w-8 h-8 text-amber-600" />
+                        )}
                     </div>
+
                     <div className="flex flex-col items-center">
                         <div className="flex gap-1">
                             {[0, 1, 2].map((i) => (
@@ -431,29 +463,21 @@ export default function ClienteDashboard() {
     }
 
     return (
-        <div className="min-h-screen bg-stone-50 font-['Lato'] text-stone-900 relative selection:bg-amber-100 selection:text-amber-900 overflow-x-hidden">
-            {/* Premium Background Gradients */}
-            <div className="fixed inset-0 z-0 pointer-events-none">
-                <div className="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] bg-emerald-100/40 rounded-full blur-[120px]" />
-                <div className="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] bg-amber-100/40 rounded-full blur-[100px]" />
-                <div className="absolute top-[40%] left-[30%] w-[40%] h-[40%] bg-white/40 rounded-full blur-[80px]" />
-                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.03] pointer-events-none" />
-            </div>
-
+        <div className={`min-h-screen font-sans relative selection:bg-amber-100 overflow-x-hidden ${portalTheme.bg}`}>
             {/* Header */}
-            <header className="fixed top-0 w-full z-50 border-b border-stone-200/50 bg-white/80 backdrop-blur-xl shadow-sm">
+            <header className={`fixed top-0 w-full z-50 border-b ${portalTheme.headerBg}`}>
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                        <div className="h-12 w-12 rounded-xl bg-white p-2 shadow-inner border border-stone-100 flex items-center justify-center">
+                        <div className="h-12 w-12 rounded-xl bg-white/10 p-2 shadow-inner border border-white/10 flex items-center justify-center">
                             {brandLogo ? (
                                 <img src={brandLogo} alt={brandName} className="h-full w-full object-contain" />
                             ) : (
-                                <Store className="h-6 w-6 text-green-950" />
+                                <Store className={`h-6 w-6 ${portalTheme.accentText}`} />
                             )}
                         </div>
                         <div>
-                            <h1 className="text-xl font-['Playfair_Display'] font-bold text-stone-900 tracking-tight">{brandName}</h1>
-                            <p className="text-[10px] uppercase tracking-[0.2em] text-amber-600 font-bold">Portal do Cliente</p>
+                            <h1 className={`text-xl font-bold tracking-tight ${portalTheme.textHeading}`}>{brandName}</h1>
+                            <p className={`text-[10px] uppercase tracking-[0.2em] font-bold ${portalTheme.accentText}`}>Portal do Cliente</p>
                         </div>
                     </div>
 
@@ -473,29 +497,53 @@ export default function ClienteDashboard() {
                 {/* Hero Section */}
                 <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
                     <div className="space-y-2">
-                        <h2 className="text-4xl md:text-5xl font-['Playfair_Display'] font-black text-stone-900">
-                            Olá, <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-600 to-amber-500">{cliente?.nome_completo?.split(' ')[0] || user?.email?.split('@')[0]}</span>
+                        <h2 className="text-4xl md:text-5xl font-['Playfair_Display'] font-black text-stone-100">
+                            Olá, <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-amber-200">{displayName}</span>
                         </h2>
-                        <p className="text-stone-500 font-medium">Bem-vindo ao seu espaço exclusivo de móveis e decorações.</p>
+                        <p className="text-stone-300 font-medium">
+                            {isIncompleteProfile ? "Complete o seu cadastro para aproveitar todas as vantagens do portal." : "Bem-vindo ao seu espaço exclusivo de móveis e decorações."}
+                        </p>
                     </div>
 
-                    <div className="flex gap-4 p-1 rounded-2xl bg-white/50 border border-stone-200/50 backdrop-blur-md shadow-sm">
-                        <div className="px-4 py-2 rounded-xl bg-white shadow-sm border border-stone-100 flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
+                    <div className="flex gap-4 p-1 rounded-2xl bg-stone-900/80 border border-amber-900/40 backdrop-blur-md shadow-lg">
+                        <div className="px-4 py-2 rounded-xl bg-stone-950/60 border border-amber-900/30 flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400">
                                 <Crown size={20} />
                             </div>
                             <div>
-                                <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">Status</p>
-                                <p className="text-sm font-bold text-stone-800">{statusMembro}</p>
+                                <p className="text-[10px] text-amber-400/80 font-bold uppercase tracking-wider">Status</p>
+                                <p className="text-sm font-bold text-amber-100">{statusMembro}</p>
                             </div>
                         </div>
                     </div>
                 </div>
 
+                {/* Incomplete Profile Alert Banner */}
+                {isIncompleteProfile && (
+                    <div className="p-5 rounded-2xl bg-gradient-to-r from-amber-950/80 via-stone-900/90 to-amber-950/80 border border-amber-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 backdrop-blur-md shadow-xl animate-pulse-subtle">
+                        <div className="flex items-center gap-3.5">
+                            <div className="w-11 h-11 rounded-xl bg-amber-500 text-stone-950 flex items-center justify-center shrink-0 font-bold shadow-lg shadow-amber-500/20">
+                                <AlertCircle size={22} />
+                            </div>
+                            <div>
+                                <h4 className="font-bold text-amber-200 text-sm">Seu cadastro está incompleto</h4>
+                                <p className="text-xs text-stone-300">Cadastre seu nome completo e telefone para liberar resgates de coroas e histórico de compras.</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={openProfileEditor}
+                            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-stone-950 text-xs font-bold shrink-0 transition-all shadow-md shadow-amber-500/20 flex items-center gap-2"
+                        >
+                            <Edit2 size={14} /> Complete seu Perfil
+                        </button>
+                    </div>
+                )}
+
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     {/* Left Column */}
                     <div className="lg:col-span-2 space-y-8">
                         {/* Loyalty Card */}
+                        {isFidelidadeActive && (
                         <div className="relative group overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-stone-900 to-black p-8 text-white shadow-2xl transition-all duration-500 hover:shadow-amber-900/10">
                             <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform duration-700 group-hover:rotate-12" aria-hidden="true">
                                 <Crown size={180} />
@@ -548,12 +596,13 @@ export default function ClienteDashboard() {
                                         <div className="flex justify-between text-[10px] font-bold text-stone-500 uppercase tracking-widest">
                                             <span>Início</span>
                                             <span className="text-amber-500">{Math.max(0, (fidelidadeConfig?.reward_threshold || 10) - (cliente?.coroas || 0))} Coroas para o Próximo Nível</span>
-                                            <span>Master</span>
+                                            <span>Ouro</span>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
+                        )}
 
                         {/* Redemption Card */}
                         {(cliente?.coroas || 0) >= (fidelidadeConfig?.reward_threshold || 100) && (
@@ -619,14 +668,14 @@ export default function ClienteDashboard() {
                                 { label: 'Pedidos', value: String(vendas.length), icon: Package },
                                 { label: 'Coroas', value: String(cliente?.coroas || 0), icon: Crown }
                             ].map((stat, i) => (
-                                <div key={i} className="group p-6 rounded-[2rem] bg-white border border-stone-200/60 shadow-sm transition-all duration-500 hover:shadow-xl hover:shadow-stone-200/50">
+                                <div key={i} className="group p-6 rounded-[2rem] bg-stone-900/60 border border-amber-900/30 text-stone-100 shadow-xl transition-all duration-500 hover:border-amber-500/40">
                                     <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 rounded-2xl bg-stone-50 flex items-center justify-center text-stone-600 group-hover:scale-110 transition-transform">
+                                        <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 group-hover:scale-110 transition-transform">
                                             <stat.icon size={24} />
                                         </div>
                                         <div>
-                                            <p className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">{stat.label}</p>
-                                            <p className="text-lg font-bold text-stone-800">{stat.value}</p>
+                                            <p className="text-[10px] text-amber-400/80 font-bold uppercase tracking-wider">{stat.label}</p>
+                                            <p className="text-lg font-bold text-stone-100">{stat.value}</p>
                                         </div>
                                     </div>
                                 </div>
@@ -634,14 +683,14 @@ export default function ClienteDashboard() {
                         </div>
 
                         {/* Rewards List */}
-                        <div className="p-8 rounded-[2.5rem] bg-white border border-stone-200/60 shadow-sm">
+                        <div className="p-8 rounded-[2.5rem] bg-stone-900/60 border border-amber-900/30 text-stone-100 shadow-xl">
                             <div className="flex items-center gap-4 mb-8">
-                                <div className="p-2 rounded-lg bg-stone-50">
-                                    <Star className="w-5 h-5 text-amber-500" />
+                                <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                                    <Star className="w-5 h-5 text-amber-400" />
                                 </div>
                                 <div>
-                                    <h3 className="text-xl font-bold font-['Playfair_Display'] text-stone-900">Níveis de Recompensa</h3>
-                                    <p className="text-xs text-stone-500">Acumule coroas e desbloqueie benefícios</p>
+                                    <h3 className="text-xl font-bold font-['Playfair_Display'] text-amber-100">Níveis de Recompensa</h3>
+                                    <p className="text-xs text-stone-400">Acumule coroas e desbloqueie benefícios</p>
                                 </div>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -651,35 +700,37 @@ export default function ClienteDashboard() {
                                         <div
                                             key={index}
                                             className={`relative p-5 rounded-2xl flex items-center gap-5 transition-all duration-500 border
-                                                ${unlocked ? "bg-gradient-to-r from-amber-500/5 to-transparent border-amber-500/20" : "bg-stone-50 border-stone-100 opacity-60"}
+                                                ${unlocked ? "bg-gradient-to-r from-amber-500/10 to-stone-900 border-amber-500/30" : "bg-stone-950/40 border-stone-800 opacity-60"}
                                             `}
                                         >
                                             <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 shrink-0
-                                                ${unlocked ? "bg-amber-500 text-white border-amber-500 shadow-md" : "bg-white text-stone-300 border-stone-200"}
+                                                ${unlocked ? "bg-amber-500 text-stone-950 border-amber-400 shadow-md font-bold" : "bg-stone-900 text-stone-500 border-stone-700"}
                                             `}>
                                                 {unlocked ? <Crown size={16} /> : <span className="font-bold text-xs">{milestone.steps}</span>}
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <p className={`font-bold text-sm truncate ${unlocked ? "text-stone-900" : "text-stone-400"}`}>{milestone.reward}</p>
-                                                <p className="text-[10px] text-stone-500 uppercase tracking-widest font-bold mt-0.5">{milestone.steps} Coroas</p>
+                                                <p className={`font-bold text-sm truncate ${unlocked ? "text-amber-100" : "text-stone-400"}`}>{milestone.reward}</p>
+                                                <p className="text-[10px] text-amber-400/70 uppercase tracking-widest font-bold mt-0.5">{milestone.steps} Coroas</p>
                                             </div>
-                                            {unlocked && <Sparkles className="absolute top-4 right-4 w-4 h-4 text-amber-500/50 animate-pulse" />}
+                                            {unlocked && <Sparkles className="absolute top-4 right-4 w-4 h-4 text-amber-400/50 animate-pulse" />}
                                         </div>
                                     );
                                 })}
                             </div>
                         </div>
+                        )}
 
                         {/* Activity History */}
-                        <div className="p-8 rounded-[2.5rem] bg-white border border-stone-200/60 shadow-sm overflow-hidden">
+                        {isPedidosActive && (
+                        <div className="p-8 rounded-[2.5rem] bg-stone-900/60 border border-amber-900/30 text-stone-100 shadow-xl overflow-hidden">
                             <div className="flex items-center justify-between mb-8">
                                 <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-2xl bg-stone-50 text-stone-600 flex items-center justify-center shadow-inner border border-stone-100">
+                                    <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/20">
                                         <Package size={24} />
                                     </div>
                                     <div>
-                                        <h3 className="text-xl font-bold font-['Playfair_Display'] text-stone-900">Histórico de Pedidos</h3>
-                                        <p className="text-xs text-stone-500">Documentação das suas compras recentes</p>
+                                        <h3 className="text-xl font-bold font-['Playfair_Display'] text-amber-100">Histórico de Pedidos</h3>
+                                        <p className="text-xs text-stone-400">Documentação das suas compras recentes</p>
                                     </div>
                                 </div>
                             </div>
@@ -687,26 +738,26 @@ export default function ClienteDashboard() {
                             <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead>
-                                        <tr className="text-left border-b border-stone-100">
-                                            <th className="pb-4 text-[10px] font-bold text-stone-400 uppercase tracking-widest px-4">Pedido ID</th>
-                                            <th className="pb-4 text-[10px] font-bold text-stone-400 uppercase tracking-widest px-4">Data</th>
-                                            <th className="pb-4 text-[10px] font-bold text-stone-400 uppercase tracking-widest px-4">Valor</th>
-                                            <th className="pb-4 text-[10px] font-bold text-stone-400 uppercase tracking-widest px-4">Status</th>
+                                        <tr className="text-left border-b border-amber-900/30">
+                                            <th className="pb-4 text-[10px] font-bold text-amber-400/80 uppercase tracking-widest px-4">Pedido ID</th>
+                                            <th className="pb-4 text-[10px] font-bold text-amber-400/80 uppercase tracking-widest px-4">Data</th>
+                                            <th className="pb-4 text-[10px] font-bold text-amber-400/80 uppercase tracking-widest px-4">Valor</th>
+                                            <th className="pb-4 text-[10px] font-bold text-amber-400/80 uppercase tracking-widest px-4">Status</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-stone-50">
+                                    <tbody className="divide-y divide-amber-900/20">
                                         {vendas.length > 0 ? vendas.map((p) => (
-                                            <tr key={p.id} className="group hover:bg-stone-50 transition-colors">
-                                                <td className="py-5 px-4 font-mono text-sm text-amber-600 font-bold">#{p.id.slice(0, 8)}</td>
+                                            <tr key={p.id} className="group hover:bg-amber-950/30 transition-colors">
+                                                <td className="py-5 px-4 font-mono text-sm text-amber-400 font-bold">#{p.id.slice(0, 8)}</td>
                                                 <td className="py-5 px-4">
-                                                    <div className="flex items-center gap-2 text-stone-900 font-medium">
+                                                    <div className="flex items-center gap-2 text-stone-200 font-medium">
                                                         <Calendar size={14} className="text-stone-400" />
                                                         {new Date(p.data_venda || p.created_at).toLocaleDateString()}
                                                     </div>
                                                 </td>
-                                                <td className="py-5 px-4 font-bold text-stone-900">{formatCurrency(p.valor_total)}</td>
+                                                <td className="py-5 px-4 font-bold text-amber-100">{formatCurrency(p.valor_total)}</td>
                                                 <td className="py-5 px-4">
-                                                    <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${p.status === 'Concluído' || p.status === 'Concluída' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
+                                                    <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${p.status === 'Concluído' || p.status === 'Concluída' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                                                         }`}>
                                                         {p.status || 'Pendente'}
                                                     </span>
@@ -721,68 +772,85 @@ export default function ClienteDashboard() {
                                 </table>
                             </div>
                         </div>
+                        )}
                     </div>
 
                     {/* Right Column */}
                     <div className="space-y-8">
                         {/* Profile Summary */}
-                        <div className="p-8 rounded-[2.5rem] bg-white border border-stone-200/60 shadow-sm relative overflow-hidden group">
+                        <div className="p-8 rounded-[2.5rem] bg-stone-900/60 border border-amber-900/30 text-stone-100 shadow-xl relative overflow-hidden group">
                             <div className="absolute top-0 right-0 p-4 translate-x-4 -translate-y-4 opacity-5 group-hover:translate-x-0 group-hover:translate-y-0 transition-all duration-500">
                                 <User size={120} />
                             </div>
 
                             <div className="relative z-10 flex flex-col items-center text-center space-y-4">
-                                <div className="w-24 h-24 rounded-[2rem] bg-stone-50 p-2 shadow-inner border border-stone-100 relative">
-                                    <div className="w-full h-full rounded-2xl bg-gradient-to-br from-stone-100 to-stone-200 flex items-center justify-center text-stone-400 text-3xl font-bold">
-                                        {cliente?.nome_completo?.charAt(0) || user?.email?.charAt(0).toUpperCase()}
+                                <div className="w-24 h-24 rounded-[2rem] bg-stone-950 p-2 shadow-inner border border-amber-900/40 relative">
+                                    <div className="w-full h-full rounded-2xl bg-gradient-to-br from-amber-950 to-stone-900 flex items-center justify-center text-amber-400 text-3xl font-bold border border-amber-500/20">
+                                        {isNameValid ? cliente.nome_completo.charAt(0).toUpperCase() : (user?.email?.charAt(0).toUpperCase() || 'C')}
                                     </div>
                                     <button
                                         onClick={openProfileEditor}
-                                        className="absolute -bottom-2 -right-2 w-10 h-10 rounded-xl bg-amber-500 text-white shadow-xl shadow-amber-500/20 flex items-center justify-center hover:scale-110 active:scale-95 transition-all"
+                                        className="absolute -bottom-2 -right-2 w-10 h-10 rounded-xl bg-amber-500 text-stone-950 shadow-xl shadow-amber-500/20 flex items-center justify-center hover:scale-110 active:scale-95 transition-all font-bold"
+                                        title="Editar Perfil"
                                     >
                                         <Edit2 size={18} />
                                     </button>
                                 </div>
                                 <div className="space-y-1 overflow-hidden w-full">
-                                    <h4 className="text-2xl font-bold font-['Playfair_Display'] text-stone-900 truncate">{cliente?.nome_completo || 'Completar Perfil'}</h4>
-                                    <p className="text-xs text-stone-500 font-medium truncate">{user?.email}</p>
+                                    <h4 className="text-2xl font-bold font-['Playfair_Display'] text-amber-100 truncate">
+                                        {isNameValid ? cliente.nome_completo : 'Completar Perfil'}
+                                    </h4>
+                                    <p className="text-xs text-stone-400 font-medium truncate">{user?.email}</p>
+
+                                    {isIncompleteProfile && (
+                                        <div className="inline-block mt-2">
+                                            <button 
+                                                onClick={openProfileEditor}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-all"
+                                            >
+                                                <AlertCircle size={12} /> Cadastro Incompleto
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
                             <div className="mt-8 space-y-4">
-                                <div className="p-4 rounded-2xl bg-stone-50 border border-stone-100">
-                                    <p className="text-[10px] text-stone-400 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
+                                <div className="p-4 rounded-2xl bg-stone-950/60 border border-amber-900/30">
+                                    <p className="text-[10px] text-amber-400/80 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
                                         <Phone size={12} className="text-amber-500" />
                                         Telefone
                                     </p>
-                                    <p className="text-sm font-bold text-stone-800">{cliente?.telefone || '-'}</p>
+                                    <p className="text-sm font-bold text-stone-200">{cliente?.telefone || '-'}</p>
                                 </div>
-                                <div className="p-4 rounded-2xl bg-stone-50 border border-stone-100">
-                                    <p className="text-[10px] text-stone-400 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
+                                <div className="p-4 rounded-2xl bg-stone-950/60 border border-amber-900/30">
+                                    <p className="text-[10px] text-amber-400/80 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
                                         <MapPin size={12} className="text-amber-500" />
                                         Localização
                                     </p>
-                                    <p className="text-sm font-bold text-stone-800 truncate">{cliente?.cidade ? `${cliente.cidade} - ${cliente.estado}` : '-'}</p>
+                                    <p className="text-sm font-bold text-stone-200 truncate">{cliente?.cidade ? `${cliente.cidade} - ${cliente.estado}` : '-'}</p>
                                 </div>
                             </div>
                         </div>
 
                         {/* Support Card */}
-                        <div className="p-8 rounded-[2.5rem] bg-white border border-stone-200/60 shadow-sm flex flex-col items-center text-center space-y-4">
-                            <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
+                        {isAutoatendimentoActive && (
+                        <div className="p-8 rounded-[2.5rem] bg-stone-900/60 border border-amber-900/30 text-stone-100 shadow-xl flex flex-col items-center text-center space-y-4">
+                            <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
                                 <Phone size={32} />
                             </div>
                             <div className="space-y-1">
-                                <h4 className="text-lg font-bold text-stone-900">Precisa de Ajuda?</h4>
-                                <p className="text-xs text-stone-500">Nossa equipe está disponível para te atender.</p>
+                                <h4 className="text-lg font-bold text-amber-100">Precisa de Ajuda?</h4>
+                                <p className="text-xs text-stone-400">Nossa equipe está disponível para te atender.</p>
                             </div>
                             <button
-                                className="text-emerald-600 font-bold text-sm hover:underline"
+                                className="text-emerald-400 font-bold text-sm hover:underline flex items-center gap-1"
                                 onClick={openAutoAtendimento}
                             >
                                 Abrir Autoatendimento
                             </button>
                         </div>
+                        )}
                     </div>
                 </div>
             </main>
@@ -790,95 +858,95 @@ export default function ClienteDashboard() {
             {/* Profile Edit Dialog */}
             {isEditing && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-md" onClick={() => setIsEditing(false)} />
-                    <div className="relative w-full max-w-xl bg-white rounded-[2.5rem] shadow-2xl border border-stone-200 overflow-hidden animate-in zoom-in-95 duration-300">
+                    <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-md" onClick={() => setIsEditing(false)} />
+                    <div className="relative w-full max-w-xl bg-stone-900 rounded-[2.5rem] shadow-2xl border border-amber-900/40 text-stone-100 overflow-hidden animate-in zoom-in-95 duration-300">
                         <div className="p-8 space-y-8 max-h-[90vh] overflow-y-auto">
                             <div className="flex justify-between items-center">
                                 <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                                    <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
                                         <Edit2 size={24} />
                                     </div>
                                     <div>
-                                        <h3 className="text-2xl font-bold font-['Playfair_Display'] text-stone-900">Editar Perfil</h3>
-                                        <p className="text-xs text-stone-500">Mantenha seus dados atualizados</p>
+                                        <h3 className="text-2xl font-bold font-['Playfair_Display'] text-amber-100">Completar Perfil</h3>
+                                        <p className="text-xs text-stone-400">Preencha seus dados para ter a melhor experiência</p>
                                     </div>
                                 </div>
-                                <button onClick={() => setIsEditing(false)} className="p-3 rounded-full hover:bg-stone-50 transition-colors text-stone-400">
+                                <button onClick={() => setIsEditing(false)} className="p-3 rounded-full hover:bg-stone-800 transition-colors text-stone-400">
                                     <X size={24} />
                                 </button>
                             </div>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                                 <div className="space-y-2 sm:col-span-2">
-                                    <Label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest ml-2 px-1 bg-white inline-block">Nome Completo</Label>
+                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2 px-1 bg-stone-900 inline-block">Nome Completo *</Label>
                                     <Input
                                         type="text"
                                         value={editData.nome_completo}
                                         onChange={(e) => setEditData({ ...editData, nome_completo: e.target.value })}
-                                        className="w-full px-5 py-4 rounded-2xl bg-stone-50 border border-stone-200 text-stone-900 focus:outline-none focus:ring-4 focus:ring-amber-500/10 focus:border-amber-500/50 transition-all font-medium h-auto"
-                                        placeholder="Seu nome"
+                                        className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 transition-all font-medium h-auto placeholder:text-stone-600"
+                                        placeholder="Seu nome completo"
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest ml-2">Telefone</Label>
+                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">Telefone *</Label>
                                     <Input
                                         type="text"
                                         value={editData.telefone}
                                         onChange={(e) => setEditData({ ...editData, telefone: e.target.value })}
-                                        className="w-full px-5 py-4 rounded-2xl bg-stone-50 border border-stone-200 text-stone-900 focus:outline-none focus:ring-4 focus:ring-amber-500/10 focus:border-amber-500/50 transition-all font-medium h-auto"
+                                        className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 transition-all font-medium h-auto placeholder:text-stone-600"
                                         placeholder="(00) 00000-0000"
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest ml-2">CEP</Label>
+                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">CEP</Label>
                                     <div className="flex gap-2">
                                         <Input
                                             type="text"
                                             value={editData.cep}
                                             onChange={(e) => setEditData({ ...editData, cep: e.target.value })}
-                                            className="w-full px-5 py-4 rounded-2xl bg-stone-50 border border-stone-200 text-stone-900 focus:outline-none focus:ring-4 focus:ring-amber-500/10 h-auto"
+                                            className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 h-auto placeholder:text-stone-600"
                                             placeholder="00000-000"
                                         />
-                                        <button onClick={() => buscarCEP(editData.cep)} className="p-4 rounded-2xl bg-stone-100 text-stone-600 hover:bg-stone-200 transition-colors">
+                                        <button onClick={() => buscarCEP(editData.cep)} className="p-4 rounded-2xl bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30 transition-colors">
                                             <Search size={20} />
                                         </button>
                                     </div>
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest ml-2">Cidade</Label>
-                                    <Input readOnly value={editData.cidade} className="w-full px-5 py-4 rounded-2xl bg-stone-100 border border-stone-200 text-stone-400 font-medium cursor-not-allowed h-auto" />
+                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">Cidade</Label>
+                                    <Input readOnly value={editData.cidade} className="w-full px-5 py-4 rounded-2xl bg-stone-950/60 border border-stone-800 text-stone-400 font-medium cursor-not-allowed h-auto" />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest ml-2">UF</Label>
-                                    <Input readOnly value={editData.estado} className="w-full px-5 py-4 rounded-2xl bg-stone-100 border border-stone-200 text-stone-400 font-medium cursor-not-allowed h-auto" />
+                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">UF</Label>
+                                    <Input readOnly value={editData.estado} className="w-full px-5 py-4 rounded-2xl bg-stone-950/60 border border-stone-800 text-stone-400 font-medium cursor-not-allowed h-auto" />
                                 </div>
                                 <div className="sm:col-span-2 space-y-2">
-                                    <Label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest ml-2">Endereço (Rua)</Label>
+                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">Endereço (Rua)</Label>
                                     <Input
                                         type="text"
                                         value={editData.endereco}
                                         onChange={(e) => setEditData({ ...editData, endereco: e.target.value })}
-                                        className="w-full px-5 py-4 rounded-2xl bg-stone-50 border border-stone-200 text-stone-900 focus:outline-none focus:ring-4 focus:ring-amber-500/10 transition-all font-medium h-auto"
+                                        className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 transition-all font-medium h-auto placeholder:text-stone-600"
                                         placeholder="Rua..."
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest ml-2">Número</Label>
+                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">Número</Label>
                                     <Input
                                         type="text"
                                         value={editData.numero}
                                         onChange={(e) => setEditData({ ...editData, numero: e.target.value })}
-                                        className="w-full px-5 py-4 rounded-2xl bg-stone-50 border border-stone-200 text-stone-900 focus:outline-none focus:ring-4 focus:ring-amber-500/10 transition-all font-medium text-center h-auto"
+                                        className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 transition-all font-medium text-center h-auto placeholder:text-stone-600"
                                         placeholder="Nº"
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-stone-400 uppercase tracking-widest ml-2">Bairro</Label>
+                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">Bairro</Label>
                                     <Input
                                         type="text"
                                         value={editData.bairro}
                                         onChange={(e) => setEditData({ ...editData, bairro: e.target.value })}
-                                        className="w-full px-5 py-4 rounded-2xl bg-stone-50 border border-stone-200 text-stone-900 focus:outline-none focus:ring-4 focus:ring-amber-500/10 transition-all font-medium h-auto"
+                                        className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 transition-all font-medium h-auto placeholder:text-stone-600"
                                         placeholder="Bairro"
                                     />
                                 </div>
@@ -887,7 +955,7 @@ export default function ClienteDashboard() {
                             <button
                                 onClick={handleSaveProfile}
                                 disabled={savingProfile}
-                                className="w-full py-5 rounded-[1.5rem] bg-stone-900 text-white font-black uppercase tracking-[0.2em] shadow-2xl shadow-stone-900/20 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                                className="w-full py-5 rounded-[1.5rem] bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-stone-950 font-black uppercase tracking-[0.2em] shadow-2xl shadow-amber-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-50"
                             >
                                 {savingProfile ? <Loader2 className="animate-spin" /> : <Save size={20} />}
                                 {savingProfile ? 'Salvando...' : 'Confirmar Alterações'}

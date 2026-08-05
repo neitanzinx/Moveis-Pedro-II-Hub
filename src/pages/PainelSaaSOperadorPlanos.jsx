@@ -8,6 +8,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { SYSTEM_MODULES, MODULE_CATEGORIES } from "@/config/modules";
+import PlanModulesDisplay from "@/components/planos/PlanModulesDisplay";
+
+
 
 export default function PainelSaaSOperadorPlanos() {
   const [loading, setLoading] = useState(true);
@@ -57,6 +61,18 @@ export default function PainelSaaSOperadorPlanos() {
   }
 
   // Ações de Plano
+  const getInitialPlanModules = (planoRecursos = {}) => {
+    const map = {};
+    SYSTEM_MODULES.forEach(mod => {
+      if (Object.prototype.hasOwnProperty.call(planoRecursos, mod.key)) {
+        map[mod.key] = planoRecursos[mod.key] !== false;
+      } else {
+        map[mod.key] = true; // Por padrão, ativo se não especificado
+      }
+    });
+    return map;
+  };
+
   const handleOpenCreatePlan = () => {
     setIsEditing(false);
     setPlanForm({
@@ -64,7 +80,7 @@ export default function PainelSaaSOperadorPlanos() {
       nome: "",
       preco_mensal: "",
       ativo: true,
-      recursos: { whatsapp_bot: false, fotos_entrega: false },
+      recursos: getInitialPlanModules({}),
       updateExisting: false,
       updateExistingModules: false
     });
@@ -78,15 +94,23 @@ export default function PainelSaaSOperadorPlanos() {
       nome: plano.nome,
       preco_mensal: plano.preco_mensal.toString(),
       ativo: plano.ativo,
-      recursos: {
-        whatsapp_bot: !!plano.recursos?.whatsapp_bot,
-        fotos_entrega: !!plano.recursos?.fotos_entrega
-      },
+      recursos: getInitialPlanModules(plano.recursos || {}),
       updateExisting: false,
       updateExistingModules: false
     });
     setShowPlanModal(true);
   };
+
+  const togglePlanModule = (moduleKey) => {
+    setPlanForm(prev => ({
+      ...prev,
+      recursos: {
+        ...prev.recursos,
+        [moduleKey]: !prev.recursos?.[moduleKey]
+      }
+    }));
+  };
+
 
   const handlePlanSubmit = async (e) => {
     e.preventDefault();
@@ -149,12 +173,6 @@ export default function PainelSaaSOperadorPlanos() {
     }
   };
 
-  const togglePlanModule = (mod) => {
-    setPlanForm(prev => ({
-      ...prev,
-      recursos: { ...prev.recursos, [mod]: !prev.recursos[mod] }
-    }));
-  };
 
 
   if (loading) {
@@ -212,16 +230,9 @@ export default function PainelSaaSOperadorPlanos() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex gap-2">
-                          {plano.recursos && Object.entries(plano.recursos)
-                            .filter(([_, ativo]) => ativo)
-                            .map(([key]) => (
-                              <span key={key} className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-600 capitalize">
-                                {key.replace("_", " ")}
-                              </span>
-                          ))}
-                        </div>
+                        <PlanModulesDisplay recursos={plano.recursos} variant="compact" showDisabled={false} />
                       </td>
+
                       <td className="px-4 py-3 text-right">
                         <Button size="sm" variant="ghost" className="text-slate-600 hover:text-slate-900" onClick={() => handleOpenEditPlan(plano)}>
                           <Edit className="w-4 h-4" />
@@ -293,19 +304,35 @@ export default function PainelSaaSOperadorPlanos() {
                 </label>
               </div>
 
-              <div className="space-y-2 pt-2 border-t">
-                <Label>Módulos Inclusos neste Plano</Label>
-                <div className="flex flex-col gap-2 mt-2">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="p_wpp" checked={planForm.recursos.whatsapp_bot} onCheckedChange={() => togglePlanModule('whatsapp_bot')} />
-                    <label htmlFor="p_wpp" className="text-sm">WhatsApp Bot</label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="p_fotos" checked={planForm.recursos.fotos_entrega} onCheckedChange={() => togglePlanModule('fotos_entrega')} />
-                    <label htmlFor="p_fotos" className="text-sm">Fotos de Entrega</label>
-                  </div>
-                </div>
+              <div className="space-y-3 pt-2 border-t max-h-60 overflow-y-auto pr-1">
+                <Label className="text-sm font-bold text-slate-800">Módulos Inclusos neste Plano</Label>
+                {MODULE_CATEGORIES.map(cat => {
+                  const categoryModules = SYSTEM_MODULES.filter(m => m.category === cat.key);
+                  return (
+                    <div key={cat.key} className="space-y-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                      <p className="text-[11px] uppercase font-bold text-slate-500">{cat.label}</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {categoryModules.map(mod => {
+                          const isChecked = planForm.recursos?.[mod.key] !== false;
+                          return (
+                            <div key={mod.key} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`plan_mod_${mod.key}`}
+                                checked={isChecked}
+                                onCheckedChange={() => togglePlanModule(mod.key)}
+                              />
+                              <label htmlFor={`plan_mod_${mod.key}`} className="text-xs cursor-pointer text-slate-700">
+                                {mod.label}
+                              </label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+
 
               {isEditing && (
                 <div className="space-y-2 pt-4 border-t mt-4">

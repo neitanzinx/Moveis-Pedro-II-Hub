@@ -39,17 +39,23 @@ const DEFAULT_SETTINGS = {
         bi_dashboard: true,
         catalogo_whatsapp: true,
         rastreio: true,
-        // Módulos pagos (ausência no banco = DESATIVADO, usar isPaidModuleActive)
-        whatsapp: true,
-        fotos_entrega: true
+        frota: true,
+        fotos_entrega: true,
+        comissoes: true,
+        conferencia_caixa: true,
+        markup_automatico: true,
+        aprovacao_vendas: true,
+        whatsapp: true
     }
 };
 
 export function TenantProvider({ children, organizationId, slug: slugProp }) {
     const [organization, setOrganization] = useState(null);
     const [settings, setSettings] = useState(null);
+    const [plano, setPlano] = useState(null);
     const [lojas, setLojas] = useState([]);
     const [loading, setLoading] = useState(true);
+
     const [error, setError] = useState(null);
     const [resolvedOrgId, setResolvedOrgId] = useState(organizationId || null);
     const [isDomainResolved, setIsDomainResolved] = useState(false);
@@ -179,19 +185,30 @@ export function TenantProvider({ children, organizationId, slug: slugProp }) {
                 return;
             }
 
-            document.title = organization.name || 'Sistema de Gestão';
+            const orgName = organization.name || '';
+            const isDefaultOrg = orgName.toLowerCase().includes('pedro ii');
+            
+            document.title = orgName && !isDefaultOrg
+                ? `${orgName} - GestApp` 
+                : 'GestApp';
 
             // Remove favicons antigos se existirem para evitar duplicidade
             const existingLinks = document.querySelectorAll("link[rel~='icon']");
             existingLinks.forEach(link => link.remove());
 
-            // Cria o novo favicon do tenant (sem fallback hardcoded)
-            if (organization.logo_url) {
+            // Cria o novo favicon do tenant (se for org padrão, usa o favicon.svg do GestApp)
+            if (!isDefaultOrg && organization.logo_url && !organization.logo_url.includes('mp2logo.png')) {
                 const logoUrl = `${organization.logo_url}?v=${new Date().getTime()}`;
                 const link = document.createElement('link');
                 link.rel = 'icon';
                 link.type = 'image/png';
                 link.href = logoUrl;
+                document.getElementsByTagName('head')[0].appendChild(link);
+            } else {
+                const link = document.createElement('link');
+                link.rel = 'icon';
+                link.type = 'image/svg+xml';
+                link.href = '/favicon.svg?v=2';
                 document.getElementsByTagName('head')[0].appendChild(link);
             }
         }
@@ -214,9 +231,21 @@ export function TenantProvider({ children, organizationId, slug: slugProp }) {
             if (orgError) {
                 console.warn('Erro ao carregar organização, usando padrão:', orgError);
                 setOrganization(DEFAULT_ORGANIZATION);
+                setPlano(null);
             } else {
                 setOrganization(orgData);
+                if (orgData?.plano_id) {
+                    const { data: pData } = await supabase
+                        .from('planos')
+                        .select('*')
+                        .eq('id', orgData.plano_id)
+                        .maybeSingle();
+                    setPlano(pData || null);
+                } else {
+                    setPlano(null);
+                }
             }
+
 
             // Carregar configurações
             const { data: settingsData, error: settingsError } = await supabase
@@ -258,11 +287,22 @@ export function TenantProvider({ children, organizationId, slug: slugProp }) {
         }
     };
 
-    // Verificar se um módulo está ativo (padrão: ativo se ausente)
+    // Verificar se um módulo é permitido pelo plano de assinatura da empresa
+    const isModuleAllowedByPlan = (moduleName) => {
+        if (!plano || !plano.recursos) return true; // sem plano específico ou recursos = liberado
+        if (Object.prototype.hasOwnProperty.call(plano.recursos, moduleName)) {
+            return plano.recursos[moduleName] !== false;
+        }
+        return true;
+    };
+
+    // Verificar se um módulo está ativo (considerando trava do plano E opção da empresa)
     const isModuleActive = (moduleName) => {
-        if (!settings?.modulos_ativos) return true; // padrão: ativo
+        if (!isModuleAllowedByPlan(moduleName)) return false;
+        if (!settings?.modulos_ativos) return true;
         return settings.modulos_ativos[moduleName] !== false;
     };
+
 
     // Verificar se um módulo PAGO está ativo (padrão: DESATIVADO se ausente)
     // Usar esta função para módulos que geram custo real: 'whatsapp', 'fotos_entrega'
@@ -281,14 +321,17 @@ export function TenantProvider({ children, organizationId, slug: slugProp }) {
     const value = {
         organization,
         settings,
+        plano,
         lojas,
         loading,
         error,
         isModuleActive,
+        isModuleAllowedByPlan,
         isPaidModuleActive,
         getJurosParcela,
         isDomainResolved,
         refreshTenant: loadTenantData,
+
         // Flag de Conferência de Caixa
         conferenciaCaixaEnabled: settings?.conferencia_caixa_enabled === true,
         // Helpers para branding

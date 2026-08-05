@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { ShieldAlert, Trash2, Search, Building2, Activity, Users, MoreVertical, XCircle, FileText, Key, Lock, Unlock, Mail, Footprints } from "lucide-react";
+import { ShieldAlert, Trash2, Search, Building2, Activity, Users, MoreVertical, XCircle, FileText, Key, Lock, Unlock, Mail, Footprints, Sliders, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
+import { SYSTEM_MODULES, MODULE_CATEGORIES } from "@/config/modules";
+import { Switch } from "@/components/ui/switch";
+
 import {
   Dialog,
   DialogContent,
@@ -51,6 +54,12 @@ export default function PainelSaaSOperadorEmpresas() {
   const [overrideReason, setOverrideReason] = useState("");
   const [isOverriding, setIsOverriding] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Modules Modal States
+  const [isModulesModalOpen, setIsModulesModalOpen] = useState(false);
+  const [modulesState, setModulesState] = useState({});
+  const [savingModules, setSavingModules] = useState(false);
+
 
   const fetchData = async () => {
     setLoading(true);
@@ -165,6 +174,51 @@ export default function PainelSaaSOperadorEmpresas() {
       setLoadingOrgFootsteps(false);
     }
   };
+
+  const openModulesModal = (org) => {
+    setSelectedOrg(org);
+    const modulosNoBanco = org?.organization_settings?.[0]?.modulos_ativos || {};
+    const initialMap = {};
+
+    SYSTEM_MODULES.forEach(mod => {
+      if (Object.prototype.hasOwnProperty.call(modulosNoBanco, mod.key)) {
+        initialMap[mod.key] = modulosNoBanco[mod.key] !== false;
+      } else {
+        initialMap[mod.key] = mod.defaultActive;
+      }
+    });
+
+    setModulesState(initialMap);
+    setIsModulesModalOpen(true);
+  };
+
+  const handleSaveModules = async () => {
+    try {
+      setSavingModules(true);
+      const { error } = await supabase
+        .from('organization_settings')
+        .upsert(
+          {
+            organization_id: selectedOrg.id,
+            modulos_ativos: modulesState,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'organization_id' }
+        );
+
+      if (error) throw error;
+
+      toast.success(`Módulos da empresa ${selectedOrg.name} atualizados com sucesso!`);
+      setIsModulesModalOpen(false);
+      fetchData();
+    } catch (err) {
+      console.error("Erro ao salvar módulos do tenant:", err);
+      toast.error("Falha ao salvar módulos: " + (err.message || err));
+    } finally {
+      setSavingModules(false);
+    }
+  };
+
 
   const handleOverrideSubmit = async (e) => {
     e.preventDefault();
@@ -363,6 +417,9 @@ export default function PainelSaaSOperadorEmpresas() {
                             <DropdownMenuLabel>Ações da Empresa</DropdownMenuLabel>
                             <DropdownMenuItem onClick={() => openDetailsModal(org)}>
                               <FileText className="w-4 h-4 mr-2" /> Ficha Completa
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openModulesModal(org)}>
+                              <Sliders className="w-4 h-4 mr-2 text-purple-600" /> Módulos & Recursos
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openOrgFootstepsModal(org)}>
                               <Activity className="w-4 h-4 mr-2 text-blue-600" /> Feed de Atividades
@@ -752,6 +809,70 @@ export default function PainelSaaSOperadorEmpresas() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Modal Operador SaaS: Gerenciador de Módulos */}
+      <Dialog open={isModulesModalOpen} onOpenChange={setIsModulesModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-purple-900">
+              <Sliders className="w-5 h-5 text-purple-600" />
+              Módulos & Recursos: {selectedOrg?.name}
+            </DialogTitle>
+            <DialogDescription>
+              Ative ou desative o acesso da empresa aos módulos do sistema. Alterações feitas pelo operador entram em vigor imediatamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-2">
+            {MODULE_CATEGORIES.map(cat => {
+              const modulesInCategory = SYSTEM_MODULES.filter(m => m.category === cat.key);
+              return (
+                <div key={cat.key} className="space-y-3">
+                  <h4 className="text-xs uppercase font-bold tracking-wider text-slate-500 border-b pb-1">
+                    {cat.label}
+                  </h4>
+                  <div className="space-y-2">
+                    {modulesInCategory.map(mod => {
+                      const isChecked = modulesState[mod.key] !== false;
+                      return (
+                        <div key={mod.key} className="flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-slate-50/50 hover:bg-slate-50">
+                          <div className="pr-4">
+                            <p className="text-sm font-semibold text-slate-900">{mod.label}</p>
+                            <p className="text-xs text-slate-500">{mod.description}</p>
+                          </div>
+                          <Switch
+                            checked={isChecked}
+                            onCheckedChange={(val) => setModulesState(prev => ({ ...prev, [mod.key]: val }))}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <button
+              type="button"
+              className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
+              onClick={() => setIsModulesModalOpen(false)}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={savingModules}
+              onClick={handleSaveModules}
+              className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg disabled:opacity-50"
+            >
+              {savingModules ? "Salvando Módulos..." : "Salvar Módulos"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+

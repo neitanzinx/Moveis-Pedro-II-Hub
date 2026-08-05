@@ -1,389 +1,648 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { EMPRESA } from "../config/empresa";
+import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-    Star, ArrowRight, ChevronRight, Award, ShieldCheck, Heart, Crown,
-    Check, Instagram, Facebook, Mail, MapPin, Phone, MessageCircle, Hammer
+    Building2, ShieldCheck, TrendingUp, Truck, Wrench, Boxes, Users,
+    BarChart3, ArrowRight, CheckCircle2, Lock, ChevronDown,
+    Zap, Headphones, Smartphone, Check, Globe, DollarSign, Store, Crown,
+    MessageCircle, Menu, X, LogIn, HelpCircle, FileText, Award
 } from "lucide-react";
 
-// Image Constants
-const HERO_IMAGE = "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?q=80&w=2000&auto=format&fit=crop";
-const SOFA_IMAGE = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?q=80&w=800&auto=format&fit=crop";
-const BED_IMAGE = "https://images.unsplash.com/photo-1505693416388-c03dc043955b?q=80&w=800&auto=format&fit=crop";
-const DINING_IMAGE = "https://images.unsplash.com/photo-1617806118233-18e1de247200?q=80&w=800&auto=format&fit=crop";
-
-
-// --- PÁGINA DE MANUTENÇÃO (TEMPORÁRIA) ---
 export default function LandingPage() {
-    return (
-        <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center p-4">
-            <div className="max-w-md w-full text-center space-y-8 bg-white p-10 rounded-2xl shadow-xl border border-stone-100">
-                <div className="flex justify-center mb-6">
-                    <img
-                        src={EMPRESA.logo_url}
-                        alt={EMPRESA.nome}
-                        className="h-20 w-auto object-contain"
-                    />
-                </div>
+    const navigate = useNavigate();
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [openFaq, setOpenFaq] = useState(null);
 
-                <div className="space-y-4">
-                    <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-                        <Hammer className="w-8 h-8" />
-                    </div>
-                    <h1 className="text-3xl font-serif font-bold text-green-950">Estamos em Obras</h1>
-                    <p className="text-stone-600 font-body leading-relaxed">
-                        Estamos preparando um novo ambiente incrível para você, cliente. <br />
-                        A maior mudança em duas décadas de tradição. Aguardamos você em breve! 😉
-                    </p>
-                </div>
+    // Carregamento dinâmico dos planos do Supabase
+    const [planos, setPlanos] = useState([]);
+    const [loadingPlanos, setLoadingPlanos] = useState(true);
 
-                <div className="pt-6 border-t border-stone-100 flex flex-col gap-3">
-                    <Button
-                        onClick={() => window.open('https://wa.me/552422456349', '_blank')}
-                        className="w-full bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold"
-                    >
-                        <MessageCircle className="w-4 h-4 mr-2" />
-                        Fale Conosco no WhatsApp
-                    </Button>
+    useEffect(() => {
+        async function loadPlanos() {
+            try {
+                setLoadingPlanos(true);
+                const { data, error } = await supabase
+                    .from("planos")
+                    .select("*")
+                    .eq("ativo", true)
+                    .order("preco_mensal", { ascending: true });
 
-                    <Link to="/cadastro">
-                        <Button className="w-full bg-green-700 hover:bg-green-800 text-white font-bold">
-                            Cadastre sua Empresa
-                        </Button>
-                    </Link>
+                if (error) throw error;
+                setPlanos(data || []);
+            } catch (err) {
+                console.error("Erro ao carregar planos:", err);
+                setPlanos([]);
+            } finally {
+                setLoadingPlanos(false);
+            }
+        }
+        loadPlanos();
+    }, []);
 
-                    <Link to="/cliente-login">
-                        <Button variant="outline" className="w-full text-green-800 border-green-200 hover:bg-green-50">
-                            Acesso do Cliente
-                        </Button>
-                    </Link>
-                </div>
-
-                <div className="mt-8">
-                    <Link to="/login" className="text-xs text-stone-400 hover:text-stone-600 transition-colors">
-                        Acesso Administrativo
-                    </Link>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// --- CÓDIGO ORIGINAL (SUSPENSO) ---
-function LandingPageOriginal() {
-    const [hoveredCategory, setHoveredCategory] = useState(null);
-
-    // Scroll to section handler
-    const scrollTo = (id) => {
-        document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+    const scrollToSection = (id) => {
+        setMobileMenuOpen(false);
+        const element = document.getElementById(id);
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth' });
+        }
     };
 
+    const formatCurrency = (val) =>
+        new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val);
+
     return (
-        <div className="min-h-screen bg-stone-50 font-sans selection:bg-amber-100 selection:text-green-900">
-            {/* Import Premium Fonts */}
-            <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Lato:wght@300;400;700&display=swap');
-
-        .font-serif { fontFamily: 'Playfair Display', serif; }
-        .font-body { fontFamily: 'Lato', sans-serif; }
-      `}</style>
-
-            {/* Navigation Bar */}
-            <nav className="fixed w-full z-50 bg-white/90 backdrop-blur-md border-b border-stone-200">
+        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-emerald-100 selection:text-[#07593f]">
+            {/* Header / Navegação */}
+            <header className="sticky top-0 z-50 bg-white border-b border-slate-200 shadow-sm">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between items-center h-20">
-                        <div className="flex items-center gap-3">
-                            {/* Logo */}
-                            <img
-                                src={EMPRESA.logo_url}
-                                alt={EMPRESA.nome}
-                                className="h-12 w-auto object-contain"
-                            />
-                            <span className="font-serif text-2xl font-bold text-green-950 tracking-tight">
-                                {EMPRESA.nome}
-                            </span>
-                        </div>
+                    <div className="flex items-center justify-between h-16 sm:h-20">
+                        {/* Logo */}
+                        <Link to="/" className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-lg bg-[#07593f] flex items-center justify-center text-white">
+                                <Building2 className="w-5 h-5 stroke-[2.2]" />
+                            </div>
+                            <div className="flex flex-col">
+                                <span className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 leading-none">
+                                    Gest<span className="text-[#07593f]">App</span>
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-medium tracking-wide mt-0.5">
+                                    Gestão Comercial & Logística
+                                </span>
+                            </div>
+                        </Link>
 
-                        <div className="hidden md:flex items-center gap-8">
-                            <button onClick={() => scrollTo('colecoes')} className="text-stone-600 hover:text-green-900 font-body text-sm font-medium tracking-wide transition-colors">COLEÇÕES</button>
-                            <button onClick={() => scrollTo('sobre')} className="text-stone-600 hover:text-green-900 font-body text-sm font-medium tracking-wide transition-colors">SOBRE NÓS</button>
-                            <button onClick={() => scrollTo('fidelidade')} className="text-stone-600 hover:text-green-900 font-body text-sm font-medium tracking-wide transition-colors">FIDELIDADE</button>
-                        </div>
+                        {/* Menu Desktop */}
+                        <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
+                            <button onClick={() => scrollToSection('pilares')} className="hover:text-[#07593f] transition-colors">
+                                Funcionalidades
+                            </button>
+                            <button onClick={() => scrollToSection('portal-cliente')} className="hover:text-[#07593f] transition-colors">
+                                Portal do Cliente
+                            </button>
+                            <button onClick={() => scrollToSection('planos')} className="hover:text-[#07593f] transition-colors">
+                                Planos
+                            </button>
+                            <button onClick={() => scrollToSection('faq')} className="hover:text-[#07593f] transition-colors">
+                                Dúvidas
+                            </button>
+                        </nav>
 
-                        <div className="flex items-center gap-4">
-                            <Link to="/cliente-login">
-                                <Button variant="ghost" className="font-body text-green-900 hover:bg-green-50">
+                        {/* Botões de Ação */}
+                        <div className="hidden md:flex items-center gap-3">
+                            <Link to="/login">
+                                <Button variant="ghost" className="text-slate-700 hover:text-[#07593f] hover:bg-slate-100 font-semibold text-sm">
+                                    <LogIn className="w-4 h-4 mr-2 text-[#07593f]" />
                                     Entrar
                                 </Button>
                             </Link>
-                            <Link to="/cliente-login?mode=register">
-                                <Button className="bg-green-900 text-white hover:bg-green-800 font-body px-6 rounded-full shadow-lg shadow-green-900/20">
-                                    Cadastrar
+
+                            <Link to="/cadastro">
+                                <Button className="bg-[#07593f] hover:bg-[#05432f] text-white font-bold text-sm px-5">
+                                    Cadastrar Empresa
+                                </Button>
+                            </Link>
+                        </div>
+
+                        {/* Menu Mobile */}
+                        <div className="md:hidden flex items-center gap-2">
+                            <Link to="/login">
+                                <Button size="sm" variant="outline" className="border-slate-300 text-[#07593f]">
+                                    Entrar
+                                </Button>
+                            </Link>
+                            <button
+                                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                                className="p-2 text-slate-700 hover:text-slate-900 focus:outline-none"
+                            >
+                                {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Mobile Menu Dropdown */}
+                {mobileMenuOpen && (
+                    <div className="md:hidden bg-white border-b border-slate-200 px-4 pt-3 pb-6 space-y-3">
+                        <button
+                            onClick={() => scrollToSection('pilares')}
+                            className="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                            Funcionalidades
+                        </button>
+                        <button
+                            onClick={() => scrollToSection('portal-cliente')}
+                            className="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                            Portal do Cliente
+                        </button>
+                        <button
+                            onClick={() => scrollToSection('planos')}
+                            className="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                            Planos
+                        </button>
+                        <button
+                            onClick={() => scrollToSection('faq')}
+                            className="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                            Dúvidas Frequentes
+                        </button>
+                        <div className="pt-4 border-t border-slate-200 flex flex-col gap-2">
+                            <Link to="/login" className="w-full">
+                                <Button variant="outline" className="w-full justify-center border-slate-300 text-slate-700">
+                                    <LogIn className="w-4 h-4 mr-2 text-[#07593f]" />
+                                    Área da Empresa (Login)
+                                </Button>
+                            </Link>
+                            <Link to="/cadastro" className="w-full">
+                                <Button className="w-full justify-center bg-[#07593f] hover:bg-[#05432f] text-white font-bold">
+                                    Cadastrar Minha Empresa
                                 </Button>
                             </Link>
                         </div>
                     </div>
-                </div>
-            </nav>
+                )}
+            </header>
 
-            {/* Hero Section - Immersive */}
-            <div className="relative h-screen min-h-[700px] flex items-center justify-center overflow-hidden">
-                {/* Background Image with Parallax-like effect */}
-                <div
-                    className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat transform scale-105"
-                    style={{ backgroundImage: `url(${HERO_IMAGE})` }}
-                >
-                    <div className="absolute inset-0 bg-gradient-to-r from-green-950/90 via-green-900/40 to-transparent"></div>
-                </div>
-
-                <div className="relative z-10 max-w-7xl mx-auto px-4 w-full pt-20">
-                    <div className="max-w-2xl animate-fade-in-up">
-                        <Badge className="bg-amber-400/90 text-green-950 hover:bg-amber-400 border-none mb-6 px-4 py-1 text-xs font-bold tracking-widest uppercase">
-                            Nova Coleção 2026
-                        </Badge>
-                        <h1 className="font-serif text-5xl md:text-7xl font-bold text-white leading-tight mb-6 drop-shadow-lg">
-                            Elegância e <br />
-                            <span className="italic text-amber-200">Conforto</span> para <br />
-                            seu Lar
+            {/* SEÇÃO HERO */}
+            <section className="pt-12 pb-16 md:pt-20 md:pb-24 bg-white border-b border-slate-200">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="max-w-3xl space-y-6">
+                        <h1 className="text-3xl sm:text-5xl font-bold tracking-tight text-slate-900 leading-[1.2]">
+                            Sistema de Gestão Comercial, Estoque e Logística para Lojas e Distribuidoras
                         </h1>
-                        <p className="font-body text-lg md:text-xl text-stone-200 mb-10 leading-relaxed max-w-lg">
-                            Transformamos ambientes com móveis de design exclusivo e qualidade superior.
-                            Descubra a sofisticação que sua casa merece.
+
+                        <p className="text-base sm:text-lg text-slate-600 leading-relaxed font-normal">
+                            Do balcão de vendas à entrega na casa do cliente: controle toda a sua operação em uma única plataforma web integrada e sem complicação.
                         </p>
-                        <div className="flex flex-col gap-5 sm:w-fit">
-                            <div className="flex flex-col sm:flex-row gap-4">
-                                <Link to="/cliente-login?mode=register">
-                                    <Button size="lg" className="h-14 px-8 bg-amber-400 text-green-950 hover:bg-amber-300 font-bold rounded-full w-full sm:w-auto transition-all transform hover:scale-105 shadow-xl shadow-amber-900/20">
-                                        Começar Agora
-                                        <ArrowRight className="ml-2 w-5 h-5" />
-                                    </Button>
-                                </Link>
-                                <Button
-                                    variant="outline"
-                                    size="lg"
-                                    className="h-14 px-8 border-2 border-white bg-white/5 text-white hover:bg-white hover:text-green-950 rounded-full font-medium w-full sm:w-auto backdrop-blur-sm transition-all duration-300"
-                                    onClick={() => scrollTo('colecoes')}
-                                >
-                                    Ver Coleções
+
+                        <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                            <Link to="/cadastro">
+                                <Button size="lg" className="w-full sm:w-auto h-12 px-7 text-sm bg-[#07593f] hover:bg-[#05432f] text-white font-bold rounded-lg shadow-sm">
+                                    Cadastrar Empresa
+                                    <ArrowRight className="w-4 h-4 ml-2" />
                                 </Button>
-                            </div>
-                            <Button
-                                size="lg"
-                                className="h-14 bg-[#25D366]/20 text-white hover:bg-[#25D366] font-bold rounded-full w-full backdrop-blur-md border border-white/20 transition-all transform hover:scale-105 shadow-xl shadow-black/20 flex items-center justify-center group"
-                                onClick={() => window.open('https://wa.me/552422456349', '_blank')}
-                            >
-                                <svg viewBox="0 0 24 24" className="mr-2 w-6 h-6 fill-current text-[#25D366] group-hover:text-white transition-colors" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.008-.57-.008-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" />
-                                </svg>
-                                Falar no WhatsApp (24) 2245-6349
-                            </Button>
+                            </Link>
+
+                            <Link to="/login">
+                                <Button size="lg" variant="outline" className="w-full sm:w-auto h-12 px-7 text-sm border-slate-300 text-slate-700 hover:bg-slate-50 font-medium rounded-lg">
+                                    <LogIn className="w-4 h-4 mr-2 text-[#07593f]" />
+                                    Acessar o Sistema
+                                </Button>
+                            </Link>
+                        </div>
+
+                        <div className="pt-4 flex flex-wrap gap-6 text-xs text-slate-500 font-medium">
+                            <span className="flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4 text-[#07593f]" />
+                                Acesso 100% via navegador Web
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4 text-[#07593f]" />
+                                Suporte a múltiplas lojas e filiais
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                                <ShieldCheck className="w-4 h-4 text-[#07593f]" />
+                                Backup diário automático
+                            </span>
                         </div>
                     </div>
                 </div>
+            </section>
 
-                {/* Scroll Indicator */}
-                <div className="absolute bottom-10 left-1/2 transform -translate-x-1/2 animate-bounce">
-                    <ChevronRight className="w-8 h-8 text-white rotate-90" />
-                </div>
-            </div >
-
-            {/* Featured Collections Grid */}
-            < section id="colecoes" className="py-24 bg-stone-50" >
+            {/* SEÇÃO DOS 4 PILARES DA OPERAÇÃO */}
+            <section id="pilares" className="py-16 md:py-24 bg-slate-50 border-b border-slate-200">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="text-center mb-16">
-                        <span className="text-green-800 font-bold tracking-widest text-sm uppercase mb-2 block">Categorias</span>
-                        <h2 className="font-serif text-4xl md:text-5xl font-bold text-green-950 mb-4">Coleções em Destaque</h2>
-                        <div className="w-24 h-1 bg-amber-400 mx-auto rounded-full"></div>
+                    <div className="max-w-3xl mb-12 space-y-2">
+                        <h2 className="text-2xl sm:text-4xl font-bold text-slate-900">
+                            Os 4 pilares do GestApp na sua empresa
+                        </h2>
+                        <p className="text-slate-600 text-base">
+                            Tudo o que sua equipe precisa para operar com clareza e agilidade.
+                        </p>
                     </div>
 
-                    <div className="grid md:grid-cols-3 gap-8">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        {/* Pilar 1 */}
+                        <div className="p-6 bg-white rounded-xl border border-slate-200 shadow-sm space-y-3 flex flex-col justify-between">
+                            <div className="space-y-3">
+                                <div className="w-10 h-10 rounded-lg bg-emerald-50 text-[#07593f] flex items-center justify-center">
+                                    <Store className="w-5 h-5 stroke-[2.2]" />
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-900">1. Vendas & PDV</h3>
+                                <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
+                                    Emissão rápida de orçamentos, venda no balcão, consulta imediata de estoque, e múltiplas formas de pagamento.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Pilar 2 */}
+                        <div className="p-6 bg-white rounded-xl border border-slate-200 shadow-sm space-y-3 flex flex-col justify-between">
+                            <div className="space-y-3">
+                                <div className="w-10 h-10 rounded-lg bg-emerald-50 text-[#07593f] flex items-center justify-center">
+                                    <Boxes className="w-5 h-5 stroke-[2.2]" />
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-900">2. Estoque Multi-Filial</h3>
+                                <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
+                                    Saldo unificado entre lojas e depósitos centralizados, inventário ágil e trava para impedir vendas sem saldo físico.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Pilar 3 */}
+                        <div className="p-6 bg-white rounded-xl border border-slate-200 shadow-sm space-y-3 flex flex-col justify-between">
+                            <div className="space-y-3">
+                                <div className="w-10 h-10 rounded-lg bg-emerald-50 text-[#07593f] flex items-center justify-center">
+                                    <Truck className="w-5 h-5 stroke-[2.2]" />
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-900">3. Logística & Montagem</h3>
+                                <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
+                                    Roteirização de frotas de entrega, link de rastreamento com mapa em tempo real e ordens de serviço para montadores.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Pilar 4 */}
+                        <div className="p-6 bg-white rounded-xl border border-slate-200 shadow-sm space-y-3 flex flex-col justify-between">
+                            <div className="space-y-3">
+                                <div className="w-10 h-10 rounded-lg bg-emerald-50 text-[#07593f] flex items-center justify-center">
+                                    <Headphones className="w-5 h-5 stroke-[2.2]" />
+                                </div>
+                                <h3 className="text-lg font-bold text-slate-900">4. Pós-Venda & Garantia</h3>
+                                <p className="text-slate-600 text-xs sm:text-sm leading-relaxed">
+                                    Autoatendimento para solicitações de assistência técnica via QR Code impresso diretamente na Nota Fiscal do produto.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* SEÇÃO PORTAL DO CLIENTE COM A MARCA DA EMPRESA */}
+            <section id="portal-cliente" className="py-16 md:py-24 bg-slate-50 border-b border-slate-200">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="grid md:grid-cols-2 gap-12 items-center">
+                        {/* Texto e Benefícios */}
+                        <div className="space-y-6">
+                            <div className="inline-flex items-center gap-2 text-xs font-semibold text-[#07593f] bg-emerald-50 px-3 py-1 rounded-md border border-emerald-200">
+                                <Crown className="w-4 h-4 text-[#07593f] fill-[#07593f]/20" />
+                                <span>Portal do Cliente Exclusivo</span>
+                            </div>
+
+                            <h2 className="text-2xl sm:text-4xl font-bold text-slate-900 leading-tight">
+                                Ofereça um Portal do Cliente personalizado com a marca da sua empresa
+                            </h2>
+
+                            <p className="text-slate-600 text-base leading-relaxed">
+                                Além do gerenciamento interno, o GestApp fornece uma área exclusiva para os clientes da sua loja. Eles podem consultar compras, rastrear entregas ao vivo e acumular pontos de fidelidade.
+                            </p>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                                <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm space-y-1.5">
+                                    <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                                        <Crown className="w-4 h-4 text-amber-500 fill-amber-500" />
+                                        <span>Clube de Pontos</span>
+                                    </div>
+                                    <p className="text-slate-600 text-xs leading-relaxed">
+                                        Fidelização com acúmulo de pontos/coroas a cada compra realizada.
+                                    </p>
+                                </div>
+
+                                <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm space-y-1.5">
+                                    <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                                        <Truck className="w-4 h-4 text-[#07593f]" />
+                                        <span>Rastreio ao Vivo</span>
+                                    </div>
+                                    <p className="text-slate-600 text-xs leading-relaxed">
+                                        Mapa GPS em tempo real enviando o status da entrega pelo celular.
+                                    </p>
+                                </div>
+
+                                <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm space-y-1.5">
+                                    <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                                        <Headphones className="w-4 h-4 text-[#07593f]" />
+                                        <span>Assistência QR Code</span>
+                                    </div>
+                                    <p className="text-slate-600 text-xs leading-relaxed">
+                                        Abertura de chamados de garantia escaneando a Nota Fiscal.
+                                    </p>
+                                </div>
+
+                                <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm space-y-1.5">
+                                    <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                                        <FileText className="w-4 h-4 text-[#07593f]" />
+                                        <span>Segunda Via de Notas</span>
+                                    </div>
+                                    <p className="text-slate-600 text-xs leading-relaxed">
+                                        Histórico completo de pedidos e documentos para o cliente.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="pt-2">
+                                <Link to="/cadastro">
+                                    <Button size="lg" className="h-12 px-7 bg-[#07593f] hover:bg-[#05432f] text-white font-bold rounded-lg text-sm shadow-sm">
+                                        Testar no Cadastro de Empresa
+                                        <ArrowRight className="w-4 h-4 ml-2" />
+                                    </Button>
+                                </Link>
+                            </div>
+                        </div>
+
+                        {/* Card Ilustrativo Fiel ao ClienteDashboard */}
+                        <div className="bg-white border border-slate-200 p-6 sm:p-7 rounded-2xl shadow-md space-y-5">
+                            {/* Header do App do Cliente */}
+                            <div className="flex justify-between items-center pb-4 border-b border-slate-100">
+                                <div className="flex items-center gap-2.5">
+                                    <div className="w-8 h-8 rounded-lg bg-[#07593f] text-white flex items-center justify-center text-xs font-bold">
+                                        E
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-bold text-slate-900">Sua Empresa</h3>
+                                        <p className="text-[10px] text-slate-500 font-medium">Portal do Cliente & Fidelidade</p>
+                                    </div>
+                                </div>
+                                <Badge className="bg-amber-50 text-amber-800 border-amber-200 text-xs font-semibold flex items-center gap-1">
+                                    <Crown className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                                    VIP Gold
+                                </Badge>
+                            </div>
+
+                            {/* Card de Pontos do Cliente */}
+                            <div className="bg-gradient-to-r from-[#07593f] to-emerald-800 p-5 rounded-xl text-white space-y-3 shadow-sm">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <span className="text-emerald-100 text-[11px] font-medium">Saldo de Pontos Acumulados</span>
+                                        <p className="text-2xl font-bold font-mono mt-0.5">2.450 pts</p>
+                                    </div>
+                                    <Award className="w-7 h-7 text-amber-400" />
+                                </div>
+
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-[10px] text-emerald-100">
+                                        <span>Meta para Resgate de Cupom</span>
+                                        <span>75%</span>
+                                    </div>
+                                    <div className="h-2 w-full bg-white/20 rounded-full overflow-hidden">
+                                        <div className="h-full w-[75%] bg-amber-400 rounded-full" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Status da Entrega Recente */}
+                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-xs">
+                                <div className="flex justify-between items-center">
+                                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                                        <Truck className="w-4 h-4 text-[#07593f]" />
+                                        Entrega do Pedido #8491
+                                    </span>
+                                    <Badge className="bg-emerald-100 text-[#07593f] text-[10px]">Em Trânsito</Badge>
+                                </div>
+                                <p className="text-slate-600 text-[11px]">
+                                    Motorista a caminho • Chegada estimada às 14:30h
+                                </p>
+                                <div className="pt-1">
+                                    <Button size="sm" variant="outline" className="w-full h-8 text-[11px] border-slate-300 text-slate-700 font-semibold bg-white hover:bg-slate-100">
+                                        Ver localização no Mapa ao Vivo
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+
+            {/* SEÇÃO DE PLANOS ATIVOS */}
+            <section id="planos" className="py-16 md:py-24 bg-white border-b border-slate-200">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="max-w-3xl mb-12 space-y-2">
+                        <h2 className="text-2xl sm:text-4xl font-bold text-slate-900">
+                            Planos transparentes para sua empresa
+                        </h2>
+                        <p className="text-slate-600 text-base">
+                            Escolha o plano adequado para a estrutura do seu negócio.
+                        </p>
+                    </div>
+
+                    {loadingPlanos ? (
+                        <div className="text-center py-12">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#07593f] mx-auto mb-3" />
+                            <p className="text-slate-500 text-xs">Carregando planos...</p>
+                        </div>
+                    ) : planos.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {planos.map((plano, index) => {
+                                const isPopular = index === 1;
+                                return (
+                                    <div
+                                        key={plano.id || index}
+                                        className={`rounded-xl p-6 flex flex-col justify-between space-y-6 ${isPopular
+                                            ? "bg-white border-2 border-[#07593f] shadow-md relative"
+                                            : "bg-slate-50 border border-slate-200"
+                                            }`}
+                                    >
+                                        {isPopular && (
+                                            <div className="absolute -top-3 left-6 bg-[#07593f] text-white text-[10px] font-bold px-3 py-0.5 rounded uppercase tracking-wider">
+                                                Recomendado
+                                            </div>
+                                        )}
+                                        <div className="space-y-4">
+                                            <div>
+                                                <h3 className="text-xl font-bold text-slate-900">{plano.nome}</h3>
+                                                <p className="text-xs text-slate-600 mt-1">{plano.descricao || "Acesso completo à plataforma GestApp."}</p>
+                                            </div>
+
+                                            <div className="pt-2">
+                                                <span className="text-3xl font-bold text-slate-900 font-mono">
+                                                    {formatCurrency(plano.preco_mensal || 0)}
+                                                </span>
+                                                <span className="text-slate-500 text-xs"> / mês</span>
+                                            </div>
+
+                                            <div className="pt-3 space-y-2 text-xs text-slate-600 border-t border-slate-200">
+                                                <div className="flex items-center gap-2">
+                                                    <Check className="w-4 h-4 text-[#07593f]" />
+                                                    <span>Acesso via web em qualquer dispositivo</span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <Check className="w-4 h-4 text-[#07593f]" />
+                                                    <span>Suporte via WhatsApp</span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <Check className="w-4 h-4 text-[#07593f]" />
+                                                    <span>Backups automáticos</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <Link to={`/cadastro?plano=${plano.id}`} className="w-full">
+                                            <Button
+                                                className={`w-full font-bold text-sm h-11 ${isPopular
+                                                    ? "bg-[#07593f] hover:bg-[#05432f] text-white"
+                                                    : "bg-white hover:bg-slate-100 text-slate-800 border border-slate-300"
+                                                    }`}
+                                            >
+                                                Selecionar Plano
+                                            </Button>
+                                        </Link>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        /* Fallback se a lista estiver em transição */
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {[
+                                { nome: "Starter", preco: 199, desc: "Para pequenos comércios e lojas em fase inicial." },
+                                { nome: "Business", preco: 399, desc: "Para empresas com logística de entregas e montadores.", popular: true },
+                                { nome: "Enterprise", preco: 799, desc: "Para redes de lojas e operações com múltiplas filiais." }
+                            ].map((p, idx) => (
+                                <div key={idx} className={`rounded-xl p-6 flex flex-col justify-between space-y-6 ${p.popular ? "bg-white border-2 border-[#07593f] shadow-md" : "bg-slate-50 border border-slate-200"}`}>
+                                    <div className="space-y-3">
+                                        <h3 className="text-xl font-bold text-slate-900">{p.nome}</h3>
+                                        <p className="text-xs text-slate-600">{p.desc}</p>
+                                        <div>
+                                            <span className="text-3xl font-bold text-slate-900 font-mono">R$ {p.preco}</span>
+                                            <span className="text-slate-500 text-xs"> / mês</span>
+                                        </div>
+                                    </div>
+                                    <Link to="/cadastro" className="w-full">
+                                        <Button className={`w-full font-bold text-sm h-11 ${p.popular ? "bg-[#07593f] hover:bg-[#05432f] text-white" : "bg-white border border-slate-300 text-slate-800"}`}>
+                                            Cadastrar Empresa
+                                        </Button>
+                                    </Link>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </section>
+
+            {/* SEÇÃO PERGUNTAS FREQUENTES (FAQ) */}
+            <section id="faq" className="py-16 bg-white">
+                <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+                    <div className="space-y-2">
+                        <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">Perguntas Frequentes</h2>
+                        <p className="text-slate-600 text-sm">Respostas diretas para dúvidas comuns sobre o GestApp.</p>
+                    </div>
+
+                    <div className="space-y-3">
                         {[
-                            { title: "Living Room", image: SOFA_IMAGE, desc: "Sofás e poltronas exclusivos" },
-                            { title: "Quartos", image: BED_IMAGE, desc: "Camas e cabeceiras premium" },
-                            { title: "Jantar", image: DINING_IMAGE, desc: "Mesas para momentos especiais" }
+                            {
+                                q: "Como funciona a contratação do GestApp?",
+                                a: "O cadastro é feito online. Você preenche os dados da sua empresa, seleciona o plano desejado e tem acesso imediato ao painel."
+                            },
+                            {
+                                q: "O sistema exige instalação em servidores locais?",
+                                a: "Não. O GestApp é 100% web e roda direto pelo navegador no computador, tablet ou celular."
+                            },
+                            {
+                                q: "Como funciona o rastreamento de entregas para o cliente?",
+                                a: "Ao agendar a entrega no módulo de logística, o sistema disponibiliza um link onde o cliente acompanha a localização do entregador no mapa."
+                            },
+                            {
+                                q: "Como meus dados são mantidos em segurança?",
+                                a: "Seus dados ficam 100% isolados por políticas de segurança a nível de linha (RLS), garantidos por backups diários automáticos."
+                            }
                         ].map((item, idx) => (
                             <div
                                 key={idx}
-                                className="group relative h-[500px] overflow-hidden rounded-2xl cursor-pointer shadow-xl"
-                                onMouseEnter={() => setHoveredCategory(idx)}
-                                onMouseLeave={() => setHoveredCategory(null)}
+                                className="bg-slate-50 border border-slate-200 rounded-lg overflow-hidden cursor-pointer"
+                                onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
                             >
-                                <div
-                                    className="absolute inset-0 bg-cover bg-center transition-transform duration-700 ease-out group-hover:scale-110"
-                                    style={{ backgroundImage: `url(${item.image})` }}
-                                />
-                                <div className="absolute inset-0 bg-gradient-to-t from-green-950/90 via-green-900/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
-
-                                <div className="absolute bottom-0 left-0 p-8 transform transition-transform duration-500 group-hover:-translate-y-2">
-                                    <h3 className="font-serif text-3xl text-white mb-2">{item.title}</h3>
-                                    <p className="text-stone-300 mb-4 font-body opacity-0 group-hover:opacity-100 transition-opacity duration-500 delay-100">
-                                        {item.desc}
-                                    </p>
-                                    <span className="inline-flex items-center text-amber-400 font-bold border-b border-amber-400 pb-1 text-sm tracking-widest uppercase hover:text-amber-300 transition-colors">
-                                        Explorar <ArrowRight className="ml-2 w-4 h-4" />
-                                    </span>
+                                <div className="p-4 flex justify-between items-center text-sm font-semibold text-slate-800">
+                                    <span>{item.q}</span>
+                                    <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${openFaq === idx ? "rotate-180 text-[#07593f]" : ""}`} />
                                 </div>
+                                {openFaq === idx && (
+                                    <div className="px-4 pb-4 text-xs text-slate-600 leading-relaxed border-t border-slate-200 pt-3 bg-white">
+                                        {item.a}
+                                    </div>
+                                )}
                             </div>
                         ))}
                     </div>
                 </div>
-            </section >
+            </section>
 
-            {/* Value Proposition */}
-            < section id="sobre" className="py-24 bg-white border-y border-stone-100" >
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="grid md:grid-cols-3 gap-12 text-center">
-                        {[
-                            { icon: Award, title: "Qualidade Superior", text: "Materiais selecionados e acabamento artesanal de excelência." },
-                            { icon: ShieldCheck, title: "Garantia Estendida", text: "Confiança total na durabilidade de cada peça que produzimos." },
-                            { icon: Heart, title: "Design Exclusivo", text: "Peças assinadas que trazem personalidade única ao seu ambiente." }
-                        ].map((feature, idx) => (
-                            <div key={idx} className="p-8 rounded-2xl bg-stone-50 hover:bg-stone-100 transition-colors duration-300">
-                                <div className="w-16 h-16 bg-green-100 text-green-800 rounded-full flex items-center justify-center mx-auto mb-6">
-                                    <feature.icon className="w-8 h-8" />
-                                </div>
-                                <h3 className="font-serif text-2xl font-bold text-green-950 mb-4">{feature.title}</h3>
-                                <p className="text-stone-600 font-body leading-relaxed">{feature.text}</p>
-                            </div>
-                        ))}
+            {/* CALL TO ACTION FINAL */}
+            <section className="py-14 bg-[#07593f] text-white">
+                <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4">
+                    <h2 className="text-2xl sm:text-3xl font-bold">
+                        Comece a organizar a gestão da sua empresa hoje
+                    </h2>
+                    <p className="text-emerald-100 text-sm max-w-lg mx-auto">
+                        Cadastre sua empresa e unifique vendas, estoque, logística e atendimento.
+                    </p>
+                    <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+                        <Link to="/cadastro" className="w-full sm:w-auto">
+                            <Button size="lg" className="w-full sm:w-auto h-12 px-7 text-sm bg-white hover:bg-slate-100 text-[#07593f] font-bold rounded-lg shadow-sm">
+                                Cadastrar Empresa
+                                <ArrowRight className="w-4 h-4 ml-2" />
+                            </Button>
+                        </Link>
+                        <Link to="/login" className="w-full sm:w-auto">
+                            <Button size="lg" variant="outline" className="w-full sm:w-auto h-12 px-7 text-sm border-white/40 text-white hover:bg-white/10 rounded-lg font-semibold">
+                                <LogIn className="w-4 h-4 mr-2" />
+                                Acessar Minha Conta
+                            </Button>
+                        </Link>
                     </div>
                 </div>
-            </section >
+            </section>
 
-            {/* Loyalty Club Section - "The Black Card" Feel */}
-            < section id="fidelidade" className="py-28 relative overflow-hidden bg-green-950" >
-                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-                <div className="absolute bottom-0 left-0 w-96 h-96 bg-green-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2"></div>
-
-                <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="grid md:grid-cols-2 gap-16 items-center">
-                        <div className="text-left text-white">
-                            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-md border border-white/20 mb-6">
-                                <Crown className="w-4 h-4 text-amber-400 fill-amber-400" />
-                                <span className="text-sm font-bold tracking-widest uppercase text-amber-50">{EMPRESA.nome} Club</span>
-                            </div>
-                            <h2 className="font-serif text-5xl md:text-6xl font-bold mb-6 leading-tight">
-                                Mais que móveis...<br />
-                                <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-500">
-                                    Privilégios Reais.
-                                </span>
-                            </h2>
-                            <p className="text-stone-300 text-lg mb-10 leading-relaxed font-body">
-                                Faça parte do nosso programa de fidelidade exclusivo.
-                                Acumule Coroas em cada compra e troque por descontos e experiências únicas.
-                                Cadastre-se hoje e ganhe bônus imediato.
-                            </p>
-
-                            <div className="space-y-4 mb-10">
-                                {[
-                                    "Acumule Coroas a cada compra realizada",
-                                    "Acesso antecipado a novas coleções",
-                                    "Descontos exclusivos para membros",
-                                    "Atendimento personalizado VIP"
-                                ].map((item, i) => (
-                                    <div key={i} className="flex items-center gap-3">
-                                        <div className="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center shrink-0">
-                                            <Check className="w-4 h-4 text-green-950" />
-                                        </div>
-                                        <span className="text-stone-200 font-body">{item}</span>
-                                    </div>
-                                ))}
-                            </div>
-
-                            <Link to="/cliente-login?mode=register">
-                                <Button size="lg" className="h-16 px-10 bg-gradient-to-r from-amber-400 to-amber-500 text-green-950 font-bold rounded-full text-lg shadow-2xl shadow-amber-900/50 hover:shadow-amber-500/30 transform hover:-translate-y-1 transition-all">
-                                    Quero Ser VIP
-                                </Button>
-                            </Link>
-                        </div>
-
-                        {/* Visual representation of the card/app */}
-                        <div className="relative">
-                            <div className="absolute inset-0 bg-gradient-to-r from-amber-200 to-amber-500 transform rotate-6 rounded-3xl blur-md opacity-30"></div>
-                            <div className="relative bg-white/10 backdrop-blur-xl border border-white/20 p-8 rounded-3xl shadow-2xl text-white transform hover:scale-105 transition-transform duration-500">
-                                <div className="flex justify-between items-start mb-12">
-                                    <div>
-                                        <h3 className="text-2xl font-serif font-bold">{EMPRESA.nome}</h3>
-                                        <p className="text-amber-300 text-sm tracking-[0.2em] uppercase">Premium Member</p>
-                                    </div>
-                                    <Crown className="w-10 h-10 text-amber-400 fill-amber-400" />
-                                </div>
-                                <div className="space-y-6">
-                                    <div className="flex gap-4">
-                                        <div className="h-3 flex-1 bg-white/20 rounded-full overflow-hidden">
-                                            <div className="h-full w-2/3 bg-amber-400 rounded-full"></div>
-                                        </div>
-                                    </div>
-                                    <div className="flex justify-between items-end">
-                                        <div>
-                                            <p className="text-stone-400 text-xs uppercase tracking-widest mb-1">Suas Coroas</p>
-                                            <p className="text-4xl font-bold font-serif">2.450</p>
-                                        </div>
-                                        <div>
-                                            <p className="text-stone-400 text-xs uppercase tracking-widest text-right mb-1">Status</p>
-                                            <p className="text-xl font-bold text-amber-300">Gold</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section >
-
-            {/* Footer */}
-            < footer className="bg-green-950 text-stone-400 py-16 border-t border-white/10 font-body" >
+            {/* RODAPÉ */}
+            <footer className="bg-slate-900 text-slate-400 py-10 text-xs border-t border-slate-800">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="grid md:grid-cols-4 gap-12">
-                        <div className="col-span-1 md:col-span-2">
-                            <h3 className="text-white font-serif text-2xl font-bold mb-6">{EMPRESA.nome}</h3>
-                            <p className="mb-6 max-w-sm">
-                                Tradição em criar lares com conforto e elegância.
-                                Sua satisfação é o nosso maior compromisso.
-                            </p>
-                            <div className="flex gap-4">
-                                <Button variant="ghost" size="icon" className="hover:text-white hover:bg-white/10 rounded-full"><Instagram /></Button>
-                                <Button variant="ghost" size="icon" className="hover:text-white hover:bg-white/10 rounded-full"><Facebook /></Button>
-                                <Button variant="ghost" size="icon" className="hover:text-white hover:bg-white/10 rounded-full"><Mail /></Button>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded bg-[#07593f] flex items-center justify-center text-white">
+                                    <Building2 className="w-4 h-4" />
+                                </div>
+                                <span className="text-lg font-bold text-white">GestApp</span>
                             </div>
+                            <p className="text-slate-400 text-xs">
+                                Plataforma de Gestão Comercial, Estoque e Logística.
+                            </p>
                         </div>
 
-                        <div>
-                            <h4 className="text-white font-bold mb-6 uppercase tracking-wider text-sm">Links Rápidos</h4>
-                            <ul className="space-y-3">
-                                <li><a href="#" className="hover:text-amber-400 transition-colors">Coleções</a></li>
-                                <li><a href="#" className="hover:text-amber-400 transition-colors">Sobre Nós</a></li>
-                                <li><a href="#" className="hover:text-amber-400 transition-colors">Programa Fidelidade</a></li>
-                                <li><a href="#" className="hover:text-amber-400 transition-colors">Fale Conosco</a></li>
+                        <div className="space-y-2">
+                            <h4 className="font-semibold text-slate-200 text-xs uppercase">Links Rápidos</h4>
+                            <ul className="space-y-1.5 text-xs">
+                                <li><Link to="/login" className="hover:text-white transition-colors">Login da Empresa</Link></li>
+                                <li><Link to="/cadastro" className="hover:text-white transition-colors">Cadastrar Empresa</Link></li>
+                                <li><Link to="/cliente-login" className="hover:text-white transition-colors">Portal do Cliente</Link></li>
+                                <li><Link to="/operador/login" className="hover:text-white transition-colors">Operador SaaS</Link></li>
                             </ul>
                         </div>
 
-                        <div>
-                            <h4 className="text-white font-bold mb-6 uppercase tracking-wider text-sm">Contato</h4>
-                            <ul className="space-y-3">
-                                <li className="flex items-center gap-3">
-                                    <MapPin className="w-5 h-5 text-amber-500" />
-                                    <span>Av. Principal, 123 - Centro</span>
-                                </li>
-                                <li className="flex items-center gap-3">
-                                    <Phone className="w-5 h-5 text-amber-500" />
-                                    <span>(11) 99999-9999</span>
-                                </li>
-                                <li className="flex items-center gap-3">
-                                    <Mail className="w-5 h-5 text-amber-500" />
-                                    <span>contato@GestApp.com.br</span>
-                                </li>
+                        <div className="space-y-2">
+                            <h4 className="font-semibold text-slate-200 text-xs uppercase">Navegação</h4>
+                            <ul className="space-y-1.5 text-xs">
+                                <li><button onClick={() => scrollToSection('pilares')} className="hover:text-white transition-colors">Funcionalidades</button></li>
+                                <li><button onClick={() => scrollToSection('portal-cliente')} className="hover:text-white transition-colors">Portal do Cliente</button></li>
+                                <li><button onClick={() => scrollToSection('planos')} className="hover:text-white transition-colors">Planos</button></li>
                             </ul>
                         </div>
+
+                        <div className="space-y-2">
+                            <h4 className="font-semibold text-slate-200 text-xs uppercase">Suporte</h4>
+                            <p className="text-slate-400 text-xs">
+                                Atendimento aos clientes GestApp de Segunda a Sábado.
+                            </p>
+                        </div>
                     </div>
-                    <div className="border-t border-white/10 mt-12 pt-8 text-center text-sm">
-                        <p>&copy; 2026 {EMPRESA.nome}. Todos os direitos reservados.</p>
+
+                    <div className="pt-6 border-t border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-3 text-slate-500 text-[11px]">
+                        <p>© 2026 GestApp. Todos os direitos reservados.</p>
+                        <span>Sistemas Operacionais</span>
                     </div>
                 </div>
-            </footer >
-        </div >
+            </footer>
+        </div>
     );
 }

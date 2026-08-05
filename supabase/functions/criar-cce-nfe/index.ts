@@ -117,6 +117,7 @@ serve(async (req) => {
 
         // ─── Persistir CC-e no banco ─────────────────────────────────────────
         const { error: insertError } = await supabase.from('nfe_carta_correcao').insert({
+            organization_id: orgId,
             nota_fiscal_id: nfeRecord.id,
             nfe_ref,
             sequencia: proximaSequencia,
@@ -135,6 +136,7 @@ serve(async (req) => {
 
         // ─── Auditoria ────────────────────────────────────────────────────────
         await supabase.from('nfe_eventos').insert({
+            organization_id: orgId,
             venda_id: nfeRecord.venda_id,
             nfe_ref,
             tipo_evento: 'carta_correcao',
