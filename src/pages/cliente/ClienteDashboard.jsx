@@ -20,8 +20,6 @@ import {
     Trophy, Target, Sparkles, ArrowRight, Crown, Edit2, Save, X, Navigation, Home, Globe, Hash, Search, CreditCard, Store, AlertCircle
 } from "lucide-react";
 
-const HERO_IMAGE = "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?q=80&w=2000&auto=format&fit=crop";
-
 export default function ClienteDashboard() {
     const navigate = useNavigate();
     const location = useLocation();
@@ -39,6 +37,7 @@ export default function ClienteDashboard() {
     const [cliente, setCliente] = useState(null);
     const [vendas, setVendas] = useState([]);
     const [fidelidadeConfig, setFidelidadeConfig] = useState(null);
+    const [tiers, setTiers] = useState([]);
     const [accessSessionId, setAccessSessionId] = useState(null);
 
     // Redeem State
@@ -91,9 +90,8 @@ export default function ClienteDashboard() {
                 .eq("user_id", authUser.id)
                 .maybeSingle();
 
-            if (clienteError) {
-                console.error("Erro ao buscar cliente:", clienteError);
-                // Try to find by email
+            if (!clienteData && authUser.email) {
+                // Try to find by email if user_id wasn't linked yet
                 const { data: clienteByEmail } = await supabase
                     .from("clientes")
                     .select("*")
@@ -105,7 +103,7 @@ export default function ClienteDashboard() {
                         .from("clientes")
                         .update({ user_id: authUser.id })
                         .eq("id", clienteByEmail.id);
-                    resolvedCliente = clienteByEmail;
+                    resolvedCliente = { ...clienteByEmail, user_id: authUser.id };
                 }
             } else {
                 resolvedCliente = clienteData;
@@ -147,6 +145,16 @@ export default function ClienteDashboard() {
             const { data: configData } = await fidelidadeQuery.maybeSingle();
             setFidelidadeConfig(configData);
 
+            // Fetch tiers
+            try {
+                const { data: tiersData } = await supabase
+                    .from("fidelidade_tiers")
+                    .select("*")
+                    .eq("is_active", true)
+                    .order("coroas_minimas", { ascending: true });
+                setTiers(tiersData || []);
+            } catch (_) { /* silently fail */ }
+
             // Fetch purchases — usa resolvedCliente diretamente (estado React ainda não re-renderizou)
             if (resolvedCliente?.id) {
                 let vendasQuery = supabase
@@ -163,7 +171,6 @@ export default function ClienteDashboard() {
                     .limit(10);
 
                 setVendas(vendasData || []);
-
 
                 // Fetch coroas history
                 try {
@@ -233,7 +240,9 @@ export default function ClienteDashboard() {
         setSavingProfile(true);
 
         const profileData = {
+            organization_id: cliente?.organization_id || organization?.id || null, // Include organization_id for SaaS RLS
             user_id: user.id, // Ensure user_id is linked
+            created_by: user.id, // RLS might require created_by to match auth.uid()
             email: user.email, // Ensure email is present
             nome_completo: editData.nome_completo,
             telefone: editData.telefone,
@@ -244,30 +253,40 @@ export default function ClienteDashboard() {
             complemento: editData.complemento,
             bairro: editData.bairro,
             cidade: editData.cidade,
-            estado: editData.estado,
-            updated_at: new Date().toISOString()
+            estado: editData.estado
         };
 
         try {
             let error;
             let data;
 
-            if (cliente?.id) {
+            let existingId = cliente?.id;
+            if (!existingId) {
+                const { data: existingClient } = await supabase
+                    .from("clientes")
+                    .select("id")
+                    .or(`user_id.eq.${user.id},email.eq.${user.email}`)
+                    .maybeSingle();
+                if (existingClient?.id) {
+                    existingId = existingClient.id;
+                }
+            }
+
+            if (existingId) {
                 // Update existing
                 const { error: updateError, data: updateData } = await supabase
                     .from("clientes")
                     .update(profileData)
-                    .eq("id", cliente.id)
+                    .eq("id", existingId)
                     .select()
                     .single();
                 error = updateError;
                 data = updateData;
             } else {
-                // Insert new (Upsert safely with user_id as key if constraint exists, or just insert)
-                // Using upsert on user_id is safest if unique constraint exists
+                // Insert new 
                 const { error: insertError, data: insertData } = await supabase
                     .from("clientes")
-                    .upsert(profileData, { onConflict: 'user_id' })
+                    .insert(profileData)
                     .select()
                     .single();
                 error = insertError;
@@ -402,16 +421,79 @@ export default function ClienteDashboard() {
         return new Date(date).toLocaleDateString("pt-BR");
     };
 
-    // Keep loyalty calculations
-    const currentSteps = cliente?.coroas || 0;
-    const maxSteps = fidelidadeConfig?.reward_threshold || 20;
-    const progressPercent = Math.min((currentSteps / maxSteps) * 100, 100);
+    // Loyalty calculations
+    const saldoCoroas = cliente?.coroas || 0;
 
-    const statusMembro = currentSteps >= maxSteps
-        ? "Membro Coroa Ouro"
-        : currentSteps >= Math.ceil(maxSteps * 0.5)
-            ? "Membro Coroa Prata"
-            : "Membro Coroa Bronze";
+    // Calcular tier atual e próximo tier a partir dos tiers cadastrados no banco
+    const sortedTiers = Array.isArray(tiers) && tiers.length > 0
+        ? [...tiers].sort((a, b) => (a.coroas_minimas || 0) - (b.coroas_minimas || 0))
+        : [];
+
+    let currentTier = null;
+    let nextTier = null;
+
+    if (sortedTiers.length > 0) {
+        for (let i = 0; i < sortedTiers.length; i++) {
+            if (saldoCoroas >= (sortedTiers[i].coroas_minimas || 0)) {
+                currentTier = sortedTiers[i];
+            } else if (!nextTier) {
+                nextTier = sortedTiers[i];
+            }
+        }
+    }
+
+    const hasNextTier = Boolean(nextTier && nextTier.coroas_minimas > saldoCoroas);
+    const coroasParaProximoNivel = hasNextTier ? nextTier.coroas_minimas - saldoCoroas : 0;
+    const hasConfiguredReward = Boolean(fidelidadeConfig?.reward_threshold && fidelidadeConfig.reward_threshold > 0);
+    const rewardThreshold = hasConfiguredReward ? fidelidadeConfig.reward_threshold : null;
+
+    // Barra de progresso e rótulos dinâmicos
+    let progressPercent = 0;
+    let progressLabelLeft = currentTier?.nome ? currentTier.nome.toUpperCase() : "INÍCIO";
+    let progressLabelCenter = "";
+    let progressLabelRight = "";
+
+    if (hasNextTier) {
+        const baseMin = currentTier ? (currentTier.coroas_minimas || 0) : 0;
+        const targetMax = nextTier.coroas_minimas;
+        const diff = targetMax - baseMin;
+        progressPercent = diff > 0 
+            ? Math.min(100, Math.max(5, ((saldoCoroas - baseMin) / diff) * 100))
+            : 100;
+        progressLabelCenter = `${coroasParaProximoNivel} Coroas para o nível ${nextTier.nome}`;
+        progressLabelRight = nextTier.nome.toUpperCase();
+    } else if (hasConfiguredReward) {
+        progressPercent = Math.min(100, Math.max(5, (saldoCoroas / rewardThreshold) * 100));
+        const faltam = Math.max(0, rewardThreshold - saldoCoroas);
+        progressLabelCenter = faltam > 0 ? `${faltam} Coroas para resgate` : "Recompensa disponível!";
+        progressLabelRight = "RESGATE";
+    } else {
+        // Quando o próximo nível ou recompensa ainda não foram definidos
+        progressPercent = saldoCoroas > 0 ? 100 : 0;
+        progressLabelLeft = "SALDO ATIVO";
+        progressLabelCenter = `${saldoCoroas} ${saldoCoroas === 1 ? 'Coroa acumulada' : 'Coroas acumuladas'}`;
+        progressLabelRight = currentTier?.nome ? currentTier.nome.toUpperCase() : "FIDELIDADE";
+    }
+
+    // Nível atual / status do membro
+    const statusMembro = currentTier?.nome
+        ? `Membro Coroa ${currentTier.nome}`
+        : "Membro Fidelidade";
+
+    // Milestones / Níveis de recompensa do programa
+    const currentSteps = saldoCoroas;
+    const defaultMilestones = [
+        { steps: 50, reward: "Cupom de R$ 50 de Desconto" },
+        { steps: 100, reward: "Frete Grátis na Próxima Compra" },
+        { steps: 200, reward: "Brinde Especial da Linha Conforto" },
+        { steps: 500, reward: "Acesso a Ofertas Exclusivas VIP" },
+    ];
+    const milestones = sortedTiers.length > 0
+        ? sortedTiers.map(t => ({
+            steps: t.coroas_minimas || 0,
+            reward: t.beneficio || `Nível ${t.nome} Desbloqueado`
+        }))
+        : defaultMilestones;
 
     // Client profile validity checks
     const rawName = cliente?.nome_completo;
@@ -426,26 +508,15 @@ export default function ClienteDashboard() {
         cliente.telefone === '-' ||
         (!cliente.cpf && !cliente.cnpj);
 
-    const milestones = [
-        { steps: firstMilestone, reward: `${firstMilestone} coroas acumuladas` },
-        { steps: secondMilestone, reward: `${secondMilestone} coroas acumuladas` },
-        { steps: thirdMilestone, reward: `${thirdMilestone} coroas acumuladas` },
-        { steps: maxSteps, reward: fidelidadeConfig?.reward_description || "Recompensa especial!" },
-    ];
-
     if (loading) {
         return (
-            <div className="min-h-screen bg-stone-50 flex items-center justify-center relative overflow-hidden">
-                <div className="absolute inset-0 z-0 opacity-40">
-                    <div className="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] bg-emerald-100/40 rounded-full blur-[120px]" />
-                    <div className="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] bg-amber-100/40 rounded-full blur-[100px]" />
-                </div>
+            <div className={`min-h-screen flex items-center justify-center relative overflow-hidden ${portalTheme.bg}`}>
                 <div className="relative z-10 flex flex-col items-center gap-4">
-                    <div className="w-16 h-16 rounded-3xl bg-white shadow-xl shadow-amber-500/10 flex items-center justify-center animate-bounce">
+                    <div className="w-16 h-16 rounded-3xl bg-white/10 shadow-xl flex items-center justify-center animate-bounce border border-white/20">
                         {brandLogo ? (
                             <img src={brandLogo} alt={brandName} className="w-10 h-10 object-contain" />
                         ) : (
-                            <Store className="w-8 h-8 text-amber-600" />
+                            <Store className={`w-8 h-8 ${portalTheme.accentText}`} />
                         )}
                     </div>
 
@@ -455,7 +526,7 @@ export default function ClienteDashboard() {
                                 <div key={i} className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" style={{ animationDelay: `${i * 0.2}s` }} />
                             ))}
                         </div>
-                        <p className="text-[10px] uppercase tracking-[0.3em] font-black text-stone-400 mt-2">Carregando</p>
+                        <p className={`text-[10px] uppercase tracking-[0.3em] font-bold mt-2 ${portalTheme.textMuted}`}>Carregando Portal</p>
                     </div>
                 </div>
             </div>
@@ -463,12 +534,12 @@ export default function ClienteDashboard() {
     }
 
     return (
-        <div className={`min-h-screen font-sans relative selection:bg-amber-100 overflow-x-hidden ${portalTheme.bg}`}>
+        <div className={`min-h-screen font-sans relative selection:bg-amber-500/20 overflow-x-hidden ${portalTheme.bg}`}>
             {/* Header */}
             <header className={`fixed top-0 w-full z-50 border-b ${portalTheme.headerBg}`}>
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                        <div className="h-12 w-12 rounded-xl bg-white/10 p-2 shadow-inner border border-white/10 flex items-center justify-center">
+                        <div className="h-12 w-12 rounded-xl bg-white/10 p-2 shadow-inner border border-stone-200/20 flex items-center justify-center">
                             {brandLogo ? (
                                 <img src={brandLogo} alt={brandName} className="h-full w-full object-contain" />
                             ) : (
@@ -484,7 +555,7 @@ export default function ClienteDashboard() {
                     <div className="flex items-center gap-3">
                         <button
                             onClick={handleLogout}
-                            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-600 transition-all duration-300 font-medium text-sm group"
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 font-medium text-sm group ${portalTheme.logoutBtn}`}
                         >
                             <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
                             <span className="hidden sm:inline">Sair</span>
@@ -497,22 +568,23 @@ export default function ClienteDashboard() {
                 {/* Hero Section */}
                 <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
                     <div className="space-y-2">
-                        <h2 className="text-4xl md:text-5xl font-['Playfair_Display'] font-black text-stone-100">
-                            Olá, <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-amber-200">{displayName}</span>
+                        <h2 className="text-4xl md:text-5xl font-['Playfair_Display'] font-black">
+                            <span className={portalTheme.heroTitle}>Olá, </span>
+                            <span className={portalTheme.heroName}>{displayName}</span>
                         </h2>
-                        <p className="text-stone-300 font-medium">
-                            {isIncompleteProfile ? "Complete o seu cadastro para aproveitar todas as vantagens do portal." : "Bem-vindo ao seu espaço exclusivo de móveis e decorações."}
+                        <p className={portalTheme.heroSubtitle}>
+                            {isIncompleteProfile ? "Complete o seu cadastro para aproveitar todas as vantagens do portal." : "Bem-vindo ao seu espaço exclusivo de compras e fidelidade."}
                         </p>
                     </div>
 
-                    <div className="flex gap-4 p-1 rounded-2xl bg-stone-900/80 border border-amber-900/40 backdrop-blur-md shadow-lg">
-                        <div className="px-4 py-2 rounded-xl bg-stone-950/60 border border-amber-900/30 flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400">
+                    <div className={`flex gap-4 p-1.5 rounded-2xl border backdrop-blur-md shadow-md ${portalTheme.statusCard}`}>
+                        <div className={`px-4 py-2 rounded-xl border flex items-center gap-3 ${portalTheme.statusBadge}`}>
+                            <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold shrink-0">
                                 <Crown size={20} />
                             </div>
                             <div>
-                                <p className="text-[10px] text-amber-400/80 font-bold uppercase tracking-wider">Status</p>
-                                <p className="text-sm font-bold text-amber-100">{statusMembro}</p>
+                                <p className={portalTheme.statLabel}>Status</p>
+                                <p className={portalTheme.statusMemberText}>{statusMembro}</p>
                             </div>
                         </div>
                     </div>
@@ -520,19 +592,19 @@ export default function ClienteDashboard() {
 
                 {/* Incomplete Profile Alert Banner */}
                 {isIncompleteProfile && (
-                    <div className="p-5 rounded-2xl bg-gradient-to-r from-amber-950/80 via-stone-900/90 to-amber-950/80 border border-amber-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 backdrop-blur-md shadow-xl animate-pulse-subtle">
+                    <div className={`p-5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 backdrop-blur-md shadow-md transition-all ${portalTheme.alertBanner}`}>
                         <div className="flex items-center gap-3.5">
                             <div className="w-11 h-11 rounded-xl bg-amber-500 text-stone-950 flex items-center justify-center shrink-0 font-bold shadow-lg shadow-amber-500/20">
                                 <AlertCircle size={22} />
                             </div>
                             <div>
-                                <h4 className="font-bold text-amber-200 text-sm">Seu cadastro está incompleto</h4>
-                                <p className="text-xs text-stone-300">Cadastre seu nome completo e telefone para liberar resgates de coroas e histórico de compras.</p>
+                                <h4 className={portalTheme.alertTitle}>Seu cadastro está incompleto</h4>
+                                <p className={portalTheme.alertText}>Cadastre seu nome completo e telefone para liberar resgates de coroas e histórico de compras.</p>
                             </div>
                         </div>
                         <button
                             onClick={openProfileEditor}
-                            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-stone-950 text-xs font-bold shrink-0 transition-all shadow-md shadow-amber-500/20 flex items-center gap-2"
+                            className={`px-4 py-2.5 rounded-xl text-xs font-bold shrink-0 transition-all flex items-center gap-2 ${portalTheme.alertButton}`}
                         >
                             <Edit2 size={14} /> Complete seu Perfil
                         </button>
@@ -544,24 +616,24 @@ export default function ClienteDashboard() {
                     <div className="lg:col-span-2 space-y-8">
                         {/* Loyalty Card */}
                         {isFidelidadeActive && (
-                        <div className="relative group overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-stone-900 to-black p-8 text-white shadow-2xl transition-all duration-500 hover:shadow-amber-900/10">
-                            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform duration-700 group-hover:rotate-12" aria-hidden="true">
+                        <div className={`relative group overflow-hidden rounded-[2.5rem] p-8 text-white shadow-2xl transition-all duration-500 border ${portalTheme.loyaltyBg}`}>
+                            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform duration-700 group-hover:rotate-12 pointer-events-none" aria-hidden="true">
                                 <Crown size={180} />
                             </div>
-                            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10" />
+                            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10 pointer-events-none" />
 
                             <div className="relative z-10 flex flex-col h-full justify-between gap-12">
                                 <div className="flex justify-between items-start">
                                     <div className="space-y-4">
-                                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-400 text-[10px] font-bold uppercase tracking-widest backdrop-blur-md">
+                                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-bold uppercase tracking-widest backdrop-blur-md">
                                             <Sparkles size={12} />
                                             Programa de Fidelidade
                                         </div>
-                                        <h3 className="text-3xl font-['Playfair_Display'] font-bold">Programa Coroas</h3>
+                                        <h3 className="text-3xl font-['Playfair_Display'] font-bold text-white">Programa Coroas</h3>
                                     </div>
                                     <div className="w-16 h-10 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-lg shadow-amber-900/50">
-                                        <div className="w-8 h-6 border-[1.5px] border-white/30 rounded flex items-center justify-center">
-                                            <div className="w-2 h-2 bg-white/20 rounded-full" />
+                                        <div className="w-8 h-6 border-[1.5px] border-white/40 rounded flex items-center justify-center">
+                                            <div className="w-2 h-2 bg-white/30 rounded-full" />
                                         </div>
                                     </div>
                                 </div>
@@ -569,34 +641,54 @@ export default function ClienteDashboard() {
                                 <div className="space-y-6">
                                     <div className="flex items-end justify-between">
                                         <div>
-                                            <p className="text-stone-400 text-xs font-bold uppercase tracking-[.2em] mb-1">Saldo Atual</p>
+                                            <p className="text-amber-200/90 text-xs font-bold uppercase tracking-[.2em] mb-1">Saldo Atual</p>
                                             <div className="flex items-center gap-3">
                                                 <span className="text-5xl font-black font-['Playfair_Display'] text-amber-400">{cliente?.coroas || 0}</span>
-                                                <span className="text-amber-500/50 font-bold uppercase tracking-widest text-sm">Coroas</span>
+                                                <span className="text-amber-300/80 font-bold uppercase tracking-widest text-sm">Coroas</span>
                                             </div>
                                         </div>
 
                                         <div className="text-right">
-                                            <p className="text-stone-400 text-xs font-bold uppercase tracking-[.2em] mb-1">Próxima Recompensa</p>
-                                            <p className="text-xs font-medium text-stone-300">
-                                                Resgate com {fidelidadeConfig?.reward_threshold || 10} coroas
-                                            </p>
+                                            {hasNextTier ? (
+                                                <>
+                                                    <p className="text-amber-200/90 text-xs font-bold uppercase tracking-[.2em] mb-1">Próximo Nível</p>
+                                                    <p className="text-xs font-semibold text-stone-200">
+                                                        {nextTier.nome} ({nextTier.coroas_minimas} coroas)
+                                                    </p>
+                                                </>
+                                            ) : hasConfiguredReward ? (
+                                                <>
+                                                    <p className="text-amber-200/90 text-xs font-bold uppercase tracking-[.2em] mb-1">Próxima Recompensa</p>
+                                                    <p className="text-xs font-semibold text-stone-200">
+                                                        Resgate com {rewardThreshold} coroas
+                                                    </p>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <p className="text-amber-200/90 text-xs font-bold uppercase tracking-[.2em] mb-1">Status Fidelidade</p>
+                                                    <p className="text-xs font-semibold text-stone-200">
+                                                        {currentTier?.nome ? `Nível ${currentTier.nome}` : "Pontuação Ativa"}
+                                                    </p>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
 
                                     <div className="space-y-2">
-                                        <div className="h-4 w-full bg-white/5 rounded-full overflow-hidden border border-white/10 p-[2px]">
+                                        <div className="h-4 w-full bg-black/40 rounded-full overflow-hidden border border-white/20 p-[2px]">
                                             <div
-                                                className="h-full bg-gradient-to-r from-amber-600 via-amber-400 to-amber-600 rounded-full transition-all duration-1000 relative group"
-                                                style={{ width: `${Math.min((cliente?.coroas || 0) / (fidelidadeConfig?.reward_threshold || 10) * 100, 100)}%` }}
+                                                className="h-full bg-gradient-to-r from-amber-500 via-amber-400 to-amber-300 rounded-full transition-all duration-1000 relative group shadow-sm"
+                                                style={{ width: `${progressPercent}%` }}
                                             >
-                                                <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.2)_50%,transparent_75%)] bg-[length:50px_50px] animate-[shimmer_2s_infinite]" />
+                                                <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.3)_50%,transparent_75%)] bg-[length:50px_50px] animate-[shimmer_2s_infinite]" />
                                             </div>
                                         </div>
-                                        <div className="flex justify-between text-[10px] font-bold text-stone-500 uppercase tracking-widest">
-                                            <span>Início</span>
-                                            <span className="text-amber-500">{Math.max(0, (fidelidadeConfig?.reward_threshold || 10) - (cliente?.coroas || 0))} Coroas para o Próximo Nível</span>
-                                            <span>Ouro</span>
+                                        <div className="flex justify-between text-[10px] font-bold text-stone-300 uppercase tracking-widest">
+                                            <span>{progressLabelLeft}</span>
+                                            {progressLabelCenter && (
+                                                <span className="text-amber-300 font-extrabold">{progressLabelCenter}</span>
+                                            )}
+                                            <span>{progressLabelRight}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -605,32 +697,31 @@ export default function ClienteDashboard() {
                         )}
 
                         {/* Redemption Card */}
-                        {(cliente?.coroas || 0) >= (fidelidadeConfig?.reward_threshold || 100) && (
-                            <div className="relative p-6 rounded-[2rem] bg-gradient-to-br from-amber-50 to-white border border-amber-200/60 shadow-sm">
+                        {hasConfiguredReward && (cliente?.coroas || 0) >= rewardThreshold && (
+                            <div className={`relative p-6 rounded-[2rem] border shadow-md ${portalTheme.card}`}>
                                 <div className="flex items-center gap-3 mb-4">
-                                    <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600"><Gift size={20} /></div>
+                                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400"><Gift size={20} /></div>
                                     <div>
-                                        <h3 className="font-bold text-stone-900">Resgatar Coroas</h3>
-                                        <p className="text-xs text-stone-500">Converta Coroas em desconto na sua proxima compra</p>
+                                        <h3 className={`font-bold ${portalTheme.textHeading}`}>Resgatar Coroas</h3>
+                                        <p className={`text-xs ${portalTheme.textMuted}`}>Converta Coroas em desconto na sua próxima compra</p>
                                     </div>
                                 </div>
-                                <div className="flex items-end gap-3">
+                                <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
                                     <div className="flex-1">
-                                        <label className="text-xs text-stone-500 font-bold uppercase tracking-wide block mb-1">Quantidade de Coroas</label>
+                                        <label className={portalTheme.statLabel}>Quantidade de Coroas</label>
                                         <input type="number" min={fidelidadeConfig?.reward_threshold || 100} max={cliente?.coroas || 0}
                                             value={coroasParaResgatar} onChange={(e) => setCoroasParaResgatar(e.target.value)}
                                             placeholder={`Min: ${fidelidadeConfig?.reward_threshold || 100}`}
-                                            className="w-full px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                                            className={`w-full px-3 py-2 rounded-xl text-sm ${portalTheme.input}`} />
                                     </div>
                                     {coroasParaResgatar && parseInt(coroasParaResgatar) > 0 && (
-                                        <div className="text-right">
-                                            <p className="text-xs text-stone-400">Valor</p>
-                                            <p className="font-bold text-green-600">R$ {((parseInt(coroasParaResgatar) || 0) * (fidelidadeConfig?.desconto_por_coroa || 0.10)).toFixed(2)}</p>
+                                        <div className="text-right px-2">
+                                            <p className={`text-xs ${portalTheme.textMuted}`}>Valor do Desconto</p>
+                                            <p className="font-black text-emerald-600 dark:text-emerald-400 text-base">R$ {((parseInt(coroasParaResgatar) || 0) * (fidelidadeConfig?.desconto_por_coroa || 0.10)).toFixed(2)}</p>
                                         </div>
                                     )}
                                     <button onClick={handleResgatarDesconto} disabled={resgatando || !coroasParaResgatar}
-                                        className="px-4 py-2 rounded-xl text-white text-sm font-bold disabled:opacity-40 flex items-center gap-2"
-                                        style={{ backgroundColor: "#07593f" }}>
+                                        className={`px-5 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2 ${portalTheme.primaryButton}`}>
                                         {resgatando ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                                         Gerar Cupom
                                     </button>
@@ -640,19 +731,19 @@ export default function ClienteDashboard() {
 
                         {/* Coroas History */}
                         {historicoCoroas.length > 0 && (
-                            <div className="p-6 rounded-[2rem] bg-white border border-stone-200/60 shadow-sm">
+                            <div className={`p-6 rounded-[2rem] border shadow-md ${portalTheme.card}`}>
                                 <div className="flex items-center gap-3 mb-4">
-                                    <div className="w-10 h-10 rounded-xl bg-stone-50 flex items-center justify-center text-stone-500"><Crown size={20} /></div>
-                                    <h3 className="font-bold text-stone-900">Historico de Coroas</h3>
+                                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500"><Crown size={20} /></div>
+                                    <h3 className={`font-bold ${portalTheme.textHeading}`}>Histórico de Coroas</h3>
                                 </div>
-                                <div className="divide-y divide-stone-50">
+                                <div className="divide-y divide-stone-200/30 dark:divide-amber-900/20">
                                     {historicoCoroas.map((h) => (
                                         <div key={h.id} className="flex items-center justify-between py-3">
                                             <div>
-                                                <p className="text-sm font-medium text-stone-800">{formatarTipoEvento(h.tipo_evento)}</p>
-                                                <p className="text-xs text-stone-400">{new Date(h.created_at).toLocaleDateString("pt-BR")}</p>
+                                                <p className={`text-sm font-medium ${portalTheme.tableText}`}>{formatarTipoEvento(h.tipo_evento)}</p>
+                                                <p className={`text-xs ${portalTheme.textMuted}`}>{new Date(h.created_at).toLocaleDateString("pt-BR")}</p>
                                             </div>
-                                            <span className={`font-bold text-sm ${h.coroas > 0 ? "text-green-600" : "text-red-500"}`}>
+                                            <span className={`font-bold text-sm ${h.coroas > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
                                                 {h.coroas > 0 ? "+" : ""}{h.coroas}
                                             </span>
                                         </div>
@@ -668,14 +759,14 @@ export default function ClienteDashboard() {
                                 { label: 'Pedidos', value: String(vendas.length), icon: Package },
                                 { label: 'Coroas', value: String(cliente?.coroas || 0), icon: Crown }
                             ].map((stat, i) => (
-                                <div key={i} className="group p-6 rounded-[2rem] bg-stone-900/60 border border-amber-900/30 text-stone-100 shadow-xl transition-all duration-500 hover:border-amber-500/40">
+                                <div key={i} className={`group p-6 rounded-[2rem] border shadow-md transition-all duration-300 ${portalTheme.statCard}`}>
                                     <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 group-hover:scale-110 transition-transform">
+                                        <div className={portalTheme.statIcon}>
                                             <stat.icon size={24} />
                                         </div>
                                         <div>
-                                            <p className="text-[10px] text-amber-400/80 font-bold uppercase tracking-wider">{stat.label}</p>
-                                            <p className="text-lg font-bold text-stone-100">{stat.value}</p>
+                                            <p className={portalTheme.statLabel}>{stat.label}</p>
+                                            <p className={portalTheme.statValue}>{stat.value}</p>
                                         </div>
                                     </div>
                                 </div>
@@ -683,14 +774,14 @@ export default function ClienteDashboard() {
                         </div>
 
                         {/* Rewards List */}
-                        <div className="p-8 rounded-[2.5rem] bg-stone-900/60 border border-amber-900/30 text-stone-100 shadow-xl">
+                        <div className={`p-8 rounded-[2.5rem] border shadow-xl ${portalTheme.card}`}>
                             <div className="flex items-center gap-4 mb-8">
-                                <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                                    <Star className="w-5 h-5 text-amber-400" />
+                                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                                    <Star className="w-5 h-5 text-amber-500" />
                                 </div>
                                 <div>
-                                    <h3 className="text-xl font-bold font-['Playfair_Display'] text-amber-100">Níveis de Recompensa</h3>
-                                    <p className="text-xs text-stone-400">Acumule coroas e desbloqueie benefícios</p>
+                                    <h3 className={`text-xl font-bold ${portalTheme.textHeading}`}>Níveis de Recompensa</h3>
+                                    <p className={`text-xs ${portalTheme.textMuted}`}>Acumule coroas e desbloqueie benefícios exclusivos</p>
                                 </div>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -699,38 +790,37 @@ export default function ClienteDashboard() {
                                     return (
                                         <div
                                             key={index}
-                                            className={`relative p-5 rounded-2xl flex items-center gap-5 transition-all duration-500 border
-                                                ${unlocked ? "bg-gradient-to-r from-amber-500/10 to-stone-900 border-amber-500/30" : "bg-stone-950/40 border-stone-800 opacity-60"}
-                                            `}
+                                            className={`relative p-5 rounded-2xl flex items-center gap-5 transition-all duration-300 border ${
+                                                unlocked ? portalTheme.rewardUnlocked : portalTheme.rewardLocked
+                                            }`}
                                         >
-                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 shrink-0
-                                                ${unlocked ? "bg-amber-500 text-stone-950 border-amber-400 shadow-md font-bold" : "bg-stone-900 text-stone-500 border-stone-700"}
-                                            `}>
+                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 shrink-0 ${
+                                                unlocked ? "bg-amber-500 text-stone-950 border-amber-400 shadow-md font-bold" : "bg-stone-200/50 dark:bg-stone-900 text-stone-500 border-stone-300 dark:border-stone-700"
+                                            }`}>
                                                 {unlocked ? <Crown size={16} /> : <span className="font-bold text-xs">{milestone.steps}</span>}
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <p className={`font-bold text-sm truncate ${unlocked ? "text-amber-100" : "text-stone-400"}`}>{milestone.reward}</p>
-                                                <p className="text-[10px] text-amber-400/70 uppercase tracking-widest font-bold mt-0.5">{milestone.steps} Coroas</p>
+                                                <p className={`font-bold text-sm truncate ${unlocked ? (portalTheme.isDark ? "text-amber-100" : "text-stone-900") : portalTheme.textMuted}`}>{milestone.reward}</p>
+                                                <p className={`text-[10px] uppercase tracking-widest font-bold mt-0.5 ${unlocked ? portalTheme.accentText : portalTheme.textMuted}`}>{milestone.steps} Coroas</p>
                                             </div>
-                                            {unlocked && <Sparkles className="absolute top-4 right-4 w-4 h-4 text-amber-400/50 animate-pulse" />}
+                                            {unlocked && <Sparkles className="absolute top-4 right-4 w-4 h-4 text-amber-500/60 animate-pulse" />}
                                         </div>
                                     );
                                 })}
                             </div>
                         </div>
-                        )}
 
                         {/* Activity History */}
                         {isPedidosActive && (
-                        <div className="p-8 rounded-[2.5rem] bg-stone-900/60 border border-amber-900/30 text-stone-100 shadow-xl overflow-hidden">
+                        <div className={`p-8 rounded-[2.5rem] border shadow-xl overflow-hidden ${portalTheme.card}`}>
                             <div className="flex items-center justify-between mb-8">
                                 <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/20">
+                                    <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center border border-amber-500/20">
                                         <Package size={24} />
                                     </div>
                                     <div>
-                                        <h3 className="text-xl font-bold font-['Playfair_Display'] text-amber-100">Histórico de Pedidos</h3>
-                                        <p className="text-xs text-stone-400">Documentação das suas compras recentes</p>
+                                        <h3 className={`text-xl font-bold ${portalTheme.textHeading}`}>Histórico de Pedidos</h3>
+                                        <p className={`text-xs ${portalTheme.textMuted}`}>Documentação das suas compras recentes</p>
                                     </div>
                                 </div>
                             </div>
@@ -738,34 +828,37 @@ export default function ClienteDashboard() {
                             <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead>
-                                        <tr className="text-left border-b border-amber-900/30">
-                                            <th className="pb-4 text-[10px] font-bold text-amber-400/80 uppercase tracking-widest px-4">Pedido ID</th>
-                                            <th className="pb-4 text-[10px] font-bold text-amber-400/80 uppercase tracking-widest px-4">Data</th>
-                                            <th className="pb-4 text-[10px] font-bold text-amber-400/80 uppercase tracking-widest px-4">Valor</th>
-                                            <th className="pb-4 text-[10px] font-bold text-amber-400/80 uppercase tracking-widest px-4">Status</th>
+                                        <tr className={`text-left border-b ${portalTheme.cardHeader}`}>
+                                            <th className={`pb-4 px-4 ${portalTheme.tableHeader}`}>Pedido ID</th>
+                                            <th className={`pb-4 px-4 ${portalTheme.tableHeader}`}>Data</th>
+                                            <th className={`pb-4 px-4 ${portalTheme.tableHeader}`}>Valor</th>
+                                            <th className={`pb-4 px-4 ${portalTheme.tableHeader}`}>Status</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-amber-900/20">
+                                    <tbody className="divide-y divide-stone-200/30 dark:divide-amber-900/20">
                                         {vendas.length > 0 ? vendas.map((p) => (
-                                            <tr key={p.id} className="group hover:bg-amber-950/30 transition-colors">
-                                                <td className="py-5 px-4 font-mono text-sm text-amber-400 font-bold">#{p.id.slice(0, 8)}</td>
+                                            <tr key={p.id} className={`group transition-colors ${portalTheme.tableRowHover}`}>
+                                                <td className="py-5 px-4 font-mono text-sm text-amber-600 dark:text-amber-400 font-bold">#{String(p.id).slice(0, 8)}</td>
                                                 <td className="py-5 px-4">
-                                                    <div className="flex items-center gap-2 text-stone-200 font-medium">
-                                                        <Calendar size={14} className="text-stone-400" />
+                                                    <div className={`flex items-center gap-2 font-medium ${portalTheme.tableText}`}>
+                                                        <Calendar size={14} className={portalTheme.textMuted} />
                                                         {new Date(p.data_venda || p.created_at).toLocaleDateString()}
                                                     </div>
                                                 </td>
-                                                <td className="py-5 px-4 font-bold text-amber-100">{formatCurrency(p.valor_total)}</td>
+                                                <td className={`py-5 px-4 font-bold ${portalTheme.tableHighlight}`}>{formatCurrency(p.valor_total)}</td>
                                                 <td className="py-5 px-4">
-                                                    <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${p.status === 'Concluído' || p.status === 'Concluída' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                                        }`}>
+                                                    <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
+                                                        p.status === 'Concluído' || p.status === 'Concluída' 
+                                                            ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30' 
+                                                            : 'bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30'
+                                                    }`}>
                                                         {p.status || 'Pendente'}
                                                     </span>
                                                 </td>
                                             </tr>
                                         )) : (
                                             <tr>
-                                                <td colSpan="4" className="py-12 text-center text-stone-400 text-sm italic">Nenhum pedido encontrado.</td>
+                                                <td colSpan="4" className={`py-12 text-center text-sm italic ${portalTheme.textMuted}`}>Nenhum pedido encontrado.</td>
                                             </tr>
                                         )}
                                     </tbody>
@@ -778,14 +871,14 @@ export default function ClienteDashboard() {
                     {/* Right Column */}
                     <div className="space-y-8">
                         {/* Profile Summary */}
-                        <div className="p-8 rounded-[2.5rem] bg-stone-900/60 border border-amber-900/30 text-stone-100 shadow-xl relative overflow-hidden group">
-                            <div className="absolute top-0 right-0 p-4 translate-x-4 -translate-y-4 opacity-5 group-hover:translate-x-0 group-hover:translate-y-0 transition-all duration-500">
+                        <div className={`p-8 rounded-[2.5rem] border shadow-xl relative overflow-hidden group ${portalTheme.card}`}>
+                            <div className="absolute top-0 right-0 p-4 translate-x-4 -translate-y-4 opacity-5 group-hover:translate-x-0 group-hover:translate-y-0 transition-all duration-500 pointer-events-none">
                                 <User size={120} />
                             </div>
 
                             <div className="relative z-10 flex flex-col items-center text-center space-y-4">
-                                <div className="w-24 h-24 rounded-[2rem] bg-stone-950 p-2 shadow-inner border border-amber-900/40 relative">
-                                    <div className="w-full h-full rounded-2xl bg-gradient-to-br from-amber-950 to-stone-900 flex items-center justify-center text-amber-400 text-3xl font-bold border border-amber-500/20">
+                                <div className={`w-24 h-24 rounded-[2rem] p-2 relative ${portalTheme.profileAvatarBox}`}>
+                                    <div className={`w-full h-full rounded-2xl flex items-center justify-center ${portalTheme.profileAvatarInner}`}>
                                         {isNameValid ? cliente.nome_completo.charAt(0).toUpperCase() : (user?.email?.charAt(0).toUpperCase() || 'C')}
                                     </div>
                                     <button
@@ -797,16 +890,16 @@ export default function ClienteDashboard() {
                                     </button>
                                 </div>
                                 <div className="space-y-1 overflow-hidden w-full">
-                                    <h4 className="text-2xl font-bold font-['Playfair_Display'] text-amber-100 truncate">
+                                    <h4 className={`text-2xl font-bold truncate ${portalTheme.textHeading}`}>
                                         {isNameValid ? cliente.nome_completo : 'Completar Perfil'}
                                     </h4>
-                                    <p className="text-xs text-stone-400 font-medium truncate">{user?.email}</p>
+                                    <p className={`text-xs font-medium truncate ${portalTheme.textMuted}`}>{user?.email}</p>
 
                                     {isIncompleteProfile && (
                                         <div className="inline-block mt-2">
                                             <button 
                                                 onClick={openProfileEditor}
-                                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-all"
+                                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-all"
                                             >
                                                 <AlertCircle size={12} /> Cadastro Incompleto
                                             </button>
@@ -816,35 +909,35 @@ export default function ClienteDashboard() {
                             </div>
 
                             <div className="mt-8 space-y-4">
-                                <div className="p-4 rounded-2xl bg-stone-950/60 border border-amber-900/30">
-                                    <p className="text-[10px] text-amber-400/80 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
-                                        <Phone size={12} className="text-amber-500" />
+                                <div className={`p-4 rounded-2xl border ${portalTheme.profileFieldBox}`}>
+                                    <p className={`mb-1 flex items-center gap-2 ${portalTheme.profileFieldLabel}`}>
+                                        <Phone size={12} className={portalTheme.accentText} />
                                         Telefone
                                     </p>
-                                    <p className="text-sm font-bold text-stone-200">{cliente?.telefone || '-'}</p>
+                                    <p className={`text-sm font-bold ${portalTheme.tableText}`}>{cliente?.telefone || '-'}</p>
                                 </div>
-                                <div className="p-4 rounded-2xl bg-stone-950/60 border border-amber-900/30">
-                                    <p className="text-[10px] text-amber-400/80 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
-                                        <MapPin size={12} className="text-amber-500" />
+                                <div className={`p-4 rounded-2xl border ${portalTheme.profileFieldBox}`}>
+                                    <p className={`mb-1 flex items-center gap-2 ${portalTheme.profileFieldLabel}`}>
+                                        <MapPin size={12} className={portalTheme.accentText} />
                                         Localização
                                     </p>
-                                    <p className="text-sm font-bold text-stone-200 truncate">{cliente?.cidade ? `${cliente.cidade} - ${cliente.estado}` : '-'}</p>
+                                    <p className={`text-sm font-bold truncate ${portalTheme.tableText}`}>{cliente?.cidade ? `${cliente.cidade} - ${cliente.estado}` : '-'}</p>
                                 </div>
                             </div>
                         </div>
 
                         {/* Support Card */}
                         {isAutoatendimentoActive && (
-                        <div className="p-8 rounded-[2.5rem] bg-stone-900/60 border border-amber-900/30 text-stone-100 shadow-xl flex flex-col items-center text-center space-y-4">
-                            <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                        <div className={`p-8 rounded-[2.5rem] border shadow-xl flex flex-col items-center text-center space-y-4 ${portalTheme.card}`}>
+                            <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                                 <Phone size={32} />
                             </div>
                             <div className="space-y-1">
-                                <h4 className="text-lg font-bold text-amber-100">Precisa de Ajuda?</h4>
-                                <p className="text-xs text-stone-400">Nossa equipe está disponível para te atender.</p>
+                                <h4 className={`text-lg font-bold ${portalTheme.textHeading}`}>Precisa de Ajuda?</h4>
+                                <p className={`text-xs ${portalTheme.textMuted}`}>Nossa equipe está disponível para te atender.</p>
                             </div>
                             <button
-                                className="text-emerald-400 font-bold text-sm hover:underline flex items-center gap-1"
+                                className={`font-bold text-sm hover:underline flex items-center gap-1 ${portalTheme.accentText}`}
                                 onClick={openAutoAtendimento}
                             >
                                 Abrir Autoatendimento
@@ -858,95 +951,95 @@ export default function ClienteDashboard() {
             {/* Profile Edit Dialog */}
             {isEditing && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-stone-950/80 backdrop-blur-md" onClick={() => setIsEditing(false)} />
-                    <div className="relative w-full max-w-xl bg-stone-900 rounded-[2.5rem] shadow-2xl border border-amber-900/40 text-stone-100 overflow-hidden animate-in zoom-in-95 duration-300">
-                        <div className="p-8 space-y-8 max-h-[90vh] overflow-y-auto">
+                    <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={() => setIsEditing(false)} />
+                    <div className={`relative w-full max-w-xl rounded-[2.5rem] shadow-2xl border overflow-hidden animate-in zoom-in-95 duration-300 ${portalTheme.modalCard}`}>
+                        <div className="p-8 space-y-8 max-h-[90vh] overflow-y-auto custom-scrollbar">
                             <div className="flex justify-between items-center">
                                 <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                                    <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-500 flex items-center justify-center border border-amber-500/30">
                                         <Edit2 size={24} />
                                     </div>
                                     <div>
-                                        <h3 className="text-2xl font-bold font-['Playfair_Display'] text-amber-100">Completar Perfil</h3>
-                                        <p className="text-xs text-stone-400">Preencha seus dados para ter a melhor experiência</p>
+                                        <h3 className={`text-2xl font-bold ${portalTheme.textHeading}`}>Completar Perfil</h3>
+                                        <p className={`text-xs ${portalTheme.textMuted}`}>Preencha seus dados para ter a melhor experiência</p>
                                     </div>
                                 </div>
-                                <button onClick={() => setIsEditing(false)} className="p-3 rounded-full hover:bg-stone-800 transition-colors text-stone-400">
+                                <button onClick={() => setIsEditing(false)} className={`p-3 rounded-full transition-colors ${portalTheme.isDark ? 'hover:bg-stone-800 text-stone-400' : 'hover:bg-stone-100 text-stone-600'}`}>
                                     <X size={24} />
                                 </button>
                             </div>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                                 <div className="space-y-2 sm:col-span-2">
-                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2 px-1 bg-stone-900 inline-block">Nome Completo *</Label>
+                                    <Label className={portalTheme.inputLabel}>Nome Completo *</Label>
                                     <Input
                                         type="text"
                                         value={editData.nome_completo}
                                         onChange={(e) => setEditData({ ...editData, nome_completo: e.target.value })}
-                                        className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 transition-all font-medium h-auto placeholder:text-stone-600"
+                                        className={`w-full px-5 py-4 rounded-2xl font-medium h-auto ${portalTheme.input}`}
                                         placeholder="Seu nome completo"
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">Telefone *</Label>
+                                    <Label className={portalTheme.inputLabel}>Telefone *</Label>
                                     <Input
                                         type="text"
                                         value={editData.telefone}
                                         onChange={(e) => setEditData({ ...editData, telefone: e.target.value })}
-                                        className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 focus:border-amber-500 transition-all font-medium h-auto placeholder:text-stone-600"
+                                        className={`w-full px-5 py-4 rounded-2xl font-medium h-auto ${portalTheme.input}`}
                                         placeholder="(00) 00000-0000"
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">CEP</Label>
+                                    <Label className={portalTheme.inputLabel}>CEP</Label>
                                     <div className="flex gap-2">
                                         <Input
                                             type="text"
                                             value={editData.cep}
                                             onChange={(e) => setEditData({ ...editData, cep: e.target.value })}
-                                            className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 h-auto placeholder:text-stone-600"
+                                            className={`w-full px-5 py-4 rounded-2xl font-medium h-auto ${portalTheme.input}`}
                                             placeholder="00000-000"
                                         />
-                                        <button onClick={() => buscarCEP(editData.cep)} className="p-4 rounded-2xl bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30 transition-colors">
+                                        <button onClick={() => buscarCEP(editData.cep)} className="p-4 rounded-2xl bg-amber-500/20 text-amber-700 dark:text-amber-300 hover:bg-amber-500/30 border border-amber-500/30 transition-colors">
                                             <Search size={20} />
                                         </button>
                                     </div>
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">Cidade</Label>
-                                    <Input readOnly value={editData.cidade} className="w-full px-5 py-4 rounded-2xl bg-stone-950/60 border border-stone-800 text-stone-400 font-medium cursor-not-allowed h-auto" />
+                                    <Label className={portalTheme.inputLabel}>Cidade</Label>
+                                    <Input readOnly value={editData.cidade} className={`w-full px-5 py-4 rounded-2xl font-medium cursor-not-allowed h-auto ${portalTheme.inputReadOnly}`} />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">UF</Label>
-                                    <Input readOnly value={editData.estado} className="w-full px-5 py-4 rounded-2xl bg-stone-950/60 border border-stone-800 text-stone-400 font-medium cursor-not-allowed h-auto" />
+                                    <Label className={portalTheme.inputLabel}>UF</Label>
+                                    <Input readOnly value={editData.estado} className={`w-full px-5 py-4 rounded-2xl font-medium cursor-not-allowed h-auto ${portalTheme.inputReadOnly}`} />
                                 </div>
                                 <div className="sm:col-span-2 space-y-2">
-                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">Endereço (Rua)</Label>
+                                    <Label className={portalTheme.inputLabel}>Endereço (Rua)</Label>
                                     <Input
                                         type="text"
                                         value={editData.endereco}
                                         onChange={(e) => setEditData({ ...editData, endereco: e.target.value })}
-                                        className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 transition-all font-medium h-auto placeholder:text-stone-600"
+                                        className={`w-full px-5 py-4 rounded-2xl font-medium h-auto ${portalTheme.input}`}
                                         placeholder="Rua..."
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">Número</Label>
+                                    <Label className={portalTheme.inputLabel}>Número</Label>
                                     <Input
                                         type="text"
                                         value={editData.numero}
                                         onChange={(e) => setEditData({ ...editData, numero: e.target.value })}
-                                        className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 transition-all font-medium text-center h-auto placeholder:text-stone-600"
+                                        className={`w-full px-5 py-4 rounded-2xl font-medium text-center h-auto ${portalTheme.input}`}
                                         placeholder="Nº"
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest ml-2">Bairro</Label>
+                                    <Label className={portalTheme.inputLabel}>Bairro</Label>
                                     <Input
                                         type="text"
                                         value={editData.bairro}
                                         onChange={(e) => setEditData({ ...editData, bairro: e.target.value })}
-                                        className="w-full px-5 py-4 rounded-2xl bg-stone-950 border border-amber-900/40 text-stone-100 focus:outline-none focus:ring-4 focus:ring-amber-500/20 transition-all font-medium h-auto placeholder:text-stone-600"
+                                        className={`w-full px-5 py-4 rounded-2xl font-medium h-auto ${portalTheme.input}`}
                                         placeholder="Bairro"
                                     />
                                 </div>
@@ -955,7 +1048,7 @@ export default function ClienteDashboard() {
                             <button
                                 onClick={handleSaveProfile}
                                 disabled={savingProfile}
-                                className="w-full py-5 rounded-[1.5rem] bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-stone-950 font-black uppercase tracking-[0.2em] shadow-2xl shadow-amber-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                                className={`w-full py-5 rounded-[1.5rem] font-black uppercase tracking-[0.2em] shadow-2xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-50 ${portalTheme.primaryButton}`}
                             >
                                 {savingProfile ? <Loader2 className="animate-spin" /> : <Save size={20} />}
                                 {savingProfile ? 'Salvando...' : 'Confirmar Alterações'}

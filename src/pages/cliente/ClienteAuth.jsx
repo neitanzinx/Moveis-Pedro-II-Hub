@@ -385,14 +385,14 @@ export default function ClienteAuth() {
                 {/* Back to Landing */}
                 <Link
                     to="/"
-                    className="inline-flex items-center gap-2 text-stone-300 hover:text-amber-400 mb-6 group font-body transition-colors text-sm font-medium"
+                    className={`inline-flex items-center gap-2 mb-6 group font-body transition-colors text-sm font-medium ${portalTheme.backLink || 'text-stone-300 hover:text-amber-400'}`}
                 >
                     <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
                     Voltar para o início
                 </Link>
 
                 <Card className={`border shadow-2xl rounded-3xl overflow-hidden ${portalTheme.card}`}>
-                    <CardHeader className="text-center pb-6 border-b border-stone-800/20">
+                    <CardHeader className="text-center pb-6 border-b border-stone-500/10">
                         {brandLogo ? (
                             <img src={brandLogo} alt={brandName} className="h-16 mx-auto mb-4 object-contain" />
                         ) : (
@@ -410,16 +410,16 @@ export default function ClienteAuth() {
 
                     <CardContent className="pt-6">
                         <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setRegistrationStep(1); setError(""); }}>
-                            <TabsList className="grid w-full grid-cols-2 mb-8 p-1 bg-black/20 rounded-2xl border border-white/5">
+                            <TabsList className={`grid w-full grid-cols-2 mb-8 p-1 rounded-2xl ${portalTheme.tabList || 'bg-black/20 border border-white/5'}`}>
                                 <TabsTrigger
                                     value="login"
-                                    className="data-[state=active]:bg-white/20 data-[state=active]:text-white rounded-xl font-bold transition-all duration-300"
+                                    className={`rounded-xl font-bold transition-all duration-300 ${activeTab === 'login' ? portalTheme.tabActive : portalTheme.tabInactive}`}
                                 >
                                     Entrar
                                 </TabsTrigger>
                                 <TabsTrigger
                                     value="register"
-                                    className="data-[state=active]:bg-white/20 data-[state=active]:text-white rounded-xl font-bold transition-all duration-300"
+                                    className={`rounded-xl font-bold transition-all duration-300 ${activeTab === 'register' ? portalTheme.tabActive : portalTheme.tabInactive}`}
                                 >
                                     Cadastrar
                                 </TabsTrigger>
@@ -435,7 +435,7 @@ export default function ClienteAuth() {
                             <TabsContent value="login">
                                 <form onSubmit={handleLogin} className="space-y-4">
                                     <div>
-                                        <Label htmlFor="login-email" className={portalTheme.textMuted}>E-mail</Label>
+                                        <Label htmlFor="login-email" className={portalTheme.inputLabel || portalTheme.textMuted}>E-mail</Label>
                                         <div className="relative mt-1">
                                             <Mail className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                             <Input
@@ -451,7 +451,7 @@ export default function ClienteAuth() {
                                     </div>
 
                                     <div>
-                                        <Label htmlFor="login-password" className={portalTheme.textMuted}>Senha</Label>
+                                        <Label htmlFor="login-password" className={portalTheme.inputLabel || portalTheme.textMuted}>Senha</Label>
                                         <div className="relative mt-1">
                                             <Lock className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                             <Input
@@ -466,7 +466,7 @@ export default function ClienteAuth() {
                                             <button
                                                 type="button"
                                                 onClick={() => setShowPassword(!showPassword)}
-                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 dark:hover:text-stone-200"
                                             >
                                                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                             </button>
@@ -480,7 +480,7 @@ export default function ClienteAuth() {
                                     >
                                         {loading ? (
                                             <>
-                                                <Loader2 className="w-5 h-5 mr-2 animate-spin text-amber-400" />
+                                                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                                                 Entrando...
                                             </>
                                         ) : (
@@ -495,15 +495,15 @@ export default function ClienteAuth() {
                                 <form onSubmit={handleRegister} className="space-y-4">
                                     {/* Loyalty Banner */}
                                     {signupBonusAtivo && (
-                                        <div className="bg-gradient-to-r from-amber-50 to-amber-100/50 border border-amber-200 p-4 rounded-xl flex items-center gap-4 mb-6 shadow-sm">
-                                            <div className="w-12 h-12 bg-amber-400 text-green-950 rounded-full flex items-center justify-center shrink-0 shadow-md">
+                                        <div className={`p-4 rounded-xl flex items-center gap-4 mb-6 shadow-sm border ${portalTheme.bonusBanner || 'bg-amber-50 border-amber-200 text-amber-950'}`}>
+                                            <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 shadow-md ${portalTheme.bonusIcon || 'bg-amber-400 text-stone-950'}`}>
                                                 <Crown className="w-6 h-6 fill-current" />
                                             </div>
                                             <div>
-                                                <p className="font-serif font-bold text-green-950 text-lg">
+                                                <p className={portalTheme.bonusTitle || 'font-serif font-bold text-stone-900 text-lg'}>
                                                     Ganhe {signupBonus} {signupBonus === 1 ? nomePontosSingular : nomePontosPlural} de Bônus
                                                 </p>
-                                                <p className="text-sm text-stone-600 font-body">Cadastre-se agora e comece com vantagens exclusivas.</p>
+                                                <p className={portalTheme.bonusText || 'text-sm text-stone-600 font-body'}>Cadastre-se agora e comece com vantagens exclusivas.</p>
                                             </div>
                                         </div>
                                     )}
@@ -513,14 +513,14 @@ export default function ClienteAuth() {
                                         <>
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div className="col-span-2">
-                                                    <Label htmlFor="tipo_pessoa">Tipo de Pessoa</Label>
+                                                    <Label htmlFor="tipo_pessoa" className={portalTheme.inputLabel}>Tipo de Pessoa</Label>
                                                     <div className="relative mt-1">
-                                                        <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500 z-10" />
+                                                        <UserCircle className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText} z-10`} />
                                                         <Select
                                                             value={registerData.tipo_pessoa}
                                                             onValueChange={(value) => setRegisterData({ ...registerData, tipo_pessoa: value })}
                                                         >
-                                                            <SelectTrigger className="mt-1 pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl">
+                                                            <SelectTrigger className={`mt-1 pl-10 h-11 rounded-xl ${portalTheme.input}`}>
                                                                 <SelectValue />
                                                             </SelectTrigger>
                                                             <SelectContent>
@@ -533,33 +533,31 @@ export default function ClienteAuth() {
                                             </div>
 
                                             <div>
-                                                <Label htmlFor="nome_completo">
+                                                <Label htmlFor="nome_completo" className={portalTheme.inputLabel}>
                                                     {registerData.tipo_pessoa === "Física" ? "Nome Completo *" : "Nome Fantasia *"}
                                                 </Label>
                                                 <div className="relative mt-1">
-                                                    <div className="relative mt-1">
-                                                        <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
-                                                        <Input
-                                                            id="nome_completo"
-                                                            placeholder="Seu nome completo"
-                                                            className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
-                                                            value={registerData.nome_completo}
-                                                            onChange={(e) => setRegisterData({ ...registerData, nome_completo: e.target.value })}
-                                                            required
-                                                        />
-                                                    </div>
+                                                    <User className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
+                                                    <Input
+                                                        id="nome_completo"
+                                                        placeholder="Seu nome completo"
+                                                        className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
+                                                        value={registerData.nome_completo}
+                                                        onChange={(e) => setRegisterData({ ...registerData, nome_completo: e.target.value })}
+                                                        required
+                                                    />
                                                 </div>
                                             </div>
 
                                             {registerData.tipo_pessoa === "Física" ? (
                                                 <div>
-                                                    <Label htmlFor="cpf">CPF</Label>
+                                                    <Label htmlFor="cpf" className={portalTheme.inputLabel}>CPF</Label>
                                                     <div className="relative mt-1">
-                                                        <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                        <CreditCard className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                         <Input
                                                             id="cpf"
                                                             placeholder="000.000.000-00"
-                                                            className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                            className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                             value={registerData.cpf}
                                                             onChange={(e) => setRegisterData({ ...registerData, cpf: formatarCPF(e.target.value) })}
                                                             maxLength={14}
@@ -569,13 +567,13 @@ export default function ClienteAuth() {
                                             ) : (
                                                 <>
                                                     <div>
-                                                        <Label htmlFor="cnpj">CNPJ</Label>
+                                                        <Label htmlFor="cnpj" className={portalTheme.inputLabel}>CNPJ</Label>
                                                         <div className="relative mt-1">
-                                                            <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                            <CreditCard className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                             <Input
                                                                 id="cnpj"
                                                                 placeholder="00.000.000/0000-00"
-                                                                className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                                className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                                 value={registerData.cnpj}
                                                                 onChange={(e) => setRegisterData({ ...registerData, cnpj: formatarCNPJ(e.target.value) })}
                                                                 maxLength={18}
@@ -583,13 +581,13 @@ export default function ClienteAuth() {
                                                         </div>
                                                     </div>
                                                     <div>
-                                                        <Label htmlFor="razao_social">Razão Social</Label>
+                                                        <Label htmlFor="razao_social" className={portalTheme.inputLabel}>Razão Social</Label>
                                                         <div className="relative mt-1">
-                                                            <Building className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                            <Building className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                             <Input
                                                                 id="razao_social"
                                                                 placeholder="Razão Social da empresa"
-                                                                className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                                className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                                 value={registerData.razao_social}
                                                                 onChange={(e) => setRegisterData({ ...registerData, razao_social: e.target.value })}
                                                             />
@@ -599,13 +597,13 @@ export default function ClienteAuth() {
                                             )}
 
                                             <div>
-                                                <Label htmlFor="telefone">Telefone *</Label>
+                                                <Label htmlFor="telefone" className={portalTheme.inputLabel}>Telefone *</Label>
                                                 <div className="relative mt-1">
-                                                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                    <Phone className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                     <Input
                                                         id="telefone"
                                                         placeholder="(00) 00000-0000"
-                                                        className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                        className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                         value={registerData.telefone}
                                                         onChange={(e) => setRegisterData({ ...registerData, telefone: formatarTelefone(e.target.value) })}
                                                         required
@@ -614,13 +612,13 @@ export default function ClienteAuth() {
                                             </div>
 
                                             <div>
-                                                <Label htmlFor="data_nascimento">Data de Nascimento</Label>
+                                                <Label htmlFor="data_nascimento" className={portalTheme.inputLabel}>Data de Nascimento</Label>
                                                 <div className="relative mt-1">
-                                                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                    <Calendar className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                     <Input
                                                         id="data_nascimento"
                                                         type="date" lang="pt-BR"
-                                                        className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                        className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                         value={registerData.data_nascimento}
                                                         onChange={(e) => setRegisterData({ ...registerData, data_nascimento: e.target.value })}
                                                     />
@@ -629,7 +627,7 @@ export default function ClienteAuth() {
 
                                             <Button
                                                 type="button"
-                                                className="w-full bg-green-700 hover:bg-green-800"
+                                                className={`w-full font-bold h-12 rounded-xl text-base ${portalTheme.primaryButton}`}
                                                 onClick={() => {
                                                     if (!registerData.nome_completo || !registerData.telefone) {
                                                         setError("Nome e telefone são obrigatórios");
@@ -651,23 +649,23 @@ export default function ClienteAuth() {
                                                 <button
                                                     type="button"
                                                     onClick={() => setRegistrationStep(1)}
-                                                    className="text-green-700 hover:text-green-800"
+                                                    className={`hover:opacity-80 transition-opacity ${portalTheme.accentText}`}
                                                 >
                                                     <ArrowLeft className="w-4 h-4" />
                                                 </button>
-                                                <span className="text-sm text-gray-500">Passo 2 de 3: Endereço (opcional)</span>
+                                                <span className={`text-sm ${portalTheme.textMuted}`}>Passo 2 de 3: Endereço (opcional)</span>
                                             </div>
 
                                             <div className="grid grid-cols-3 gap-4">
                                                 <div className="col-span-2">
-                                                    <Label htmlFor="cep">CEP</Label>
+                                                    <Label htmlFor="cep" className={portalTheme.inputLabel}>CEP</Label>
                                                     <div className="flex gap-2 mt-1 relative">
                                                         <div className="relative flex-1">
-                                                            <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                            <Hash className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                             <Input
                                                                 id="cep"
                                                                 placeholder="00000-000"
-                                                                className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                                className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                                 value={registerData.cep}
                                                                 onChange={(e) => setRegisterData({ ...registerData, cep: e.target.value })}
                                                                 onBlur={(e) => buscarCEP(e.target.value)}
@@ -685,13 +683,13 @@ export default function ClienteAuth() {
                                                     </div>
                                                 </div>
                                                 <div>
-                                                    <Label htmlFor="numero">Número</Label>
+                                                    <Label htmlFor="numero" className={portalTheme.inputLabel}>Número</Label>
                                                     <div className="relative mt-1">
-                                                        <Navigation className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                        <Navigation className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                         <Input
                                                             id="numero"
                                                             placeholder="123"
-                                                            className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                            className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                             value={registerData.numero}
                                                             onChange={(e) => setRegisterData({ ...registerData, numero: e.target.value })}
                                                         />
@@ -700,13 +698,13 @@ export default function ClienteAuth() {
                                             </div>
 
                                             <div>
-                                                <Label htmlFor="endereco">Endereço</Label>
+                                                <Label htmlFor="endereco" className={portalTheme.inputLabel}>Endereço</Label>
                                                 <div className="relative mt-1">
-                                                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                    <MapPin className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                     <Input
                                                         id="endereco"
                                                         placeholder="Rua, Avenida..."
-                                                        className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                        className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                         value={registerData.endereco}
                                                         onChange={(e) => setRegisterData({ ...registerData, endereco: e.target.value })}
                                                     />
@@ -715,11 +713,11 @@ export default function ClienteAuth() {
 
                                             <div>
                                                 <div className="relative mt-1">
-                                                    <Info className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                    <Info className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                     <Input
                                                         id="complemento"
                                                         placeholder="Apto, Bloco..."
-                                                        className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                        className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                         value={registerData.complemento}
                                                         onChange={(e) => setRegisterData({ ...registerData, complemento: e.target.value })}
                                                     />
@@ -728,39 +726,39 @@ export default function ClienteAuth() {
 
                                             <div className="grid grid-cols-3 gap-4">
                                                 <div>
-                                                    <Label htmlFor="bairro">Bairro</Label>
+                                                    <Label htmlFor="bairro" className={portalTheme.inputLabel}>Bairro</Label>
                                                     <div className="relative mt-1">
-                                                        <Map className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                        <Map className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                         <Input
                                                             id="bairro"
                                                             placeholder="Bairro"
-                                                            className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                            className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                             value={registerData.bairro}
                                                             onChange={(e) => setRegisterData({ ...registerData, bairro: e.target.value })}
                                                         />
                                                     </div>
                                                 </div>
                                                 <div>
-                                                    <Label htmlFor="cidade">Cidade</Label>
+                                                    <Label htmlFor="cidade" className={portalTheme.inputLabel}>Cidade</Label>
                                                     <div className="relative mt-1">
-                                                        <Home className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                        <Home className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                         <Input
                                                             id="cidade"
                                                             placeholder="Cidade"
-                                                            className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                            className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                             value={registerData.cidade}
                                                             onChange={(e) => setRegisterData({ ...registerData, cidade: e.target.value })}
                                                         />
                                                     </div>
                                                 </div>
                                                 <div>
-                                                    <Label htmlFor="estado">UF</Label>
+                                                    <Label htmlFor="estado" className={portalTheme.inputLabel}>UF</Label>
                                                     <div className="relative mt-1">
-                                                        <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                        <Globe className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                         <Input
                                                             id="estado"
                                                             placeholder="UF"
-                                                            className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                            className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                             value={registerData.estado}
                                                             onChange={(e) => setRegisterData({ ...registerData, estado: e.target.value.toUpperCase() })}
                                                             maxLength={2}
@@ -771,7 +769,7 @@ export default function ClienteAuth() {
 
                                             <Button
                                                 type="button"
-                                                className="w-full bg-green-700 hover:bg-green-800"
+                                                className={`w-full font-bold h-12 rounded-xl text-base ${portalTheme.primaryButton}`}
                                                 onClick={() => setRegistrationStep(3)}
                                             >
                                                 Continuar
@@ -786,22 +784,22 @@ export default function ClienteAuth() {
                                                 <button
                                                     type="button"
                                                     onClick={() => setRegistrationStep(2)}
-                                                    className="text-green-700 hover:text-green-800"
+                                                    className={`hover:opacity-80 transition-opacity ${portalTheme.accentText}`}
                                                 >
                                                     <ArrowLeft className="w-4 h-4" />
                                                 </button>
-                                                <span className="text-sm text-gray-500">Passo 3 de 3: Credenciais</span>
+                                                <span className={`text-sm ${portalTheme.textMuted}`}>Passo 3 de 3: Credenciais</span>
                                             </div>
 
                                             <div>
-                                                <Label htmlFor="register-email">E-mail *</Label>
+                                                <Label htmlFor="register-email" className={portalTheme.inputLabel}>E-mail *</Label>
                                                 <div className="relative mt-1">
-                                                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                    <Mail className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                     <Input
                                                         id="register-email"
                                                         type="email"
                                                         placeholder="seu@email.com"
-                                                        className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                        className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                         value={registerData.email}
                                                         onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
                                                         required
@@ -810,14 +808,14 @@ export default function ClienteAuth() {
                                             </div>
 
                                             <div>
-                                                <Label htmlFor="register-password">Senha *</Label>
+                                                <Label htmlFor="register-password" className={portalTheme.inputLabel}>Senha *</Label>
                                                 <div className="relative mt-1">
-                                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                    <Lock className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                     <Input
                                                         id="register-password"
                                                         type={showPassword ? "text" : "password"}
                                                         placeholder="Mínimo 6 caracteres"
-                                                        className="pl-10 pr-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                        className={`pl-10 pr-10 h-11 rounded-xl ${portalTheme.input}`}
                                                         value={registerData.password}
                                                         onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
                                                         required
@@ -825,7 +823,7 @@ export default function ClienteAuth() {
                                                     <button
                                                         type="button"
                                                         onClick={() => setShowPassword(!showPassword)}
-                                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 dark:hover:text-stone-200"
                                                     >
                                                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                                     </button>
@@ -833,27 +831,27 @@ export default function ClienteAuth() {
                                             </div>
 
                                             <div>
-                                                <Label htmlFor="confirm-password">Confirmar Senha *</Label>
+                                                <Label htmlFor="confirm-password" className={portalTheme.inputLabel}>Confirmar Senha *</Label>
                                                 <div className="relative mt-1">
-                                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                                                    <Lock className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${portalTheme.accentText}`} />
                                                     <Input
                                                         id="confirm-password"
                                                         type={showPassword ? "text" : "password"}
                                                         placeholder="Confirme sua senha"
-                                                        className="pl-10 h-11 border-stone-200 focus:border-amber-400 focus:ring-amber-400/20 rounded-xl"
+                                                        className={`pl-10 h-11 rounded-xl ${portalTheme.input}`}
                                                         value={registerData.confirmPassword}
                                                         onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
                                                         required
                                                     />
                                                     {registerData.confirmPassword && registerData.password === registerData.confirmPassword && (
-                                                        <Check className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-green-600" />
+                                                        <Check className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                                                     )}
                                                 </div>
                                             </div>
 
                                             <Button
                                                 type="submit"
-                                                className="w-full bg-amber-400 hover:bg-amber-300 text-green-950 font-bold h-12 rounded-xl shadow-lg shadow-amber-400/20 text-lg transition-all hover:scale-[1.02]"
+                                                className={`w-full font-bold h-12 rounded-xl text-base shadow-lg transition-all hover:scale-[1.02] ${portalTheme.primaryButton}`}
                                                 disabled={loading}
                                             >
                                                 {loading ? (
@@ -876,7 +874,7 @@ export default function ClienteAuth() {
                                         {[1, 2, 3].map((step) => (
                                             <div
                                                 key={step}
-                                                className={`w-2 h-2 rounded-full transition-colors ${registrationStep >= step ? "bg-green-700" : "bg-gray-300"
+                                                className={`w-2 h-2 rounded-full transition-colors ${registrationStep >= step ? "bg-amber-500" : "bg-stone-300 dark:bg-stone-700"
                                                     }`}
                                             />
                                         ))}
@@ -888,7 +886,7 @@ export default function ClienteAuth() {
                 </Card>
 
                 {/* Legal Footer */}
-                <p className="text-center text-xs text-gray-500 mt-6">
+                <p className={`text-center text-xs mt-6 ${portalTheme.textMuted}`}>
                     Ao se cadastrar, você concorda com nossos termos de uso e política de privacidade.
                 </p>
             </div>

@@ -61,7 +61,7 @@ export default function CRM() {
   const [search, setSearch] = useState("");
   const [tierFilter, setTierFilter] = useState("all");
   const [viewMode, setViewMode] = useState("table"); // 'table' | 'cards'
-  
+
   // Modais de Clientes
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCliente, setEditingCliente] = useState(null);
@@ -157,7 +157,7 @@ export default function CRM() {
       try {
         const { data, error } = await supabase
           .from('organization_settings')
-          .select('modulos_ativos, portal_theme')
+          .select('modulos_ativos')
           .eq('organization_id', selectedOrgId)
           .maybeSingle();
 
@@ -171,13 +171,7 @@ export default function CRM() {
             autoatendimento: m.autoatendimento !== false,
             perfil: m.perfil !== false,
           });
-          if (m.portal_theme || data.portal_theme) {
-            setSelectedPortalTheme(m.portal_theme || data.portal_theme || "luxo");
-          } else {
-            setSelectedPortalTheme("luxo");
-          }
-        } else if (data?.portal_theme) {
-          setSelectedPortalTheme(data.portal_theme);
+          setSelectedPortalTheme(m.portal_theme || "luxo");
         } else {
           setSelectedPortalTheme("luxo");
         }
@@ -217,7 +211,6 @@ export default function CRM() {
           {
             organization_id: selectedOrgId,
             modulos_ativos: novosModulos,
-            portal_theme: selectedPortalTheme,
             updated_at: new Date().toISOString()
           },
           { onConflict: 'organization_id' }
@@ -401,7 +394,7 @@ export default function CRM() {
             <Trophy className="w-4 h-4" /> Fidelidade & Regras
           </TabsTrigger>
           <TabsTrigger value="painel_empresa" className="gap-2 text-sm font-medium px-4">
-            <Building2 className="w-4 h-4" /> Portal do Cliente (Empresas)
+            <Building2 className="w-4 h-4" /> Portal do Cliente
           </TabsTrigger>
           <TabsTrigger value="acessos" className="gap-2 text-sm font-medium px-4">
             <Activity className="w-4 h-4" /> Métricas de Acesso
@@ -436,11 +429,10 @@ export default function CRM() {
                   <button
                     key={t.key}
                     onClick={() => setTierFilter(t.key)}
-                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                      tierFilter === t.key
+                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${tierFilter === t.key
                         ? 'bg-white dark:bg-neutral-700 text-gray-900 dark:text-white shadow-sm'
                         : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
-                    }`}
+                      }`}
                   >
                     {t.label}
                   </button>
@@ -515,13 +507,12 @@ export default function CRM() {
 
                         <TableCell>
                           <div className="flex items-center gap-1.5">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${
-                              tier.nome === 'Ouro'
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${tier.nome === 'Ouro'
                                 ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800'
                                 : tier.nome === 'Prata'
                                   ? 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
                                   : 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-neutral-800 dark:text-gray-400 dark:border-neutral-700'
-                            }`}>
+                              }`}>
                               {tier.nome}
                             </span>
                             <span className="text-[11px] text-gray-400">
@@ -550,15 +541,6 @@ export default function CRM() {
                               className="h-7 px-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-neutral-800"
                             >
                               <ShoppingBag className="w-3.5 h-3.5 mr-1" /> Histórico
-                            </Button>
-
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => { setPreviewCliente(c); setPreviewModalOpen(true); }}
-                              className="h-7 px-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-neutral-800"
-                            >
-                              <Eye className="w-3.5 h-3.5 mr-1" /> Portal
                             </Button>
 
                             {canEdit && (
@@ -755,11 +737,10 @@ export default function CRM() {
                         <div
                           key={t.id}
                           onClick={() => setSelectedPortalTheme(t.id)}
-                          className={`cursor-pointer p-3.5 rounded-xl border transition-all flex flex-col justify-between ${
-                            isSelected
+                          className={`cursor-pointer p-3.5 rounded-xl border transition-all flex flex-col justify-between ${isSelected
                               ? 'border-green-600 bg-green-50/40 dark:bg-green-950/20 ring-2 ring-green-500/20 shadow-md'
                               : 'border-gray-200 dark:border-neutral-800 hover:border-gray-300 dark:hover:border-neutral-700 bg-white dark:bg-neutral-900'
-                          }`}
+                            }`}
                         >
                           <div className="space-y-1.5">
                             <div className="flex items-center justify-between">
@@ -903,25 +884,22 @@ export default function CRM() {
                 <div className="flex gap-2">
                   <button
                     onClick={() => setPreviewTab('login')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      previewTab === 'login' ? 'bg-green-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'
-                    }`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${previewTab === 'login' ? 'bg-green-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
                   >
                     1. Tela de Login
                   </button>
                   <button
                     onClick={() => setPreviewTab('cadastro')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      previewTab === 'cadastro' ? 'bg-green-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'
-                    }`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${previewTab === 'cadastro' ? 'bg-green-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
                   >
                     2. Tela de Cadastro
                   </button>
                   <button
                     onClick={() => setPreviewTab('painel')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      previewTab === 'painel' ? 'bg-green-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'
-                    }`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${previewTab === 'painel' ? 'bg-green-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
                   >
                     3. Painel do Cliente
                   </button>

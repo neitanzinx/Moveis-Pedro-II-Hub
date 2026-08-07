@@ -98,7 +98,7 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
               })()
             : []
       });
-      const venda = vendasParaSelecao.find(v => v.id === devolucao.venda_id) || vendas.find(v => v.id === devolucao.venda_id);
+      const venda = vendas?.find(v => v.id === devolucao.venda_id);
       setVendaSelecionada(venda);
       setEntregue(true);
       setValorEditadoManual(Boolean(Number(devolucao.valor_devolvido || 0)));
@@ -114,7 +114,7 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
       setQuantidadeTrocaInput(1);
       setBuscaVenda("");
     }
-  }, [devolucao, vendas, vendasParaSelecao, isOpen]);
+  }, [devolucao, vendas, isOpen]);
   useEffect(() => {
     if (valorDiferenca <= 0 && pagamentosDiferenca.length > 0) {
       setFormData((prev) => ({ ...prev, pagamentos_diferenca: [] }));
@@ -133,7 +133,7 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
   }, [isOpen, lojasDestino, formData.destino_estoque]);
 
   const handleVendaChange = async (vendaId) => {
-    const venda = vendasParaSelecao.find(v => v.id === vendaId) || vendas.find(v => v.id === vendaId);
+    const venda = vendas?.find(v => v.id === vendaId);
     if (!venda) return;
 
     setVendaSelecionada(venda);
@@ -326,10 +326,10 @@ const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
   };
 
   const vendaSelecionadaLabel = useMemo(() => {
-    const vendaAtual = vendasParaSelecao.find((v) => v.id === formData.venda_id) || vendaSelecionada;
+    const vendaAtual = vendas?.find((v) => v.id === formData.venda_id) || vendaSelecionada;
     if (!vendaAtual) return "Buscar pedido por numero ou cliente";
     return `#${vendaAtual.numero_pedido} - ${vendaAtual.cliente_nome}`;
-  }, [formData.venda_id, vendaSelecionada, vendasParaSelecao]);
+  }, [formData.venda_id, vendaSelecionada, vendas]);
 
   const produtoTrocaSelecionado = useMemo(() => {
     return produtosTrocaDisponiveis.find((p) => p.id === produtoTrocaSelecionadoId) || null;
