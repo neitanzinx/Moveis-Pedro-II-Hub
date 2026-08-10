@@ -126,5 +126,22 @@ export const removeOfflineQueueItem = async (id) => {
     }
 };
 
+/**
+ * Limpa completamente a fila offline
+ */
+export const clearOfflineQueue = async () => {
+    try {
+        const ok = writeQueue([]);
+        if (ok) {
+            notifyOfflineQueueUpdated();
+        }
+        return ok;
+    } catch (error) {
+        console.error('Erro ao limpar fila offline:', error);
+        return false;
+    }
+};
+
 // Re-export for backward compat (some files import this)
 export const offlineQueueDB = legacyDB;
+

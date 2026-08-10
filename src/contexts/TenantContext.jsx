@@ -232,8 +232,10 @@ export function TenantProvider({ children, organizationId, slug: slugProp }) {
                 console.warn('Erro ao carregar organização, usando padrão:', orgError);
                 setOrganization(DEFAULT_ORGANIZATION);
                 setPlano(null);
+                try { localStorage.setItem('current_organization_id', DEFAULT_ORGANIZATION.id); } catch (_) {}
             } else {
                 setOrganization(orgData);
+                try { localStorage.setItem('current_organization_id', orgData.id); } catch (_) {}
                 if (orgData?.plano_id) {
                     const { data: pData } = await supabase
                         .from('planos')

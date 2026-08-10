@@ -1,7 +1,33 @@
 import { toast } from "sonner";
 import { ZAP_API_URL as API_URL } from "@/utils/zapApiUrl";
-import { saveToOfflineQueue } from "@/utils/offlineQueue";
+import { saveToOfflineQueue, getOfflineQueue, removeOfflineQueueItem, clearOfflineQueue } from "@/utils/offlineQueue";
 import { buildTrackingUrl, buildClientPortalUrl, buildAssistenciaUrl } from "@/utils/tenantLinkHelper";
+
+// 🔐 Chave de API compartilhada com o backend do bot
+const BOT_API_KEY = import.meta.env.VITE_BOT_API_SECRET || '';
+
+/**
+ * Obtém o organization_id ativo (do localStorage ou padrão)
+ */
+function getActiveOrgId(customOrgId = null) {
+    if (customOrgId) return customOrgId;
+    try {
+        const stored = localStorage.getItem('current_organization_id') || localStorage.getItem('selected_org_id');
+        if (stored) return stored;
+    } catch (e) { /* ignore */ }
+    return '00000000-0000-0000-0000-000000000001';
+}
+
+/** Headers padrão para chamadas ao bot, incluindo API key de autenticação e tenant ID */
+function botHeaders(extra = {}, orgId = null) {
+    const activeOrgId = getActiveOrgId(orgId);
+    return {
+        'Content-Type': 'application/json',
+        ...(BOT_API_KEY ? { 'x-bot-api-key': BOT_API_KEY } : {}),
+        'x-organization-id': activeOrgId,
+        ...extra,
+    };
+}
 
 
 const isLikelyBotOfflineResponse = (status, errorPayload) => {
@@ -36,7 +62,9 @@ export const whatsappService = {
      */
     checkStatus: async () => {
         try {
-            const response = await fetch(`${API_URL}/status`);
+            const response = await fetch(`${API_URL}/status`, {
+                headers: botHeaders(),
+            });
             if (!response.ok) return false;
 
             const data = await response.json();
@@ -66,9 +94,7 @@ export const whatsappService = {
         try {
             const response = await fetch(`${API_URL}/send-text`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: botHeaders(),
                 body: JSON.stringify(payload),
             });
 
@@ -113,9 +139,7 @@ export const whatsappService = {
         try {
             const response = await fetch(`${API_URL}/send-image-url`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: botHeaders(),
                 body: JSON.stringify(payload),
             });
 
@@ -193,7 +217,7 @@ Acompanhe a entrega em tempo real pelo link abaixo:
         try {
             const response = await fetch(`${API_URL}/aviso-proxima-parada`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: botHeaders(),
                 body: JSON.stringify({
                     id: entrega.id,
                     telefone: telefone || entrega.cliente_telefone,
@@ -264,7 +288,7 @@ Acompanhe a entrega em tempo real pelo link abaixo:
         try {
             const response = await fetch(`${API_URL}/aviso-inicio-rota`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: botHeaders(),
                 body: JSON.stringify({ entregas })
             });
             if (!response.ok) {
@@ -299,7 +323,7 @@ Acompanhe a entrega em tempo real pelo link abaixo:
         try {
             const response = await fetch(`${API_URL}/concluir-entrega`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: botHeaders(),
                 body: JSON.stringify({
                     id_concluida: idConcluida,
                     update_data: updateData
@@ -335,7 +359,7 @@ Acompanhe a entrega em tempo real pelo link abaixo:
         try {
             const response = await fetch(`${API_URL}/disparar-confirmacoes`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: botHeaders(),
                 body: JSON.stringify({ entregas })
             });
             if (!response.ok) {
@@ -369,7 +393,7 @@ Acompanhe a entrega em tempo real pelo link abaixo:
         try {
             const response = await fetch(`${API_URL}/reagendar-entregas`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: botHeaders(),
                 body: JSON.stringify({ entregas })
             });
             if (!response.ok) {
@@ -402,7 +426,7 @@ Acompanhe a entrega em tempo real pelo link abaixo:
         try {
             const response = await fetch(`${API_URL}/aviso-montagem-agendada`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: botHeaders(),
                 body: JSON.stringify(data)
             });
             if (!response.ok) {
@@ -435,7 +459,7 @@ Acompanhe a entrega em tempo real pelo link abaixo:
         try {
             const response = await fetch(`${API_URL}/aviso-montagem-cancelada`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: botHeaders(),
                 body: JSON.stringify(data)
             });
             if (!response.ok) {
@@ -468,7 +492,7 @@ Acompanhe a entrega em tempo real pelo link abaixo:
         try {
             const response = await fetch(`${API_URL}/aviso-montagem-reagendada`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: botHeaders(),
                 body: JSON.stringify(data)
             });
             if (!response.ok) {
@@ -501,7 +525,7 @@ Acompanhe a entrega em tempo real pelo link abaixo:
         try {
             const response = await fetch(`${API_URL}/enviar-mensagem-marketing`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: botHeaders(),
                 body: JSON.stringify(data)
             });
             if (!response.ok) {
@@ -538,7 +562,7 @@ Acompanhe a entrega em tempo real pelo link abaixo:
         try {
             const response = await fetch(`${API_URL}/mensagem-pos-venda`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: botHeaders(),
                 body: JSON.stringify(data)
             });
 
@@ -582,7 +606,7 @@ Acompanhe a entrega em tempo real pelo link abaixo:
         try {
             const response = await fetch(`${API_URL}/enviar-mensagem-aniversario`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: botHeaders(),
                 body: JSON.stringify(data)
             });
 
@@ -605,6 +629,121 @@ Acompanhe a entrega em tempo real pelo link abaixo:
             console.error("Erro ao enviar mensagem de aniversário:", error);
             return false;
         }
+    },
+
+    /**
+     * Consulta todas as pendências acumuladas (local e backend)
+     */
+    getPendingQueueInfo: async () => {
+        try {
+            const localItems = await getOfflineQueue();
+
+            let backendItems = [];
+            let backendCount = 0;
+
+            try {
+                const response = await fetch(`${API_URL}/whatsapp/queue/pending`, {
+                    headers: botHeaders()
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    backendCount = data.count || 0;
+                    backendItems = data.items || [];
+                }
+            } catch (err) {
+                console.warn("Não foi possível buscar fila do backend:", err.message);
+            }
+
+            return {
+                totalCount: (localItems?.length || 0) + backendCount,
+                localCount: localItems?.length || 0,
+                backendCount: backendCount,
+                localItems: localItems || [],
+                backendItems: backendItems || []
+            };
+        } catch (error) {
+            console.error("Erro ao obter informações da fila pendente:", error);
+            return { totalCount: 0, localCount: 0, backendCount: 0, localItems: [], backendItems: [] };
+        }
+    },
+
+    /**
+     * Envia todas as mensagens pendentes acumuladas (processa local e backend)
+     */
+    processAllPendingQueues: async () => {
+        let sucessosLocal = 0;
+        let falhasLocal = 0;
+
+        // 1. Processar fila local
+        try {
+            const localItems = await getOfflineQueue();
+            for (const item of localItems) {
+                try {
+                    if (typeof whatsappService[item.action] === 'function') {
+                        const res = await whatsappService[item.action](...item.payload);
+                        if (res === true || res?.status === 'sent' || res?.ok) {
+                            await removeOfflineQueueItem(item.id);
+                            sucessosLocal++;
+                        } else {
+                            falhasLocal++;
+                        }
+                    } else {
+                        await removeOfflineQueueItem(item.id);
+                    }
+                } catch (e) {
+                    falhasLocal++;
+                }
+            }
+        } catch (err) {
+            console.error("Erro ao processar fila local:", err);
+        }
+
+        // 2. Disparar processamento no backend
+        let backendOk = false;
+        try {
+            const res = await fetch(`${API_URL}/whatsapp/queue/process`, {
+                method: 'POST',
+                headers: botHeaders()
+            });
+            backendOk = res.ok;
+        } catch (err) {
+            console.error("Erro ao disparar fila do backend:", err);
+        }
+
+        return {
+            sucessosLocal,
+            falhasLocal,
+            backendOk
+        };
+    },
+
+    /**
+     * Descarta/apaga todas as mensagens pendentes acumuladas (limpa local e backend)
+     */
+    clearAllPendingQueues: async () => {
+        // 1. Limpar fila local
+        const localCleared = await clearOfflineQueue();
+
+        // 2. Limpar fila no backend
+        let backendCancelledCount = 0;
+        try {
+            const res = await fetch(`${API_URL}/whatsapp/queue/clear`, {
+                method: 'POST',
+                headers: botHeaders()
+            });
+            if (res.ok) {
+                const data = await res.json();
+                backendCancelledCount = data.cancelled_count || 0;
+            }
+        } catch (err) {
+            console.error("Erro ao limpar fila do backend:", err);
+        }
+
+        return {
+            localCleared,
+            backendCancelledCount
+        };
     }
 };
+
 

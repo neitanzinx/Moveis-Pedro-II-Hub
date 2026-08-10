@@ -10,6 +10,53 @@ const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET || 'moveis-pedro-ii-jwt-secret-2026';
 const JWT_EXPIRES_IN = '24h';
 
+// Cargos autorizados a criar/resetar credenciais de funcionários
+const ADMIN_ROLES = ['Administrador', 'Gerente Geral'];
+
+/**
+ * Verifica se o request possui um JWT válido de um Administrador ou Gerente Geral.
+ * Retorna o payload decodificado do JWT ou null (com resposta HTTP já enviada).
+ */
+async function verifyAdminJWT(req, res, supabase) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        res.status(401).json({ success: false, error: 'Token de autenticação não fornecido.' });
+        return null;
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    let decoded;
+    try {
+        decoded = jwt.verify(token, JWT_SECRET);
+    } catch (e) {
+        res.status(401).json({ success: false, error: 'Token inválido ou expirado. Faça login novamente.' });
+        return null;
+    }
+
+    // Verificar cargo do solicitante no banco (fonte da verdade, não confiar só no JWT)
+    const { data: adminUser, error } = await supabase
+        .from('public_users')
+        .select('id, cargo, cargos, ativo')
+        .eq('id', decoded.id)
+        .single();
+
+    if (error || !adminUser || !adminUser.ativo) {
+        res.status(403).json({ success: false, error: 'Usuário não encontrado ou inativo.' });
+        return null;
+    }
+
+    const roles = normalizeUserRoles(adminUser);
+    const isAdmin = roles.some(r => ADMIN_ROLES.includes(r));
+
+    if (!isAdmin) {
+        console.warn(`[Auth] Tentativa de acesso admin negada para user ${decoded.id} (cargos: ${roles.join(', ')})`);
+        res.status(403).json({ success: false, error: 'Acesso negado. Apenas Administradores podem executar esta ação.' });
+        return null;
+    }
+
+    return decoded;
+}
+
 function normalizeUserRoles(user) {
     const fromArray = Array.isArray(user?.cargos)
         ? user.cargos.filter((role) => typeof role === 'string' && role.trim())
@@ -276,11 +323,11 @@ function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
     // ========================================
     app.post('/api/auth/employee/create', async (req, res) => {
         try {
-            const { user_id, setor_code } = req.body;
+            // 🔐 Verificar se o solicitante é Administrador ou Gerente Geral
+            const admin = await verifyAdminJWT(req, res, supabase);
+            if (!admin) return; // Resposta já enviada por verifyAdminJWT
 
-            // Nota: Esta rota usa o service_role do Supabase para operações,
-            // então não precisa de JWT de usuário. A segurança é garantida
-            // pelo fato de estar acessível apenas no backend.
+            const { user_id, setor_code } = req.body;
 
             // Gerar matrícula usando função do banco
             const { data: matriculaData, error: matriculaError } = await supabase
@@ -346,17 +393,16 @@ function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
     // ========================================
     app.post('/api/auth/employee/reset-password', async (req, res) => {
         try {
-            const { user_id } = req.body;
-            const authHeader = req.headers.authorization;
+            // 🔐 Verificar se o solicitante é Administrador ou Gerente Geral
+            const admin = await verifyAdminJWT(req, res, supabase);
+            if (!admin) return; // Resposta já enviada por verifyAdminJWT
 
-            if (!authHeader) {
-                return res.status(401).json({ success: false, error: 'Não autorizado' });
-            }
+            const { user_id } = req.body;
 
             // Verificar se o usuário existe
             const { data: user, error: userError } = await supabase
                 .from('public_users')
-                .select('id, full_name, matricula, telefone, cargo')
+                .select('id, full_name, matricula, telefone, cargo, organization_id')
                 .eq('id', user_id)
                 .single();
 
@@ -406,16 +452,20 @@ function setupEmployeeAuthRoutes(app, supabase, whatsappClient = null) {
                         ? telefoneFormatado
                         : '55' + telefoneFormatado;
 
-                    const mensagem = `🔐 *Senha Resetada - Móveis Pedro II*\n\n` +
+                    const mensagem = `🔐 *Senha Resetada*\n\n` +
                         `Olá ${user.full_name}!\n\n` +
                         `Sua senha de acesso foi resetada.\n\n` +
                         `📋 *Matrícula:* ${user.matricula}\n` +
                         `🔑 *Nova Senha:* ${senhaTemp}\n\n` +
                         `⚠️ _No primeiro acesso você deverá criar uma nova senha._\n\n` +
-                        `Acesse: ${process.env.FRONTEND_URL || 'https://moveispedro2.com.br'}/login`;
+                        `Acesse o sistema para entrar.`;
 
-                    await whatsappClient.sendMessage(`${telefoneWhatsApp}@c.us`, mensagem);
-                    whatsappEnviado = true;
+                    const orgId = user.organization_id || '00000000-0000-0000-0000-000000000001';
+                    if (typeof whatsappClient.sendMessage === 'function') {
+                        // Suporte a TenantWhatsAppManager (orgId, chatId, content)
+                        const sendRes = await whatsappClient.sendMessage(orgId, `${telefoneWhatsApp}@c.us`, mensagem);
+                        whatsappEnviado = sendRes?.success || false;
+                    }
                     console.log(`[Auth] Notificação WhatsApp enviada para ${user.full_name}`);
                 } catch (whatsError) {
                     console.error('[Auth] Erro ao enviar WhatsApp:', whatsError);

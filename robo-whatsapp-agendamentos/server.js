@@ -123,27 +123,23 @@ function parseBooleanSetting(value, defaultValue = true) {
     return defaultValue;
 }
 
-async function getWhatsAppSettings(forceRefresh = false) {
-    const now = Date.now();
-    if (!forceRefresh && whatsappSettingsCache.data && now < whatsappSettingsCache.expiresAt) {
-        return whatsappSettingsCache.data;
-    }
+async function getWhatsAppSettings(forceRefresh = false, orgId = DEFAULT_ORG_ID) {
+    if (!orgId) orgId = DEFAULT_ORG_ID;
 
     const { data, error } = await supabase
         .from('whatsapp_bot_settings')
-        .select('key, value');
+        .select('key, value')
+        .eq('organization_id', orgId);
 
-    if (error) throw error;
+    if (error) {
+        console.warn(`Erro ao carregar configurações para Org ${orgId}:`, error.message);
+        return {};
+    }
 
     const settings = {};
     (data || []).forEach((row) => {
         settings[row.key] = row.value;
     });
-
-    whatsappSettingsCache = {
-        data: settings,
-        expiresAt: now + WHATSAPP_SETTINGS_CACHE_TTL_MS
-    };
 
     return settings;
 }
@@ -155,9 +151,9 @@ function renderTemplate(template, variables = {}) {
     }, template || '');
 }
 
-async function buildMessageFromSettings(messageKey, fallbackTemplate, variables = {}, defaultEnabled = true) {
+async function buildMessageFromSettings(messageKey, fallbackTemplate, variables = {}, defaultEnabled = true, orgId = DEFAULT_ORG_ID) {
     try {
-        const settings = await getWhatsAppSettings();
+        const settings = await getWhatsAppSettings(false, orgId);
         const enabled = parseBooleanSetting(settings[`msg_${messageKey}_enabled`], defaultEnabled);
         const template = settings[`msg_${messageKey}_template`] || fallbackTemplate;
         return {
@@ -165,7 +161,7 @@ async function buildMessageFromSettings(messageKey, fallbackTemplate, variables 
             message: renderTemplate(template, variables)
         };
     } catch (error) {
-        console.error(`Erro ao carregar template configurável (${messageKey}):`, error.message);
+        console.error(`Erro ao carregar template configurável (${messageKey}) para Org ${orgId}:`, error.message);
         return {
             enabled: defaultEnabled,
             message: renderTemplate(fallbackTemplate, variables)
@@ -335,7 +331,45 @@ app.use(async (req, res, next) => {
     next();
 });
 
-// 🔐 As rotas de autenticação de funcionários são registradas após a inicialização do client WhatsApp
+// 🔐 PROTEÇÃO DE ROTAS DO BOT — Middleware de API Key
+const BOT_API_SECRET = process.env.BOT_API_SECRET;
+
+// Rotas que exigem autenticação via x-bot-api-key
+const BOT_PROTECTED_ROUTES = new Set([
+    '/send-text', '/send-image-url',
+    '/disparar-confirmacoes', '/mensagem-pos-venda',
+    '/aviso-inicio-rota', '/aviso-proxima-parada',
+    '/reagendar-entregas', '/entrega-nao-realizada',
+    '/enviar-mensagem-marketing', '/enviar-mensagem-aniversario',
+    '/aviso-montagem-agendada', '/aviso-montagem-cancelada',
+    '/aviso-montagem-reagendada', '/confirmar-montagem',
+    '/lembrete-montagem', '/montador-a-caminho',
+    '/concluir-entrega', '/buscar-produto-ia',
+    '/whatsapp/reconnect', '/whatsapp/disconnect',
+    '/whatsapp/ai-settings',
+    '/whatsapp/queue/pending', '/whatsapp/queue/process', '/whatsapp/queue/clear',
+    '/status', '/whatsapp/status', '/logs',
+]);
+
+app.use((req, res, next) => {
+    // Só verificar rotas de API conhecidas (SPA e static files passam direto)
+    const needsAuth = BOT_PROTECTED_ROUTES.has(req.path) || req.path.startsWith('/nfe-xml/');
+    if (!needsAuth) return next();
+
+    // Fallback: se BOT_API_SECRET não estiver configurado, permitir (modo dev)
+    if (!BOT_API_SECRET) return next();
+
+    const providedKey = req.headers['x-bot-api-key'];
+    if (providedKey !== BOT_API_SECRET) {
+        console.warn(`🚫 [BotAuth] Acesso negado à rota ${req.method} ${req.path} — API key inválida ou ausente`);
+        return res.status(403).json({
+            error: 'Acesso negado. Chave de API inválida.',
+            code: 'INVALID_API_KEY'
+        });
+    }
+
+    next();
+});
 
 // 🏗️ SERVE FRONTEND (Monolith Mode)
 // Serves static files from the React build folder
@@ -345,532 +379,32 @@ const distPath = fs.existsSync(path.join(__dirname, 'dist'))
     : path.join(__dirname, '../dist');
 app.use(express.static(distPath));
 
-// const genAI = new GoogleGenerativeAI(GEMINI_KEY); // Movido para dentro da rota
-// const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
 // =============================================================================
-// 🤖 WHATSAPP MANAGER — Gerenciador de Ciclo de Vida Resiliente
+// 🤖 TENANT WHATSAPP MANAGER — Gerenciador Multi-Tenant / Multi-Sessão
 // =============================================================================
+const { TenantWhatsAppManager, DEFAULT_ORG_ID } = require('./TenantWhatsAppManager');
+const whatsappManager = new TenantWhatsAppManager(supabase);
 
-// 🏭 FACTORY: Cria Client NOVO a cada tentativa.
-// Motivo: whatsapp-web.js NÃO suporta reinicializar o mesmo objeto Client
-// após destroy(). O Puppeteer interno mantém referências ao browser antigo.
-// 🏭 FACTORY: Cria Client NOVO a cada tentativa.
-// 🏭 FACTORY: Cria Client NOVO a cada tentativa.
-function createWhatsAppClient(clientId = "client-v2") {
-    // 🛡️ Caminhos absolutos e adaptativos (Windows/Linux)
-    const isWindows = process.platform === "win32";
-
-    // USAR PASTA LOCAL EM PRODUÇÃO (Para persistir via Docker Volumes)
-    // Local: ./.wwebjs_auth (Relativo ao WORKDIR /usr/src/app)
-    const basePath = path.join(process.cwd(), '.wwebjs_auth');
-
-    // Cria diretório base se não existir
-    try {
-        if (!fs.existsSync(basePath)) fs.mkdirSync(basePath, { recursive: true });
-    } catch (e) { /* ignore */ }
-
-    const sessionPath = basePath; // LocalAuth já concatena o 'session-' + clientId
-
-    const puppeteer = require('puppeteer');
-
-    console.log(`🔧 [FACTORY] Client ID: ${clientId} | Path: ${sessionPath}`);
-
-    return new Client({
-        authStrategy: new LocalAuth({
-            clientId: clientId,
-            dataPath: sessionPath
-        }),
-        authTimeoutMs: 60000,
-        puppeteer: {
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu'
-            ]
-        },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    });
+/**
+ * Helper para extrair o ID da organização do request (Headers, Query ou Body)
+ */
+function extractOrgId(req) {
+    return req.headers['x-organization-id'] || req.query?.organization_id || req.body?.organization_id || DEFAULT_ORG_ID;
 }
-
-
-// --- Estado global de conexão ---
-let connectionStatus = 'disconnected';
-let currentQR = null;
-let connectionInfo = null;
-
-// --- Client WhatsApp (LET porque precisa ser recriado) ---
-// Estado global para guardar o ID atual (permite rotação em caso de erro)
-let currentClientId = "client-v5"; // Bump para v5 (Fresh Start)
-let client = createWhatsAppClient(currentClientId);
-
-// 🔗 Registrar event handlers no client atual
-function attachClientEvents(c) {
-    c.on('qr', qr => {
-        currentQR = qr;
-        connectionStatus = 'waiting_qr';
-        qrcode.generate(qr, { small: true });
-        console.log('📱 QR Code gerado - escaneie pelo celular ou pela interface web');
-    });
-
-    c.on('authenticated', async () => {
-        console.log('🔐 Autenticação bem-sucedida!');
-        connectionStatus = 'connected';
-        currentQR = null;
-        whatsapp.reconnectAttempts = 0;
-        whatsapp.disconnectedSince = null;
-        whatsapp.isInitializing = false; // ← Liberar trava de init
-        try {
-            const info = await client.info;
-            if (info) {
-                connectionInfo = {
-                    wid: info.wid?.user || 'N/A',
-                    pushname: info.pushname || 'WhatsApp Bot',
-                    platform: info.platform || 'unknown'
-                };
-            }
-        } catch (e) {
-            console.log('⚠️ Info do usuário indisponível, mas autenticado.');
-        }
-    });
-
-    c.on('loading_screen', async (percent, message) => {
-        console.log(`📶 Carregando WhatsApp: ${percent}% - ${message}`);
-        if (percent >= 100 && connectionStatus !== 'connected') {
-            console.log('⏳ Aguardando evento ready (3s timeout)...');
-            setTimeout(async () => {
-                if (connectionStatus !== 'connected') {
-                    console.log('⚠️ Evento ready não disparou, forçando conexão...');
-                    currentQR = null;
-                    connectionStatus = 'connected';
-                    whatsapp.disconnectedSince = null;
-                    whatsapp.isInitializing = false; // ← Liberar trava de init
-                    try {
-                        const info = await client.info;
-                        connectionInfo = {
-                            wid: info?.wid?.user || 'N/A',
-                            pushname: info?.pushname || 'WhatsApp Bot',
-                            platform: info?.platform || 'unknown'
-                        };
-                        console.log(`✅ Robô Online! Conectado como: ${connectionInfo.pushname}`);
-                    } catch (e) {
-                        connectionInfo = null;
-                        console.log('✅ Robô Online!');
-                    }
-                }
-            }, 3000);
-        }
-    });
-
-    c.on('ready', async () => {
-        currentQR = null;
-        connectionStatus = 'connected';
-        whatsapp.reconnectAttempts = 0;
-        whatsapp.disconnectedSince = null;
-        whatsapp.lastHeartbeat = new Date().toISOString();
-        whatsapp.isInitializing = false; // ← Liberar trava de init
-        try {
-            const info = await client.info;
-            connectionInfo = {
-                wid: info?.wid?.user || 'N/A',
-                pushname: info?.pushname || 'WhatsApp Bot',
-                platform: info?.platform || 'unknown'
-            };
-            console.log(`✅ Robô Logístico Online! Conectado como: ${connectionInfo.pushname}`);
-
-            // 🚀 Processar fila ao conectar!
-            setTimeout(() => processarFila(), 5000);
-        } catch (e) {
-            connectionInfo = null;
-            console.log('✅ Robô Logístico Online!');
-            setTimeout(() => processarFila(), 5000);
-        }
-    });
-
-    c.on('disconnected', async (reason) => {
-        currentQR = null;
-        connectionStatus = 'disconnected';
-        connectionInfo = null;
-        whatsapp.disconnectedSince = whatsapp.disconnectedSince || Date.now();
-        console.log('❌ WhatsApp desconectado:', reason);
-        whatsapp.isInitializing = false; // ← Liberar trava
-        whatsapp.reconnect(`desconexão: ${reason}`);
-    });
-
-    c.on('auth_failure', async (msg) => {
-        currentQR = null;
-        connectionStatus = 'disconnected';
-        whatsapp.disconnectedSince = whatsapp.disconnectedSince || Date.now();
-        console.log('⚠️ Falha na autenticação:', msg);
-        whatsapp.isInitializing = false; // ← Liberar trava
-        whatsapp.reconnect(`auth_failure: ${msg}`);
-    });
-}
-
-// Registrar no client inicial
-attachClientEvents(client);
-
-// --- WhatsApp Manager ---
-const whatsapp = {
-    isReconnecting: false,
-    isInitializing: false,
-    reconnectAttempts: 0,
-    maxReconnectAttempts: 5,
-    watchdogInterval: null,
-    watchdogFailures: 0,
-    startedAt: null,
-    lastHeartbeat: null,
-    reconnectCount: 0,
-    disconnectedSince: null,
-
-    getBackoffDelay() {
-        const delays = [10, 30, 60, 120, 300];
-        return (delays[Math.min(this.reconnectAttempts, delays.length - 1)]) * 1000;
-    },
-
-    // 💀 Matar Chrome + limpar APENAS lock files (preserva sessão/auth!)
-    cleanChrome(deleteSession = false) {
-        const { execSync } = require('child_process');
-        const fs = require('fs');
-        console.log(`💀 [CLEAN] Matando Chrome... (deleteSession=${deleteSession})`);
-
-        const isWindows = process.platform === "win32";
-
-        if (isWindows) {
-            // WINDOWS: Usar taskkill reforçado
-            try { execSync('taskkill /F /IM chrome.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { /* ok */ }
-            try { execSync('taskkill /F /IM chromium.exe /T 2>NUL', { stdio: 'ignore' }); } catch (e) { /* ok */ }
-        } else {
-            // LINUX/MAC: Usar killall/pkill
-            const killCmds = [
-                'killall -9 google-chrome-stable',
-                'killall -9 chrome',
-                'killall -9 chromium',
-                'killall -9 chromium-browser',
-                'pkill -9 -f "chrome-linux64/chrome"'
-            ];
-            for (const cmd of killCmds) {
-                try { execSync(`${cmd} 2>/dev/null`, { stdio: 'ignore' }); } catch (e) { /* ok */ }
-            }
-        }
-
-        // 3) Esperar 
-        try {
-            const sleepCmd = isWindows ? 'timeout /t 2 /nobreak >NUL' : 'sleep 2';
-            execSync(sleepCmd, { stdio: 'ignore' });
-        } catch (e) { /* ok */ }
-
-        // 4) Limpar lock files / Sessão (usando os.tmpdir para consistência)
-        const basePath = path.join(process.cwd(), '.wwebjs_auth');
-        const sessionDir = path.join(basePath, `session-${currentClientId}`);
-
-        const lockFiles = ['SingletonLock', 'Lock', 'SingletonCookie'];
-
-        const removeFolder = (dir) => {
-            let deleted = false;
-            for (let i = 0; i < 3; i++) { // Reduzido para 3 tentativas
-                try {
-                    if (fs.existsSync(dir)) {
-                        fs.rmSync(dir, { recursive: true, force: true });
-                    }
-                    deleted = true;
-                    break;
-                } catch (e) {
-                    console.warn(`⏳ [CLEAN] Tentativa ${i + 1}/3 falhou (${e.message}).`);
-                    try { execSync(isWindows ? 'timeout /t 1 /nobreak >NUL' : 'sleep 1', { stdio: 'ignore' }); } catch (s) { void s; }
-                }
-            }
-            return deleted;
-        };
-
-        if (deleteSession) {
-            console.log(`🧹 [CLEAN] Solicitação de limpeza executada. Removendo: ${sessionDir}`);
-            removeFolder(sessionDir);
-        } else {
-            // Remove apenas os locks se não for deletar a sessão (preserva autenticação!)
-            lockFiles.forEach(f => {
-                const lockPath = path.join(sessionDir, f);
-                try {
-                    if (fs.existsSync(lockPath)) {
-                        console.log(`🧹 [CLEAN] Removendo arquivo de trava isolado detectado: ${f}`);
-                        fs.unlinkSync(lockPath);
-                    }
-                } catch (e) { void e; }
-            });
-        }
-
-        console.log('✅ [CLEAN] Limpeza concluída');
-    },
-
-    // 🔄 Cria novo Client e registra os event handlers
-    recreateClient() {
-        console.log(`🔄 [CLIENT] Criando novo Client (${currentClientId})...`);
-        client = createWhatsAppClient(currentClientId);
-        attachClientEvents(client);
-        return client;
-    },
-
-    // 🚀 Inicialização — fire-and-forget com timeout safety
-    async initialize() {
-        if (this.isInitializing) {
-            console.log('⏳ [INIT] Já em andamento.');
-            return false;
-        }
-        this.isInitializing = true;
-        this.startedAt = Date.now();
-
-        // Limpeza inicial
-        this.cleanChrome(false);
-        this.recreateClient();
-
-        connectionStatus = 'initializing';
-
-        console.log('📱 [INIT] Iniciando WhatsApp...');
-
-        // Fire-and-forget: client.initialize() roda em background
-        // Os EVENTOS (qr, ready, authenticated) vão atualizar o status
-        client.initialize().then(() => {
-            console.log('✅ [INIT] client.initialize() resolveu com sucesso');
-            this.isInitializing = false;
-            this.startWatchdog();
-        }).catch(async (err) => {
-            console.error('❌ [INIT] client.initialize() falhou:', err.message);
-
-            // Destruir client atual
-            try { await client.destroy(); } catch (e) { /* ok */ }
-
-            // ⚠️ ESTRATÉGIA ANTI-LOCK: Se o erro for de "browser already running", trocamos o ID da sessão!
-            if (err.message && (err.message.includes('browser is already running') || err.message.includes('EBUSY') || err.message.includes('EPERM'))) {
-                console.warn('⚠️ DETECTADO BLOQUEIO DE SESSÃO! Checkmate: Criando nova ID de sessão para contornar o lock.');
-
-                // Rotacionar ID
-                currentClientId = `client-v2-${Date.now()}`;
-                console.log(`🆔 Nova Session ID: ${currentClientId}`);
-
-                // Forçar recreação com novo ID
-                this.isInitializing = false; // Reset para permitir nova chamada
-                // Pequeno delay para OS processar
-                setTimeout(() => this.initialize(), 2000);
-                return;
-            }
-
-            if (connectionStatus === 'initializing') {
-                connectionStatus = 'disconnected';
-                this.disconnectedSince = Date.now();
-            }
-
-            this.isInitializing = false;
-
-            // Retry automático padrão (apenas se não foi resolvido pelo estratégia acima)
-            if (this.reconnectAttempts < 2) {
-                console.log('🔄 [INIT] Retry padrão em 10s...');
-                setTimeout(() => {
-                    this.reconnectAttempts++;
-                    this.initialize();
-                }, 10000);
-            }
-        });
-
-        // Safety timeout
-        setTimeout(() => {
-            if (connectionStatus === 'initializing') {
-                console.warn('⚠️ [INIT] Safety timeout: 2min sem resposta.');
-                connectionStatus = 'disconnected';
-                this.isInitializing = false;
-            }
-        }, 120000);
-
-        return true;
-    },
-
-    // 🔄 Reconexão robusta com backoff exponencial
-    async reconnect(reason = 'unknown') {
-        if (this.isReconnecting || this.isInitializing) {
-            console.log(`⏳ [RECONNECT] Bloqueado (init=${this.isInitializing}, reconn=${this.isReconnecting})`);
-            return;
-        }
-
-        this.isReconnecting = true;
-
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error(`⛔ [RECONNECT] Máximo de ${this.maxReconnectAttempts} tentativas.`);
-            connectionStatus = 'disconnected';
-            this.isReconnecting = false;
-            return;
-        }
-
-        this.reconnectAttempts++;
-        this.reconnectCount++;
-        const delay = this.getBackoffDelay();
-
-        console.log(`🔄 [RECONNECT] #${this.reconnectAttempts} (${reason}) em ${delay / 1000}s...`);
-        await new Promise(r => setTimeout(r, delay));
-
-        this.cleanChrome(false);
-        this.recreateClient();
-        connectionStatus = 'initializing';
-
-        try {
-            await client.initialize();
-            console.log('✅ [RECONNECT] Sucesso!');
-            this.reconnectAttempts = 0;
-            this.disconnectedSince = null;
-            this.isReconnecting = false;
-        } catch (e) {
-            console.error(`❌ [RECONNECT] Falha:`, e.message);
-            try { await client.destroy(); } catch (e2) { /* ok */ }
-
-            if (connectionStatus === 'initializing') {
-                connectionStatus = 'disconnected';
-            }
-            this.isReconnecting = false;
-
-            if (this.reconnectAttempts < this.maxReconnectAttempts) {
-                this.reconnect('retry');
-            }
-        }
-    },
-
-    // 🔧 Reconexão manual forçada (via /whatsapp/reconnect)
-    async forceReconnect(deleteSession = false) {
-        if (this.isInitializing) {
-            return { blocked: true, reason: 'Inicialização em andamento' };
-        }
-
-        console.log(`🔧 [FORCE] Reconexão manual... (deleteSession=${deleteSession})`);
-        this.reconnectAttempts = 0;
-        this.isReconnecting = false;
-        this.watchdogFailures = 0;
-        this.isInitializing = true;
-
-        try { await client.destroy(); } catch (e) { /* ok */ }
-
-        // Só faz a limpeza pesada se explicitamente solicitado
-        this.cleanChrome(deleteSession);
-        this.recreateClient();
-
-        connectionStatus = 'initializing';
-        currentQR = null;
-        connectionInfo = null;
-
-        // Fire-and-forget (eventos vão atualizar o status)
-        client.initialize().then(() => {
-            console.log('✅ [FORCE] Sucesso!');
-            this.disconnectedSince = null;
-            this.isInitializing = false;
-        }).catch((e) => {
-            console.error('❌ [FORCE] Falha:', e);
-            this.startWatchdog();
-            if (connectionStatus === 'initializing') {
-                connectionStatus = 'disconnected';
-            }
-            this.disconnectedSince = Date.now();
-            this.isInitializing = false;
-        });
-
-        // Retorna imediato — frontend vai pollar status
-        return { blocked: false, success: true, message: 'Inicialização disparada' };
-    },
-
-    // 🫀 Watchdog
-    startWatchdog() {
-        if (this.watchdogInterval) clearInterval(this.watchdogInterval);
-
-        const WATCHDOG_INTERVAL = 5 * 60 * 1000;
-        const MAX_FAILURES = 3;
-
-        this.watchdogInterval = setInterval(async () => {
-            if (this.isReconnecting || this.isInitializing || connectionStatus === 'initializing' || connectionStatus === 'waiting_qr') {
-                return;
-            }
-
-            try {
-                const state = await Promise.race([
-                    client.getState(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('watchdog timeout')), 15000))
-                ]);
-
-                if (state === 'CONNECTED') {
-                    this.watchdogFailures = 0;
-                    this.lastHeartbeat = new Date().toISOString();
-                    if (connectionStatus !== 'connected') {
-                        connectionStatus = 'connected';
-                        this.disconnectedSince = null;
-                    }
-                } else {
-                    console.warn(`⚠️ [Watchdog] Estado: ${state}`);
-                    this.watchdogFailures++;
-                }
-            } catch (e) {
-                this.watchdogFailures++;
-                console.warn(`⚠️ [Watchdog] Falha #${this.watchdogFailures}: ${e.message}`);
-            }
-
-            if (this.watchdogFailures >= MAX_FAILURES && !this.isReconnecting) {
-                console.error(`🚨 [Watchdog] ${MAX_FAILURES} falhas! Reconectando...`);
-                this.watchdogFailures = 0;
-                connectionStatus = 'disconnected';
-                this.disconnectedSince = this.disconnectedSince || Date.now();
-                this.reconnect('watchdog');
-            }
-        }, WATCHDOG_INTERVAL);
-
-        console.log('🫀 Watchdog iniciado (a cada 5 min)');
-    },
-
-    stopWatchdog() {
-        if (this.watchdogInterval) {
-            clearInterval(this.watchdogInterval);
-            console.log('🛑 Watchdog parado');
-        }
-    },
-
-    getHealthData() {
-        const now = Date.now();
-        return {
-            whatsapp: connectionStatus,
-            server: 'running',
-            uptime_minutes: this.startedAt ? Math.floor((now - this.startedAt) / 60000) : 0,
-            reconnect_count: this.reconnectCount,
-            offline_minutes: this.disconnectedSince ? Math.floor((now - this.disconnectedSince) / 60000) : 0,
-            last_heartbeat: this.lastHeartbeat,
-            pid: process.pid,
-            memory_mb: Math.round(process.memoryUsage().rss / 1024 / 1024)
-        };
-    }
-};
-
-// 🛑 GRACEFUL SHUTDOWN
-const shutdown = async (signal) => {
-    console.log(`\n${signal} recebido. Encerrando...`);
-    whatsapp.stopWatchdog();
-    try {
-        await client.destroy();
-        console.log('✅ Cliente WhatsApp encerrado.');
-        process.exit(0);
-    } catch (err) {
-        console.error('❌ Erro ao encerrar:', err);
-        process.exit(1);
-    }
-};
-
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 let filaEspera = {};
 let mapaEntregas = {};
 
 // =============================================================================
-// 📦 SISTEMA DE FILA DE MENSAGENS (PERSISTENTE)
+// 📦 SISTEMA DE FILA DE MENSAGENS POR ORGANIZAÇÃO (PERSISTENTE)
 // =============================================================================
 
 /**
- * Adiciona uma mensagem à fila de espera no Supabase
+ * Adiciona uma mensagem à fila de espera no Supabase com isolamento de tenant
  */
-async function adicionarAFila(phone, message, options = {}, venda_id = null) {
-    console.log(`📥 Adicionando mensagem para ${phone} à fila...`);
+async function adicionarAFila(phone, message, options = {}, venda_id = null, orgId = DEFAULT_ORG_ID) {
+    if (!orgId) orgId = DEFAULT_ORG_ID;
+    console.log(`📥 [Org: ${orgId}] Adicionando mensagem para ${phone} à fila...`);
     try {
         const { error } = await supabase
             .from('whatsapp_message_queue')
@@ -879,52 +413,49 @@ async function adicionarAFila(phone, message, options = {}, venda_id = null) {
                 message,
                 options,
                 venda_id,
+                organization_id: orgId,
                 status: 'pending',
                 created_at: new Date().toISOString()
             });
 
         if (error) {
-            console.error('❌ Erro ao inserir na fila do Supabase:', error.message);
+            console.error(`❌ [Org: ${orgId}] Erro ao inserir na fila do Supabase:`, error.message);
             return false;
         }
-        console.log(`✅ Mensagem para ${phone} guardada na fila.`);
+        console.log(`✅ [Org: ${orgId}] Mensagem para ${phone} guardada na fila.`);
         return true;
     } catch (e) {
-        console.error('💥 Erro fatal ao adicionar à fila:', e.message);
+        console.error(`💥 [Org: ${orgId}] Erro fatal ao adicionar à fila:`, e.message);
         return false;
     }
 }
 
 /**
- * Processa mensagens pendentes na fila
+ * Processa mensagens pendentes na fila (isolado por organização ou geral)
  */
-async function processarFila() {
-    if (connectionStatus !== 'connected' || whatsapp.isInitializing || whatsapp.isReconnecting) {
-        return;
-    }
-
+async function processarFila(targetOrgId = null) {
     try {
-        // Buscar mensagens pendentes com menos de 5 tentativas
-        const { data: pendentes, error } = await supabase
+        let query = supabase
             .from('whatsapp_message_queue')
             .select('*')
             .eq('status', 'pending')
             .lt('attempts', 5)
             .order('created_at', { ascending: true })
-            .limit(10); // Processar em pequenos lotes
+            .limit(20);
 
-        if (error) {
-            console.error('❌ Erro ao buscar fila:', error.message);
-            return;
+        if (targetOrgId) {
+            query = query.eq('organization_id', targetOrgId);
         }
 
-        if (!pendentes || pendentes.length === 0) return;
+        const { data: pendentes, error } = await query;
+        if (error || !pendentes || pendentes.length === 0) return;
 
-        console.log(`🤖 Processando ${pendentes.length} mensagens da fila...`);
+        console.log(`🤖 Processando ${pendentes.length} mensagens da fila${targetOrgId ? ` para Org: ${targetOrgId}` : ''}...`);
 
         for (const item of pendentes) {
+            const itemOrgId = item.organization_id || targetOrgId || DEFAULT_ORG_ID;
             try {
-                // Incrementar tentativas antes de enviar (evita loop infinito se crashar)
+                // Incrementar tentativas
                 await supabase
                     .from('whatsapp_message_queue')
                     .update({
@@ -935,34 +466,26 @@ async function processarFila() {
 
                 let tel = item.phone.replace(/\D/g, '');
                 if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
-
-                // Tenta validar número primeiro
                 let chatId = `${tel}@c.us`;
-                try {
-                    const numberId = await client.getNumberId(tel);
-                    if (numberId) chatId = numberId._serialized;
-                } catch (vErr) { /* fallback para padrão */ }
 
-                console.log(`📤 Enviando mensagem da fila para ${chatId}...`);
-                await client.sendMessage(chatId, item.message, item.options || {});
+                const res = await whatsappManager.sendMessage(itemOrgId, chatId, item.message, item.options || {});
 
-                // Marcar como enviado
-                await supabase
-                    .from('whatsapp_message_queue')
-                    .update({
-                        status: 'sent',
-                        updated_at: new Date().toISOString()
-                    })
-                    .eq('id', item.id);
+                if (res.success) {
+                    await supabase
+                        .from('whatsapp_message_queue')
+                        .update({
+                            status: 'sent',
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', item.id);
+                    console.log(`✅ [Org: ${itemOrgId}] Mensagem enviada para ${chatId}`);
+                } else {
+                    throw new Error(res.error || 'Falha no envio');
+                }
 
-                console.log(`✅ Mensagem da fila enviada com sucesso para ${chatId}`);
-
-                // Pequeno delay entre mensagens da fila
                 await new Promise(r => setTimeout(r, 2000));
             } catch (err) {
-                console.error(`❌ Falha ao processar item da fila (${item.id}):`, err.message);
-
-                // Se atingiu limite, marcar como falha definitiva
+                console.error(`❌ [Org: ${itemOrgId}] Falha ao processar item (${item.id}):`, err.message);
                 if ((item.attempts || 0) + 1 >= 5) {
                     await supabase
                         .from('whatsapp_message_queue')
@@ -988,9 +511,8 @@ async function processarFila() {
     }
 }
 
-
 // 🔐 Registrar rotas de autenticação de funcionários
-setupEmployeeAuthRoutes(app, supabase, client);
+setupEmployeeAuthRoutes(app, supabase, whatsappManager);
 
 function limparJSON(texto) {
     try {
@@ -1001,13 +523,9 @@ function limparJSON(texto) {
     } catch (e) { return null; }
 }
 
-// 🛡️ Enviar mensagem com verificação de conexão E checagem de módulo
+// 🛡️ Enviar mensagem com verificação de módulo e isolamento de tenant
 async function enviarMensagemSegura(chatId, content, options = {}) {
     try {
-        // 🔒 CHECAGEM DE MÓDULO (fallback para mensagens que não passam pelo middleware HTTP)
-        // Mensagens enviadas por crons/triggers internos chegam aqui diretamente.
-        // O middleware Express já bloqueia rotas HTTP, mas esta checagem garante
-        // que NENHUMA mensagem escape se o módulo estiver desativado.
         const orgId = options.organization_id || DEFAULT_ORG_ID;
         const moduloAtivo = await verificarModuloWhatsApp(orgId);
         if (!moduloAtivo) {
@@ -1015,35 +533,16 @@ async function enviarMensagemSegura(chatId, content, options = {}) {
             return { success: false, blocked: true, error: 'Módulo de WhatsApp não incluído no plano atual.' };
         }
 
-        // Se não estiver conectado, manda direto pra fila
-        if (connectionStatus !== 'connected') {
-            console.warn(`⚠️ WhatsApp desconectado. Enviando mensagem para ${chatId} para a fila.`);
-            await adicionarAFila(chatId, content, options, options.venda_id);
-            return { success: true, queued: true, message: "Mensagem guardada para envio posterior (WhatsApp offline)." };
+        const result = await whatsappManager.sendMessage(orgId, chatId, content, options);
+        if (result.success) {
+            return result;
         }
 
-        try {
-            console.log(`📤 Enviando mensagem para ${chatId}...`);
-            const result = await client.sendMessage(chatId, content, options);
-            console.log(`✅ Mensagem enviada com SUCESSO para ${chatId}`);
-            return { success: true, result };
-        } catch (error) {
-            console.error(`❌ Erro ao enviar mensagem:`, error.message);
-
-            // 🚑 CORREÇÃO DE EMERGÊNCIA: Ignorar erro específico do whatsapp-web.js
-            if (error.message && (error.message.includes('markedUnread') || error.message.includes("reading 'getChat'"))) {
-                console.log('⚠️ Erro não crítico detectado (markedUnread/getChat) - Assumindo sucesso.');
-                return { success: true, warning: error.message };
-            }
-
-            // Para outros erros (como conexão perdida no momento), tenta guardar na fila
-            console.log(`📥 Erro no envio. Guardando na fila para ${chatId}...`);
-            await adicionarAFila(chatId, content, options, options.venda_id);
-            return { success: true, queued: true, error: error.message };
-        }
+        // Se o WhatsApp não estiver conectado, guarda na fila da organização
+        console.warn(`⚠️ [Org: ${orgId}] WhatsApp offline ou falha no envio. Guardando na fila.`);
+        await adicionarAFila(chatId, content, options, options.venda_id, orgId);
+        return { success: true, queued: true, message: "Mensagem guardada para envio posterior na fila da organização." };
     } catch (outerError) {
-        // Fallback de segurança: garante que a função nunca lança exceção
-        console.error(`💥 Erro inesperado em enviarMensagemSegura para ${chatId}:`, outerError);
         try { await adicionarAFila(chatId, content, options, options.venda_id); } catch (_) {}
         return { success: true, queued: true, error: outerError?.message || String(outerError) };
     }
@@ -1055,9 +554,10 @@ async function enviarMensagemSegura(chatId, content, options = {}) {
 // --- ROTA DE HEALTH CHECK (RENDER) ---
 app.get('/', (req, res) => res.status(200).send('Bot is running! 🚀'));
 
-// --- ROTA DE ENVIO DE TEXTO GENÉRICO (FALTANDO ANTERIORMENTE) ---
+// --- ROTA DE ENVIO DE TEXTO GENÉRICO ---
 app.post('/send-text', async (req, res) => {
     const { phone, message } = req.body;
+    const orgId = extractOrgId(req);
 
     if (!phone || !message) {
         return res.status(400).json({ error: "phone e message são obrigatórios" });
@@ -1066,32 +566,12 @@ app.post('/send-text', async (req, res) => {
     let tel = phone.replace(/\D/g, '');
     if (tel.length >= 10 && tel.length <= 11) tel = '55' + tel;
 
-    // Tentativa de correção para o erro: Cannot read properties of undefined (reading 'getChat')
-    // Validar se o número existe no WhatsApp antes de enviar
     try {
         let chatId = `${tel}@c.us`;
-
-        // Verificar se client está pronto
-        if (client) {
-            try {
-                const numberId = await client.getNumberId(tel);
-                if (numberId) {
-                    chatId = numberId._serialized;
-                    console.log(`🔍 Número validado: ${tel} -> ${chatId}`);
-                } else {
-                    console.warn(`⚠️ Número não registrado no WhatsApp: ${tel}`);
-                    return res.status(404).json({ error: "Número não registrado no WhatsApp" });
-                }
-            } catch (verError) {
-                console.warn(`⚠️ Falha ao validar número (tentando enviar direto): ${verError.message}`);
-                // Segue com o chatId padrão se a validação falhar (fallback)
-            }
-        }
-
-        const result = await enviarMensagemSegura(chatId, message);
+        const result = await enviarMensagemSegura(chatId, message, { organization_id: orgId });
         res.json(result);
     } catch (e) {
-        console.error("Erro ao enviar texto genérico:", e.message);
+        console.error(`❌ [Org: ${orgId}] Erro ao enviar texto genérico:`, e.message);
         res.status(500).json({ error: e.message });
     }
 });
@@ -1099,6 +579,7 @@ app.post('/send-text', async (req, res) => {
 // --- ROTA DE ENVIO DE IMAGEM VIA URL ---
 app.post('/send-image-url', async (req, res) => {
     const { phone, imageUrl, caption } = req.body;
+    const orgId = extractOrgId(req);
 
     if (!phone || !imageUrl) {
         return res.status(400).json({ error: "phone e imageUrl são obrigatórios" });
@@ -1109,35 +590,20 @@ app.post('/send-image-url', async (req, res) => {
 
     try {
         let chatId = `${tel}@c.us`;
-
-        if (client) {
-            const numberId = await client.getNumberId(tel);
-            if (numberId) chatId = numberId._serialized;
-        }
-
-        console.log(`🖼️ Preparando imagem para ${chatId}: ${imageUrl}`);
-
-        // Carregar media do URL
         const media = await MessageMedia.fromUrl(imageUrl);
-
-        const result = await enviarMensagemSegura(chatId, media, { caption });
+        const result = await enviarMensagemSegura(chatId, media, { caption, organization_id: orgId });
         res.json(result);
     } catch (e) {
-        console.error("Erro ao enviar imagem via URL:", e.message);
+        console.error(`❌ [Org: ${orgId}] Erro ao enviar imagem via URL:`, e.message);
         res.status(500).json({ error: e.message });
     }
 });
 
-// --- ROTA DE STATUS GERAL ---
-app.get('/status', (req, res) => res.json({ status: connectionStatus }));
-
-// --- ROTA DE HEALTH CHECK INTELIGENTE (para Docker) ---
-app.get('/whatsapp/health', (req, res) => {
-    const health = whatsapp.getHealthData();
-    // Se WhatsApp estiver offline há mais de 10 minutos, retorna 503
-    // Docker healthcheck vai captar isso e reiniciar o container
-    const isHealthy = health.whatsapp === 'connected' || health.offline_minutes < 10;
-    res.status(isHealthy ? 200 : 503).json(health);
+// --- ROTA DE STATUS GERAL POR ORGANIZAÇÃO ---
+app.get('/status', async (req, res) => {
+    const orgId = extractOrgId(req);
+    const statusData = await whatsappManager.getStatus(orgId);
+    res.json({ status: statusData.status, organization_id: orgId });
 });
 
 // --- LOG CAPTURE SYSTEM (IN-MEMORY) ---
@@ -1159,27 +625,11 @@ console.log = (...args) => { captureLog('info', args); originalConsoleLog.apply(
 console.error = (...args) => { captureLog('error', args); originalConsoleError.apply(console, args); };
 console.warn = (...args) => { captureLog('warn', args); originalConsoleWarn.apply(console, args); };
 
-// --- ROTA DE STATUS DO WHATSAPP (PARA A INTERFACE) ---
+// --- ROTA DE STATUS DO WHATSAPP POR ORGANIZAÇÃO (PARA A INTERFACE) ---
 app.get('/whatsapp/status', async (req, res) => {
-    // Tentar recuperar info se estiver conectado mas sem dados
-    if (connectionStatus === 'connected' && (!connectionInfo || connectionInfo.wid === 'N/A')) {
-        try {
-            const info = await client.info;
-            if (info) {
-                connectionInfo = {
-                    wid: info.wid?.user || 'N/A',
-                    pushname: info.pushname || 'WhatsApp Bot',
-                    platform: info.platform || 'unknown'
-                };
-            }
-        } catch (e) { /* ignore */ }
-    }
-
-    res.json({
-        status: connectionStatus,
-        qr: currentQR,
-        info: connectionInfo
-    });
+    const orgId = extractOrgId(req);
+    const statusData = await whatsappManager.getStatus(orgId);
+    res.json(statusData);
 });
 
 // --- ROTA DE LOGS (DEBUG) ---
@@ -1187,11 +637,11 @@ app.get('/logs', (req, res) => {
     res.json(memoryLogs);
 });
 
-// --- ROTA PARA CARREGAR CONFIGURAÇÕES DO AGENTE IA ---
+// --- ROTA PARA CARREGAR CONFIGURAÇÕES DO AGENTE IA POR ORGANIZAÇÃO ---
 app.get('/whatsapp/ai-settings', async (req, res) => {
     try {
-        const settings = await getWhatsAppSettings(true);
-
+        const orgId = extractOrgId(req);
+        const settings = await getWhatsAppSettings(true, orgId);
         res.json(settings);
     } catch (e) {
         console.error('Erro ao carregar configurações:', e);
@@ -1199,78 +649,134 @@ app.get('/whatsapp/ai-settings', async (req, res) => {
     }
 });
 
-// --- ROTA PARA SALVAR CONFIGURAÇÕES DO AGENTE IA ---
+// --- ROTA PARA SALVAR CONFIGURAÇÕES DO AGENTE IA POR ORGANIZAÇÃO ---
 app.post('/whatsapp/ai-settings', async (req, res) => {
     try {
+        const orgId = extractOrgId(req);
         const settings = req.body;
 
-        // Upsert cada configuração
         for (const [key, value] of Object.entries(settings)) {
+            if (key === 'organization_id') continue;
             const { error } = await supabase
                 .from('whatsapp_bot_settings')
                 .upsert({
+                    organization_id: orgId,
                     key,
                     value,
                     updated_at: new Date().toISOString()
-                }, { onConflict: 'key' });
+                }, { onConflict: 'organization_id,key' });
 
             if (error) throw error;
         }
 
-        whatsappSettingsCache = { data: null, expiresAt: 0 };
-
-        console.log('✅ Configurações do agente IA salvas');
-        res.json({ success: true });
+        console.log(`✅ [Org: ${orgId}] Configurações do agente IA salvas`);
+        res.json({ success: true, organization_id: orgId });
     } catch (e) {
         console.error('Erro ao salvar configurações:', e);
         res.status(500).json({ error: e.message });
     }
 });
 
-// --- ROTA PARA FORÇAR RECONEXÃO ---
-app.post('/whatsapp/reconnect', async (req, res) => {
-    // Se já estiver conectado, não faz sentido reiniciar tudo
-    if (connectionStatus === 'connected') {
-        return res.json({
+// --- ROTAS DE GERENCIAMENTO DE FILA PENDENTE POR ORGANIZAÇÃO ---
+
+// Consultar mensagens pendentes na fila da organização
+app.get('/whatsapp/queue/pending', async (req, res) => {
+    try {
+        const orgId = extractOrgId(req);
+        const { data, error, count } = await supabase
+            .from('whatsapp_message_queue')
+            .select('id, phone, message, created_at, attempts, status, options, organization_id', { count: 'exact' })
+            .eq('status', 'pending')
+            .eq('organization_id', orgId)
+            .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        res.json({
             success: true,
-            message: 'O robô já está conectado e operante.',
-            state: 'connected'
+            count: count || (data ? data.length : 0),
+            items: data || [],
+            organization_id: orgId
         });
+    } catch (e) {
+        console.error('❌ Erro ao consultar fila pendente do WhatsApp:', e.message);
+        res.status(500).json({ success: false, error: e.message });
     }
-
-    // Se init já está rodando, informar amigavelmente (evita erro 409 no front)
-    if (whatsapp.isInitializing) {
-        return res.json({
-            success: true,
-            message: 'A inicialização já está em andamento. Por favor, aguarde alguns segundos.',
-            state: 'initializing'
-        });
-    }
-
-    // Responde imediatamente — o reconnect roda em background
-    res.json({ success: true, message: 'Protocolo de reconexão iniciado.' });
-
-    // Executa em background (não bloqueia a response)
-    // Mudamos para cleanSession=false para tentar reaproveitar a sessão antes de apagar tudo
-    whatsapp.forceReconnect(false).catch(e => {
-        console.error('❌ Erro na reconexão forçada:', e.message);
-    });
 });
 
-// --- ROTA PARA DESCONECTAR ---
+// Disparar processamento das mensagens pendentes da organização
+app.post('/whatsapp/queue/process', async (req, res) => {
+    try {
+        const orgId = extractOrgId(req);
+        console.log(`🚀 [Fila] Solicitação de envio das mensagens pendentes para Org ${orgId}...`);
+        processarFila(orgId);
+        res.json({
+            success: true,
+            message: 'Envio da fila pendente iniciado com sucesso.',
+            organization_id: orgId
+        });
+    } catch (e) {
+        console.error('❌ Erro ao iniciar envio da fila pendente:', e.message);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Descartar/apagar mensagens pendentes acumuladas da organização
+app.post('/whatsapp/queue/clear', async (req, res) => {
+    try {
+        const orgId = extractOrgId(req);
+        console.log(`🗑️ [Fila] Descartando mensagens pendentes para Org ${orgId}...`);
+        const { data, error } = await supabase
+            .from('whatsapp_message_queue')
+            .update({
+                status: 'cancelled',
+                last_error: 'Descartado pelo usuário ao conectar WhatsApp',
+                updated_at: new Date().toISOString()
+            })
+            .eq('status', 'pending')
+            .eq('organization_id', orgId)
+            .select('id');
+
+        if (error) throw error;
+
+        const count = data ? data.length : 0;
+        console.log(`✅ [Fila] ${count} mensagens pendentes canceladas para Org ${orgId}.`);
+        res.json({
+            success: true,
+            cancelled_count: count,
+            message: `${count} mensagens pendentes foram descartadas com sucesso.`,
+            organization_id: orgId
+        });
+    } catch (e) {
+        console.error('❌ Erro ao descartar fila pendente:', e.message);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// --- ROTA PARA FORÇAR RECONEXÃO DA ORGANIZAÇÃO ---
+app.post('/whatsapp/reconnect', async (req, res) => {
+    try {
+        const orgId = extractOrgId(req);
+        const result = await whatsappManager.reconnect(orgId);
+        res.json(result);
+    } catch (e) {
+        console.error('Erro ao reconectar:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- ROTA PARA DESCONECTAR A ORGANIZAÇÃO ---
 app.post('/whatsapp/disconnect', async (req, res) => {
     try {
-        await client.logout();
-        connectionStatus = 'disconnected';
-        currentQR = null;
-        connectionInfo = null;
-
-        res.json({ success: true, message: 'Desconectado com sucesso' });
+        const orgId = extractOrgId(req);
+        const result = await whatsappManager.disconnect(orgId);
+        res.json(result);
     } catch (e) {
         console.error('Erro ao desconectar:', e);
         res.status(500).json({ error: e.message });
     }
 });
+
 
 // --- ROTA 1: DISPARO DE CONFIRMAÇÕES (ASSERTIVO / INFORMATIVO) ---
 app.post('/disparar-confirmacoes', async (req, res) => {
@@ -2271,10 +1777,8 @@ require('./cron-aniversarios');
 // === SISTEMA DE LEMBRETES DE MONTAGEM ===
 require('./cron-montagens');
 
-// --- PROCESSADOR PERIÓDICO DE FILA (A cada 2 minutos) ---
-setInterval(() => {
-    processarFila();
-}, 120000);
+// (O processamento de mensagens acumuladas da fila é controlado pelo usuário via interface ao conectar)
+
 
 // 🏗️ CATCH-ALL MIDDLEWARE MOVED TO END
 
@@ -2482,6 +1986,6 @@ app.listen(PORT, async () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
     console.log(`🔗 Link local: http://localhost:${PORT}`);
 
-    // 🤖 Inicializar WhatsApp via manager (retry + watchdog automáticos)
-    await whatsapp.initialize();
+    // 🤖 Inicializar sessões ativas de WhatsApp para todos os tenants
+    await whatsappManager.initActiveTenants();
 });

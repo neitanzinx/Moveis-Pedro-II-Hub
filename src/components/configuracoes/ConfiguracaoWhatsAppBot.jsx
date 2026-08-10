@@ -16,13 +16,19 @@ import {
     RefreshCw, Power, PowerOff, Smartphone, Bot, Sparkles,
     QrCode, Wifi, WifiOff, Truck, Package, ShoppingBag,
     Wrench, Megaphone, ChevronDown, ChevronRight, Edit2, Eye, EyeOff,
-    Copy, Gift, MapPin, AlertTriangle, Clock, Calendar, Key, Rocket, CloudOff, Trash2
+    Copy, Gift, MapPin, AlertTriangle, Clock, Calendar, Key, Rocket, CloudOff, Trash2,
+    Send, Inbox
 } from "lucide-react";
 import { toast } from "sonner";
 import QRCode from "qrcode";
 
 import { ZAP_API_URL as WHATSAPP_BOT_URL } from "@/utils/zapApiUrl";
-import { getOfflineQueue, removeOfflineQueueItem } from "@/utils/offlineQueue";
+
+// 🔐 Chave de API para autenticação com o backend do bot
+const BOT_API_KEY = import.meta.env.VITE_BOT_API_SECRET || '';
+const botAuthHeaders = BOT_API_KEY ? { 'x-bot-api-key': BOT_API_KEY } : {};
+import { getOfflineQueue, removeOfflineQueueItem, clearOfflineQueue } from "@/utils/offlineQueue";
+import { whatsappService } from "@/services/whatsappService";
 import { useTenant } from "@/contexts/TenantContext";
 
 
@@ -350,7 +356,15 @@ Estou à disposição para tirar qualquer dúvida! 😊`
 });
 
 export default function ConfiguracaoWhatsAppBot() {
-    const { brandName } = useTenant();
+    const { brandName, organization } = useTenant();
+    const currentOrgId = organization?.id || '00000000-0000-0000-0000-000000000001';
+
+    const getBotHeaders = useCallback((extra = {}) => ({
+        ...extra,
+        ...(BOT_API_KEY ? { 'x-bot-api-key': BOT_API_KEY } : {}),
+        'x-organization-id': currentOrgId,
+    }), [currentOrgId]);
+
     const MESSAGE_TEMPLATES = getMessageTemplates(brandName || "Nossa Empresa");
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -364,8 +378,6 @@ export default function ConfiguracaoWhatsAppBot() {
     const [qrCodeImage, setQrCodeImage] = useState(null);
     const [connectionInfo, setConnectionInfo] = useState(null);
 
-
-
     // Templates de mensagens
     const [messageSettings, setMessageSettings] = useState({});
     const [originalMessageSettings, setOriginalMessageSettings] = useState({});
@@ -378,9 +390,13 @@ export default function ConfiguracaoWhatsAppBot() {
     // Expandidos (acordeões)
     const [expandedCategories, setExpandedCategories] = useState({});
 
-    // Fila Offline
+    // Fila Offline & Modal de Pendências ao Conectar
     const [offlineQueue, setOfflineQueue] = useState([]);
     const [loadingQueue, setLoadingQueue] = useState(false);
+    const [pendingModalOpen, setPendingModalOpen] = useState(false);
+    const [pendingInfo, setPendingInfo] = useState({ totalCount: 0, localCount: 0, backendCount: 0, localItems: [], backendItems: [] });
+    const [processingQueueAction, setProcessingQueueAction] = useState(false); // 'sending' | 'clearing' | false
+    const prevStatusRef = useRef(null);
 
     const fetchOfflineQueue = useCallback(async () => {
         setLoadingQueue(true);
@@ -395,15 +411,64 @@ export default function ConfiguracaoWhatsAppBot() {
         toast.success("Ação cancelada e removida da fila");
     };
 
+    const handleSendPendingNotifications = async () => {
+        setProcessingQueueAction('sending');
+        try {
+            const result = await whatsappService.processAllPendingQueues();
+            toast.success(`Disparo iniciado! ${result.sucessosLocal} notificações locais enviadas e processamento do servidor em andamento.`);
+            setPendingModalOpen(false);
+            fetchOfflineQueue();
+        } catch (err) {
+            console.error("Erro ao enviar pendências:", err);
+            toast.error("Erro ao enviar notificações acumuladas.");
+        } finally {
+            setProcessingQueueAction(false);
+        }
+    };
+
+    const handleClearPendingNotifications = async () => {
+        setProcessingQueueAction('clearing');
+        try {
+            const result = await whatsappService.clearAllPendingQueues();
+            const total = (pendingInfo.localCount || 0) + (result.backendCancelledCount || 0);
+            toast.success(`${total} notificações acumuladas foram descartadas e não serão enviadas.`);
+            setPendingModalOpen(false);
+            fetchOfflineQueue();
+        } catch (err) {
+            console.error("Erro ao descartar pendências:", err);
+            toast.error("Erro ao descartar notificações.");
+        } finally {
+            setProcessingQueueAction(false);
+        }
+    };
+
     // Polling de status do WhatsApp
     const fetchStatus = useCallback(async () => {
         try {
-            const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/status`);
+            const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/status`, {
+                headers: getBotHeaders(),
+            });
             if (res.ok) {
                 const data = await res.json();
+                const prevStatus = prevStatusRef.current;
+                prevStatusRef.current = data.status;
+
                 setConnectionStatus(data.status);
                 setQrCode(data.qr);
                 setConnectionInfo(data.info);
+
+                // 🔔 DETECÇÃO: WhatsApp acabou de conectar (após leitura de QR ou reconexão)
+                if (data.status === 'connected' && prevStatus && prevStatus !== 'connected') {
+                    console.log("📱 WhatsApp conectou! Verificando pendências acumuladas...");
+                    whatsappService.getPendingQueueInfo().then(info => {
+                        if (info.totalCount > 0) {
+                            setPendingInfo(info);
+                            setPendingModalOpen(true);
+                        } else {
+                            toast.success("WhatsApp conectado com sucesso!");
+                        }
+                    }).catch(() => {});
+                }
 
                 if (data.qr && data.qr !== qrCode) {
                     const qrImg = await QRCode.toDataURL(data.qr, {
@@ -417,14 +482,17 @@ export default function ConfiguracaoWhatsAppBot() {
                 }
             }
         } catch (error) {
+            prevStatusRef.current = 'offline';
             setConnectionStatus('offline');
         }
-    }, [qrCode]);
+    }, [qrCode, getBotHeaders]);
 
     // Carregar configurações de mensagens
-    const loadSettings = async () => {
+    const loadSettings = useCallback(async () => {
         try {
-            const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/ai-settings`);
+            const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/ai-settings`, {
+                headers: getBotHeaders(),
+            });
             if (res.ok) {
                 const data = await res.json();
 
@@ -458,7 +526,7 @@ export default function ConfiguracaoWhatsAppBot() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [MESSAGE_TEMPLATES, getBotHeaders]);
 
     useEffect(() => {
         fetchStatus();
@@ -475,7 +543,7 @@ export default function ConfiguracaoWhatsAppBot() {
             clearInterval(interval);
             window.removeEventListener('offline-queue-updated', handleOfflineQueueUpdated);
         };
-    }, [fetchStatus, fetchOfflineQueue]);
+    }, [fetchStatus, loadSettings, fetchOfflineQueue]);
 
 
 
@@ -491,7 +559,7 @@ export default function ConfiguracaoWhatsAppBot() {
 
             const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/ai-settings`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getBotHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(payload)
             });
 
@@ -509,7 +577,7 @@ export default function ConfiguracaoWhatsAppBot() {
     const handleReconnect = async () => {
         setReconnecting(true);
         try {
-            const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/reconnect`, { method: 'POST' });
+            const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/reconnect`, { method: 'POST', headers: getBotHeaders() });
             if (res.ok) {
                 toast.success("Reconexão iniciada!");
                 setTimeout(fetchStatus, 1000);
@@ -524,7 +592,7 @@ export default function ConfiguracaoWhatsAppBot() {
     const handleDisconnect = async () => {
         setDisconnecting(true);
         try {
-            const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/disconnect`, { method: 'POST' });
+            const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/disconnect`, { method: 'POST', headers: getBotHeaders() });
             if (res.ok) {
                 toast.success("Desconectado!");
                 setTimeout(fetchStatus, 1000);
@@ -802,14 +870,46 @@ export default function ConfiguracaoWhatsAppBot() {
 
                         {/* Tab Fila Offline */}
                         <TabsContent value="fila_offline" className="mt-0 space-y-4">
-                            <div className="flex justify-between items-center mb-6">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                                 <div>
                                     <h3 className="text-lg font-semibold">Fila de Ações Offline</h3>
                                     <p className="text-sm text-gray-500">Ações que estão aguardando o envio porque o bot estava offline ou processando.</p>
                                 </div>
-                                <Button onClick={fetchOfflineQueue} disabled={loadingQueue} variant="outline" className="border-gray-200">
-                                    <RefreshCw className={`w-4 h-4 mr-2 ${loadingQueue ? 'animate-spin' : ''}`} /> Atualizar Fila
-                                </Button>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    {offlineQueue.length > 0 && (
+                                        <>
+                                            <Button
+                                                onClick={async () => {
+                                                    const ok = window.confirm("Deseja apagar toda a fila offline sem enviar?");
+                                                    if (!ok) return;
+                                                    await whatsappService.clearAllPendingQueues();
+                                                    fetchOfflineQueue();
+                                                    toast.success("Fila offline apagada!");
+                                                }}
+                                                variant="outline"
+                                                className="border-red-200 text-red-600 hover:bg-red-50 text-xs"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Limpar Toda a Fila
+                                            </Button>
+
+                                            <Button
+                                                onClick={async () => {
+                                                    setLoadingQueue(true);
+                                                    await whatsappService.processAllPendingQueues();
+                                                    fetchOfflineQueue();
+                                                    setLoadingQueue(false);
+                                                    toast.success("Processamento da fila iniciado!");
+                                                }}
+                                                className="bg-green-600 hover:bg-green-700 text-white text-xs"
+                                            >
+                                                <Send className="w-3.5 h-3.5 mr-1.5" /> Enviar Toda a Fila
+                                            </Button>
+                                        </>
+                                    )}
+                                    <Button onClick={fetchOfflineQueue} disabled={loadingQueue} variant="outline" className="border-gray-200 text-xs">
+                                        <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loadingQueue ? 'animate-spin' : ''}`} /> Atualizar
+                                    </Button>
+                                </div>
                             </div>
 
                             <div className="space-y-4">
@@ -940,6 +1040,104 @@ export default function ConfiguracaoWhatsAppBot() {
                             <Save className="w-4 h-4 mr-2" /> Salvar Alterações
                         </Button>
                     </DialogHeader>
+                </DialogContent>
+            </Dialog>
+
+            {/* 🔔 Modal de Confirmação de Notificações Pendentes ao Ler QR Code */}
+            <Dialog open={pendingModalOpen} onOpenChange={(open) => {
+                if (!processingQueueAction) setPendingModalOpen(open);
+            }}>
+                <DialogContent className="max-w-xl p-0 overflow-hidden rounded-2xl border-amber-200 shadow-2xl">
+                    <DialogHeader className="px-6 pt-6 pb-4 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-100">
+                        <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 border border-amber-200 shadow-sm">
+                                <Inbox className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <DialogTitle className="text-xl font-bold text-gray-900">
+                                    WhatsApp Conectado!
+                                </DialogTitle>
+                                <DialogDescription className="text-amber-800 font-medium text-sm mt-0.5">
+                                    Notificações pendentes identificadas durante o período desconectado.
+                                </DialogDescription>
+                            </div>
+                        </div>
+                    </DialogHeader>
+
+                    <div className="p-6 space-y-4 bg-white">
+                        <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-4 text-sm text-gray-700 space-y-2">
+                            <p className="font-semibold text-amber-950 flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                                O que você deseja fazer com as notificações acumuladas?
+                            </p>
+                            <p className="text-xs text-gray-600 leading-relaxed">
+                                Identificamos <strong>{pendingInfo.totalCount} notificação(ões)</strong> acumuladas enquanto o WhatsApp esteve desconectado. Você pode optar por enviá-las agora para os clientes ou descartá-las para evitar mensagens retroativas.
+                            </p>
+                        </div>
+
+                        {/* Prévia das mensagens */}
+                        {pendingInfo.totalCount > 0 && (
+                            <div className="space-y-2">
+                                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center justify-between">
+                                    <span>Mensagens na Fila</span>
+                                    <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-200 text-[10px]">
+                                        {pendingInfo.totalCount} pendente(s)
+                                    </Badge>
+                                </p>
+                                <div className="max-h-48 overflow-y-auto space-y-2 border rounded-xl p-3 bg-gray-50/60">
+                                    {pendingInfo.localItems.map((item, idx) => (
+                                        <div key={item.id || idx} className="text-xs bg-white p-2.5 rounded-lg border border-gray-200 shadow-2xs space-y-1">
+                                            <div className="flex items-center justify-between text-[11px] font-semibold text-gray-700">
+                                                <span className="text-blue-700 font-mono">{item.action}</span>
+                                                <span className="text-gray-400 font-normal">{new Date(item.timestamp).toLocaleString()}</span>
+                                            </div>
+                                            <p className="text-gray-600 font-mono text-[10px] truncate">
+                                                {item.payload ? JSON.stringify(item.payload[0] || item.payload) : ''}
+                                            </p>
+                                        </div>
+                                    ))}
+                                    {pendingInfo.backendItems.map((item, idx) => (
+                                        <div key={item.id || idx} className="text-xs bg-white p-2.5 rounded-lg border border-gray-200 shadow-2xs space-y-1">
+                                            <div className="flex items-center justify-between text-[11px] font-semibold text-gray-700">
+                                                <span className="text-green-700">Para: {item.phone}</span>
+                                                <span className="text-gray-400 font-normal">{new Date(item.created_at).toLocaleString()}</span>
+                                            </div>
+                                            <p className="text-gray-600 text-[11px] truncate">
+                                                {item.message}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="px-6 py-4 bg-gray-50 border-t flex flex-col sm:flex-row items-center justify-end gap-3 rounded-b-2xl">
+                        <Button
+                            variant="outline"
+                            disabled={!!processingQueueAction}
+                            onClick={handleClearPendingNotifications}
+                            className="w-full sm:w-auto border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300 font-medium text-xs sm:text-sm"
+                        >
+                            {processingQueueAction === 'clearing' ? (
+                                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Descartando...</>
+                            ) : (
+                                <><Trash2 className="w-4 h-4 mr-2" /> Apagar / Descartar Todas</>
+                            )}
+                        </Button>
+
+                        <Button
+                            disabled={!!processingQueueAction}
+                            onClick={handleSendPendingNotifications}
+                            className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-semibold shadow-md shadow-green-600/20 text-xs sm:text-sm"
+                        >
+                            {processingQueueAction === 'sending' ? (
+                                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Enviando...</>
+                            ) : (
+                                <><Send className="w-4 h-4 mr-2" /> Enviar Todas as Notificações ({pendingInfo.totalCount})</>
+                            )}
+                        </Button>
+                    </div>
                 </DialogContent>
             </Dialog>
         </div>

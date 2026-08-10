@@ -89,11 +89,10 @@ export function useConnectionStatus(enabled = false) {
         const checkWhatsAppStatus = async () => {
             const status = await whatsappService.checkStatus();
 
-            // Se o WhatsApp acabou de reconectar (estava desconectado, agora conectou),
-            // sincroniza a fila offline automaticamente
+            // Se o WhatsApp reconectou, o modal de confirmação na tela de Configuração
+            // permite ao usuário decidir se envia ou descarta as pendências.
             if (status && !prevWhatsAppConnected.current) {
-                console.log('🔄 WhatsApp reconectou! Sincronizando fila offline...');
-                syncOfflineQueue();
+                console.log('🔄 WhatsApp conectado.');
             }
 
             prevWhatsAppConnected.current = status;

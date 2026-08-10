@@ -21,6 +21,7 @@ import {
 } from "../components/vendas/NotaPedidoPDF";
 import { processarFidelidadeCompra } from "@/utils/fidelidadeEngine";
 import { ZAP_API_URL } from "@/utils/zapApiUrl";
+const _BOT_API_KEY = import.meta.env.VITE_BOT_API_SECRET || '';
 import { whatsappService } from "@/services/whatsappService";
 import ProdutoQuickEditModal from "@/components/produtos/ProdutoQuickEditModal";
 
@@ -933,7 +934,7 @@ export default function PDV() {
         if (dadosVenda.cliente_telefone) {
           fetch(`${ZAP_API_URL}/mensagem-pos-venda`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(_BOT_API_KEY ? { 'x-bot-api-key': _BOT_API_KEY } : {}) },
             body: JSON.stringify({
               telefone: dadosVenda.cliente_telefone,
               nome: dadosVenda.cliente_nome,
