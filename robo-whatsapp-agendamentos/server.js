@@ -382,7 +382,7 @@ app.use(express.static(distPath));
 // =============================================================================
 // 🤖 TENANT WHATSAPP MANAGER — Gerenciador Multi-Tenant / Multi-Sessão
 // =============================================================================
-const { TenantWhatsAppManager, DEFAULT_ORG_ID } = require('./TenantWhatsAppManager');
+const { TenantWhatsAppManager } = require('./TenantWhatsAppManager');
 const whatsappManager = new TenantWhatsAppManager(supabase);
 
 /**

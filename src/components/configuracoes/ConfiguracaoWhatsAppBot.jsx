@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -365,7 +365,7 @@ export default function ConfiguracaoWhatsAppBot() {
         'x-organization-id': currentOrgId,
     }), [currentOrgId]);
 
-    const MESSAGE_TEMPLATES = getMessageTemplates(brandName || "Nossa Empresa");
+    const MESSAGE_TEMPLATES = useMemo(() => getMessageTemplates(brandName || "Nossa Empresa"), [brandName]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [reconnecting, setReconnecting] = useState(false);
@@ -397,12 +397,18 @@ export default function ConfiguracaoWhatsAppBot() {
     const [pendingInfo, setPendingInfo] = useState({ totalCount: 0, localCount: 0, backendCount: 0, localItems: [], backendItems: [] });
     const [processingQueueAction, setProcessingQueueAction] = useState(false); // 'sending' | 'clearing' | false
     const prevStatusRef = useRef(null);
+    const lastQrRef = useRef(null);
 
     const fetchOfflineQueue = useCallback(async () => {
         setLoadingQueue(true);
-        const queue = await getOfflineQueue();
-        setOfflineQueue(queue);
-        setLoadingQueue(false);
+        try {
+            const queue = await getOfflineQueue();
+            setOfflineQueue(queue || []);
+        } catch (e) {
+            console.error("Erro ao carregar fila offline:", e);
+        } finally {
+            setLoadingQueue(false);
+        }
     }, []);
 
     const handleRemoveQueueItem = async (id) => {
@@ -470,7 +476,8 @@ export default function ConfiguracaoWhatsAppBot() {
                     }).catch(() => {});
                 }
 
-                if (data.qr && data.qr !== qrCode) {
+                if (data.qr && data.qr !== lastQrRef.current) {
+                    lastQrRef.current = data.qr;
                     const qrImg = await QRCode.toDataURL(data.qr, {
                         width: 280,
                         margin: 2,
@@ -478,6 +485,7 @@ export default function ConfiguracaoWhatsAppBot() {
                     });
                     setQrCodeImage(qrImg);
                 } else if (!data.qr) {
+                    lastQrRef.current = null;
                     setQrCodeImage(null);
                 }
             }
@@ -485,10 +493,11 @@ export default function ConfiguracaoWhatsAppBot() {
             prevStatusRef.current = 'offline';
             setConnectionStatus('offline');
         }
-    }, [qrCode, getBotHeaders]);
+    }, [getBotHeaders]);
 
     // Carregar configurações de mensagens
     const loadSettings = useCallback(async () => {
+        const templates = getMessageTemplates(brandName || "Nossa Empresa");
         try {
             const res = await fetch(`${WHATSAPP_BOT_URL}/whatsapp/ai-settings`, {
                 headers: getBotHeaders(),
@@ -498,7 +507,7 @@ export default function ConfiguracaoWhatsAppBot() {
 
                 // Configurações de mensagens
                 const msgSettings = {};
-                Object.values(MESSAGE_TEMPLATES).forEach(category => {
+                Object.values(templates).forEach(category => {
                     category.messages.forEach(msg => {
                         msgSettings[msg.key] = {
                             enabled: data[`msg_${msg.key}_enabled`] ?? true,
@@ -513,7 +522,7 @@ export default function ConfiguracaoWhatsAppBot() {
             console.error("Erro ao carregar configurações:", error);
             // Usar valores padrão
             const msgSettings = {};
-            Object.values(MESSAGE_TEMPLATES).forEach(category => {
+            Object.values(templates).forEach(category => {
                 category.messages.forEach(msg => {
                     msgSettings[msg.key] = {
                         enabled: true,
@@ -526,7 +535,7 @@ export default function ConfiguracaoWhatsAppBot() {
         } finally {
             setLoading(false);
         }
-    }, [MESSAGE_TEMPLATES, getBotHeaders]);
+    }, [brandName, getBotHeaders]);
 
     useEffect(() => {
         fetchStatus();
@@ -543,7 +552,7 @@ export default function ConfiguracaoWhatsAppBot() {
             clearInterval(interval);
             window.removeEventListener('offline-queue-updated', handleOfflineQueueUpdated);
         };
-    }, [fetchStatus, loadSettings, fetchOfflineQueue]);
+    }, [currentOrgId, fetchStatus, loadSettings, fetchOfflineQueue]);
 
 
 
