@@ -196,6 +196,7 @@ export default function EscolhaPlano({ onCancel }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:max-w-4xl mx-auto">
         {planos.map((plano) => {
           const isCurrent = plano.id === organization?.plano_id && organization?.status_assinatura === 'ativa';
+          const isCustom = !plano.preco_mensal || Number(plano.preco_mensal) === 0 || plano.recursos?.customizado || plano.recursos?.sob_consulta;
           
           return (
             <Card 
@@ -214,10 +215,18 @@ export default function EscolhaPlano({ onCancel }) {
               
               <CardHeader className="text-center pb-4">
                 <CardTitle className="text-xl text-gray-800">{plano.nome}</CardTitle>
-                <CardDescription className="text-xs mt-1">Recorrência mensal automática</CardDescription>
+                <CardDescription className="text-xs mt-1">
+                  {isCustom ? "Atendimento e escopo customizado" : "Recorrência mensal automática"}
+                </CardDescription>
                 <div className="mt-4">
-                  <span className="text-3xl font-extrabold text-gray-900">{formatCurrency(plano.preco_mensal)}</span>
-                  <span className="text-sm text-gray-400"> / mês</span>
+                  {isCustom ? (
+                    <span className="text-2xl font-extrabold text-gray-900">Sob Consulta</span>
+                  ) : (
+                    <>
+                      <span className="text-3xl font-extrabold text-gray-900">{formatCurrency(plano.preco_mensal)}</span>
+                      <span className="text-sm text-gray-400"> / mês</span>
+                    </>
+                  )}
                 </div>
               </CardHeader>
               
@@ -240,6 +249,18 @@ export default function EscolhaPlano({ onCancel }) {
                   <Button className="w-full bg-green-50 text-green-800 border border-green-200 cursor-default hover:bg-green-50" disabled>
                     Plano Atual Contratado
                   </Button>
+                ) : isCustom ? (
+                  <a 
+                    href={`https://wa.me/5521999999999?text=${encodeURIComponent(`Olá! Gostaria de uma proposta personalizada para o Plano ${plano.nome} no GestApp.`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full block"
+                  >
+                    <Button className="w-full bg-slate-900 hover:bg-slate-800 text-white transition-colors">
+                      Falar com Suporte / Contate-nos
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </Button>
+                  </a>
                 ) : (
                   <Button 
                     onClick={() => handleSelectPlan(plano)}

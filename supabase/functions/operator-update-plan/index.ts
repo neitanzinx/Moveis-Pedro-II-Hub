@@ -77,7 +77,10 @@ serve(async (req) => {
 
     if (action === 'create') {
       const { nome, preco_mensal, ativo, recursos } = payload;
-      if (!nome || preco_mensal === undefined) throw new Error('Nome e preço são obrigatórios');
+      if (!nome) throw new Error('O nome do plano é obrigatório');
+
+      const isCustom = recursos?.customizado || recursos?.sob_consulta || preco_mensal === null || preco_mensal === undefined || Number(preco_mensal) === 0;
+      const finalPrice = isCustom ? 0 : (Number(preco_mensal) || 0);
 
       const slug = generateSlug(nome);
 
@@ -86,7 +89,7 @@ serve(async (req) => {
         .insert([{
           nome,
           slug,
-          preco_mensal,
+          preco_mensal: finalPrice,
           recursos: recursos || {},
           ativo: ativo !== undefined ? ativo : true
         }]);
@@ -102,16 +105,19 @@ serve(async (req) => {
     if (action === 'update') {
       const { planId, nome, preco_mensal, ativo, recursos, update_existing, update_existing_modules } = payload;
 
-      if (!planId || !nome || preco_mensal === undefined) {
+      if (!planId || !nome) {
         throw new Error('Parâmetros inválidos');
       }
+
+      const isCustom = recursos?.customizado || recursos?.sob_consulta || preco_mensal === null || preco_mensal === undefined || Number(preco_mensal) === 0;
+      const finalPrice = isCustom ? 0 : (Number(preco_mensal) || 0);
 
       // 1. Atualizar o plano no banco de dados
       const { error: updateError } = await supabaseAdmin
         .from('planos')
         .update({
           nome: nome,
-          preco_mensal: preco_mensal,
+          preco_mensal: finalPrice,
           recursos: recursos || {},
           ativo: ativo !== undefined ? ativo : true
         })
@@ -121,7 +127,7 @@ serve(async (req) => {
 
       // Buscar organizações afetadas (se precisar atualizar o asaas ou os módulos)
       let orgs = [];
-      if (update_existing || update_existing_modules) {
+      if ((update_existing && finalPrice > 0) || update_existing_modules) {
         const { data: fetchedOrgs, error: orgsError } = await supabaseAdmin
           .from('organizations')
           .select('id, name, asaas_subscription_id')
@@ -151,7 +157,7 @@ serve(async (req) => {
       let asaasSuccessCount = 0;
       let asaasErrorCount = 0;
 
-      if (update_existing && orgs.length > 0) {
+      if (update_existing && finalPrice > 0 && orgs.length > 0) {
         const asaasKey = Deno.env.get('ASAAS_API_KEY') || '';
         const defaultUrl = (asaasKey.trim().startsWith('$aae') || asaasKey.trim().startsWith('$aact_prod')) 
           ? 'https://api.asaas.com/v3' 
