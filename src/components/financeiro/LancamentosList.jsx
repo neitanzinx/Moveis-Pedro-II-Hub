@@ -58,6 +58,35 @@ const formatCurrencyMask = (raw) => {
   return `${intFormatted},${cents}`;
 };
 
+// Normaliza texto para comparação insensível a maiúsculas/minúsculas, acentos e múltiplos espaços
+const normalizeTextForComparison = (text) => {
+  return (text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Remove acentos/diacríticos
+    .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ") // Converte non-breaking e zero-width spaces
+    .replace(/\s+/g, " ") // Colapsa múltiplos espaços em um único
+    .trim()
+    .toLowerCase();
+};
+
+// Faz o parsing seguro de valores digitados em moeda (aceita pt-BR "1.281,70" e float "1281.70")
+const parseMoneyForComparison = (raw) => {
+  if (typeof raw === "number") return raw;
+  if (!raw) return NaN;
+  let str = String(raw).trim().replace(/[^\d.,-]/g, "");
+  if (!str) return NaN;
+  if (str.includes(",") && str.includes(".")) {
+    if (str.indexOf(".") < str.indexOf(",")) {
+      str = str.replace(/\./g, "").replace(",", ".");
+    } else {
+      str = str.replace(/,/g, "");
+    }
+  } else if (str.includes(",")) {
+    str = str.replace(",", ".");
+  }
+  return parseFloat(str);
+};
+
 export default function LancamentosList({ lancamentos = [], categorias = [], isLoading, onlyModal = false }) {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
@@ -363,24 +392,22 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
     setDeleteConfirmOpen(true);
   };
 
-  // Valida e executa a exclusão do lançamento pago
+  // Valida e executa a exclusão do lançamento
   const confirmarDeletePago = () => {
     const lanc = selectedLancamento;
     if (!lanc) return;
 
-    const nomeEsperado = (lanc.descricao || "").trim();
+    const nomeEsperado = normalizeTextForComparison(lanc.descricao);
+    const nomeDigitado = normalizeTextForComparison(deleteConfirmNome);
     const valorEsperado = Math.abs(lanc.valor || 0);
 
-    if (deleteConfirmNome.trim() !== nomeEsperado) {
+    if (!nomeDigitado || nomeDigitado !== nomeEsperado) {
       setDeleteConfirmError("O nome digitado não corresponde ao lançamento.");
       return;
     }
 
-    // aceita tanto vírgula quanto ponto como separador decimal
-    const valorDigitado = parseFloat(
-      deleteConfirmValor.replace(/\./g, "").replace(",", ".")
-    );
-    if (isNaN(valorDigitado) || Math.abs(valorDigitado - valorEsperado) > 0.009) {
+    const valorDigitado = parseMoneyForComparison(deleteConfirmValor);
+    if (isNaN(valorDigitado) || Math.abs(valorDigitado - valorEsperado) > 0.01) {
       setDeleteConfirmError("O valor digitado não corresponde ao lançamento.");
       return;
     }
@@ -1404,9 +1431,27 @@ export default function LancamentosList({ lancamentos = [], categorias = [], isL
           {selectedLancamento && (
             <div className="space-y-4 pt-2">
               <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 text-sm space-y-1">
-                <p><span className="font-semibold text-gray-700 dark:text-gray-300">Lançamento:</span> {selectedLancamento.descricao}</p>
-                <p><span className="font-semibold text-gray-700 dark:text-gray-300">Valor:</span> {formatMoney(selectedLancamento.valor)}</p>
-                <p><span className="font-semibold text-gray-700 dark:text-gray-300">Status:</span> {selectedLancamento.status || "Pendente"}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <p><span className="font-semibold text-gray-700 dark:text-gray-300">Lançamento:</span> {selectedLancamento.descricao}</p>
+                    <p><span className="font-semibold text-gray-700 dark:text-gray-300">Valor:</span> {formatMoney(selectedLancamento.valor)}</p>
+                    <p><span className="font-semibold text-gray-700 dark:text-gray-300">Status:</span> {selectedLancamento.status || "Pendente"}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs border-red-300 text-red-700 hover:bg-red-100 hover:text-red-800 dark:border-red-700 dark:text-red-300 flex-shrink-0"
+                    onClick={() => {
+                      setDeleteConfirmNome(selectedLancamento.descricao || "");
+                      const val = Math.abs(selectedLancamento.valor || 0);
+                      setDeleteConfirmValor(formatCurrencyMask(String(Math.round(val * 100))));
+                      setDeleteConfirmError("");
+                    }}
+                  >
+                    Preencher campos
+                  </Button>
+                </div>
               </div>
 
               {isLancamentoRecorrente(selectedLancamento) && (

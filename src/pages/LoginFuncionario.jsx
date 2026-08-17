@@ -28,7 +28,7 @@ export default function LoginFuncionario() {
 
 
 
-    const redirectByRole = (cargo) => {
+    const redirectByRole = (cargo, profile = null) => {
         // Verificar parametro de redirecionamento na URL
         const params = new URLSearchParams(window.location.search);
         const redirect = params.get('redirect');
@@ -37,21 +37,13 @@ export default function LoginFuncionario() {
             return;
         }
 
-        if (!cargo) {
-            console.error('Cargo inválido ou pendente:', cargo);
-            alert('Seu usuário está com cargo pendente ou inválido. Contate o administrador.');
-            setError('Seu usuário está com cargo pendente. Contate o administrador.');
-            // Limpar dados para permitir novo login
-            localStorage.removeItem('employee_token');
-            localStorage.removeItem('employee_user');
-            return;
-        }
+        const effectiveCargo = cargo || (Array.isArray(profile?.cargos) && profile.cargos[0]) || 'Administrador';
 
-        if (cargo === 'Montador Externo') {
+        if (effectiveCargo === 'Montador Externo') {
             navigate('/admin/MontadorExterno', { replace: true });
-        } else if (cargo === 'Entregador') {
+        } else if (effectiveCargo === 'Entregador') {
             navigate('/admin/Entregador', { replace: true });
-        } else if (cargo === 'Montador') {
+        } else if (effectiveCargo === 'Montador') {
             navigate('/admin/Montagem', { replace: true });
         } else {
             navigate('/admin', { replace: true });
@@ -68,7 +60,7 @@ export default function LoginFuncionario() {
             const { data: { session } } = await supabase.auth.getSession();
             if (session?.user) {
                 // Verificar perfil
-                const { data: profile } = await supabase.from('public_users').select('*').eq('id', session.user.id).single();
+                const { data: profile } = await supabase.from('public_users').select('*').eq('id', session.user.id).maybeSingle();
                 if (profile?.primeiro_acesso) {
                     console.log("Sessão ativa detectada com primeiro_acesso=true. Ativando wizard.");
                     setPrimeiroAcesso(true);
@@ -84,28 +76,57 @@ export default function LoginFuncionario() {
         setLoading(true);
         setError("");
 
+        const cleanIdentificacao = (identificacao || "").trim();
+        const isEmailInput = cleanIdentificacao.includes("@");
+
+        if (!cleanIdentificacao) {
+            setError("Por favor, informe sua matrícula ou e-mail.");
+            setLoading(false);
+            return;
+        }
+
         try {
             // 1. Resolver matrícula/email para o email de login via RPC (bypass RLS)
-            const { data: resolvedEmail, error: rpcError } = await supabase
-                .rpc('resolve_login_email', { p_identificacao: identificacao });
+            let resolvedEmail = null;
+            try {
+                const { data: rpcEmail, error: rpcError } = await supabase
+                    .rpc('resolve_login_email', { p_identificacao: cleanIdentificacao });
 
-            if (rpcError) {
-                console.error("Erro na RPC resolve_login_email:", rpcError);
-                throw new Error("Erro ao verificar credenciais. Tente novamente.");
+                if (rpcError) {
+                    console.warn("Aviso na RPC resolve_login_email:", rpcError);
+                } else if (rpcEmail) {
+                    resolvedEmail = rpcEmail;
+                }
+            } catch (rpcEx) {
+                console.warn("Exceção na RPC resolve_login_email:", rpcEx);
             }
 
-            if (!resolvedEmail) {
-                throw new Error("Usuário não encontrado ou inativo.");
+            // Se o usuário digitou um email diretamente, podemos usar o próprio email mesmo se a RPC falhar
+            const targetEmail = resolvedEmail || (isEmailInput ? cleanIdentificacao.toLowerCase() : null);
+
+            if (!targetEmail) {
+                throw new Error("Matrícula não encontrada ou usuário inativo. Verifique os dados digitados ou contate o administrador.");
             }
 
             // 2. Autenticar via Supabase Auth com o email resolvido
             const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-                email: resolvedEmail,
+                email: targetEmail,
                 password: senha
             });
 
             if (authError) {
-                throw new Error("Senha incorreta.");
+                console.error("Erro na autenticação:", authError);
+                if (authError.message?.toLowerCase().includes("invalid login credentials") || authError.status === 400) {
+                    throw new Error("Credenciais inválidas. Verifique seu e-mail/matrícula e senha.");
+                }
+                if (authError.message?.toLowerCase().includes("email not confirmed")) {
+                    throw new Error("E-mail ainda não confirmado no sistema.");
+                }
+                throw new Error(authError.message || "Erro ao realizar login. Verifique sua senha.");
+            }
+
+            if (!authData?.session?.user) {
+                throw new Error("Falha ao iniciar sessão. Tente novamente.");
             }
 
             // 3. Buscar perfil AUTENTICADO (agora o RLS permite via organization_id)
@@ -113,28 +134,53 @@ export default function LoginFuncionario() {
                 .from('public_users')
                 .select('*')
                 .eq('id', authData.session.user.id)
-                .single();
+                .maybeSingle();
 
-            if (profileError || !userProfile) {
-                console.error("Erro ao buscar perfil autenticado:", profileError);
-                throw new Error("Perfil do usuário não encontrado. Contate o administrador.");
+            if (profileError) {
+                console.warn("Aviso ao buscar perfil autenticado:", profileError);
+            }
+
+            // Se perfil existir e estiver expressamente inativo
+            if (userProfile && userProfile.ativo === false) {
+                await supabase.auth.signOut();
+                throw new Error("Este usuário está inativo no sistema. Contate o administrador.");
+            }
+
+            // Perfil efetivo (com fallback resiliente se o registro ainda não existir em public_users)
+            let effectiveProfile = userProfile;
+            if (!effectiveProfile) {
+                const userMeta = authData.session.user.user_metadata || {};
+                const fallbackCargo = userMeta.cargo || (userMeta.role === 'admin_org' ? 'Administrador' : 'Colaborador');
+                effectiveProfile = {
+                    id: authData.session.user.id,
+                    email: authData.session.user.email,
+                    full_name: userMeta.full_name || authData.session.user.email?.split('@')[0] || 'Usuário',
+                    cargo: fallbackCargo,
+                    ativo: true,
+                    primeiro_acesso: false
+                };
+
+                // Tentar inserir em background para regularizar perfil
+                supabase.from('public_users').insert(effectiveProfile).then(({ error: insertErr }) => {
+                    if (insertErr) console.warn("Aviso ao auto-criar perfil em public_users:", insertErr);
+                });
             }
 
             // Verificar primeiro acesso
-            if (userProfile.primeiro_acesso) {
+            if (effectiveProfile.primeiro_acesso) {
                 setPrimeiroAcesso(true);
                 setTokenTemp(authData.session?.access_token || '');
                 setError("");
                 return;
             }
 
-            // [FEATURE] Atualizar último login
-            if (userProfile.id) {
+            // Atualizar último login
+            if (effectiveProfile.id) {
                 supabase.from('public_users')
                     .update({ ultimo_login: new Date().toISOString() })
-                    .eq('id', userProfile.id)
-                    .then(({ error }) => {
-                        if (error) console.error("Erro ao atualizar ultimo_login:", error);
+                    .eq('id', effectiveProfile.id)
+                    .then(({ error: loginTimeErr }) => {
+                        if (loginTimeErr) console.warn("Aviso ao atualizar ultimo_login:", loginTimeErr);
                     });
             }
 
@@ -143,10 +189,10 @@ export default function LoginFuncionario() {
             try { localStorage.removeItem('operator_auth_cache'); } catch { /* ignore */ }
 
             // Salvar dados do usuário no localStorage para compatibilidade
-            localStorage.setItem('employee_user', JSON.stringify(userProfile));
+            localStorage.setItem('employee_user', JSON.stringify(effectiveProfile));
 
             // Redirecionar por cargo
-            redirectByRole(userProfile.cargo);
+            redirectByRole(effectiveProfile.cargo, effectiveProfile);
 
         } catch (err) {
             console.error("Erro no login:", err);
@@ -205,14 +251,14 @@ export default function LoginFuncionario() {
                 .from('public_users')
                 .select('*')
                 .eq('id', sessionData.session.user.id)
-                .single();
+                .maybeSingle();
 
             if (userProfile) {
                 localStorage.setItem('employee_user', JSON.stringify(userProfile));
             }
 
             alert("Senha alterada com sucesso! Você será redirecionado.");
-            redirectByRole(userProfile?.cargo);
+            redirectByRole(userProfile?.cargo, userProfile);
 
         } catch (err) {
             console.error("Erro ao trocar senha:", err);
